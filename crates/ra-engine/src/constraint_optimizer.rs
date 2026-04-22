@@ -11,9 +11,7 @@
 
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Expr, UnaryOp};
-use ra_metadata::schema::{
-    ConstraintInfo, ConstraintKind, SchemaInfo, TableInfo,
-};
+use ra_metadata::schema::{ConstraintInfo, ConstraintKind, SchemaInfo, TableInfo};
 
 /// Result of a constraint-based optimization pass.
 #[derive(Debug, Clone)]
@@ -30,18 +28,13 @@ pub struct ConstraintOptResult {
 /// Returns the optimized expression along with descriptions of
 /// what was changed.
 #[must_use]
-pub fn optimize_with_constraints(
-    expr: &RelExpr,
-    schema: &SchemaInfo,
-) -> ConstraintOptResult {
+pub fn optimize_with_constraints(expr: &RelExpr, schema: &SchemaInfo) -> ConstraintOptResult {
     let mut applied = Vec::new();
     let mut result = expr.clone();
 
     result = prune_redundant_predicates(&result, schema, &mut applied);
-    result =
-        eliminate_distinct_with_unique(&result, schema, &mut applied);
-    result =
-        eliminate_join_with_fk(&result, schema, &mut applied);
+    result = eliminate_distinct_with_unique(&result, schema, &mut applied);
+    result = eliminate_join_with_fk(&result, schema, &mut applied);
 
     ConstraintOptResult {
         expr: result,
@@ -62,30 +55,20 @@ fn prune_redundant_predicates(
 ) -> RelExpr {
     match expr {
         RelExpr::Filter { predicate, input } => {
-            let new_input =
-                prune_redundant_predicates(input, schema, applied);
+            let new_input = prune_redundant_predicates(input, schema, applied);
 
             let table_name = find_scan_table(&new_input);
             if let Some(ref tname) = table_name {
                 if let Some(table_info) = schema.get_table(tname) {
                     if let Some(rewritten) =
-                        try_prune_predicate(
-                            predicate,
-                            table_info,
-                            tname,
-                            applied,
-                        )
+                        try_prune_predicate(predicate, table_info, tname, applied)
                     {
                         return match rewritten {
-                            PrunedPredicate::AlwaysTrue => {
-                                new_input
-                            }
-                            PrunedPredicate::Simplified(p) => {
-                                RelExpr::Filter {
-                                    predicate: p,
-                                    input: Box::new(new_input),
-                                }
-                            }
+                            PrunedPredicate::AlwaysTrue => new_input,
+                            PrunedPredicate::Simplified(p) => RelExpr::Filter {
+                                predicate: p,
+                                input: Box::new(new_input),
+                            },
                         };
                     }
                 }
@@ -104,29 +87,19 @@ fn prune_redundant_predicates(
         } => RelExpr::Join {
             join_type: *join_type,
             condition: condition.clone(),
-            left: Box::new(prune_redundant_predicates(
-                left, schema, applied,
-            )),
-            right: Box::new(prune_redundant_predicates(
-                right, schema, applied,
-            )),
+            left: Box::new(prune_redundant_predicates(left, schema, applied)),
+            right: Box::new(prune_redundant_predicates(right, schema, applied)),
         },
         RelExpr::Project { columns, input } => RelExpr::Project {
             columns: columns.clone(),
-            input: Box::new(prune_redundant_predicates(
-                input, schema, applied,
-            )),
+            input: Box::new(prune_redundant_predicates(input, schema, applied)),
         },
         RelExpr::Distinct { input } => RelExpr::Distinct {
-            input: Box::new(prune_redundant_predicates(
-                input, schema, applied,
-            )),
+            input: Box::new(prune_redundant_predicates(input, schema, applied)),
         },
         RelExpr::Sort { keys, input } => RelExpr::Sort {
             keys: keys.clone(),
-            input: Box::new(prune_redundant_predicates(
-                input, schema, applied,
-            )),
+            input: Box::new(prune_redundant_predicates(input, schema, applied)),
         },
         RelExpr::Limit {
             count,
@@ -135,9 +108,7 @@ fn prune_redundant_predicates(
         } => RelExpr::Limit {
             count: *count,
             offset: *offset,
-            input: Box::new(prune_redundant_predicates(
-                input, schema, applied,
-            )),
+            input: Box::new(prune_redundant_predicates(input, schema, applied)),
         },
         RelExpr::Aggregate {
             group_by,
@@ -146,9 +117,7 @@ fn prune_redundant_predicates(
         } => RelExpr::Aggregate {
             group_by: group_by.clone(),
             aggregates: aggregates.clone(),
-            input: Box::new(prune_redundant_predicates(
-                input, schema, applied,
-            )),
+            input: Box::new(prune_redundant_predicates(input, schema, applied)),
         },
         other => other.clone(),
     }
@@ -190,66 +159,40 @@ fn try_prune_predicate(
             left,
             right,
         } => {
-            let left_pruned = try_prune_predicate(
-                left,
-                table_info,
-                table_name,
-                applied,
-            );
-            let right_pruned = try_prune_predicate(
-                right,
-                table_info,
-                table_name,
-                applied,
-            );
+            let left_pruned = try_prune_predicate(left, table_info, table_name, applied);
+            let right_pruned = try_prune_predicate(right, table_info, table_name, applied);
 
             match (left_pruned, right_pruned) {
-                (
-                    Some(PrunedPredicate::AlwaysTrue),
-                    Some(PrunedPredicate::AlwaysTrue),
-                ) => Some(PrunedPredicate::AlwaysTrue),
+                (Some(PrunedPredicate::AlwaysTrue), Some(PrunedPredicate::AlwaysTrue)) => {
+                    Some(PrunedPredicate::AlwaysTrue)
+                }
                 (Some(PrunedPredicate::AlwaysTrue), None) => {
-                    Some(PrunedPredicate::Simplified(
-                        *right.clone(),
-                    ))
+                    Some(PrunedPredicate::Simplified(*right.clone()))
                 }
                 (None, Some(PrunedPredicate::AlwaysTrue)) => {
-                    Some(PrunedPredicate::Simplified(
-                        *left.clone(),
-                    ))
+                    Some(PrunedPredicate::Simplified(*left.clone()))
                 }
-                (
-                    Some(PrunedPredicate::AlwaysTrue),
-                    Some(PrunedPredicate::Simplified(r)),
-                ) => Some(PrunedPredicate::Simplified(r)),
-                (
-                    Some(PrunedPredicate::Simplified(l)),
-                    Some(PrunedPredicate::AlwaysTrue),
-                ) => Some(PrunedPredicate::Simplified(l)),
-                (
-                    Some(PrunedPredicate::Simplified(l)),
-                    Some(PrunedPredicate::Simplified(r)),
-                ) => {
+                (Some(PrunedPredicate::AlwaysTrue), Some(PrunedPredicate::Simplified(r))) => {
+                    Some(PrunedPredicate::Simplified(r))
+                }
+                (Some(PrunedPredicate::Simplified(l)), Some(PrunedPredicate::AlwaysTrue)) => {
+                    Some(PrunedPredicate::Simplified(l))
+                }
+                (Some(PrunedPredicate::Simplified(l)), Some(PrunedPredicate::Simplified(r))) => {
                     Some(PrunedPredicate::Simplified(Expr::BinOp {
                         op: BinOp::And,
                         left: Box::new(l),
                         right: Box::new(r),
                     }))
                 }
-                (
-                    Some(PrunedPredicate::Simplified(l)),
-                    None,
-                ) => {
+                (Some(PrunedPredicate::Simplified(l)), None) => {
                     Some(PrunedPredicate::Simplified(Expr::BinOp {
                         op: BinOp::And,
                         left: Box::new(l),
                         right: right.clone(),
                     }))
                 }
-                (
-                    None,
-                    Some(PrunedPredicate::Simplified(r)),
-                ) => {
+                (None, Some(PrunedPredicate::Simplified(r))) => {
                     Some(PrunedPredicate::Simplified(Expr::BinOp {
                         op: BinOp::And,
                         left: left.clone(),
@@ -264,9 +207,7 @@ fn try_prune_predicate(
 }
 
 fn is_not_null_column(table_info: &TableInfo, col: &str) -> bool {
-    table_info
-        .get_column(col)
-        .is_some_and(|c| !c.nullable)
+    table_info.get_column(col).is_some_and(|c| !c.nullable)
 }
 
 /// Eliminate DISTINCT when a unique constraint covers the output
@@ -282,22 +223,13 @@ fn eliminate_distinct_with_unique(
 ) -> RelExpr {
     match expr {
         RelExpr::Distinct { input } => {
-            let new_input = eliminate_distinct_with_unique(
-                input, schema, applied,
-            );
+            let new_input = eliminate_distinct_with_unique(input, schema, applied);
 
-            if let Some(table_name) = find_scan_table(&new_input)
-            {
-                if let Some(table_info) =
-                    schema.get_table(&table_name)
-                {
-                    let output_cols =
-                        collect_output_columns(&new_input);
+            if let Some(table_name) = find_scan_table(&new_input) {
+                if let Some(table_info) = schema.get_table(&table_name) {
+                    let output_cols = collect_output_columns(&new_input);
 
-                    if is_covered_by_unique(
-                        &output_cols,
-                        table_info,
-                    ) {
+                    if is_covered_by_unique(&output_cols, table_info) {
                         applied.push(format!(
                             "Eliminated DISTINCT on \
                              {table_name}: output columns \
@@ -314,15 +246,11 @@ fn eliminate_distinct_with_unique(
         }
         RelExpr::Filter { predicate, input } => RelExpr::Filter {
             predicate: predicate.clone(),
-            input: Box::new(eliminate_distinct_with_unique(
-                input, schema, applied,
-            )),
+            input: Box::new(eliminate_distinct_with_unique(input, schema, applied)),
         },
         RelExpr::Project { columns, input } => RelExpr::Project {
             columns: columns.clone(),
-            input: Box::new(eliminate_distinct_with_unique(
-                input, schema, applied,
-            )),
+            input: Box::new(eliminate_distinct_with_unique(input, schema, applied)),
         },
         RelExpr::Join {
             join_type,
@@ -332,12 +260,8 @@ fn eliminate_distinct_with_unique(
         } => RelExpr::Join {
             join_type: *join_type,
             condition: condition.clone(),
-            left: Box::new(eliminate_distinct_with_unique(
-                left, schema, applied,
-            )),
-            right: Box::new(eliminate_distinct_with_unique(
-                right, schema, applied,
-            )),
+            left: Box::new(eliminate_distinct_with_unique(left, schema, applied)),
+            right: Box::new(eliminate_distinct_with_unique(right, schema, applied)),
         },
         other => other.clone(),
     }
@@ -346,10 +270,7 @@ fn eliminate_distinct_with_unique(
 /// Check if the output columns are covered by any unique
 /// constraint (the unique constraint columns are a subset of
 /// the output columns).
-fn is_covered_by_unique(
-    output_cols: &[String],
-    table_info: &TableInfo,
-) -> bool {
+fn is_covered_by_unique(output_cols: &[String], table_info: &TableInfo) -> bool {
     for constraint in &table_info.constraints {
         if constraint.kind != ConstraintKind::PrimaryKey
             && constraint.kind != ConstraintKind::Unique
@@ -357,9 +278,10 @@ fn is_covered_by_unique(
             continue;
         }
 
-        let all_covered = constraint.columns.iter().all(|c| {
-            output_cols.iter().any(|oc| oc == c)
-        });
+        let all_covered = constraint
+            .columns
+            .iter()
+            .all(|c| output_cols.iter().any(|oc| oc == c));
 
         if all_covered {
             return true;
@@ -389,56 +311,39 @@ fn eliminate_join_with_fk(
             left,
             right,
         } => {
-            let new_left =
-                eliminate_join_with_fk(left, schema, applied);
-            let new_right =
-                eliminate_join_with_fk(right, schema, applied);
+            let new_left = eliminate_join_with_fk(left, schema, applied);
+            let new_right = eliminate_join_with_fk(right, schema, applied);
 
             let left_table = find_scan_table(&new_left);
             let right_table = find_scan_table(&new_right);
 
-            if let (Some(ref lt), Some(ref rt)) =
-                (&left_table, &right_table)
-            {
-                if let Some((fk_side, fk_info)) =
-                    find_fk_join_match(
-                        condition, lt, rt, schema,
-                    )
-                {
-                    let used_tables =
-                        collect_used_tables_above(expr);
+            if let (Some(ref lt), Some(ref rt)) = (&left_table, &right_table) {
+                if let Some((fk_side, fk_info)) = find_fk_join_match(condition, lt, rt, schema) {
+                    let used_tables = collect_used_tables_above(expr);
 
                     match fk_side {
                         FkSide::LeftReferenceRight => {
-                            if !used_tables.contains(
-                                &rt.to_string(),
-                            ) {
+                            if !used_tables.contains(&rt.to_string()) {
                                 applied.push(format!(
                                     "Eliminated join to {rt}: \
                                      FK {}.({}) -> {rt}.({}) \
                                      guarantees match",
                                     lt,
                                     fk_info.columns.join(", "),
-                                    fk_info
-                                        .referenced_columns
-                                        .join(", ")
+                                    fk_info.referenced_columns.join(", ")
                                 ));
                                 return new_left;
                             }
                         }
                         FkSide::RightReferenceLeft => {
-                            if !used_tables.contains(
-                                &lt.to_string(),
-                            ) {
+                            if !used_tables.contains(&lt.to_string()) {
                                 applied.push(format!(
                                     "Eliminated join to {lt}: \
                                      FK {}.({}) -> {lt}.({}) \
                                      guarantees match",
                                     rt,
                                     fk_info.columns.join(", "),
-                                    fk_info
-                                        .referenced_columns
-                                        .join(", ")
+                                    fk_info.referenced_columns.join(", ")
                                 ));
                                 return new_right;
                             }
@@ -456,20 +361,14 @@ fn eliminate_join_with_fk(
         }
         RelExpr::Filter { predicate, input } => RelExpr::Filter {
             predicate: predicate.clone(),
-            input: Box::new(eliminate_join_with_fk(
-                input, schema, applied,
-            )),
+            input: Box::new(eliminate_join_with_fk(input, schema, applied)),
         },
         RelExpr::Project { columns, input } => RelExpr::Project {
             columns: columns.clone(),
-            input: Box::new(eliminate_join_with_fk(
-                input, schema, applied,
-            )),
+            input: Box::new(eliminate_join_with_fk(input, schema, applied)),
         },
         RelExpr::Distinct { input } => RelExpr::Distinct {
-            input: Box::new(eliminate_join_with_fk(
-                input, schema, applied,
-            )),
+            input: Box::new(eliminate_join_with_fk(input, schema, applied)),
         },
         other => other.clone(),
     }
@@ -489,8 +388,7 @@ fn find_fk_join_match<'a>(
     right_table: &str,
     schema: &'a SchemaInfo,
 ) -> Option<(FkSide, &'a ConstraintInfo)> {
-    let (left_col, right_col) =
-        extract_eq_columns(condition)?;
+    let (left_col, right_col) = extract_eq_columns(condition)?;
 
     let left_info = schema.get_table(left_table)?;
     for fk in left_info.foreign_keys() {
@@ -528,9 +426,7 @@ fn extract_eq_columns(expr: &Expr) -> Option<(String, String)> {
         right,
     } = expr
     {
-        if let (Expr::Column(l), Expr::Column(r)) =
-            (left.as_ref(), right.as_ref())
-        {
+        if let (Expr::Column(l), Expr::Column(r)) = (left.as_ref(), right.as_ref()) {
             return Some((l.column.clone(), r.column.clone()));
         }
     }
@@ -549,9 +445,7 @@ fn find_scan_table(expr: &RelExpr) -> Option<String> {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Aggregate { input, .. }
-        | RelExpr::Window { input, .. } => {
-            find_scan_table(input)
-        }
+        | RelExpr::Window { input, .. } => find_scan_table(input),
         _ => None,
     }
 }
@@ -574,9 +468,7 @@ fn collect_output_columns(expr: &RelExpr) -> Vec<String> {
         RelExpr::Filter { input, .. }
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
-        | RelExpr::Distinct { input, .. } => {
-            collect_output_columns(input)
-        }
+        | RelExpr::Distinct { input, .. } => collect_output_columns(input),
         _ => Vec::new(),
     }
 }
@@ -599,10 +491,7 @@ fn collect_used_tables_above(expr: &RelExpr) -> Vec<String> {
     tables
 }
 
-fn collect_used_tables_recursive(
-    expr: &RelExpr,
-    tables: &mut Vec<String>,
-) {
+fn collect_used_tables_recursive(expr: &RelExpr, tables: &mut Vec<String>) {
     match expr {
         RelExpr::Scan { table, .. } => {
             tables.push(table.clone());
@@ -638,14 +527,9 @@ fn collect_used_tables_recursive(
     }
 }
 
-fn collect_table_refs_from_expr(
-    expr: &Expr,
-    tables: &mut Vec<String>,
-) {
+fn collect_table_refs_from_expr(expr: &Expr, tables: &mut Vec<String>) {
     match expr {
-        Expr::Column(ColumnRef {
-            table: Some(t), ..
-        }) => {
+        Expr::Column(ColumnRef { table: Some(t), .. }) => {
             if !tables.contains(t) {
                 tables.push(t.clone());
             }
@@ -671,8 +555,7 @@ mod tests {
     use super::*;
     use ra_core::algebra::ProjectionColumn;
     use ra_metadata::schema::{
-        ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo,
-        SchemaInfo, TableInfo,
+        ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, SchemaInfo, TableInfo,
     };
     use std::collections::HashMap;
 
@@ -775,12 +658,8 @@ mod tests {
                         name: "orders_user_fk".to_owned(),
                         kind: ConstraintKind::ForeignKey,
                         columns: vec!["user_id".to_owned()],
-                        referenced_table: Some(
-                            "users".to_owned(),
-                        ),
-                        referenced_columns: vec![
-                            "id".to_owned(),
-                        ],
+                        referenced_table: Some("users".to_owned()),
+                        referenced_columns: vec!["id".to_owned()],
                         check_expression: None,
                     },
                 ],
@@ -818,9 +697,7 @@ mod tests {
         let schema = test_schema();
         let expr = RelExpr::scan("users").filter(Expr::UnaryOp {
             op: UnaryOp::IsNotNull,
-            operand: Box::new(Expr::Column(ColumnRef::new(
-                "name",
-            ))),
+            operand: Box::new(Expr::Column(ColumnRef::new("name"))),
         });
 
         let result = optimize_with_constraints(&expr, &schema);
@@ -835,18 +712,12 @@ mod tests {
             op: BinOp::And,
             left: Box::new(Expr::UnaryOp {
                 op: UnaryOp::IsNotNull,
-                operand: Box::new(Expr::Column(ColumnRef::new(
-                    "id",
-                ))),
+                operand: Box::new(Expr::Column(ColumnRef::new("id"))),
             }),
             right: Box::new(Expr::BinOp {
                 op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new(
-                    "id",
-                ))),
-                right: Box::new(Expr::Const(
-                    ra_core::expr::Const::Int(10),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("id"))),
+                right: Box::new(Expr::Const(ra_core::expr::Const::Int(10))),
             }),
         };
         let expr = RelExpr::scan("users").filter(predicate);
@@ -882,12 +753,10 @@ mod tests {
     #[test]
     fn keep_distinct_without_unique_columns() {
         let schema = test_schema();
-        let proj = RelExpr::scan("users").project(vec![
-            ProjectionColumn {
-                expr: Expr::Column(ColumnRef::new("name")),
-                alias: None,
-            },
-        ]);
+        let proj = RelExpr::scan("users").project(vec![ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new("name")),
+            alias: None,
+        }]);
         let expr = proj.distinct();
 
         let result = optimize_with_constraints(&expr, &schema);
@@ -898,12 +767,10 @@ mod tests {
     #[test]
     fn eliminate_distinct_with_unique_constraint() {
         let schema = test_schema();
-        let proj = RelExpr::scan("users").project(vec![
-            ProjectionColumn {
-                expr: Expr::Column(ColumnRef::new("email")),
-                alias: None,
-            },
-        ]);
+        let proj = RelExpr::scan("users").project(vec![ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new("email")),
+            alias: None,
+        }]);
         let expr = proj.distinct();
 
         let result = optimize_with_constraints(&expr, &schema);
@@ -912,31 +779,19 @@ mod tests {
 
     #[test]
     fn find_scan_table_through_filter() {
-        let expr = RelExpr::scan("users").filter(Expr::Const(
-            ra_core::expr::Const::Bool(true),
-        ));
-        assert_eq!(
-            find_scan_table(&expr),
-            Some("users".to_owned())
-        );
+        let expr = RelExpr::scan("users").filter(Expr::Const(ra_core::expr::Const::Bool(true)));
+        assert_eq!(find_scan_table(&expr), Some("users".to_owned()));
     }
 
     #[test]
     fn extract_eq_columns_basic() {
         let condition = Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
         };
         let result = extract_eq_columns(&condition);
-        assert_eq!(
-            result,
-            Some(("user_id".to_owned(), "id".to_owned()))
-        );
+        assert_eq!(result, Some(("user_id".to_owned(), "id".to_owned())));
     }
 
     #[test]
@@ -946,9 +801,7 @@ mod tests {
         let expr = RelExpr::scan("users")
             .filter(Expr::UnaryOp {
                 op: UnaryOp::IsNotNull,
-                operand: Box::new(Expr::Column(ColumnRef::new(
-                    "email",
-                ))),
+                operand: Box::new(Expr::Column(ColumnRef::new("email"))),
             })
             .project(vec![
                 ProjectionColumn {
@@ -974,10 +827,7 @@ mod tests {
             &["id".to_owned(), "name".to_owned()],
             users
         ));
-        assert!(!is_covered_by_unique(
-            &["name".to_owned()],
-            users
-        ));
+        assert!(!is_covered_by_unique(&["name".to_owned()], users));
     }
 
     #[test]

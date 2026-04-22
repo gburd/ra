@@ -17,18 +17,15 @@ use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::cost::StatisticsProvider;
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::{
-    ColumnStats, EquiWidthHistogram, Histogram, HistogramBucket,
-    IndexStats, Statistics,
+    ColumnStats, EquiWidthHistogram, Histogram, HistogramBucket, IndexStats, Statistics,
 };
 use ra_engine::differential::{
-    ChangeSource, HistogramDigest, IndexChange, PlanDependencies,
-    ResourceId, StalenessThresholds, StatisticsChange,
+    ChangeSource, HistogramDigest, IndexChange, PlanDependencies, ResourceId, StalenessThresholds,
+    StatisticsChange,
 };
 use ra_engine::genetic_fingerprint::QueryFingerprint;
-use ra_engine::plan_cache::{
-    CacheMatchType, PlanCache, PlanCacheConfig,
-};
-use ra_engine::{IncrementalOptimizer, change_ratio};
+use ra_engine::plan_cache::{CacheMatchType, PlanCache, PlanCacheConfig};
+use ra_engine::{change_ratio, IncrementalOptimizer};
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -49,14 +46,8 @@ fn join_query(left_table: &str, right_table: &str) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(ColumnRef::qualified(
-                left_table,
-                "id",
-            ))),
-            right: Box::new(Expr::Column(ColumnRef::qualified(
-                right_table,
-                "fk_id",
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::qualified(left_table, "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified(right_table, "fk_id"))),
         },
         left: Box::new(scan(left_table)),
         right: Box::new(scan(right_table)),
@@ -65,10 +56,7 @@ fn join_query(left_table: &str, right_table: &str) -> RelExpr {
 
 fn make_deps(tables: &[(&str, f64)]) -> PlanDependencies {
     PlanDependencies {
-        table_cardinalities: tables
-            .iter()
-            .map(|(t, r)| ((*t).to_string(), *r))
-            .collect(),
+        table_cardinalities: tables.iter().map(|(t, r)| ((*t).to_string(), *r)).collect(),
         indexes: HashSet::new(),
         distinct_counts: HashMap::new(),
         histogram_digests: HashMap::new(),
@@ -76,10 +64,7 @@ fn make_deps(tables: &[(&str, f64)]) -> PlanDependencies {
     }
 }
 
-fn make_deps_with_ndv(
-    tables: &[(&str, f64)],
-    columns: &[(&str, &str, f64)],
-) -> PlanDependencies {
+fn make_deps_with_ndv(tables: &[(&str, f64)], columns: &[(&str, &str, f64)]) -> PlanDependencies {
     let mut deps = make_deps(tables);
     for (table, col, ndv) in columns {
         deps.distinct_counts
@@ -88,10 +73,7 @@ fn make_deps_with_ndv(
     deps
 }
 
-fn make_deps_with_index(
-    tables: &[(&str, f64)],
-    indexes: &[(&str, &str)],
-) -> PlanDependencies {
+fn make_deps_with_index(tables: &[(&str, f64)], indexes: &[(&str, &str)]) -> PlanDependencies {
     let mut deps = make_deps(tables);
     for (table, idx) in indexes {
         deps.indexes
@@ -111,14 +93,12 @@ fn row_count_change_invalidates_plan() {
 
     opt.register_plan_dependencies(&fp, &deps);
 
-    let changes = vec![ChangeSource::Statistics(
-        StatisticsChange::RowCount {
-            table: "users".into(),
-            old_value: 1000.0,
-            new_value: 100_000.0,
-            ratio: 100.0,
-        },
-    )];
+    let changes = vec![ChangeSource::Statistics(StatisticsChange::RowCount {
+        table: "users".into(),
+        old_value: 1000.0,
+        new_value: 100_000.0,
+        ratio: 100.0,
+    })];
 
     let affected = opt
         .compute_affected_plans(&changes)
@@ -134,22 +114,17 @@ fn ndv_change_invalidates_plan() {
     let mut opt = IncrementalOptimizer::new();
     let plan = scan_filter("users", "city", 1);
     let fp = QueryFingerprint::from_rel_expr(&plan);
-    let deps = make_deps_with_ndv(
-        &[("users", 1000.0)],
-        &[("users", "city", 100.0)],
-    );
+    let deps = make_deps_with_ndv(&[("users", 1000.0)], &[("users", "city", 100.0)]);
 
     opt.register_plan_dependencies(&fp, &deps);
 
-    let changes = vec![ChangeSource::Statistics(
-        StatisticsChange::DistinctCount {
-            table: "users".into(),
-            column: "city".into(),
-            old_value: 100.0,
-            new_value: 500.0,
-            ratio: 5.0,
-        },
-    )];
+    let changes = vec![ChangeSource::Statistics(StatisticsChange::DistinctCount {
+        table: "users".into(),
+        column: "city".into(),
+        old_value: 100.0,
+        new_value: 500.0,
+        ratio: 5.0,
+    })];
 
     let affected = opt
         .compute_affected_plans(&changes)
@@ -164,10 +139,7 @@ fn index_drop_invalidates_plan() {
     let mut opt = IncrementalOptimizer::new();
     let plan = scan("orders");
     let fp = QueryFingerprint::from_rel_expr(&plan);
-    let deps = make_deps_with_index(
-        &[("orders", 5000.0)],
-        &[("orders", "idx_date")],
-    );
+    let deps = make_deps_with_index(&[("orders", 5000.0)], &[("orders", "idx_date")]);
 
     opt.register_plan_dependencies(&fp, &deps);
 
@@ -188,28 +160,18 @@ fn index_drop_invalidates_plan() {
 fn unaffected_query_stays_cached() {
     let mut opt = IncrementalOptimizer::new();
 
-    let fp_users =
-        QueryFingerprint::from_rel_expr(&scan("users"));
-    let fp_orders =
-        QueryFingerprint::from_rel_expr(&scan("orders"));
+    let fp_users = QueryFingerprint::from_rel_expr(&scan("users"));
+    let fp_orders = QueryFingerprint::from_rel_expr(&scan("orders"));
 
-    opt.register_plan_dependencies(
-        &fp_users,
-        &make_deps(&[("users", 1000.0)]),
-    );
-    opt.register_plan_dependencies(
-        &fp_orders,
-        &make_deps(&[("orders", 5000.0)]),
-    );
+    opt.register_plan_dependencies(&fp_users, &make_deps(&[("users", 1000.0)]));
+    opt.register_plan_dependencies(&fp_orders, &make_deps(&[("orders", 5000.0)]));
 
-    let changes = vec![ChangeSource::Statistics(
-        StatisticsChange::RowCount {
-            table: "orders".into(),
-            old_value: 5000.0,
-            new_value: 50_000.0,
-            ratio: 10.0,
-        },
-    )];
+    let changes = vec![ChangeSource::Statistics(StatisticsChange::RowCount {
+        table: "orders".into(),
+        old_value: 5000.0,
+        new_value: 50_000.0,
+        ratio: 10.0,
+    })];
 
     let affected = opt
         .compute_affected_plans(&changes)
@@ -225,20 +187,17 @@ fn multi_table_join_affected_by_any_table_change() {
     let mut opt = IncrementalOptimizer::new();
     let plan = join_query("users", "orders");
     let fp = QueryFingerprint::from_rel_expr(&plan);
-    let deps =
-        make_deps(&[("users", 1000.0), ("orders", 5000.0)]);
+    let deps = make_deps(&[("users", 1000.0), ("orders", 5000.0)]);
 
     opt.register_plan_dependencies(&fp, &deps);
 
     // Change only orders
-    let changes = vec![ChangeSource::Statistics(
-        StatisticsChange::RowCount {
-            table: "orders".into(),
-            old_value: 5000.0,
-            new_value: 50_000.0,
-            ratio: 10.0,
-        },
-    )];
+    let changes = vec![ChangeSource::Statistics(StatisticsChange::RowCount {
+        table: "orders".into(),
+        old_value: 5000.0,
+        new_value: 50_000.0,
+        ratio: 10.0,
+    })];
 
     let affected = opt
         .compute_affected_plans(&changes)
@@ -267,14 +226,9 @@ fn zero_to_zero_row_count_no_change() {
 fn empty_changes_no_invalidation() {
     let mut opt = IncrementalOptimizer::new();
     let fp = QueryFingerprint::from_rel_expr(&scan("t"));
-    opt.register_plan_dependencies(
-        &fp,
-        &make_deps(&[("t", 100.0)]),
-    );
+    opt.register_plan_dependencies(&fp, &make_deps(&[("t", 100.0)]));
 
-    let affected = opt
-        .compute_affected_plans(&[])
-        .expect("should succeed");
+    let affected = opt.compute_affected_plans(&[]).expect("should succeed");
     assert!(affected.is_empty());
 }
 
@@ -283,14 +237,12 @@ fn empty_changes_no_invalidation() {
 #[test]
 fn no_registered_plans_no_invalidation() {
     let opt = IncrementalOptimizer::new();
-    let changes = vec![ChangeSource::Statistics(
-        StatisticsChange::RowCount {
-            table: "phantom".into(),
-            old_value: 1.0,
-            new_value: 1000.0,
-            ratio: 1000.0,
-        },
-    )];
+    let changes = vec![ChangeSource::Statistics(StatisticsChange::RowCount {
+        table: "phantom".into(),
+        old_value: 1.0,
+        new_value: 1000.0,
+        ratio: 1000.0,
+    })];
 
     let affected = opt
         .compute_affected_plans(&changes)
@@ -336,11 +288,9 @@ fn detect_changes_above_cardinality_threshold() {
 fn detect_ndv_change() {
     let opt = IncrementalOptimizer::new();
     let mut old = Statistics::new(1000.0);
-    old.columns
-        .insert("city".into(), ColumnStats::new(100.0));
+    old.columns.insert("city".into(), ColumnStats::new(100.0));
     let mut new = Statistics::new(1000.0);
-    new.columns
-        .insert("city".into(), ColumnStats::new(200.0));
+    new.columns.insert("city".into(), ColumnStats::new(200.0));
     let changes = opt.detect_changes("t", &old, &new);
     assert!(changes.iter().any(|c| matches!(
         c,
@@ -359,10 +309,7 @@ fn detect_index_added() {
     let mut new = Statistics::new(1000.0);
     new.indexes.insert(
         "idx_new".into(),
-        IndexStats::new(
-            vec!["col".into()],
-            ra_core::facts::IndexType::BTree,
-        ),
+        IndexStats::new(vec!["col".into()], ra_core::facts::IndexType::BTree),
     );
     let changes = opt.detect_changes("t", &old, &new);
     assert!(changes.iter().any(|c| matches!(
@@ -382,10 +329,7 @@ fn detect_index_dropped() {
     let mut old = Statistics::new(1000.0);
     old.indexes.insert(
         "idx_old".into(),
-        IndexStats::new(
-            vec!["col".into()],
-            ra_core::facts::IndexType::BTree,
-        ),
+        IndexStats::new(vec!["col".into()], ra_core::facts::IndexType::BTree),
     );
     let new = Statistics::new(1000.0);
     let changes = opt.detect_changes("t", &old, &new);
@@ -460,11 +404,7 @@ fn end_to_end_invalidation_flow() {
     for (plan, table, rows) in &plans {
         let fp = QueryFingerprint::from_rel_expr(plan);
         let deps = make_deps(&[(table, *rows)]);
-        cache.insert_with_deps(
-            fp.clone(),
-            plan.clone(),
-            deps.clone(),
-        );
+        cache.insert_with_deps(fp.clone(), plan.clone(), deps.clone());
         opt.register_plan_dependencies(&fp, &deps);
     }
     assert_eq!(cache.len(), 3);
@@ -473,8 +413,7 @@ fn end_to_end_invalidation_flow() {
     // Simulate ANALYZE on orders table: 5000 -> 50000
     let old_stats = Statistics::new(5000.0);
     let new_stats = Statistics::new(50_000.0);
-    let changes =
-        opt.detect_changes("orders", &old_stats, &new_stats);
+    let changes = opt.detect_changes("orders", &old_stats, &new_stats);
     assert!(!changes.is_empty());
 
     // Compute affected plans
@@ -487,18 +426,15 @@ fn end_to_end_invalidation_flow() {
     cache.invalidate(&affected);
 
     // Orders plan should be evicted (cold entry)
-    let fp_orders =
-        QueryFingerprint::from_rel_expr(&scan("orders"));
+    let fp_orders = QueryFingerprint::from_rel_expr(&scan("orders"));
     assert!(
         cache.lookup(&fp_orders).is_none(),
         "orders plan should be evicted"
     );
 
     // Users and products plans should still be cached
-    let fp_users =
-        QueryFingerprint::from_rel_expr(&scan("users"));
-    let fp_products =
-        QueryFingerprint::from_rel_expr(&scan("products"));
+    let fp_users = QueryFingerprint::from_rel_expr(&scan("users"));
+    let fp_products = QueryFingerprint::from_rel_expr(&scan("products"));
     assert!(cache.lookup(&fp_users).is_some());
     assert!(cache.lookup(&fp_products).is_some());
 }
@@ -552,19 +488,13 @@ fn custom_thresholds_affect_detection() {
     let old = Statistics::new(1000.0);
     let new = Statistics::new(3000.0);
     let changes = opt.detect_changes("t", &old, &new);
-    assert!(
-        changes.is_empty(),
-        "3x should be below 10x threshold"
-    );
+    assert!(changes.is_empty(), "3x should be below 10x threshold");
 
     // Index change should be ignored
     let mut new_with_idx = Statistics::new(1000.0);
     new_with_idx.indexes.insert(
         "idx".into(),
-        IndexStats::new(
-            vec!["col".into()],
-            ra_core::facts::IndexType::BTree,
-        ),
+        IndexStats::new(vec!["col".into()], ra_core::facts::IndexType::BTree),
     );
     let changes = opt.detect_changes("t", &old, &new_with_idx);
     assert!(
@@ -582,18 +512,9 @@ fn multiple_changes_invalidate_multiple_plans() {
     let fp_b = QueryFingerprint::from_rel_expr(&scan("b"));
     let fp_c = QueryFingerprint::from_rel_expr(&scan("c"));
 
-    opt.register_plan_dependencies(
-        &fp_a,
-        &make_deps(&[("a", 100.0)]),
-    );
-    opt.register_plan_dependencies(
-        &fp_b,
-        &make_deps(&[("b", 200.0)]),
-    );
-    opt.register_plan_dependencies(
-        &fp_c,
-        &make_deps(&[("c", 300.0)]),
-    );
+    opt.register_plan_dependencies(&fp_a, &make_deps(&[("a", 100.0)]));
+    opt.register_plan_dependencies(&fp_b, &make_deps(&[("b", 200.0)]));
+    opt.register_plan_dependencies(&fp_c, &make_deps(&[("c", 300.0)]));
 
     let changes = vec![
         ChangeSource::Statistics(StatisticsChange::RowCount {
@@ -639,10 +560,7 @@ fn resource_id_key_format() {
         ResourceId::Histogram("t".into(), "col".into()).key(),
         "t.col.histogram"
     );
-    assert_eq!(
-        ResourceId::Fact("pk_users".into()).key(),
-        "pk_users"
-    );
+    assert_eq!(ResourceId::Fact("pk_users".into()).key(), "pk_users");
 }
 
 // ── 20. PlanDependencies from plan and stats ────────────────────
@@ -654,24 +572,16 @@ fn plan_dependencies_from_plan_and_stats() {
         tables: HashMap<String, Statistics>,
     }
     impl StatisticsProvider for TestProvider {
-        fn get_statistics(
-            &self,
-            table: &str,
-        ) -> Option<&Statistics> {
+        fn get_statistics(&self, table: &str) -> Option<&Statistics> {
             self.tables.get(table)
         }
     }
 
     let mut stats = Statistics::new(1000.0);
-    stats
-        .columns
-        .insert("city".into(), ColumnStats::new(50.0));
+    stats.columns.insert("city".into(), ColumnStats::new(50.0));
     stats.indexes.insert(
         "pk_users".into(),
-        IndexStats::new(
-            vec!["id".into()],
-            ra_core::facts::IndexType::BTree,
-        ),
+        IndexStats::new(vec!["id".into()], ra_core::facts::IndexType::BTree),
     );
 
     let provider = TestProvider {
@@ -679,16 +589,13 @@ fn plan_dependencies_from_plan_and_stats() {
     };
 
     let plan = scan("users");
-    let deps =
-        PlanDependencies::from_plan_and_stats(&plan, &provider);
+    let deps = PlanDependencies::from_plan_and_stats(&plan, &provider);
 
     assert!(deps.table_cardinalities.contains_key("users"));
     assert!(deps
         .distinct_counts
         .contains_key(&("users".into(), "city".into())));
-    assert!(deps
-        .indexes
-        .contains(&("users".into(), "pk_users".into())));
+    assert!(deps.indexes.contains(&("users".into(), "pk_users".into())));
 }
 
 // ── 21. Invalidate for table ────────────────────────────────────
@@ -699,19 +606,11 @@ fn invalidate_for_table_works() {
 
     let p1 = scan("users");
     let fp1 = QueryFingerprint::from_rel_expr(&p1);
-    cache.insert_with_deps(
-        fp1.clone(),
-        p1,
-        make_deps(&[("users", 1000.0)]),
-    );
+    cache.insert_with_deps(fp1.clone(), p1, make_deps(&[("users", 1000.0)]));
 
     let p2 = scan("orders");
     let fp2 = QueryFingerprint::from_rel_expr(&p2);
-    cache.insert_with_deps(
-        fp2.clone(),
-        p2,
-        make_deps(&[("orders", 5000.0)]),
-    );
+    cache.insert_with_deps(fp2.clone(), p2, make_deps(&[("orders", 5000.0)]));
 
     cache.invalidate_for_table("users");
     assert!(cache.lookup(&fp1).is_none());
@@ -734,16 +633,10 @@ fn mark_fresh_restores_exact_match() {
     let _ = cache.lookup(&fp); // hit_count >= threshold
 
     cache.invalidate(&[fp.clone()]);
-    assert_eq!(
-        cache.lookup(&fp).unwrap().match_type,
-        CacheMatchType::Stale
-    );
+    assert_eq!(cache.lookup(&fp).unwrap().match_type, CacheMatchType::Stale);
 
     cache.mark_fresh(&fp);
-    assert_eq!(
-        cache.lookup(&fp).unwrap().match_type,
-        CacheMatchType::Exact
-    );
+    assert_eq!(cache.lookup(&fp).unwrap().match_type, CacheMatchType::Exact);
 }
 
 // ── 23. Detect histogram drift via detect_changes ───────────────
@@ -761,47 +654,43 @@ fn detect_histogram_drift_via_detect_changes() {
 
     let mut old = Statistics::new(1000.0);
     let mut old_col = ColumnStats::new(100.0);
-    old_col.histogram =
-        Some(Histogram::EquiWidth(EquiWidthHistogram {
-            buckets: vec![
-                HistogramBucket {
-                    upper_bound: "50".into(),
-                    row_count: 500.0,
-                    distinct_count: 50.0,
-                },
-                HistogramBucket {
-                    upper_bound: "100".into(),
-                    row_count: 500.0,
-                    distinct_count: 50.0,
-                },
-            ],
-        }));
+    old_col.histogram = Some(Histogram::EquiWidth(EquiWidthHistogram {
+        buckets: vec![
+            HistogramBucket {
+                upper_bound: "50".into(),
+                row_count: 500.0,
+                distinct_count: 50.0,
+            },
+            HistogramBucket {
+                upper_bound: "100".into(),
+                row_count: 500.0,
+                distinct_count: 50.0,
+            },
+        ],
+    }));
     old.columns.insert("age".into(), old_col);
 
     let mut new = Statistics::new(1000.0);
     let mut new_col = ColumnStats::new(100.0);
-    new_col.histogram =
-        Some(Histogram::EquiWidth(EquiWidthHistogram {
-            buckets: vec![
-                HistogramBucket {
-                    upper_bound: "50".into(),
-                    row_count: 100.0,
-                    distinct_count: 10.0,
-                },
-                HistogramBucket {
-                    upper_bound: "100".into(),
-                    row_count: 900.0,
-                    distinct_count: 90.0,
-                },
-            ],
-        }));
+    new_col.histogram = Some(Histogram::EquiWidth(EquiWidthHistogram {
+        buckets: vec![
+            HistogramBucket {
+                upper_bound: "50".into(),
+                row_count: 100.0,
+                distinct_count: 10.0,
+            },
+            HistogramBucket {
+                upper_bound: "100".into(),
+                row_count: 900.0,
+                distinct_count: 90.0,
+            },
+        ],
+    }));
     new.columns.insert("age".into(), new_col);
 
     let changes = opt.detect_changes("t", &old, &new);
     assert!(changes.iter().any(|c| matches!(
         c,
-        ChangeSource::Statistics(
-            StatisticsChange::HistogramDrift { .. }
-        )
+        ChangeSource::Statistics(StatisticsChange::HistogramDrift { .. })
     )));
 }

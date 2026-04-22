@@ -6,9 +6,9 @@
 //!
 //! Inspired by PostgreSQL's join graph and Apache Calcite's join enumeration.
 
-use std::collections::{HashMap, HashSet};
 use ra_core::algebra::RelExpr;
 use ra_core::expr::{BinOp, Expr};
+use std::collections::{HashMap, HashSet};
 
 /// A graph representing valid join relationships between tables.
 #[derive(Debug, Clone)]
@@ -44,7 +44,12 @@ impl JoinGraph {
             RelExpr::Scan { table, .. } => {
                 self.tables.insert(table.clone());
             }
-            RelExpr::Join { condition, left, right, .. } => {
+            RelExpr::Join {
+                condition,
+                left,
+                right,
+                ..
+            } => {
                 // Recursively analyze children first
                 self.analyze_expr(left);
                 self.analyze_expr(right);
@@ -71,11 +76,18 @@ impl JoinGraph {
                 self.analyze_expr(left);
                 self.analyze_expr(right);
             }
-            RelExpr::CTE { definition, body, .. } => {
+            RelExpr::CTE {
+                definition, body, ..
+            } => {
                 self.analyze_expr(definition);
                 self.analyze_expr(body);
             }
-            RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
+            RelExpr::RecursiveCTE {
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => {
                 self.analyze_expr(base_case);
                 self.analyze_expr(recursive_case);
                 self.analyze_expr(body);
@@ -110,9 +122,7 @@ impl JoinGraph {
     /// Extract table name from a column reference.
     fn extract_table_from_expr(expr: &Expr) -> Option<String> {
         match expr {
-            Expr::Column(col_ref) => {
-                col_ref.table.clone()
-            }
+            Expr::Column(col_ref) => col_ref.table.clone(),
             _ => None,
         }
     }
@@ -387,7 +397,12 @@ mod tests {
 
         // Across components: disconnected
         assert!(!graph.is_connected(&["a".to_string(), "c".to_string()]));
-        assert!(!graph.is_connected(&["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string()]));
+        assert!(!graph.is_connected(&[
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string()
+        ]));
     }
 
     #[test]

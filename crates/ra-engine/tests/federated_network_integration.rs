@@ -10,17 +10,14 @@ use std::collections::HashMap;
 use ra_core::algebra::RelExpr;
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::federated::{
-    DataSource, DatabaseType, ExecutionLocation,
-    FederatedCostBreakdown, FederatedQuery, QueryCapabilities,
-    RemoteConnection,
+    DataSource, DatabaseType, ExecutionLocation, FederatedCostBreakdown, FederatedQuery,
+    QueryCapabilities, RemoteConnection,
 };
 use ra_core::statistics::Statistics;
 use ra_engine::federated_cost::FederatedCostModel;
 use ra_engine::federated_optimizer::FederatedOptimizer;
 use ra_engine::network_cost::NetworkCostModel;
-use ra_hardware::network::{
-    LinkType, Location, NetworkLink, NetworkTopology, NodeId,
-};
+use ra_hardware::network::{LinkType, Location, NetworkLink, NetworkTopology, NodeId};
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -30,38 +27,21 @@ fn two_node_topology(link_type: LinkType) -> NetworkTopology {
     let mut topo = NetworkTopology::new();
     let local = NodeId(0);
     let remote = NodeId(1);
-    topo.add_node(
-        local,
-        Location::new("us-east-1", "us-east-1a"),
-    );
-    topo.add_node(
-        remote,
-        Location::new("us-west-2", "us-west-2a"),
-    );
-    topo.add_link(
-        remote,
-        local,
-        NetworkLink::from_type(link_type),
-    );
+    topo.add_node(local, Location::new("us-east-1", "us-east-1a"));
+    topo.add_node(remote, Location::new("us-west-2", "us-west-2a"));
+    topo.add_link(remote, local, NetworkLink::from_type(link_type));
     topo
 }
 
 /// Build a network cost model that assigns `table` to node 1.
-fn model_with_remote_table(
-    topo: NetworkTopology,
-    table: &str,
-) -> NetworkCostModel {
+fn model_with_remote_table(topo: NetworkTopology, table: &str) -> NetworkCostModel {
     let mut assignments = HashMap::new();
     assignments.insert(table.into(), NodeId(1));
     NetworkCostModel::new(topo, assignments)
 }
 
 /// Create a remote connection with given latency/bandwidth.
-fn remote_conn(
-    db_type: DatabaseType,
-    latency_ms: u64,
-    bandwidth_mbps: u64,
-) -> RemoteConnection {
+fn remote_conn(db_type: DatabaseType, latency_ms: u64, bandwidth_mbps: u64) -> RemoteConnection {
     RemoteConnection::new(
         db_type,
         "remote.example.com:5432",
@@ -82,18 +62,12 @@ fn large_stats(rows: f64, avg_row_size: u64) -> Statistics {
 fn filter_expr(table: &str, col: &str) -> Expr {
     Expr::BinOp {
         op: BinOp::Gt,
-        left: Box::new(Expr::Column(
-            ColumnRef::qualified(table, col),
-        )),
+        left: Box::new(Expr::Column(ColumnRef::qualified(table, col))),
         right: Box::new(Expr::Const(Const::Int(100))),
     }
 }
 
-fn filter_query(
-    table: &str,
-    conn: RemoteConnection,
-    stats: Statistics,
-) -> FederatedQuery {
+fn filter_query(table: &str, conn: RemoteConnection, stats: Statistics) -> FederatedQuery {
     let plan = RelExpr::Filter {
         predicate: filter_expr(table, "amount"),
         input: Box::new(RelExpr::scan(table)),
@@ -101,12 +75,7 @@ fn filter_query(
     let mut sources = HashMap::new();
     sources.insert(
         table.into(),
-        DataSource::remote(
-            conn,
-            table,
-            Some(stats),
-            QueryCapabilities::full(),
-        ),
+        DataSource::remote(conn, table, Some(stats), QueryCapabilities::full()),
     );
     FederatedQuery::new(plan, sources)
 }
@@ -121,18 +90,12 @@ fn scan_query(
     let mut sources = HashMap::new();
     sources.insert(
         table.into(),
-        DataSource::remote(
-            conn, table, Some(stats), caps,
-        ),
+        DataSource::remote(conn, table, Some(stats), caps),
     );
     FederatedQuery::new(plan, sources)
 }
 
-fn aggregate_query(
-    table: &str,
-    conn: RemoteConnection,
-    stats: Statistics,
-) -> FederatedQuery {
+fn aggregate_query(table: &str, conn: RemoteConnection, stats: Statistics) -> FederatedQuery {
     let plan = RelExpr::Aggregate {
         group_by: vec![Expr::Column(ColumnRef::new("region"))],
         aggregates: vec![],
@@ -141,12 +104,7 @@ fn aggregate_query(
     let mut sources = HashMap::new();
     sources.insert(
         table.into(),
-        DataSource::remote(
-            conn,
-            table,
-            Some(stats),
-            QueryCapabilities::full(),
-        ),
+        DataSource::remote(conn, table, Some(stats), QueryCapabilities::full()),
     );
     FederatedQuery::new(plan, sources)
 }
@@ -162,12 +120,8 @@ fn join_local_remote(
         join_type: ra_core::algebra::JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified(local_table, "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified(remote_table, "id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified(local_table, "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified(remote_table, "id"))),
         },
         left: Box::new(RelExpr::scan(local_table)),
         right: Box::new(RelExpr::scan(remote_table)),
@@ -195,8 +149,7 @@ fn join_local_remote(
 fn network_model_attached_to_cost_model() {
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "orders");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
     assert!(model.network_model().is_some());
 }
 
@@ -213,30 +166,17 @@ fn network_model_changes_transfer_cost() {
 
     // Without network model
     let baseline = FederatedCostModel::new();
-    let cost_flat = baseline.estimate_ship_data(
-        &conn,
-        Some(&stats),
-        false,
-    );
+    let cost_flat = baseline.estimate_ship_data(&conn, Some(&stats), false);
 
     // With fast intra-datacenter network model
     let topo = two_node_topology(LinkType::IntraDatacenter);
     let net = model_with_remote_table(topo, "orders");
-    let network_aware = FederatedCostModel::new()
-        .with_network_model(net);
-    let cost_net = network_aware.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "orders",
-    );
+    let network_aware = FederatedCostModel::new().with_network_model(net);
+    let cost_net = network_aware.estimate_ship_data_for_table(&conn, Some(&stats), false, "orders");
 
     // Network-aware should differ from flat estimate
     assert!(
-        (cost_flat.network_transfer_ms
-            - cost_net.network_transfer_ms)
-            .abs()
-            > 0.001,
+        (cost_flat.network_transfer_ms - cost_net.network_transfer_ms).abs() > 0.001,
         "network model should produce different transfer \
          cost: flat={}, net={}",
         cost_flat.network_transfer_ms,
@@ -252,32 +192,17 @@ fn fast_link_produces_lower_transfer_cost() {
     // Slow link: cross-region (100 Mbps, 100ms latency)
     let slow_topo = two_node_topology(LinkType::CrossRegion);
     let slow_net = model_with_remote_table(slow_topo, "t");
-    let slow_model = FederatedCostModel::new()
-        .with_network_model(slow_net);
-    let cost_slow =
-        slow_model.estimate_ship_data_for_table(
-            &conn,
-            Some(&stats),
-            false,
-            "t",
-        );
+    let slow_model = FederatedCostModel::new().with_network_model(slow_net);
+    let cost_slow = slow_model.estimate_ship_data_for_table(&conn, Some(&stats), false, "t");
 
     // Fast link: intra-rack (100 Gbps, <1us latency)
     let fast_topo = two_node_topology(LinkType::IntraRack);
     let fast_net = model_with_remote_table(fast_topo, "t");
-    let fast_model = FederatedCostModel::new()
-        .with_network_model(fast_net);
-    let cost_fast =
-        fast_model.estimate_ship_data_for_table(
-            &conn,
-            Some(&stats),
-            false,
-            "t",
-        );
+    let fast_model = FederatedCostModel::new().with_network_model(fast_net);
+    let cost_fast = fast_model.estimate_ship_data_for_table(&conn, Some(&stats), false, "t");
 
     assert!(
-        cost_slow.network_transfer_ms
-            > cost_fast.network_transfer_ms,
+        cost_slow.network_transfer_ms > cost_fast.network_transfer_ms,
         "slow link ({}) should have higher transfer cost \
          than fast link ({})",
         cost_slow.network_transfer_ms,
@@ -294,21 +219,10 @@ fn filter_pushdown_reduces_transfer_bytes() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "orders");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
-    let full = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "orders",
-    );
-    let filtered = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        true,
-        "orders",
-    );
+    let full = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "orders");
+    let filtered = model.estimate_ship_data_for_table(&conn, Some(&stats), true, "orders");
 
     // Filtered should transfer far fewer bytes (10% selectivity)
     assert!(
@@ -328,27 +242,15 @@ fn filter_pushdown_network_time_proportional() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "sales");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
-    let full = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "sales",
-    );
-    let filtered = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        true,
-        "sales",
-    );
+    let full = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "sales");
+    let filtered = model.estimate_ship_data_for_table(&conn, Some(&stats), true, "sales");
 
     // Network time for filtered should be roughly selectivity *
     // full network time (within 2x tolerance for latency effects)
     assert!(
-        filtered.network_transfer_ms
-            < full.network_transfer_ms * 0.5,
+        filtered.network_transfer_ms < full.network_transfer_ms * 0.5,
         "filtered net time ({}) should be well under full ({})",
         filtered.network_transfer_ms,
         full.network_transfer_ms,
@@ -364,16 +266,10 @@ fn aggregate_pushdown_drastically_reduces_transfer() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "events");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
     // Ship all 100M rows (full scan)
-    let full_ship = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "events",
-    );
+    let full_ship = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "events");
 
     // Ship only aggregation results (~1% of data with default
     // selectivity, but aggregation gives us ~0.01 of that)
@@ -385,8 +281,7 @@ fn aggregate_pushdown_drastically_reduces_transfer() {
         "events",
     );
 
-    let ratio = full_ship.transfer_bytes as f64
-        / hybrid_agg.transfer_bytes.max(1) as f64;
+    let ratio = full_ship.transfer_bytes as f64 / hybrid_agg.transfer_bytes.max(1) as f64;
     assert!(
         ratio > 100.0,
         "aggregate pushdown should reduce transfer by >100x, \
@@ -404,20 +299,12 @@ fn hybrid_agg_then_local_join() {
     let stats = large_stats(10_000_000.0, 200);
     let local_stats = large_stats(1_000.0, 100);
 
-    let query = join_local_remote(
-        "local_dim",
-        "remote_fact",
-        conn,
-        local_stats,
-        stats,
-    );
+    let query = join_local_remote("local_dim", "remote_fact", conn, local_stats, stats);
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "remote_fact");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let plan = optimizer
         .optimize_federated(&query)
@@ -438,24 +325,17 @@ fn small_remote_table_favors_ship_data() {
 
     let topo = two_node_topology(LinkType::IntraDatacenter);
     let net = model_with_remote_table(topo, "config");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
 
-    let ship_data = cost_model.estimate_ship_data_for_table(
+    let ship_data = cost_model.estimate_ship_data_for_table(&conn, Some(&stats), false, "config");
+    // Ship query returns 10% of rows (default)
+    let ship_query = cost_model.estimate_ship_query_for_table(
         &conn,
         Some(&stats),
-        false,
+        500.0, // 10% of 5K
+        200,
         "config",
     );
-    // Ship query returns 10% of rows (default)
-    let ship_query =
-        cost_model.estimate_ship_query_for_table(
-            &conn,
-            Some(&stats),
-            500.0, // 10% of 5K
-            200,
-            "config",
-        );
 
     // For tiny tables, ShipData total should be reasonable
     assert!(
@@ -476,15 +356,9 @@ fn large_table_with_selective_filter_favors_hybrid() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "logs");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
 
-    let full_ship = cost_model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "logs",
-    );
+    let full_ship = cost_model.estimate_ship_data_for_table(&conn, Some(&stats), false, "logs");
     let hybrid = cost_model.estimate_hybrid_for_table(
         &conn,
         Some(&stats),
@@ -509,24 +383,13 @@ fn ship_query_best_for_supported_query_small_result() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "warehouse");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
 
     // Query returns only 100 rows
     let ship_query =
-        cost_model.estimate_ship_query_for_table(
-            &conn,
-            Some(&stats),
-            100.0,
-            256,
-            "warehouse",
-        );
-    let ship_data = cost_model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "warehouse",
-    );
+        cost_model.estimate_ship_query_for_table(&conn, Some(&stats), 100.0, 256, "warehouse");
+    let ship_data =
+        cost_model.estimate_ship_data_for_table(&conn, Some(&stats), false, "warehouse");
 
     assert!(
         ship_query.total_ms < ship_data.total_ms,
@@ -546,10 +409,8 @@ fn optimizer_uses_network_model() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "big_table");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let query = filter_query("big_table", conn, stats);
     let plan = optimizer
@@ -568,22 +429,15 @@ fn optimizer_produces_different_costs_with_topology() {
     // Without topology
     let opt_flat = FederatedOptimizer::new();
     let query_flat = filter_query("orders", conn.clone(), stats.clone());
-    let plan_flat = opt_flat
-        .optimize_federated(&query_flat)
-        .expect("flat opt");
+    let plan_flat = opt_flat.optimize_federated(&query_flat).expect("flat opt");
 
     // With slow cross-region topology
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "orders");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let opt_net =
-        FederatedOptimizer::with_cost_model(cost_model);
-    let query_net =
-        filter_query("orders", conn, stats);
-    let plan_net = opt_net
-        .optimize_federated(&query_net)
-        .expect("net opt");
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let opt_net = FederatedOptimizer::with_cost_model(cost_model);
+    let query_net = filter_query("orders", conn, stats);
+    let plan_net = opt_net.optimize_federated(&query_net).expect("net opt");
 
     // Costs should differ due to different transfer modeling
     let flat_total = plan_flat.cost.total_ms;
@@ -602,15 +456,11 @@ fn postgresql_full_pushdown_on_slow_link() {
 
     let topo = two_node_topology(LinkType::Internet);
     let net = model_with_remote_table(topo, "pg_table");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let query = filter_query("pg_table", conn, stats);
-    let plan = optimizer
-        .optimize_federated(&query)
-        .expect("pg plan");
+    let plan = optimizer.optimize_federated(&query).expect("pg plan");
 
     // On a very slow link, should not pick full ship data
     let is_full_ship = plan.cost.strategy == "ship_data_full";
@@ -629,15 +479,11 @@ fn mysql_with_limited_capabilities() {
 
     let topo = two_node_topology(LinkType::CrossDatacenter);
     let net = model_with_remote_table(topo, "mysql_t");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let query = scan_query("mysql_t", conn, stats, caps);
-    let plan = optimizer
-        .optimize_federated(&query)
-        .expect("mysql plan");
+    let plan = optimizer.optimize_federated(&query).expect("mysql plan");
 
     // Should produce a valid plan even with minimal caps
     assert!(plan.cost.total_ms > 0.0);
@@ -650,20 +496,11 @@ fn sqlite_scan_small_table() {
 
     let topo = two_node_topology(LinkType::IntraRack);
     let net = model_with_remote_table(topo, "sqlite_t");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
-    let query = scan_query(
-        "sqlite_t",
-        conn,
-        stats,
-        QueryCapabilities::full(),
-    );
-    let plan = optimizer
-        .optimize_federated(&query)
-        .expect("sqlite plan");
+    let query = scan_query("sqlite_t", conn, stats, QueryCapabilities::full());
+    let plan = optimizer.optimize_federated(&query).expect("sqlite plan");
 
     // Tiny table on fast link -- ship data should be cheap
     assert!(
@@ -680,10 +517,8 @@ fn snowflake_large_warehouse_query() {
 
     let topo = two_node_topology(LinkType::Internet);
     let net = model_with_remote_table(topo, "snowflake_t");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let query = aggregate_query("snowflake_t", conn, stats);
     let plan = optimizer
@@ -700,44 +535,23 @@ fn snowflake_large_warehouse_query() {
 
 #[test]
 fn cross_datacenter_penalizes_transfer() {
-    let conn_fast =
-        remote_conn(DatabaseType::PostgreSQL, 1, 10000);
-    let conn_slow =
-        remote_conn(DatabaseType::PostgreSQL, 50, 100);
+    let conn_fast = remote_conn(DatabaseType::PostgreSQL, 1, 10000);
+    let conn_slow = remote_conn(DatabaseType::PostgreSQL, 50, 100);
     let stats = large_stats(1_000_000.0, 200);
 
-    let fast_topo =
-        two_node_topology(LinkType::IntraDatacenter);
-    let fast_net =
-        model_with_remote_table(fast_topo, "t");
-    let fast_model = FederatedCostModel::new()
-        .with_network_model(fast_net);
+    let fast_topo = two_node_topology(LinkType::IntraDatacenter);
+    let fast_net = model_with_remote_table(fast_topo, "t");
+    let fast_model = FederatedCostModel::new().with_network_model(fast_net);
 
-    let slow_topo =
-        two_node_topology(LinkType::CrossDatacenter);
-    let slow_net =
-        model_with_remote_table(slow_topo, "t");
-    let slow_model = FederatedCostModel::new()
-        .with_network_model(slow_net);
+    let slow_topo = two_node_topology(LinkType::CrossDatacenter);
+    let slow_net = model_with_remote_table(slow_topo, "t");
+    let slow_model = FederatedCostModel::new().with_network_model(slow_net);
 
-    let cost_fast =
-        fast_model.estimate_ship_data_for_table(
-            &conn_fast,
-            Some(&stats),
-            false,
-            "t",
-        );
-    let cost_slow =
-        slow_model.estimate_ship_data_for_table(
-            &conn_slow,
-            Some(&stats),
-            false,
-            "t",
-        );
+    let cost_fast = fast_model.estimate_ship_data_for_table(&conn_fast, Some(&stats), false, "t");
+    let cost_slow = slow_model.estimate_ship_data_for_table(&conn_slow, Some(&stats), false, "t");
 
     assert!(
-        cost_slow.network_transfer_ms
-            > cost_fast.network_transfer_ms,
+        cost_slow.network_transfer_ms > cost_fast.network_transfer_ms,
         "cross-DC ({:.1}ms) should be slower than \
          intra-DC ({:.1}ms)",
         cost_slow.network_transfer_ms,
@@ -752,15 +566,9 @@ fn internet_link_heavily_penalizes_data_shipping() {
 
     let topo = two_node_topology(LinkType::Internet);
     let net = model_with_remote_table(topo, "bq_table");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
-    let ship_data = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "bq_table",
-    );
+    let ship_data = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "bq_table");
 
     // 12GB over 50 Mbps internet should be very slow
     assert!(
@@ -780,16 +588,10 @@ fn unknown_table_falls_back_to_flat_estimate() {
     let topo = two_node_topology(LinkType::CrossRegion);
     // Table "orders" is NOT in the node assignment
     let net = model_with_remote_table(topo, "other_table");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
     // Should fall back to flat estimate since "orders" is unknown
-    let cost = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "orders",
-    );
+    let cost = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "orders");
 
     // Flat estimate: 10ms latency + transfer time
     assert!(cost.network_transfer_ms > 0.0);
@@ -803,15 +605,9 @@ fn zero_rows_produces_minimal_cost() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "empty");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
-    let cost = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "empty",
-    );
+    let cost = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "empty");
 
     assert_eq!(cost.rows_transferred, 0);
     assert_eq!(cost.transfer_bytes, 0);
@@ -823,12 +619,7 @@ fn no_network_model_still_works() {
     let stats = large_stats(1_000.0, 200);
     let model = FederatedCostModel::new();
 
-    let cost = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "any_table",
-    );
+    let cost = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "any_table");
     assert!(cost.total_ms > 0.0);
 }
 
@@ -840,18 +631,12 @@ fn single_datacenter_profile() {
     let mut assignments = HashMap::new();
     assignments.insert("t".into(), NodeId(2)); // rack-2
     let net = NetworkCostModel::new(topo, assignments);
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
     let conn = remote_conn(DatabaseType::PostgreSQL, 1, 10000);
     let stats = large_stats(1_000_000.0, 200);
 
-    let cost = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "t",
-    );
+    let cost = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "t");
 
     // Intra-datacenter should be fast
     assert!(
@@ -868,18 +653,12 @@ fn multi_datacenter_profile() {
     // Table on US-West node (node 2)
     assignments.insert("remote_t".into(), NodeId(2));
     let net = NetworkCostModel::new(topo, assignments);
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
     let conn = remote_conn(DatabaseType::PostgreSQL, 60, 100);
     let stats = large_stats(1_000_000.0, 200);
 
-    let cost = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "remote_t",
-    );
+    let cost = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "remote_t");
 
     // Cross-DC should be noticeably slower
     assert!(
@@ -898,24 +677,12 @@ fn ship_query_cheaper_when_result_tiny() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "big");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
     // Ship query: returns 10 rows
-    let sq = model.estimate_ship_query_for_table(
-        &conn,
-        Some(&stats),
-        10.0,
-        200,
-        "big",
-    );
+    let sq = model.estimate_ship_query_for_table(&conn, Some(&stats), 10.0, 200, "big");
     // Ship data: fetches all 10M rows
-    let sd = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "big",
-    );
+    let sd = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "big");
 
     assert!(
         sq.total_ms < sd.total_ms,
@@ -933,15 +700,9 @@ fn hybrid_cheaper_than_ship_data_for_selective_filter() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "logs");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
-    let sd = model.estimate_ship_data_for_table(
-        &conn,
-        Some(&stats),
-        false,
-        "logs",
-    );
+    let sd = model.estimate_ship_data_for_table(&conn, Some(&stats), false, "logs");
     let hybrid = model.estimate_hybrid_for_table(
         &conn,
         Some(&stats),
@@ -966,21 +727,12 @@ fn cost_breakdown_fields_consistent() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "t");
-    let model = FederatedCostModel::new()
-        .with_network_model(net);
+    let model = FederatedCostModel::new().with_network_model(net);
 
-    let cost = model.estimate_hybrid_for_table(
-        &conn,
-        Some(&stats),
-        0.1,
-        2.0,
-        "t",
-    );
+    let cost = model.estimate_hybrid_for_table(&conn, Some(&stats), 0.1, 2.0, "t");
 
     // Total should be sum of components
-    let expected = cost.remote_exec_ms
-        + cost.network_transfer_ms
-        + cost.local_exec_ms;
+    let expected = cost.remote_exec_ms + cost.network_transfer_ms + cost.local_exec_ms;
     assert!(
         (cost.total_ms - expected).abs() < 0.001,
         "total_ms ({}) should equal sum of components ({})",
@@ -998,15 +750,11 @@ fn optimizer_analyzes_with_network_model() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "events");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let query = filter_query("events", conn, stats);
-    let analysis = optimizer
-        .analyze(&query)
-        .expect("analysis should succeed");
+    let analysis = optimizer.analyze(&query).expect("analysis should succeed");
 
     assert!(analysis.plan.cost.total_ms > 0.0);
     assert!(!analysis.plan.steps.is_empty());
@@ -1019,10 +767,8 @@ fn optimizer_enumerate_strategies_count() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "t");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let query = filter_query("t", conn, stats);
     let strategies = optimizer.enumerate_strategies(&query);
@@ -1043,10 +789,8 @@ fn optimizer_best_plan_has_lowest_cost() {
 
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "t");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let query = filter_query("t", conn, stats);
     let plan = optimizer
@@ -1070,30 +814,19 @@ fn optimizer_best_plan_has_lowest_cost() {
 fn local_only_query_ignores_network_model() {
     let topo = two_node_topology(LinkType::CrossRegion);
     let net = model_with_remote_table(topo, "remote_only");
-    let cost_model = FederatedCostModel::new()
-        .with_network_model(net);
-    let optimizer =
-        FederatedOptimizer::with_cost_model(cost_model);
+    let cost_model = FederatedCostModel::new().with_network_model(net);
+    let optimizer = FederatedOptimizer::with_cost_model(cost_model);
 
     let mut sources = HashMap::new();
     sources.insert(
         "local_t".into(),
-        DataSource::local(
-            "local_t",
-            large_stats(10_000.0, 200),
-        ),
+        DataSource::local("local_t", large_stats(10_000.0, 200)),
     );
-    let query =
-        FederatedQuery::new(RelExpr::scan("local_t"), sources);
+    let query = FederatedQuery::new(RelExpr::scan("local_t"), sources);
 
-    let plan = optimizer
-        .optimize_federated(&query)
-        .expect("local plan");
+    let plan = optimizer.optimize_federated(&query).expect("local plan");
 
-    assert!(matches!(
-        plan.location,
-        ExecutionLocation::Local { .. }
-    ));
+    assert!(matches!(plan.location, ExecutionLocation::Local { .. }));
     assert_eq!(plan.cost.network_transfer_ms, 0.0);
     assert_eq!(plan.cost.transfer_bytes, 0);
 }

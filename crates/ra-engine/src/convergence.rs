@@ -141,9 +141,7 @@ impl ConvergenceDetector {
             return None;
         }
 
-        let all_below_threshold = growth_rates
-            .iter()
-            .all(|&rate| rate < self.min_growth_rate);
+        let all_below_threshold = growth_rates.iter().all(|&rate| rate < self.min_growth_rate);
 
         Some(all_below_threshold)
     }
@@ -322,10 +320,7 @@ mod tests {
             total_classes: 50,
         });
         // Only 1 sample, window_size=3, should continue
-        assert_eq!(
-            detector.should_terminate(),
-            TerminationDecision::Continue
-        );
+        assert_eq!(detector.should_terminate(), TerminationDecision::Continue);
     }
 
     #[test]
@@ -369,10 +364,7 @@ mod tests {
             total_nodes: 200,
             total_classes: 80,
         });
-        assert_eq!(
-            detector.should_terminate(),
-            TerminationDecision::Continue
-        );
+        assert_eq!(detector.should_terminate(), TerminationDecision::Continue);
 
         // Then stall
         detector.record(IterationMetrics {
@@ -387,10 +379,7 @@ mod tests {
             total_nodes: 200,
             total_classes: 80,
         });
-        assert_eq!(
-            detector.should_terminate(),
-            TerminationDecision::Converged
-        );
+        assert_eq!(detector.should_terminate(), TerminationDecision::Converged);
     }
 
     #[test]
@@ -409,10 +398,7 @@ mod tests {
             total_classes: 50,
         });
         // prev_nodes=0 should be skipped in growth calculation
-        assert_eq!(
-            detector.should_terminate(),
-            TerminationDecision::Continue
-        );
+        assert_eq!(detector.should_terminate(), TerminationDecision::Continue);
     }
 
     #[test]

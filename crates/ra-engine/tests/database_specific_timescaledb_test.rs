@@ -97,7 +97,7 @@ fn test_timescaledb_chunk_pruning_multi_dimension() {
     let optimizer = create_optimizer();
     let plan = filter(
         filter(scan("multi_dim_hypertable"), lt_pred("time", 1000)),
-        eq_pred("device_id", "device_id")
+        eq_pred("device_id", "device_id"),
     );
     assert!(optimizer.optimize(&plan).is_ok());
 }

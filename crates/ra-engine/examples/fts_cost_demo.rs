@@ -3,10 +3,9 @@
 //! Run with: cargo run --example fts_cost_demo
 
 use ra_engine::fts_cost::{
-    BooleanOperator as FtsBooleanOperator, FtsIndexType, RankingAlgorithm,
-    boolean_query_cost, gin_scan_cost, index_vs_seqscan_speedup,
-    inverted_index_lookup_cost, rum_scan_cost as fts_rum_scan_cost, select_fts_index_type,
-    skip_list_intersection_cost, top_k_ranking_cost,
+    boolean_query_cost, gin_scan_cost, index_vs_seqscan_speedup, inverted_index_lookup_cost,
+    rum_scan_cost as fts_rum_scan_cost, select_fts_index_type, skip_list_intersection_cost,
+    top_k_ranking_cost, BooleanOperator as FtsBooleanOperator, FtsIndexType, RankingAlgorithm,
 };
 use ra_engine::fts_rules::{optimize_top_k_fts, OptimizationDecision};
 
@@ -34,9 +33,18 @@ fn main() {
     let freqs = vec![10_000, 20_000, 5_000];
     let and_cost = boolean_query_cost(&terms, FtsBooleanOperator::And, 1_000_000, &freqs);
     let phrase_cost = boolean_query_cost(&terms, FtsBooleanOperator::Phrase, 1_000_000, &freqs);
-    println!("   AND query: CPU={:.2}, IO={:.2}", and_cost.cpu, and_cost.io);
-    println!("   PHRASE query: CPU={:.2}, IO={:.2}", phrase_cost.cpu, phrase_cost.io);
-    println!("   Phrase overhead: {:.2}x\n", phrase_cost.cpu / and_cost.cpu);
+    println!(
+        "   AND query: CPU={:.2}, IO={:.2}",
+        and_cost.cpu, and_cost.io
+    );
+    println!(
+        "   PHRASE query: CPU={:.2}, IO={:.2}",
+        phrase_cost.cpu, phrase_cost.io
+    );
+    println!(
+        "   Phrase overhead: {:.2}x\n",
+        phrase_cost.cpu / and_cost.cpu
+    );
 
     println!("4. Top-K Ranking Optimization:");
     let matches = 100_000;
@@ -63,14 +71,35 @@ fn main() {
     println!("7. GIN vs RUM Comparison:");
     let terms_single = vec!["search"];
     let freqs_single = vec![10_000];
-    let gin = gin_scan_cost(&terms_single, FtsBooleanOperator::And, 1_000_000, &freqs_single, true, Some(10));
-    let rum = fts_rum_scan_cost(&terms_single, FtsBooleanOperator::And, 1_000_000, &freqs_single, true, Some(10));
+    let gin = gin_scan_cost(
+        &terms_single,
+        FtsBooleanOperator::And,
+        1_000_000,
+        &freqs_single,
+        true,
+        Some(10),
+    );
+    let rum = fts_rum_scan_cost(
+        &terms_single,
+        FtsBooleanOperator::And,
+        1_000_000,
+        &freqs_single,
+        true,
+        Some(10),
+    );
     println!("   GIN ranked LIMIT 10: CPU={:.2}", gin.cpu);
     println!("   RUM ranked LIMIT 10: CPU={:.2}", rum.cpu);
     println!("   RUM advantage: {:.2}x\n", gin.cpu / rum.cpu);
 
     println!("8. Optimization Decision:");
-    let decision = optimize_top_k_fts(true, false, Some(10), &terms_single, 1_000_000, &freqs_single);
+    let decision = optimize_top_k_fts(
+        true,
+        false,
+        Some(10),
+        &terms_single,
+        1_000_000,
+        &freqs_single,
+    );
     match decision {
         OptimizationDecision::UseRumRankedScan { cost, limit } => {
             println!("   Decision: Use RUM ranked scan");

@@ -58,8 +58,7 @@ impl Analysis<RelLang> for RelAnalysis {
                 data.is_relational = true;
                 merge_child_tables(&mut data.tables, egraph, *input_id);
             }
-            RelLang::MetadataLookup([table_id, _])
-            | RelLang::MvScan([table_id, _, _, _]) => {
+            RelLang::MetadataLookup([table_id, _]) | RelLang::MvScan([table_id, _, _, _]) => {
                 data.is_relational = true;
                 if let Some(sym) = get_symbol(egraph, *table_id) {
                     data.tables.insert(sym);

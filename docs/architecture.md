@@ -446,29 +446,31 @@ The `ra-core::rule::RuleMetadata` struct defines a `priority: i32`
 field (lower values run first), but the hardcoded `egg::Rewrite`
 rules in `rewrite.rs` do not use it.
 
-### Roadmap: Adaptive Rule Selection
+### Rule Advisor: Three-Stage Filtering Pipeline
 
-The infrastructure for metadata-driven rule selection is partially
-built. Completing it requires:
+The Rule Advisor (`ra-engine::rule_advisor`) implements intelligent rule
+selection through a three-stage pipeline:
 
-1. **Parse `complexity` and `benefit_range`** -- Add these fields to
-   `ra-parser::RuleMetadata` and `ra-engine::rule_metadata::RuleMetadata`.
+1. **Stage 1 — Context elimination** (once per optimizer instance):
+   Filters rule groups by target database engine and hardware capabilities
+   using `RuleAnnotation` metadata on each rule group. For example,
+   DocumentDB BSON rules are excluded when `--rule-advisor-db postgresql`.
 
-2. **Map .rra IDs to egg rewrites** -- Build a `HashMap<String, Rewrite>`
-   so that precondition filtering can select the actual rules passed
-   to the `Runner`.
+2. **Stage 2 — Query-shape elimination** (per query):
+   Analyzes the query's `RelExpr` tree to detect content-type features
+   (`QueryFeatureSet` bitflags: `HAS_JOIN`, `HAS_AGGREGATE`,
+   `HAS_VECTOR_DISTANCE`, `HAS_FTS_MATCH`, `HAS_XML_FUNC`, etc.).
+   Rule groups whose `required_features` have no overlap with the
+   query's features are excluded.
 
-3. **Complexity-weighted ordering** -- Sort rules by estimated
-   benefit/complexity ratio within each iteration so that cheaper,
-   high-benefit rules fire first.
+3. **Stage 3 — Learned ranking** (per query shape bucket):
+   Uses EWMA-smoothed historical effectiveness data from
+   `~/.ra/rule-knowledge.json` to reorder surviving rules.
+   Rules with enough observations and chronically low effectiveness
+   are deprioritized.
 
-4. **Budget-based pruning** -- Skip high-complexity rules when the
-   query is classified as Trivial or Simple, since the search budget
-   is already small.
-
-5. **Learned rule effectiveness** -- Use execution feedback from
-   `ra-adaptive` to track which rules produce cost improvements for
-   which query shapes, and prioritize accordingly.
+Enable the Rule Advisor with `OptimizerConfig::use_rule_advisor = true`
+or the `--rule-advisor` CLI flag.
 
 ## Differential Dataflow
 

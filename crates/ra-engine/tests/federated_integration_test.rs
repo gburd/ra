@@ -5,14 +5,11 @@
 
 use std::collections::HashMap;
 
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, ProjectionColumn,
-    RelExpr,
-};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, ProjectionColumn, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::federated::{
-    DataSource, DatabaseType, ExecutionLocation, FederatedQuery,
-    QueryCapabilities, RemoteConnection, format_bytes,
+    format_bytes, DataSource, DatabaseType, ExecutionLocation, FederatedQuery, QueryCapabilities,
+    RemoteConnection,
 };
 use ra_core::statistics::Statistics;
 use ra_engine::federated_cost::FederatedCostModel;
@@ -39,12 +36,7 @@ fn mysql_connection() -> RemoteConnection {
 }
 
 fn sqlite_connection() -> RemoteConnection {
-    RemoteConnection::new(
-        DatabaseType::SQLite,
-        "sqlite://remote-nfs/data.db",
-        5,
-        200,
-    )
+    RemoteConnection::new(DatabaseType::SQLite, "sqlite://remote-nfs/data.db", 5, 200)
 }
 
 fn slow_connection() -> RemoteConnection {
@@ -86,33 +78,19 @@ fn large_stats() -> Statistics {
     stats
 }
 
-fn equality_filter(
-    table: &str,
-    column: &str,
-    value: i64,
-) -> Expr {
+fn equality_filter(table: &str, column: &str, value: i64) -> Expr {
     Expr::BinOp {
         op: BinOp::Eq,
-        left: Box::new(Expr::Column(ColumnRef::qualified(
-            table, column,
-        ))),
+        left: Box::new(Expr::Column(ColumnRef::qualified(table, column))),
         right: Box::new(Expr::Const(Const::Int(value))),
     }
 }
 
-fn string_filter(
-    table: &str,
-    column: &str,
-    value: &str,
-) -> Expr {
+fn string_filter(table: &str, column: &str, value: &str) -> Expr {
     Expr::BinOp {
         op: BinOp::Eq,
-        left: Box::new(Expr::Column(ColumnRef::qualified(
-            table, column,
-        ))),
-        right: Box::new(Expr::Const(Const::String(
-            value.to_owned(),
-        ))),
+        left: Box::new(Expr::Column(ColumnRef::qualified(table, column))),
+        right: Box::new(Expr::Const(Const::String(value.to_owned()))),
     }
 }
 
@@ -121,12 +99,8 @@ fn string_filter(
 #[test]
 fn query_with_single_local_source() {
     let mut sources = HashMap::new();
-    sources.insert(
-        "users".into(),
-        DataSource::local("users", small_stats()),
-    );
-    let query =
-        FederatedQuery::new(RelExpr::scan("users"), sources);
+    sources.insert("users".into(), DataSource::local("users", small_stats()));
+    let query = FederatedQuery::new(RelExpr::scan("users"), sources);
 
     assert!(!query.is_distributed());
     assert!(query.local_sources().contains(&"users"));
@@ -146,8 +120,7 @@ fn query_with_single_remote_source() {
             QueryCapabilities::full(),
         ),
     );
-    let query =
-        FederatedQuery::new(RelExpr::scan("orders"), sources);
+    let query = FederatedQuery::new(RelExpr::scan("orders"), sources);
 
     assert!(query.is_distributed());
     assert_eq!(query.remote_sources().len(), 1);
@@ -179,10 +152,7 @@ fn query_with_multiple_remote_sources() {
         "local_cache".into(),
         DataSource::local("local_cache", small_stats()),
     );
-    let query = FederatedQuery::new(
-        RelExpr::scan("orders"),
-        sources,
-    );
+    let query = FederatedQuery::new(RelExpr::scan("orders"), sources);
 
     assert!(query.is_distributed());
     assert_eq!(query.remote_sources().len(), 2);
@@ -195,12 +165,7 @@ fn query_colocated_tables_same_endpoint() {
     let mut sources = HashMap::new();
     sources.insert(
         "orders".into(),
-        DataSource::remote(
-            pg_connection(),
-            "orders",
-            None,
-            QueryCapabilities::full(),
-        ),
+        DataSource::remote(pg_connection(), "orders", None, QueryCapabilities::full()),
     );
     sources.insert(
         "customers".into(),
@@ -211,10 +176,7 @@ fn query_colocated_tables_same_endpoint() {
             QueryCapabilities::full(),
         ),
     );
-    let query = FederatedQuery::new(
-        RelExpr::scan("orders"),
-        sources,
-    );
+    let query = FederatedQuery::new(RelExpr::scan("orders"), sources);
 
     assert_eq!(query.remote_endpoint_count(), 1);
 }
@@ -316,12 +278,7 @@ fn cost_model_ship_query_small_result() {
     let conn = pg_connection();
     let stats = large_stats();
 
-    let cost = model.estimate_ship_query(
-        &conn,
-        Some(&stats),
-        100.0,
-        200,
-    );
+    let cost = model.estimate_ship_query(&conn, Some(&stats), 100.0, 200);
 
     assert!(cost.total_ms > 0.0);
     assert!(cost.remote_exec_ms > 0.0);
@@ -336,8 +293,7 @@ fn cost_model_ship_data_full_large_table() {
     let conn = pg_connection();
     let stats = large_stats();
 
-    let cost =
-        model.estimate_ship_data(&conn, Some(&stats), false);
+    let cost = model.estimate_ship_data(&conn, Some(&stats), false);
 
     assert_eq!(cost.rows_transferred, 10_000_000);
     assert!(cost.network_transfer_ms > 0.0);
@@ -350,10 +306,8 @@ fn cost_model_filtered_much_cheaper_than_full() {
     let conn = pg_connection();
     let stats = large_stats();
 
-    let full =
-        model.estimate_ship_data(&conn, Some(&stats), false);
-    let filtered =
-        model.estimate_ship_data(&conn, Some(&stats), true);
+    let full = model.estimate_ship_data(&conn, Some(&stats), false);
+    let filtered = model.estimate_ship_data(&conn, Some(&stats), true);
 
     // Filtered should transfer ~10% of data
     assert!(filtered.transfer_bytes < full.transfer_bytes / 5);
@@ -366,18 +320,8 @@ fn cost_model_hybrid_selectivity_impact() {
     let conn = pg_connection();
     let stats = large_stats();
 
-    let selective = model.estimate_hybrid(
-        &conn,
-        Some(&stats),
-        0.001,
-        2.0,
-    );
-    let unselective = model.estimate_hybrid(
-        &conn,
-        Some(&stats),
-        0.5,
-        2.0,
-    );
+    let selective = model.estimate_hybrid(&conn, Some(&stats), 0.001, 2.0);
+    let unselective = model.estimate_hybrid(&conn, Some(&stats), 0.5, 2.0);
 
     assert!(selective.transfer_bytes < unselective.transfer_bytes);
     assert!(selective.total_ms < unselective.total_ms);
@@ -403,16 +347,11 @@ fn cost_model_slow_link_favors_pushdown() {
     let slow = slow_connection();
     let stats = large_stats();
 
-    let fast_full =
-        model.estimate_ship_data(&fast, Some(&stats), false);
-    let slow_full =
-        model.estimate_ship_data(&slow, Some(&stats), false);
+    let fast_full = model.estimate_ship_data(&fast, Some(&stats), false);
+    let slow_full = model.estimate_ship_data(&slow, Some(&stats), false);
 
     // Slow connection = much higher network transfer cost
-    assert!(
-        slow_full.network_transfer_ms
-            > fast_full.network_transfer_ms * 5.0
-    );
+    assert!(slow_full.network_transfer_ms > fast_full.network_transfer_ms * 5.0);
     // Total cost is also higher
     assert!(slow_full.total_ms > fast_full.total_ms);
 }
@@ -422,8 +361,7 @@ fn cost_model_estimate_output_rows() {
     let model = FederatedCostModel::new();
     let stats = large_stats();
 
-    let scan_rows = model
-        .estimate_output_rows(&RelExpr::scan("t"), Some(&stats));
+    let scan_rows = model.estimate_output_rows(&RelExpr::scan("t"), Some(&stats));
     assert!((scan_rows - 10_000_000.0).abs() < f64::EPSILON);
 
     let limit = RelExpr::Limit {
@@ -431,8 +369,7 @@ fn cost_model_estimate_output_rows() {
         offset: 0,
         input: Box::new(RelExpr::scan("t")),
     };
-    let limit_rows =
-        model.estimate_output_rows(&limit, Some(&stats));
+    let limit_rows = model.estimate_output_rows(&limit, Some(&stats));
     assert!((limit_rows - 10.0).abs() < f64::EPSILON);
 }
 
@@ -442,32 +379,20 @@ fn cost_model_estimate_output_rows() {
 fn optimizer_local_only_query() {
     let optimizer = FederatedOptimizer::new();
     let mut sources = HashMap::new();
-    sources.insert(
-        "users".into(),
-        DataSource::local("users", medium_stats()),
-    );
-    let query = FederatedQuery::new(
-        RelExpr::scan("users"),
-        sources,
-    );
+    sources.insert("users".into(), DataSource::local("users", medium_stats()));
+    let query = FederatedQuery::new(RelExpr::scan("users"), sources);
 
     let plan = optimizer
         .optimize_federated(&query)
         .expect("should succeed");
 
-    assert!(matches!(
-        plan.location,
-        ExecutionLocation::Local { .. }
-    ));
+    assert!(matches!(plan.location, ExecutionLocation::Local { .. }));
 }
 
 #[test]
 fn optimizer_empty_sources_error() {
     let optimizer = FederatedOptimizer::new();
-    let query = FederatedQuery::new(
-        RelExpr::scan("t"),
-        HashMap::new(),
-    );
+    let query = FederatedQuery::new(RelExpr::scan("t"), HashMap::new());
 
     assert!(optimizer.optimize_federated(&query).is_err());
 }
@@ -675,12 +600,11 @@ fn mysql_join_with_local() {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("local_users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("remote_orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("local_users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified(
+                "remote_orders",
+                "user_id",
+            ))),
         },
         left: Box::new(RelExpr::scan("local_users")),
         right: Box::new(RelExpr::scan("remote_orders")),
@@ -750,12 +674,11 @@ fn cross_database_pg_and_mysql() {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("pg_orders", "product_id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("mysql_products", "id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified(
+                "pg_orders",
+                "product_id",
+            ))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("mysql_products", "id"))),
         },
         left: Box::new(RelExpr::scan("pg_orders")),
         right: Box::new(RelExpr::scan("mysql_products")),
@@ -817,17 +740,9 @@ fn no_statistics_available() {
     let mut sources = HashMap::new();
     sources.insert(
         "remote".into(),
-        DataSource::remote(
-            pg_connection(),
-            "remote",
-            None,
-            QueryCapabilities::full(),
-        ),
+        DataSource::remote(pg_connection(), "remote", None, QueryCapabilities::full()),
     );
-    let query = FederatedQuery::new(
-        RelExpr::scan("remote"),
-        sources,
-    );
+    let query = FederatedQuery::new(RelExpr::scan("remote"), sources);
 
     let result = optimizer
         .optimize_federated(&query)
@@ -859,9 +774,9 @@ fn minimal_capabilities_remote() {
 
     // Should not ship query since minimal caps don't support joins
     let strategies = optimizer.enumerate_strategies(&query);
-    let has_ship_query = strategies.iter().any(|s| {
-        matches!(s, ExecutionLocation::ShipQuery { .. })
-    });
+    let has_ship_query = strategies
+        .iter()
+        .any(|s| matches!(s, ExecutionLocation::ShipQuery { .. }));
     assert!(!has_ship_query);
 }
 
@@ -935,9 +850,7 @@ fn analysis_produces_plan_with_steps() {
     };
     let query = FederatedQuery::new(plan, sources);
 
-    let analysis = optimizer
-        .analyze(&query)
-        .expect("should succeed");
+    let analysis = optimizer.analyze(&query).expect("should succeed");
 
     assert!(!analysis.plan.steps.is_empty());
     assert!(analysis.plan.cost.total_ms > 0.0);
@@ -962,9 +875,7 @@ fn analysis_compares_alternatives() {
     };
     let query = FederatedQuery::new(plan, sources);
 
-    let analysis = optimizer
-        .analyze(&query)
-        .expect("should succeed");
+    let analysis = optimizer.analyze(&query).expect("should succeed");
 
     assert!(!analysis.plan.alternatives.is_empty());
 }
@@ -986,17 +897,11 @@ fn format_bytes_display() {
 #[test]
 fn federated_query_json_roundtrip() {
     let mut sources = HashMap::new();
-    sources.insert(
-        "t".into(),
-        DataSource::local("t", small_stats()),
-    );
-    let query =
-        FederatedQuery::new(RelExpr::scan("t"), sources);
+    sources.insert("t".into(), DataSource::local("t", small_stats()));
+    let query = FederatedQuery::new(RelExpr::scan("t"), sources);
 
-    let json = serde_json::to_string(&query)
-        .expect("serialize");
-    let back: FederatedQuery =
-        serde_json::from_str(&json).expect("deserialize");
+    let json = serde_json::to_string(&query).expect("serialize");
+    let back: FederatedQuery = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(query, back);
 }
 
@@ -1007,20 +912,16 @@ fn execution_location_json_roundtrip() {
         local_operations: RelExpr::scan("l"),
         target: pg_connection(),
     };
-    let json =
-        serde_json::to_string(&loc).expect("serialize");
-    let back: ExecutionLocation =
-        serde_json::from_str(&json).expect("deserialize");
+    let json = serde_json::to_string(&loc).expect("serialize");
+    let back: ExecutionLocation = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(loc, back);
 }
 
 #[test]
 fn remote_connection_json_roundtrip() {
     let conn = mysql_connection();
-    let json =
-        serde_json::to_string(&conn).expect("serialize");
-    let back: RemoteConnection =
-        serde_json::from_str(&json).expect("deserialize");
+    let json = serde_json::to_string(&conn).expect("serialize");
+    let back: RemoteConnection = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(conn, back);
 }
 

@@ -38,10 +38,7 @@ impl LateralJoinExecutor {
     /// Create a lateral join executor.
     #[must_use]
     pub fn new(rhs: LateralRhs, preserve_left: bool) -> Self {
-        Self {
-            rhs,
-            preserve_left,
-        }
+        Self { rhs, preserve_left }
     }
 
     /// Execute the lateral join.
@@ -52,10 +49,7 @@ impl LateralJoinExecutor {
     /// # Errors
     ///
     /// Returns an error if the right-hand side evaluation fails.
-    pub fn execute(
-        &self,
-        left_rows: &[Row],
-    ) -> Result<Vec<Row>, ExecutionError> {
+    pub fn execute(&self, left_rows: &[Row]) -> Result<Vec<Row>, ExecutionError> {
         let mut output = Vec::new();
 
         for left_row in left_rows {
@@ -71,10 +65,8 @@ impl LateralJoinExecutor {
                 output.push(Row::new(combined));
             } else {
                 for right_row in &right_rows {
-                    let mut combined =
-                        left_row.values.clone();
-                    combined
-                        .extend(right_row.values.iter().cloned());
+                    let mut combined = left_row.values.clone();
+                    combined.extend(right_row.values.iter().cloned());
                     output.push(Row::new(combined));
                 }
             }
@@ -84,31 +76,21 @@ impl LateralJoinExecutor {
     }
 
     /// Evaluate the right-hand side for a single left row.
-    fn evaluate_rhs(
-        &self,
-        left_row: &Row,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn evaluate_rhs(&self, left_row: &Row) -> Result<Vec<Row>, ExecutionError> {
         let input_slice = std::slice::from_ref(left_row);
         match &self.rhs {
             LateralRhs::Unnest(executor) => {
-                let rows =
-                    executor.execute(Some(input_slice))?;
+                let rows = executor.execute(Some(input_slice))?;
                 // Strip the input columns from unnest output
                 // (they were appended by the unnest executor).
                 let left_width = left_row.width();
                 let trimmed: Vec<Row> = rows
                     .into_iter()
-                    .map(|r| {
-                        Row::new(
-                            r.values[left_width..].to_vec(),
-                        )
-                    })
+                    .map(|r| Row::new(r.values[left_width..].to_vec()))
                     .collect();
                 Ok(trimmed)
             }
-            LateralRhs::TableFunction(executor) => {
-                executor.execute(Some(input_slice))
-            }
+            LateralRhs::TableFunction(executor) => executor.execute(Some(input_slice)),
         }
     }
 
@@ -143,22 +125,12 @@ mod tests {
 
     #[test]
     fn lateral_unnest_basic() {
-        let executor = LateralJoinExecutor::new(
-            LateralRhs::Unnest(make_unnest_executor()),
-            false,
-        );
+        let executor = LateralJoinExecutor::new(LateralRhs::Unnest(make_unnest_executor()), false);
         let left = vec![
-            Row::new(vec![
-                Const::Int(1),
-                Const::String("{10,20}".into()),
-            ]),
-            Row::new(vec![
-                Const::Int(2),
-                Const::String("{30}".into()),
-            ]),
+            Row::new(vec![Const::Int(1), Const::String("{10,20}".into())]),
+            Row::new(vec![Const::Int(2), Const::String("{30}".into())]),
         ];
-        let rows =
-            executor.execute(&left).expect("should succeed");
+        let rows = executor.execute(&left).expect("should succeed");
         // Row 1 expands to 2 rows, Row 2 to 1 row
         assert_eq!(rows.len(), 3);
         // First combined row: [1, {10,20}] + [10]
@@ -177,8 +149,7 @@ mod tests {
             Const::Int(1),
             Const::Null, // NULL array
         ])];
-        let rows =
-            executor.execute(&left).expect("should succeed");
+        let rows = executor.execute(&left).expect("should succeed");
         // LEFT JOIN: should emit left row with NULL
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].values[0], Const::Int(1));
@@ -189,21 +160,14 @@ mod tests {
     fn lateral_table_function() {
         let tvf = TableFunctionExecutor::new(
             "generate_series",
-            vec![
-                Expr::Const(Const::Int(1)),
-                Expr::Const(Const::Int(3)),
-            ],
+            vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(3))],
         );
-        let executor = LateralJoinExecutor::new(
-            LateralRhs::TableFunction(tvf),
-            false,
-        );
+        let executor = LateralJoinExecutor::new(LateralRhs::TableFunction(tvf), false);
         let left = vec![
             Row::new(vec![Const::String("a".into())]),
             Row::new(vec![Const::String("b".into())]),
         ];
-        let rows =
-            executor.execute(&left).expect("should succeed");
+        let rows = executor.execute(&left).expect("should succeed");
         // Each left row gets 3 right rows
         assert_eq!(rows.len(), 6);
         assert_eq!(
@@ -216,18 +180,10 @@ mod tests {
     fn lateral_no_left_rows() {
         let tvf = TableFunctionExecutor::new(
             "generate_series",
-            vec![
-                Expr::Const(Const::Int(1)),
-                Expr::Const(Const::Int(3)),
-            ],
+            vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(3))],
         );
-        let executor = LateralJoinExecutor::new(
-            LateralRhs::TableFunction(tvf),
-            false,
-        );
-        let rows = executor
-            .execute(&[])
-            .expect("should succeed");
+        let executor = LateralJoinExecutor::new(LateralRhs::TableFunction(tvf), false);
+        let rows = executor.execute(&[]).expect("should succeed");
         assert!(rows.is_empty());
     }
 }

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ra_core::{
     algebra::{JoinType, RelExpr},
     cost::{CostModel, StatisticsProvider},
@@ -62,9 +62,7 @@ impl LeftDeepBuilder {
         // Extract all tables and conditions from the join subtree
         let mut tables = Vec::new();
         let mut conditions = Vec::new();
-        self.extract_tables_and_conditions(
-            join_subtree, &mut tables, &mut conditions,
-        )?;
+        self.extract_tables_and_conditions(join_subtree, &mut tables, &mut conditions)?;
 
         if tables.is_empty() {
             return Err(anyhow!("No tables found in query"));
@@ -77,10 +75,8 @@ impl LeftDeepBuilder {
 
         // Sort tables by cardinality (smallest first)
         tables.sort_by(|a, b| {
-            let a_rows = self.get_cardinality(a)
-                .unwrap_or(f64::MAX);
-            let b_rows = self.get_cardinality(b)
-                .unwrap_or(f64::MAX);
+            let a_rows = self.get_cardinality(a).unwrap_or(f64::MAX);
+            let b_rows = self.get_cardinality(b).unwrap_or(f64::MAX);
             a_rows
                 .partial_cmp(&b_rows)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -92,12 +88,8 @@ impl LeftDeepBuilder {
 
         for table in tables_iter {
             let condition = self
-                .find_join_condition(
-                    &current, &table, &conditions,
-                )
-                .unwrap_or_else(|| {
-                    Expr::Const(ra_core::expr::Const::Bool(true))
-                });
+                .find_join_condition(&current, &table, &conditions)
+                .unwrap_or_else(|| Expr::Const(ra_core::expr::Const::Bool(true)));
 
             current = RelExpr::Join {
                 join_type: JoinType::Inner,
@@ -121,7 +113,12 @@ impl LeftDeepBuilder {
             RelExpr::Scan { .. } => {
                 tables.push(expr.clone());
             }
-            RelExpr::Join { left, right, condition, .. } => {
+            RelExpr::Join {
+                left,
+                right,
+                condition,
+                ..
+            } => {
                 // Extract condition
                 if !matches!(condition, Expr::Const(ra_core::expr::Const::Bool(true))) {
                     conditions.push(condition.clone());
@@ -130,7 +127,9 @@ impl LeftDeepBuilder {
                 self.extract_tables_and_conditions(left, tables, conditions)?;
                 self.extract_tables_and_conditions(right, tables, conditions)?;
             }
-            RelExpr::Filter { input, predicate, .. } => {
+            RelExpr::Filter {
+                input, predicate, ..
+            } => {
                 // Extract filter as potential join condition
                 conditions.push(predicate.clone());
                 self.extract_tables_and_conditions(input, tables, conditions)?;
@@ -154,11 +153,10 @@ impl LeftDeepBuilder {
     /// Get the cardinality (row count) for a table.
     fn get_cardinality(&self, expr: &RelExpr) -> Option<f64> {
         match expr {
-            RelExpr::Scan { table, .. } => {
-                self.stats_provider
-                    .get_statistics(table)
-                    .map(|s| s.row_count)
-            }
+            RelExpr::Scan { table, .. } => self
+                .stats_provider
+                .get_statistics(table)
+                .map(|s| s.row_count),
             _ => None,
         }
     }
@@ -206,10 +204,7 @@ enum OuterOp {
 
 /// Peel outer operators off the expression, collecting them in order
 /// (outermost first), and return the inner join subtree.
-fn peel_outer_ops<'a>(
-    expr: &'a RelExpr,
-    ops: &mut Vec<OuterOp>,
-) -> &'a RelExpr {
+fn peel_outer_ops<'a>(expr: &'a RelExpr, ops: &mut Vec<OuterOp>) -> &'a RelExpr {
     match expr {
         RelExpr::Aggregate {
             group_by,
@@ -229,9 +224,7 @@ fn peel_outer_ops<'a>(
             peel_outer_ops(input, ops)
         }
         RelExpr::Sort { keys, input } => {
-            ops.push(OuterOp::Sort {
-                keys: keys.clone(),
-            });
+            ops.push(OuterOp::Sort { keys: keys.clone() });
             peel_outer_ops(input, ops)
         }
         RelExpr::Limit {
@@ -245,9 +238,7 @@ fn peel_outer_ops<'a>(
             });
             peel_outer_ops(input, ops)
         }
-        RelExpr::Window {
-            functions, input,
-        } => {
+        RelExpr::Window { functions, input } => {
             ops.push(OuterOp::Window {
                 functions: functions.clone(),
             });
@@ -264,10 +255,7 @@ fn peel_outer_ops<'a>(
 
 /// Re-apply outer operators on top of the optimised join tree.
 /// Operators are stored outermost-first, so we apply in reverse.
-fn reapply_outer_ops(
-    mut result: RelExpr,
-    ops: Vec<OuterOp>,
-) -> RelExpr {
+fn reapply_outer_ops(mut result: RelExpr, ops: Vec<OuterOp>) -> RelExpr {
     for op in ops.into_iter().rev() {
         result = match op {
             OuterOp::Aggregate {
@@ -328,9 +316,7 @@ pub fn can_use_left_deep(expr: &RelExpr) -> bool {
 fn count_tables(expr: &RelExpr) -> usize {
     match expr {
         RelExpr::Scan { .. } => 1,
-        RelExpr::Join { left, right, .. } => {
-            count_tables(left) + count_tables(right)
-        }
+        RelExpr::Join { left, right, .. } => count_tables(left) + count_tables(right),
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
@@ -353,8 +339,7 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
     match expr {
         RelExpr::Scan { .. } => true,
         RelExpr::Join { left, right, .. } => {
-            is_left_deep_eligible(left)
-                && is_left_deep_eligible(right)
+            is_left_deep_eligible(left) && is_left_deep_eligible(right)
         }
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
@@ -362,9 +347,7 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::Distinct { input } => {
-            is_left_deep_eligible(input)
-        }
+        | RelExpr::Distinct { input } => is_left_deep_eligible(input),
         // CTEs, set ops, and recursive queries need full e-graph
         RelExpr::CTE { .. }
         | RelExpr::RecursiveCTE { .. }
@@ -567,7 +550,11 @@ mod tests {
         );
 
         let query = join(
-            join(scan("large"), scan("medium"), Expr::Const(Const::Bool(true))),
+            join(
+                scan("large"),
+                scan("medium"),
+                Expr::Const(Const::Bool(true)),
+            ),
             scan("small"),
             Expr::Const(Const::Bool(true)),
         );
@@ -583,7 +570,11 @@ mod tests {
                 }
                 // Left should be (small JOIN medium)
                 match left.as_ref() {
-                    RelExpr::Join { left: inner_left, right: inner_right, .. } => {
+                    RelExpr::Join {
+                        left: inner_left,
+                        right: inner_right,
+                        ..
+                    } => {
                         match inner_left.as_ref() {
                             RelExpr::Scan { table, .. } => assert_eq!(table, "small"),
                             _ => panic!("Expected 'small' on inner left"),

@@ -16,13 +16,11 @@ use egg::{EGraph, Runner};
 use proptest::prelude::*;
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering,
-    ProjectionColumn, RelExpr, SortDirection, SortKey,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
+    SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
-use ra_engine::{
-    all_rules, to_rec_expr, RelAnalysis, RelLang,
-};
+use ra_engine::{all_rules, to_rec_expr, RelAnalysis, RelLang};
 
 // ---------------------------------------------------------------
 // Strategies (reuse the patterns from the main proptest file but
@@ -55,22 +53,18 @@ fn arb_int_const() -> impl Strategy<Value = Expr> {
 }
 
 fn arb_simple_pred() -> impl Strategy<Value = Expr> {
-    (arb_column_expr(), arb_int_const()).prop_map(|(col, val)| {
-        Expr::BinOp {
-            op: BinOp::Gt,
-            left: Box::new(col),
-            right: Box::new(val),
-        }
+    (arb_column_expr(), arb_int_const()).prop_map(|(col, val)| Expr::BinOp {
+        op: BinOp::Gt,
+        left: Box::new(col),
+        right: Box::new(val),
     })
 }
 
 fn arb_eq_pred() -> impl Strategy<Value = Expr> {
-    (arb_column_expr(), arb_column_expr()).prop_map(|(l, r)| {
-        Expr::BinOp {
-            op: BinOp::Eq,
-            left: Box::new(l),
-            right: Box::new(r),
-        }
+    (arb_column_expr(), arb_column_expr()).prop_map(|(l, r)| Expr::BinOp {
+        op: BinOp::Eq,
+        left: Box::new(l),
+        right: Box::new(r),
     })
 }
 

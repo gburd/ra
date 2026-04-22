@@ -10,7 +10,7 @@ use std::time::Instant;
 use ra_core::algebra::RelExpr;
 use ra_core::cost::StatisticsProvider;
 use ra_ml::belief_network::{BeliefNetwork, ExecutionObservation};
-use ra_ml::streaming::{StreamingMlEstimator, ModelScope};
+use ra_ml::streaming::{ModelScope, StreamingMlEstimator};
 
 use crate::rule_priority::RulePriority;
 
@@ -130,11 +130,7 @@ impl MlOptimizer {
     }
 
     /// Record the start of an optimization.
-    pub fn start_optimization(
-        &self,
-        plan: &RelExpr,
-        cost: f64,
-    ) {
+    pub fn start_optimization(&self, plan: &RelExpr, cost: f64) {
         if !self.config.collect_observations {
             return;
         }
@@ -163,11 +159,7 @@ impl MlOptimizer {
     }
 
     /// Record the completion of an optimization.
-    pub fn complete_optimization(
-        &self,
-        output_plan: &RelExpr,
-        final_cost: f64,
-    ) {
+    pub fn complete_optimization(&self, output_plan: &RelExpr, final_cost: f64) {
         if !self.config.collect_observations {
             return;
         }
@@ -212,10 +204,7 @@ impl MlOptimizer {
 }
 
 /// Extract plan context features for belief network prediction.
-fn extract_plan_context(
-    _plan: &RelExpr,
-    _stats: &dyn StatisticsProvider,
-) -> Vec<f64> {
+fn extract_plan_context(_plan: &RelExpr, _stats: &dyn StatisticsProvider) -> Vec<f64> {
     vec![1.0, 2.0, 3.0]
 }
 

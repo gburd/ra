@@ -57,7 +57,11 @@ fn test_voltdb_deterministic_order_replica() {
 #[test]
 fn test_voltdb_deterministic_order_partition() {
     let optimizer = create_optimizer();
-    let plan = join(scan("orders"), scan("items"), eq_pred("order_id", "order_id"));
+    let plan = join(
+        scan("orders"),
+        scan("items"),
+        eq_pred("order_id", "order_id"),
+    );
     assert!(optimizer.optimize(&plan).is_ok());
 }
 
@@ -71,7 +75,11 @@ fn test_voltdb_single_partition_query() {
 #[test]
 fn test_voltdb_single_partition_join() {
     let optimizer = create_optimizer();
-    let plan = join(scan("partition_a"), scan("partition_b"), eq_pred("key", "key"));
+    let plan = join(
+        scan("partition_a"),
+        scan("partition_b"),
+        eq_pred("key", "key"),
+    );
     assert!(optimizer.optimize(&plan).is_ok());
 }
 
@@ -89,7 +97,11 @@ fn test_voltdb_single_partition_aggregate() {
 #[test]
 fn test_voltdb_replicated_join_broadcast() {
     let optimizer = create_optimizer();
-    let plan = join(scan("partitioned_fact"), scan("replicated_dim"), eq_pred("id", "id"));
+    let plan = join(
+        scan("partitioned_fact"),
+        scan("replicated_dim"),
+        eq_pred("id", "id"),
+    );
     assert!(optimizer.optimize(&plan).is_ok());
 }
 
@@ -104,7 +116,11 @@ fn test_voltdb_replicated_join_multi() {
 #[test]
 fn test_voltdb_replicated_join_aggregate() {
     let optimizer = create_optimizer();
-    let joined = join(scan("orders"), scan("products"), eq_pred("product_id", "id"));
+    let joined = join(
+        scan("orders"),
+        scan("products"),
+        eq_pred("product_id", "id"),
+    );
     let agg = RelExpr::Aggregate {
         group_by: vec![Expr::Column(ColumnRef::new("category".to_string()))],
         aggregates: vec![],

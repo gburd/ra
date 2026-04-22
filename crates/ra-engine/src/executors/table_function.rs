@@ -33,32 +33,17 @@ impl TableFunctionExecutor {
     ///
     /// Returns an error if the function is unsupported or
     /// arguments are invalid.
-    pub fn execute(
-        &self,
-        _input: Option<&[Row]>,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    pub fn execute(&self, _input: Option<&[Row]>) -> Result<Vec<Row>, ExecutionError> {
         match self.name.as_str() {
             "generate_series" => self.execute_generate_series(),
-            "json_array_elements"
-            | "json_array_elements_text" => {
+            "json_array_elements" | "json_array_elements_text" => {
                 self.execute_json_array_elements()
             }
-            "json_each" | "jsonb_each" => {
-                self.execute_json_each()
-            }
-            "json_object_keys"
-            | "jsonb_object_keys" => {
-                self.execute_json_object_keys()
-            }
-            "json_populate_recordset" => {
-                self.execute_json_populate_recordset()
-            }
-            "json_to_recordset"
-            | "jsonb_to_recordset" => {
-                self.execute_json_to_recordset()
-            }
-            "jsonb_array_elements"
-            | "jsonb_array_elements_text" => {
+            "json_each" | "jsonb_each" => self.execute_json_each(),
+            "json_object_keys" | "jsonb_object_keys" => self.execute_json_object_keys(),
+            "json_populate_recordset" => self.execute_json_populate_recordset(),
+            "json_to_recordset" | "jsonb_to_recordset" => self.execute_json_to_recordset(),
+            "jsonb_array_elements" | "jsonb_array_elements_text" => {
                 self.execute_json_array_elements()
             }
             other => Err(ExecutionError::EvalError(format!(
@@ -71,13 +56,10 @@ impl TableFunctionExecutor {
     ///
     /// Produces integer rows from `start` to `stop` inclusive,
     /// incrementing by `step` (default 1).
-    fn execute_generate_series(
-        &self,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn execute_generate_series(&self) -> Result<Vec<Row>, ExecutionError> {
         if self.args.len() < 2 {
             return Err(ExecutionError::EvalError(
-                "generate_series requires at least 2 arguments"
-                    .to_owned(),
+                "generate_series requires at least 2 arguments".to_owned(),
             ));
         }
 
@@ -101,9 +83,7 @@ impl TableFunctionExecutor {
         // Limit output to prevent runaway generation.
         const MAX_ROWS: usize = 1_000_000;
 
-        while (step > 0 && current <= stop)
-            || (step < 0 && current >= stop)
-        {
+        while (step > 0 && current <= stop) || (step < 0 && current >= stop) {
             if rows.len() >= MAX_ROWS {
                 return Err(ExecutionError::EvalError(format!(
                     "generate_series exceeded {MAX_ROWS} row limit"
@@ -119,27 +99,19 @@ impl TableFunctionExecutor {
     /// Execute `json_array_elements(json_text)`.
     ///
     /// Parses a JSON array string and produces one row per element.
-    fn execute_json_array_elements(
-        &self,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn execute_json_array_elements(&self) -> Result<Vec<Row>, ExecutionError> {
         if self.args.is_empty() {
             return Err(ExecutionError::EvalError(
-                "json_array_elements requires 1 argument"
-                    .to_owned(),
+                "json_array_elements requires 1 argument".to_owned(),
             ));
         }
         let json_str = eval_arg_as_string(&self.args[0])?;
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json_str).map_err(|e| {
-                ExecutionError::EvalError(format!(
-                    "invalid JSON: {e}"
-                ))
-            })?;
+        let parsed: serde_json::Value = serde_json::from_str(&json_str)
+            .map_err(|e| ExecutionError::EvalError(format!("invalid JSON: {e}")))?;
 
         match parsed {
             serde_json::Value::Array(elements) => {
-                let mut rows =
-                    Vec::with_capacity(elements.len());
+                let mut rows = Vec::with_capacity(elements.len());
                 for elem in elements {
                     let value = json_value_to_const(&elem);
                     rows.push(Row::new(vec![value]));
@@ -147,8 +119,7 @@ impl TableFunctionExecutor {
                 Ok(rows)
             }
             _ => Err(ExecutionError::EvalError(
-                "json_array_elements requires a JSON array"
-                    .to_owned(),
+                "json_array_elements requires a JSON array".to_owned(),
             )),
         }
     }
@@ -156,33 +127,23 @@ impl TableFunctionExecutor {
     /// Execute `json_each(json_text)`.
     ///
     /// Parses a JSON object and produces one row per key-value pair.
-    fn execute_json_each(
-        &self,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn execute_json_each(&self) -> Result<Vec<Row>, ExecutionError> {
         if self.args.is_empty() {
             return Err(ExecutionError::EvalError(
                 "json_each requires 1 argument".to_owned(),
             ));
         }
         let json_str = eval_arg_as_string(&self.args[0])?;
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json_str).map_err(|e| {
-                ExecutionError::EvalError(format!(
-                    "invalid JSON: {e}"
-                ))
-            })?;
+        let parsed: serde_json::Value = serde_json::from_str(&json_str)
+            .map_err(|e| ExecutionError::EvalError(format!("invalid JSON: {e}")))?;
 
         match parsed {
             serde_json::Value::Object(map) => {
                 let mut rows = Vec::with_capacity(map.len());
                 for (key, val) in map {
-                    let key_const =
-                        Const::String(key);
-                    let val_const =
-                        json_value_to_const(&val);
-                    rows.push(Row::new(vec![
-                        key_const, val_const,
-                    ]));
+                    let key_const = Const::String(key);
+                    let val_const = json_value_to_const(&val);
+                    rows.push(Row::new(vec![key_const, val_const]));
                 }
                 Ok(rows)
             }
@@ -195,36 +156,26 @@ impl TableFunctionExecutor {
     /// Execute `json_object_keys(json_text)`.
     ///
     /// Parses a JSON object and produces one row per key.
-    fn execute_json_object_keys(
-        &self,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn execute_json_object_keys(&self) -> Result<Vec<Row>, ExecutionError> {
         if self.args.is_empty() {
             return Err(ExecutionError::EvalError(
-                "json_object_keys requires 1 argument"
-                    .to_owned(),
+                "json_object_keys requires 1 argument".to_owned(),
             ));
         }
         let json_str = eval_arg_as_string(&self.args[0])?;
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json_str).map_err(|e| {
-                ExecutionError::EvalError(format!(
-                    "invalid JSON: {e}"
-                ))
-            })?;
+        let parsed: serde_json::Value = serde_json::from_str(&json_str)
+            .map_err(|e| ExecutionError::EvalError(format!("invalid JSON: {e}")))?;
 
         match parsed {
             serde_json::Value::Object(map) => {
                 let mut rows = Vec::with_capacity(map.len());
                 for key in map.keys() {
-                    rows.push(Row::new(vec![Const::String(
-                        key.clone(),
-                    )]));
+                    rows.push(Row::new(vec![Const::String(key.clone())]));
                 }
                 Ok(rows)
             }
             _ => Err(ExecutionError::EvalError(
-                "json_object_keys requires a JSON object"
-                    .to_owned(),
+                "json_object_keys requires a JSON object".to_owned(),
             )),
         }
     }
@@ -234,30 +185,22 @@ impl TableFunctionExecutor {
     /// Parses a JSON array of objects and produces typed rows.
     /// The type definition string `(col1 type1, col2 type2, ...)`
     /// determines column order and coercion.
-    fn execute_json_populate_recordset(
-        &self,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn execute_json_populate_recordset(&self) -> Result<Vec<Row>, ExecutionError> {
         if self.args.len() < 2 {
             return Err(ExecutionError::EvalError(
-                "json_populate_recordset requires 2 arguments"
-                    .to_owned(),
+                "json_populate_recordset requires 2 arguments".to_owned(),
             ));
         }
         let json_str = eval_arg_as_string(&self.args[0])?;
         let type_def = eval_arg_as_string(&self.args[1])?;
 
         let col_names = parse_type_definition(&type_def)?;
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json_str).map_err(|e| {
-                ExecutionError::EvalError(format!(
-                    "invalid JSON: {e}"
-                ))
-            })?;
+        let parsed: serde_json::Value = serde_json::from_str(&json_str)
+            .map_err(|e| ExecutionError::EvalError(format!("invalid JSON: {e}")))?;
 
         let serde_json::Value::Array(elements) = parsed else {
             return Err(ExecutionError::EvalError(
-                "json_populate_recordset requires a JSON array"
-                    .to_owned(),
+                "json_populate_recordset requires a JSON array".to_owned(),
             ));
         };
 
@@ -274,9 +217,7 @@ impl TableFunctionExecutor {
             for (col_name, col_type) in &col_names {
                 let val = obj
                     .get(col_name.as_str())
-                    .map(|v| {
-                        coerce_json_value(v, col_type)
-                    })
+                    .map(|v| coerce_json_value(v, col_type))
                     .unwrap_or(Const::Null);
                 values.push(val);
             }
@@ -290,27 +231,19 @@ impl TableFunctionExecutor {
     ///
     /// Parses a JSON array of objects and infers column types
     /// from the first object's keys. Produces one row per object.
-    fn execute_json_to_recordset(
-        &self,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn execute_json_to_recordset(&self) -> Result<Vec<Row>, ExecutionError> {
         if self.args.is_empty() {
             return Err(ExecutionError::EvalError(
-                "json_to_recordset requires 1 argument"
-                    .to_owned(),
+                "json_to_recordset requires 1 argument".to_owned(),
             ));
         }
         let json_str = eval_arg_as_string(&self.args[0])?;
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json_str).map_err(|e| {
-                ExecutionError::EvalError(format!(
-                    "invalid JSON: {e}"
-                ))
-            })?;
+        let parsed: serde_json::Value = serde_json::from_str(&json_str)
+            .map_err(|e| ExecutionError::EvalError(format!("invalid JSON: {e}")))?;
 
         let serde_json::Value::Array(elements) = parsed else {
             return Err(ExecutionError::EvalError(
-                "json_to_recordset requires a JSON array"
-                    .to_owned(),
+                "json_to_recordset requires a JSON array".to_owned(),
             ));
         };
 
@@ -319,15 +252,12 @@ impl TableFunctionExecutor {
         }
 
         // Infer column names from first object.
-        let serde_json::Value::Object(first) = &elements[0]
-        else {
+        let serde_json::Value::Object(first) = &elements[0] else {
             return Err(ExecutionError::EvalError(
-                "json_to_recordset: elements must be objects"
-                    .to_owned(),
+                "json_to_recordset: elements must be objects".to_owned(),
             ));
         };
-        let col_names: Vec<String> =
-            first.keys().cloned().collect();
+        let col_names: Vec<String> = first.keys().cloned().collect();
 
         let mut rows = Vec::with_capacity(elements.len());
         for elem in &elements {
@@ -354,14 +284,10 @@ impl TableFunctionExecutor {
 }
 
 /// Evaluate an expression as an integer.
-fn eval_arg_as_int(
-    expr: &Expr,
-) -> Result<i64, ExecutionError> {
+fn eval_arg_as_int(expr: &Expr) -> Result<i64, ExecutionError> {
     match expr {
         Expr::Const(Const::Int(i)) => Ok(*i),
-        Expr::Const(Const::Float(f)) => {
-            Ok(*f as i64)
-        }
+        Expr::Const(Const::Float(f)) => Ok(*f as i64),
         other => Err(ExecutionError::EvalError(format!(
             "expected integer argument, got: {other:?}"
         ))),
@@ -369,9 +295,7 @@ fn eval_arg_as_int(
 }
 
 /// Evaluate an expression as a string.
-fn eval_arg_as_string(
-    expr: &Expr,
-) -> Result<String, ExecutionError> {
+fn eval_arg_as_string(expr: &Expr) -> Result<String, ExecutionError> {
     match expr {
         Expr::Const(Const::String(s)) => Ok(s.clone()),
         other => Err(ExecutionError::EvalError(format!(
@@ -383,9 +307,7 @@ fn eval_arg_as_string(
 /// Parse a type definition string like `(id int, name text)`.
 ///
 /// Returns `(column_name, type_name)` pairs.
-fn parse_type_definition(
-    def: &str,
-) -> Result<Vec<(String, String)>, ExecutionError> {
+fn parse_type_definition(def: &str) -> Result<Vec<(String, String)>, ExecutionError> {
     let trimmed = def.trim();
     let inner = trimmed
         .strip_prefix('(')
@@ -394,55 +316,35 @@ fn parse_type_definition(
 
     let mut cols = Vec::new();
     for part in inner.split(',') {
-        let tokens: Vec<&str> =
-            part.trim().split_whitespace().collect();
+        let tokens: Vec<&str> = part.trim().split_whitespace().collect();
         if tokens.len() < 2 {
             return Err(ExecutionError::EvalError(format!(
                 "invalid type definition part: {part}"
             )));
         }
-        cols.push((
-            tokens[0].to_owned(),
-            tokens[1..].join(" ").to_lowercase(),
-        ));
+        cols.push((tokens[0].to_owned(), tokens[1..].join(" ").to_lowercase()));
     }
     Ok(cols)
 }
 
 /// Coerce a JSON value to a [`Const`] based on a target type.
-fn coerce_json_value(
-    val: &serde_json::Value,
-    target_type: &str,
-) -> Const {
+fn coerce_json_value(val: &serde_json::Value, target_type: &str) -> Const {
     match target_type {
-        "int" | "integer" | "int4" | "int8" | "bigint" => {
-            match val {
-                serde_json::Value::Number(n) => {
-                    if let Some(i) = n.as_i64() {
-                        Const::Int(i)
-                    } else {
-                        Const::Int(
-                            n.as_f64().unwrap_or(0.0) as i64
-                        )
-                    }
-                }
-                serde_json::Value::String(s) => {
-                    s.parse::<i64>()
-                        .map_or(Const::Null, Const::Int)
-                }
-                serde_json::Value::Null => Const::Null,
-                _ => Const::Null,
-            }
-        }
-        "float" | "double" | "real" | "numeric"
-        | "float4" | "float8" => match val {
+        "int" | "integer" | "int4" | "int8" | "bigint" => match val {
             serde_json::Value::Number(n) => {
-                Const::Float(n.as_f64().unwrap_or(0.0))
+                if let Some(i) = n.as_i64() {
+                    Const::Int(i)
+                } else {
+                    Const::Int(n.as_f64().unwrap_or(0.0) as i64)
+                }
             }
-            serde_json::Value::String(s) => {
-                s.parse::<f64>()
-                    .map_or(Const::Null, Const::Float)
-            }
+            serde_json::Value::String(s) => s.parse::<i64>().map_or(Const::Null, Const::Int),
+            serde_json::Value::Null => Const::Null,
+            _ => Const::Null,
+        },
+        "float" | "double" | "real" | "numeric" | "float4" | "float8" => match val {
+            serde_json::Value::Number(n) => Const::Float(n.as_f64().unwrap_or(0.0)),
+            serde_json::Value::String(s) => s.parse::<f64>().map_or(Const::Null, Const::Float),
             serde_json::Value::Null => Const::Null,
             _ => Const::Null,
         },
@@ -467,9 +369,7 @@ fn json_value_to_const(val: &serde_json::Value) -> Const {
                 Const::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => {
-            Const::String(s.clone())
-        }
+        serde_json::Value::String(s) => Const::String(s.clone()),
         other => Const::String(other.to_string()),
     }
 }
@@ -483,13 +383,9 @@ mod tests {
     fn generate_series_basic() {
         let exec = TableFunctionExecutor::new(
             "generate_series",
-            vec![
-                Expr::Const(Const::Int(1)),
-                Expr::Const(Const::Int(5)),
-            ],
+            vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(5))],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 5);
         assert_eq!(rows[0].values, vec![Const::Int(1)]);
         assert_eq!(rows[4].values, vec![Const::Int(5)]);
@@ -505,8 +401,7 @@ mod tests {
                 Expr::Const(Const::Int(3)),
             ],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 4); // 0, 3, 6, 9
         assert_eq!(rows[0].values, vec![Const::Int(0)]);
         assert_eq!(rows[1].values, vec![Const::Int(3)]);
@@ -524,8 +419,7 @@ mod tests {
                 Expr::Const(Const::Int(-1)),
             ],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 5); // 5,4,3,2,1
         assert_eq!(rows[0].values, vec![Const::Int(5)]);
         assert_eq!(rows[4].values, vec![Const::Int(1)]);
@@ -541,8 +435,7 @@ mod tests {
                 Expr::Const(Const::Int(1)),
             ],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert!(rows.is_empty());
     }
 
@@ -564,12 +457,9 @@ mod tests {
     fn json_array_elements_basic() {
         let exec = TableFunctionExecutor::new(
             "json_array_elements",
-            vec![Expr::Const(Const::String(
-                "[1,2,3]".into(),
-            ))],
+            vec![Expr::Const(Const::String("[1,2,3]".into()))],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].values, vec![Const::Int(1)]);
         assert_eq!(rows[1].values, vec![Const::Int(2)]);
@@ -584,14 +474,10 @@ mod tests {
                 r#"[1, "hello", null, true]"#.into(),
             ))],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 4);
         assert_eq!(rows[0].values, vec![Const::Int(1)]);
-        assert_eq!(
-            rows[1].values,
-            vec![Const::String("hello".into())]
-        );
+        assert_eq!(rows[1].values, vec![Const::String("hello".into())]);
         assert_eq!(rows[2].values, vec![Const::Null]);
         assert_eq!(rows[3].values, vec![Const::Bool(true)]);
     }
@@ -600,17 +486,13 @@ mod tests {
     fn json_each_basic() {
         let exec = TableFunctionExecutor::new(
             "json_each",
-            vec![Expr::Const(Const::String(
-                r#"{"a":1,"b":"two"}"#.into(),
-            ))],
+            vec![Expr::Const(Const::String(r#"{"a":1,"b":"two"}"#.into()))],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 2);
         // JSON object iteration order is not guaranteed,
         // so check that both keys appear.
-        let keys: Vec<&Const> =
-            rows.iter().map(|r| &r.values[0]).collect();
+        let keys: Vec<&Const> = rows.iter().map(|r| &r.values[0]).collect();
         assert!(keys.contains(&&Const::String("a".into())));
         assert!(keys.contains(&&Const::String("b".into())));
     }
@@ -619,21 +501,15 @@ mod tests {
     fn json_object_keys_basic() {
         let exec = TableFunctionExecutor::new(
             "json_object_keys",
-            vec![Expr::Const(Const::String(
-                r#"{"x":1,"y":2,"z":3}"#.into(),
-            ))],
+            vec![Expr::Const(Const::String(r#"{"x":1,"y":2,"z":3}"#.into()))],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 3);
     }
 
     #[test]
     fn unsupported_function_error() {
-        let exec = TableFunctionExecutor::new(
-            "unknown_func",
-            vec![],
-        );
+        let exec = TableFunctionExecutor::new("unknown_func", vec![]);
         let result = exec.execute(None);
         assert!(result.is_err());
     }
@@ -644,27 +520,17 @@ mod tests {
             "json_populate_recordset",
             vec![
                 Expr::Const(Const::String(
-                    r#"[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]"#
-                        .into(),
+                    r#"[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]"#.into(),
                 )),
-                Expr::Const(Const::String(
-                    "(id int, name text)".into(),
-                )),
+                Expr::Const(Const::String("(id int, name text)".into())),
             ],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].values[0], Const::Int(1));
-        assert_eq!(
-            rows[0].values[1],
-            Const::String("Alice".into())
-        );
+        assert_eq!(rows[0].values[1], Const::String("Alice".into()));
         assert_eq!(rows[1].values[0], Const::Int(2));
-        assert_eq!(
-            rows[1].values[1],
-            Const::String("Bob".into())
-        );
+        assert_eq!(rows[1].values[1], Const::String("Bob".into()));
     }
 
     #[test]
@@ -672,16 +538,11 @@ mod tests {
         let exec = TableFunctionExecutor::new(
             "json_populate_recordset",
             vec![
-                Expr::Const(Const::String(
-                    r#"[{"id":1}]"#.into(),
-                )),
-                Expr::Const(Const::String(
-                    "(id int, name text)".into(),
-                )),
+                Expr::Const(Const::String(r#"[{"id":1}]"#.into())),
+                Expr::Const(Const::String("(id int, name text)".into())),
             ],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].values[0], Const::Int(1));
         assert_eq!(rows[0].values[1], Const::Null);
@@ -692,12 +553,10 @@ mod tests {
         let exec = TableFunctionExecutor::new(
             "json_to_recordset",
             vec![Expr::Const(Const::String(
-                r#"[{"a":1,"b":"x"},{"a":2,"b":"y"}]"#
-                    .into(),
+                r#"[{"a":1,"b":"x"},{"a":2,"b":"y"}]"#.into(),
             ))],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].values.len(), 2);
     }
@@ -708,8 +567,7 @@ mod tests {
             "json_to_recordset",
             vec![Expr::Const(Const::String("[]".into()))],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert!(rows.is_empty());
     }
 
@@ -717,12 +575,9 @@ mod tests {
     fn jsonb_array_elements_basic() {
         let exec = TableFunctionExecutor::new(
             "jsonb_array_elements",
-            vec![Expr::Const(Const::String(
-                r#"[10,20,30]"#.into(),
-            ))],
+            vec![Expr::Const(Const::String(r#"[10,20,30]"#.into()))],
         );
-        let rows =
-            exec.execute(None).expect("should succeed");
+        let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].values, vec![Const::Int(10)]);
         assert_eq!(rows[2].values, vec![Const::Int(30)]);

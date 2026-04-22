@@ -309,7 +309,28 @@ ra-cli optimize \
   "SELECT * FROM complex_query"
 ```
 
-### 15. Distributed Query Optimization
+### 15. Rule Advisor
+
+Eliminate irrelevant rules before optimization using the three-stage Rule Advisor:
+
+```bash
+# Filter rules for PostgreSQL — excludes DocumentDB, Oracle, XML, vector, FTS rules
+ra-cli optimize \
+  --rule-advisor --rule-advisor-db postgresql \
+  "SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id WHERE u.age > 18"
+
+# Enable learning to improve rule ordering over time
+ra-cli optimize \
+  --rule-advisor --rule-advisor-learn --rule-advisor-db postgresql \
+  "SELECT * FROM products WHERE category = 'electronics'"
+
+# View advisor filtering statistics
+ra-cli optimize \
+  --rule-advisor --rule-advisor-db postgresql --verbose \
+  "SELECT * FROM orders JOIN items ON orders.id = items.order_id"
+```
+
+### 16. Distributed Query Optimization
 
 Optimize queries for distributed execution. See the [federated queries](features/federated-queries.md) and [distributed optimization](features/distributed-optimization.md) guides for details on distributed query planning.
 

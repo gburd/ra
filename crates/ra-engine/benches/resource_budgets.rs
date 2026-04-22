@@ -10,12 +10,8 @@
 
 #![allow(clippy::expect_used)]
 
-use criterion::{
-    black_box, criterion_group, criterion_main, Criterion,
-};
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, RelExpr,
-};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_engine::{Optimizer, ResourceBudget};
 
@@ -38,14 +34,8 @@ fn two_table_join() -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(ColumnRef::qualified(
-                "orders",
-                "o_orderkey",
-            ))),
-            right: Box::new(Expr::Column(ColumnRef::qualified(
-                "lineitem",
-                "l_orderkey",
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::qualified("orders", "o_orderkey"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("lineitem", "l_orderkey"))),
         },
         left: Box::new(RelExpr::scan("orders")),
         right: Box::new(RelExpr::scan("lineitem")),
@@ -61,32 +51,22 @@ fn tpch_q1() -> RelExpr {
         aggregates: vec![
             AggregateExpr {
                 function: AggregateFunction::Sum,
-                arg: Some(Expr::Column(ColumnRef::new(
-                    "l_quantity",
-                ))),
+                arg: Some(Expr::Column(ColumnRef::new("l_quantity"))),
                 distinct: false,
                 alias: Some("sum_qty".to_owned()),
             },
             AggregateExpr {
                 function: AggregateFunction::Sum,
-                arg: Some(Expr::Column(ColumnRef::new(
-                    "l_extendedprice",
-                ))),
+                arg: Some(Expr::Column(ColumnRef::new("l_extendedprice"))),
                 distinct: false,
                 alias: Some("sum_price".to_owned()),
             },
         ],
-        input: Box::new(
-            RelExpr::scan("lineitem").filter(Expr::BinOp {
-                op: BinOp::Le,
-                left: Box::new(Expr::Column(ColumnRef::new(
-                    "l_shipdate",
-                ))),
-                right: Box::new(Expr::Const(Const::String(
-                    "1998-09-02".to_owned(),
-                ))),
-            }),
-        ),
+        input: Box::new(RelExpr::scan("lineitem").filter(Expr::BinOp {
+            op: BinOp::Le,
+            left: Box::new(Expr::Column(ColumnRef::new("l_shipdate"))),
+            right: Box::new(Expr::Const(Const::String("1998-09-02".to_owned()))),
+        })),
     }
 }
 
@@ -95,9 +75,7 @@ fn tpch_q3() -> RelExpr {
         group_by: vec![Expr::Column(ColumnRef::new("l_orderkey"))],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            arg: Some(Expr::Column(ColumnRef::new(
-                "l_extendedprice",
-            ))),
+            arg: Some(Expr::Column(ColumnRef::new("l_extendedprice"))),
             distinct: false,
             alias: Some("revenue".to_owned()),
         }],
@@ -105,46 +83,26 @@ fn tpch_q3() -> RelExpr {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(ColumnRef::new(
-                    "l_orderkey",
-                ))),
-                right: Box::new(Expr::Column(ColumnRef::new(
-                    "o_orderkey",
-                ))),
+                left: Box::new(Expr::Column(ColumnRef::new("l_orderkey"))),
+                right: Box::new(Expr::Column(ColumnRef::new("o_orderkey"))),
             },
             left: Box::new(RelExpr::Join {
                 join_type: JoinType::Inner,
                 condition: Expr::BinOp {
                     op: BinOp::Eq,
-                    left: Box::new(Expr::Column(ColumnRef::new(
-                        "c_custkey",
-                    ))),
-                    right: Box::new(Expr::Column(ColumnRef::new(
-                        "o_custkey",
-                    ))),
+                    left: Box::new(Expr::Column(ColumnRef::new("c_custkey"))),
+                    right: Box::new(Expr::Column(ColumnRef::new("o_custkey"))),
                 },
-                left: Box::new(
-                    RelExpr::scan("customer").filter(Expr::BinOp {
-                        op: BinOp::Eq,
-                        left: Box::new(Expr::Column(
-                            ColumnRef::new("c_mktsegment"),
-                        )),
-                        right: Box::new(Expr::Const(Const::String(
-                            "BUILDING".to_owned(),
-                        ))),
-                    }),
-                ),
-                right: Box::new(
-                    RelExpr::scan("orders").filter(Expr::BinOp {
-                        op: BinOp::Lt,
-                        left: Box::new(Expr::Column(
-                            ColumnRef::new("o_orderdate"),
-                        )),
-                        right: Box::new(Expr::Const(Const::String(
-                            "1995-03-15".to_owned(),
-                        ))),
-                    }),
-                ),
+                left: Box::new(RelExpr::scan("customer").filter(Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column(ColumnRef::new("c_mktsegment"))),
+                    right: Box::new(Expr::Const(Const::String("BUILDING".to_owned()))),
+                })),
+                right: Box::new(RelExpr::scan("orders").filter(Expr::BinOp {
+                    op: BinOp::Lt,
+                    left: Box::new(Expr::Column(ColumnRef::new("o_orderdate"))),
+                    right: Box::new(Expr::Const(Const::String("1995-03-15".to_owned()))),
+                })),
             }),
             right: Box::new(RelExpr::scan("lineitem")),
         }),
@@ -156,33 +114,23 @@ fn tpch_q6() -> RelExpr {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            arg: Some(Expr::Column(ColumnRef::new(
-                "l_extendedprice",
-            ))),
+            arg: Some(Expr::Column(ColumnRef::new("l_extendedprice"))),
             distinct: false,
             alias: Some("revenue".to_owned()),
         }],
-        input: Box::new(
-            RelExpr::scan("lineitem").filter(Expr::BinOp {
-                op: BinOp::And,
-                left: Box::new(Expr::BinOp {
-                    op: BinOp::Ge,
-                    left: Box::new(Expr::Column(ColumnRef::new(
-                        "l_shipdate",
-                    ))),
-                    right: Box::new(Expr::Const(Const::String(
-                        "1994-01-01".to_owned(),
-                    ))),
-                }),
-                right: Box::new(Expr::BinOp {
-                    op: BinOp::Lt,
-                    left: Box::new(Expr::Column(ColumnRef::new(
-                        "l_quantity",
-                    ))),
-                    right: Box::new(Expr::Const(Const::Int(24))),
-                }),
+        input: Box::new(RelExpr::scan("lineitem").filter(Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(Expr::BinOp {
+                op: BinOp::Ge,
+                left: Box::new(Expr::Column(ColumnRef::new("l_shipdate"))),
+                right: Box::new(Expr::Const(Const::String("1994-01-01".to_owned()))),
             }),
-        ),
+            right: Box::new(Expr::BinOp {
+                op: BinOp::Lt,
+                left: Box::new(Expr::Column(ColumnRef::new("l_quantity"))),
+                right: Box::new(Expr::Const(Const::Int(24))),
+            }),
+        })),
     }
 }
 
@@ -192,8 +140,7 @@ fn bench_interactive(c: &mut Criterion) {
     let mut group = c.benchmark_group("interactive");
     group.sample_size(50);
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
 
     group.bench_function("simple_scan", |b| {
         let expr = simple_scan();
@@ -258,8 +205,7 @@ fn bench_standard(c: &mut Criterion) {
     let mut group = c.benchmark_group("standard");
     group.sample_size(20);
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
 
     group.bench_function("tpch_q1", |b| {
         let expr = tpch_q1();
@@ -297,8 +243,7 @@ fn bench_memory_constrained(c: &mut Criterion) {
     let mut group = c.benchmark_group("memory_constrained");
     group.sample_size(20);
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::memory_constrained());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::memory_constrained());
 
     group.bench_function("filtered_scan", |b| {
         let expr = filtered_scan();
@@ -308,8 +253,7 @@ fn bench_memory_constrained(c: &mut Criterion) {
                 .expect("should succeed");
             // Verify memory stays under 10MB
             assert!(
-                result.resource_usage.peak_memory_estimate
-                    <= 10 * 1024 * 1024,
+                result.resource_usage.peak_memory_estimate <= 10 * 1024 * 1024,
                 "memory exceeded 10MB"
             );
             result
@@ -323,8 +267,7 @@ fn bench_memory_constrained(c: &mut Criterion) {
                 .optimize_bounded(black_box(&expr))
                 .expect("should succeed");
             assert!(
-                result.resource_usage.peak_memory_estimate
-                    <= 10 * 1024 * 1024,
+                result.resource_usage.peak_memory_estimate <= 10 * 1024 * 1024,
                 "memory exceeded 10MB"
             );
             result
@@ -341,8 +284,7 @@ fn bench_tracking_overhead(c: &mut Criterion) {
     group.sample_size(30);
 
     let unbounded = Optimizer::new();
-    let bounded = Optimizer::new()
-        .with_resource_budget(ResourceBudget::unlimited());
+    let bounded = Optimizer::new().with_resource_budget(ResourceBudget::unlimited());
 
     group.bench_function("unbounded_tpch_q1", |b| {
         let expr = tpch_q1();

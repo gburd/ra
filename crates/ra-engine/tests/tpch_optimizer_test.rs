@@ -12,8 +12,8 @@
 #![allow(clippy::too_many_lines)]
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, ProjectionColumn,
-    RelExpr, SortDirection, SortKey, NullOrdering,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
+    SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::Statistics;
@@ -182,11 +182,7 @@ fn filter(input: RelExpr, pred: Expr) -> RelExpr {
     }
 }
 
-fn aggregate(
-    input: RelExpr,
-    group_by: Vec<Expr>,
-    aggregates: Vec<AggregateExpr>,
-) -> RelExpr {
+fn aggregate(input: RelExpr, group_by: Vec<Expr>, aggregates: Vec<AggregateExpr>) -> RelExpr {
     RelExpr::Aggregate {
         input: Box::new(input),
         group_by,
@@ -284,10 +280,7 @@ fn tpch_q1() -> RelExpr {
             agg(AggregateFunction::Sum, col("l_extendedprice")),
             agg(
                 AggregateFunction::Sum,
-                mul(
-                    col("l_extendedprice"),
-                    sub(int(1), col("l_discount")),
-                ),
+                mul(col("l_extendedprice"), sub(int(1), col("l_discount"))),
             ),
             count_star(),
         ],
@@ -322,11 +315,25 @@ fn tpch_q2() -> RelExpr {
     );
     limit(
         sort(
-            project(with_part, vec![
-                "s_acctbal", "s_name", "n_name", "p_partkey",
-                "p_mfgr", "s_address", "s_phone", "s_comment",
-            ]),
-            vec![desc("s_acctbal"), asc("n_name"), asc("s_name"), asc("p_partkey")],
+            project(
+                with_part,
+                vec![
+                    "s_acctbal",
+                    "s_name",
+                    "n_name",
+                    "p_partkey",
+                    "p_mfgr",
+                    "s_address",
+                    "s_phone",
+                    "s_comment",
+                ],
+            ),
+            vec![
+                desc("s_acctbal"),
+                asc("n_name"),
+                asc("s_name"),
+                asc("p_partkey"),
+            ],
         ),
         100,
     )
@@ -334,10 +341,23 @@ fn tpch_q2() -> RelExpr {
 
 /// Q3: Shipping priority (3-way join + agg).
 fn tpch_q3() -> RelExpr {
-    let cust = filter(scan("customer"), eq(col("c_mktsegment"), str_const("BUILDING")));
-    let orders = filter(scan("orders"), lt(col("o_orderdate"), str_const("1995-03-15")));
-    let li = filter(scan("lineitem"), gt(col("l_shipdate"), str_const("1995-03-15")));
-    let joined = join(join(cust, orders, eq(col("c_custkey"), col("o_custkey"))), li, eq(col("o_orderkey"), col("l_orderkey")));
+    let cust = filter(
+        scan("customer"),
+        eq(col("c_mktsegment"), str_const("BUILDING")),
+    );
+    let orders = filter(
+        scan("orders"),
+        lt(col("o_orderdate"), str_const("1995-03-15")),
+    );
+    let li = filter(
+        scan("lineitem"),
+        gt(col("l_shipdate"), str_const("1995-03-15")),
+    );
+    let joined = join(
+        join(cust, orders, eq(col("c_custkey"), col("o_custkey"))),
+        li,
+        eq(col("o_orderkey"), col("l_orderkey")),
+    );
     limit(
         sort(
             aggregate(
@@ -363,7 +383,10 @@ fn tpch_q4() -> RelExpr {
             lt(col("o_orderdate"), str_const("1993-10-01")),
         ),
     );
-    let li = filter(scan("lineitem"), lt(col("l_commitdate"), col("l_receiptdate")));
+    let li = filter(
+        scan("lineitem"),
+        lt(col("l_commitdate"), col("l_receiptdate")),
+    );
     sort(
         aggregate(
             semi_join(orders, li, eq(col("o_orderkey"), col("l_orderkey"))),
@@ -377,22 +400,48 @@ fn tpch_q4() -> RelExpr {
 /// Q5: Local supplier volume (6-way join + agg).
 fn tpch_q5() -> RelExpr {
     let region = filter(scan("region"), eq(col("r_name"), str_const("ASIA")));
-    let n_r = join(scan("nation"), region, eq(col("n_regionkey"), col("r_regionkey")));
-    let c_n = join(scan("customer"), n_r.clone(), eq(col("c_nationkey"), col("n_nationkey")));
-    let o_c = join(filter(scan("orders"), and(
-        ge(col("o_orderdate"), str_const("1994-01-01")),
-        lt(col("o_orderdate"), str_const("1995-01-01")),
-    )), c_n, eq(col("o_custkey"), col("c_custkey")));
-    let l_o = join(scan("lineitem"), o_c, eq(col("l_orderkey"), col("o_orderkey")));
-    let full = join(l_o, scan("supplier"), and(
-        eq(col("l_suppkey"), col("s_suppkey")),
-        eq(col("s_nationkey"), col("n_nationkey")),
-    ));
+    let n_r = join(
+        scan("nation"),
+        region,
+        eq(col("n_regionkey"), col("r_regionkey")),
+    );
+    let c_n = join(
+        scan("customer"),
+        n_r.clone(),
+        eq(col("c_nationkey"), col("n_nationkey")),
+    );
+    let o_c = join(
+        filter(
+            scan("orders"),
+            and(
+                ge(col("o_orderdate"), str_const("1994-01-01")),
+                lt(col("o_orderdate"), str_const("1995-01-01")),
+            ),
+        ),
+        c_n,
+        eq(col("o_custkey"), col("c_custkey")),
+    );
+    let l_o = join(
+        scan("lineitem"),
+        o_c,
+        eq(col("l_orderkey"), col("o_orderkey")),
+    );
+    let full = join(
+        l_o,
+        scan("supplier"),
+        and(
+            eq(col("l_suppkey"), col("s_suppkey")),
+            eq(col("s_nationkey"), col("n_nationkey")),
+        ),
+    );
     sort(
         aggregate(
             full,
             vec![col("n_name")],
-            vec![agg(AggregateFunction::Sum, mul(col("l_extendedprice"), sub(int(1), col("l_discount"))))],
+            vec![agg(
+                AggregateFunction::Sum,
+                mul(col("l_extendedprice"), sub(int(1), col("l_discount"))),
+            )],
         ),
         vec![desc("revenue")],
     )
@@ -415,20 +464,46 @@ fn tpch_q6() -> RelExpr {
             ),
         ),
         vec![],
-        vec![agg(AggregateFunction::Sum, mul(col("l_extendedprice"), col("l_discount")))],
+        vec![agg(
+            AggregateFunction::Sum,
+            mul(col("l_extendedprice"), col("l_discount")),
+        )],
     )
 }
 
 /// Q7: Volume shipping (multi-way join with nation filter).
 fn tpch_q7() -> RelExpr {
-    let n1 = filter(scan("nation"), or(eq(col("n_name"), str_const("FRANCE")), eq(col("n_name"), str_const("GERMANY"))));
-    let n2 = filter(scan("nation"), or(eq(col("n_name"), str_const("FRANCE")), eq(col("n_name"), str_const("GERMANY"))));
-    let s_n = join(scan("supplier"), n1, eq(col("s_nationkey"), col("n_nationkey")));
-    let c_n = join(scan("customer"), n2, eq(col("c_nationkey"), col("n_nationkey")));
-    let li = filter(scan("lineitem"), and(
-        ge(col("l_shipdate"), str_const("1995-01-01")),
-        le(col("l_shipdate"), str_const("1996-12-31")),
-    ));
+    let n1 = filter(
+        scan("nation"),
+        or(
+            eq(col("n_name"), str_const("FRANCE")),
+            eq(col("n_name"), str_const("GERMANY")),
+        ),
+    );
+    let n2 = filter(
+        scan("nation"),
+        or(
+            eq(col("n_name"), str_const("FRANCE")),
+            eq(col("n_name"), str_const("GERMANY")),
+        ),
+    );
+    let s_n = join(
+        scan("supplier"),
+        n1,
+        eq(col("s_nationkey"), col("n_nationkey")),
+    );
+    let c_n = join(
+        scan("customer"),
+        n2,
+        eq(col("c_nationkey"), col("n_nationkey")),
+    );
+    let li = filter(
+        scan("lineitem"),
+        and(
+            ge(col("l_shipdate"), str_const("1995-01-01")),
+            le(col("l_shipdate"), str_const("1996-12-31")),
+        ),
+    );
     let l_s = join(li, s_n, eq(col("l_suppkey"), col("s_suppkey")));
     let o_c = join(scan("orders"), c_n, eq(col("o_custkey"), col("c_custkey")));
     let full = join(l_s, o_c, eq(col("l_orderkey"), col("o_orderkey")));
@@ -436,7 +511,10 @@ fn tpch_q7() -> RelExpr {
         aggregate(
             full,
             vec![col("supp_nation"), col("cust_nation"), col("l_year")],
-            vec![agg(AggregateFunction::Sum, mul(col("l_extendedprice"), sub(int(1), col("l_discount"))))],
+            vec![agg(
+                AggregateFunction::Sum,
+                mul(col("l_extendedprice"), sub(int(1), col("l_discount"))),
+            )],
         ),
         vec![asc("supp_nation"), asc("cust_nation"), asc("l_year")],
     )
@@ -445,18 +523,52 @@ fn tpch_q7() -> RelExpr {
 /// Q8: National market share (8-way join + agg).
 fn tpch_q8() -> RelExpr {
     let region = filter(scan("region"), eq(col("r_name"), str_const("AMERICA")));
-    let n_r = join(scan("nation"), region, eq(col("n_regionkey"), col("r_regionkey")));
-    let c_n = join(scan("customer"), n_r, eq(col("c_nationkey"), col("n_nationkey")));
-    let o_c = join(filter(scan("orders"), and(
-        ge(col("o_orderdate"), str_const("1995-01-01")),
-        le(col("o_orderdate"), str_const("1996-12-31")),
-    )), c_n, eq(col("o_custkey"), col("c_custkey")));
-    let li_p = join(scan("lineitem"), filter(scan("part"), eq(col("p_type"), str_const("ECONOMY ANODIZED STEEL"))), eq(col("l_partkey"), col("p_partkey")));
-    let l_s = join(li_p, scan("supplier"), eq(col("l_suppkey"), col("s_suppkey")));
-    let s_n = join(l_s, scan("nation"), eq(col("s_nationkey"), col("n_nationkey")));
+    let n_r = join(
+        scan("nation"),
+        region,
+        eq(col("n_regionkey"), col("r_regionkey")),
+    );
+    let c_n = join(
+        scan("customer"),
+        n_r,
+        eq(col("c_nationkey"), col("n_nationkey")),
+    );
+    let o_c = join(
+        filter(
+            scan("orders"),
+            and(
+                ge(col("o_orderdate"), str_const("1995-01-01")),
+                le(col("o_orderdate"), str_const("1996-12-31")),
+            ),
+        ),
+        c_n,
+        eq(col("o_custkey"), col("c_custkey")),
+    );
+    let li_p = join(
+        scan("lineitem"),
+        filter(
+            scan("part"),
+            eq(col("p_type"), str_const("ECONOMY ANODIZED STEEL")),
+        ),
+        eq(col("l_partkey"), col("p_partkey")),
+    );
+    let l_s = join(
+        li_p,
+        scan("supplier"),
+        eq(col("l_suppkey"), col("s_suppkey")),
+    );
+    let s_n = join(
+        l_s,
+        scan("nation"),
+        eq(col("s_nationkey"), col("n_nationkey")),
+    );
     let full = join(s_n, o_c, eq(col("l_orderkey"), col("o_orderkey")));
     sort(
-        aggregate(full, vec![col("o_year")], vec![agg(AggregateFunction::Sum, col("volume"))]),
+        aggregate(
+            full,
+            vec![col("o_year")],
+            vec![agg(AggregateFunction::Sum, col("volume"))],
+        ),
         vec![asc("o_year")],
     )
 }
@@ -465,35 +577,73 @@ fn tpch_q8() -> RelExpr {
 fn tpch_q9() -> RelExpr {
     let p = filter(scan("part"), eq(col("p_name"), str_const("green")));
     let l_p = join(scan("lineitem"), p, eq(col("l_partkey"), col("p_partkey")));
-    let l_s = join(l_p, scan("supplier"), eq(col("l_suppkey"), col("s_suppkey")));
-    let l_ps = join(l_s, scan("partsupp"), and(
-        eq(col("l_suppkey"), col("ps_suppkey")),
-        eq(col("l_partkey"), col("ps_partkey")),
-    ));
-    let l_o = join(l_ps, scan("orders"), eq(col("l_orderkey"), col("o_orderkey")));
-    let full = join(l_o, scan("nation"), eq(col("s_nationkey"), col("n_nationkey")));
+    let l_s = join(
+        l_p,
+        scan("supplier"),
+        eq(col("l_suppkey"), col("s_suppkey")),
+    );
+    let l_ps = join(
+        l_s,
+        scan("partsupp"),
+        and(
+            eq(col("l_suppkey"), col("ps_suppkey")),
+            eq(col("l_partkey"), col("ps_partkey")),
+        ),
+    );
+    let l_o = join(
+        l_ps,
+        scan("orders"),
+        eq(col("l_orderkey"), col("o_orderkey")),
+    );
+    let full = join(
+        l_o,
+        scan("nation"),
+        eq(col("s_nationkey"), col("n_nationkey")),
+    );
     sort(
-        aggregate(full, vec![col("nation"), col("o_year")], vec![agg(AggregateFunction::Sum, col("amount"))]),
+        aggregate(
+            full,
+            vec![col("nation"), col("o_year")],
+            vec![agg(AggregateFunction::Sum, col("amount"))],
+        ),
         vec![asc("nation"), desc("o_year")],
     )
 }
 
 /// Q10: Returned item reporting (4-way join + agg).
 fn tpch_q10() -> RelExpr {
-    let o = filter(scan("orders"), and(
-        ge(col("o_orderdate"), str_const("1993-10-01")),
-        lt(col("o_orderdate"), str_const("1994-01-01")),
-    ));
+    let o = filter(
+        scan("orders"),
+        and(
+            ge(col("o_orderdate"), str_const("1993-10-01")),
+            lt(col("o_orderdate"), str_const("1994-01-01")),
+        ),
+    );
     let c_o = join(scan("customer"), o, eq(col("c_custkey"), col("o_custkey")));
     let li = filter(scan("lineitem"), eq(col("l_returnflag"), str_const("R")));
     let c_o_l = join(c_o, li, eq(col("o_orderkey"), col("l_orderkey")));
-    let full = join(c_o_l, scan("nation"), eq(col("c_nationkey"), col("n_nationkey")));
+    let full = join(
+        c_o_l,
+        scan("nation"),
+        eq(col("c_nationkey"), col("n_nationkey")),
+    );
     limit(
         sort(
             aggregate(
                 full,
-                vec![col("c_custkey"), col("c_name"), col("c_acctbal"), col("c_phone"), col("n_name"), col("c_address"), col("c_comment")],
-                vec![agg(AggregateFunction::Sum, mul(col("l_extendedprice"), sub(int(1), col("l_discount"))))],
+                vec![
+                    col("c_custkey"),
+                    col("c_name"),
+                    col("c_acctbal"),
+                    col("c_phone"),
+                    col("n_name"),
+                    col("c_address"),
+                    col("c_comment"),
+                ],
+                vec![agg(
+                    AggregateFunction::Sum,
+                    mul(col("l_extendedprice"), sub(int(1), col("l_discount"))),
+                )],
             ),
             vec![desc("revenue")],
         ),
@@ -503,14 +653,25 @@ fn tpch_q10() -> RelExpr {
 
 /// Q11: Important stock identification (3-way join + agg + having).
 fn tpch_q11() -> RelExpr {
-    let s_n = join(scan("supplier"), filter(scan("nation"), eq(col("n_name"), str_const("GERMANY"))), eq(col("s_nationkey"), col("n_nationkey")));
-    let ps_s = join(scan("partsupp"), s_n, eq(col("ps_suppkey"), col("s_suppkey")));
+    let s_n = join(
+        scan("supplier"),
+        filter(scan("nation"), eq(col("n_name"), str_const("GERMANY"))),
+        eq(col("s_nationkey"), col("n_nationkey")),
+    );
+    let ps_s = join(
+        scan("partsupp"),
+        s_n,
+        eq(col("ps_suppkey"), col("s_suppkey")),
+    );
     sort(
         filter(
             aggregate(
                 ps_s,
                 vec![col("ps_partkey")],
-                vec![agg(AggregateFunction::Sum, mul(col("ps_supplycost"), col("ps_availqty")))],
+                vec![agg(
+                    AggregateFunction::Sum,
+                    mul(col("ps_supplycost"), col("ps_availqty")),
+                )],
             ),
             gt(col("value"), int(0)),
         ),
@@ -524,12 +685,18 @@ fn tpch_q12() -> RelExpr {
         scan("lineitem"),
         and(
             and(
-                or(eq(col("l_shipmode"), str_const("MAIL")), eq(col("l_shipmode"), str_const("SHIP"))),
+                or(
+                    eq(col("l_shipmode"), str_const("MAIL")),
+                    eq(col("l_shipmode"), str_const("SHIP")),
+                ),
                 lt(col("l_commitdate"), col("l_receiptdate")),
             ),
             and(
                 lt(col("l_shipdate"), col("l_commitdate")),
-                and(ge(col("l_receiptdate"), str_const("1994-01-01")), lt(col("l_receiptdate"), str_const("1995-01-01"))),
+                and(
+                    ge(col("l_receiptdate"), str_const("1994-01-01")),
+                    lt(col("l_receiptdate"), str_const("1995-01-01")),
+                ),
             ),
         ),
     );
@@ -547,7 +714,10 @@ fn tpch_q12() -> RelExpr {
 fn tpch_q13() -> RelExpr {
     let c_o = left_join(
         scan("customer"),
-        filter(scan("orders"), ne(col("o_comment"), str_const("%special%requests%"))),
+        filter(
+            scan("orders"),
+            ne(col("o_comment"), str_const("%special%requests%")),
+        ),
         eq(col("c_custkey"), col("o_custkey")),
     );
     sort(
@@ -562,42 +732,64 @@ fn tpch_q13() -> RelExpr {
 
 /// Q14: Promotion effect (2-way join + agg).
 fn tpch_q14() -> RelExpr {
-    let li = filter(scan("lineitem"), and(
-        ge(col("l_shipdate"), str_const("1995-09-01")),
-        lt(col("l_shipdate"), str_const("1995-10-01")),
-    ));
+    let li = filter(
+        scan("lineitem"),
+        and(
+            ge(col("l_shipdate"), str_const("1995-09-01")),
+            lt(col("l_shipdate"), str_const("1995-10-01")),
+        ),
+    );
     aggregate(
         join(li, scan("part"), eq(col("l_partkey"), col("p_partkey"))),
         vec![],
-        vec![agg(AggregateFunction::Sum, mul(col("l_extendedprice"), sub(int(1), col("l_discount"))))],
+        vec![agg(
+            AggregateFunction::Sum,
+            mul(col("l_extendedprice"), sub(int(1), col("l_discount"))),
+        )],
     )
 }
 
 /// Q15: Top supplier (join with aggregate subquery).
 fn tpch_q15() -> RelExpr {
     let li_agg = aggregate(
-        filter(scan("lineitem"), and(
-            ge(col("l_shipdate"), str_const("1996-01-01")),
-            lt(col("l_shipdate"), str_const("1996-04-01")),
-        )),
+        filter(
+            scan("lineitem"),
+            and(
+                ge(col("l_shipdate"), str_const("1996-01-01")),
+                lt(col("l_shipdate"), str_const("1996-04-01")),
+            ),
+        ),
         vec![col("l_suppkey")],
-        vec![agg(AggregateFunction::Sum, mul(col("l_extendedprice"), sub(int(1), col("l_discount"))))],
+        vec![agg(
+            AggregateFunction::Sum,
+            mul(col("l_extendedprice"), sub(int(1), col("l_discount"))),
+        )],
     );
     sort(
-        join(scan("supplier"), li_agg, eq(col("s_suppkey"), col("l_suppkey"))),
+        join(
+            scan("supplier"),
+            li_agg,
+            eq(col("s_suppkey"), col("l_suppkey")),
+        ),
         vec![asc("s_suppkey")],
     )
 }
 
 /// Q16: Parts/supplier relationship (anti-join + agg).
 fn tpch_q16() -> RelExpr {
-    let part = filter(scan("part"), and(
-        ne(col("p_brand"), str_const("Brand#45")),
-        ge(col("p_size"), int(1)),
-    ));
+    let part = filter(
+        scan("part"),
+        and(
+            ne(col("p_brand"), str_const("Brand#45")),
+            ge(col("p_size"), int(1)),
+        ),
+    );
     let ps = anti_join(
         scan("partsupp"),
-        filter(scan("supplier"), eq(col("s_comment"), str_const("%Customer%Complaints%"))),
+        filter(
+            scan("supplier"),
+            eq(col("s_comment"), str_const("%Customer%Complaints%")),
+        ),
         eq(col("ps_suppkey"), col("s_suppkey")),
     );
     sort(
@@ -611,33 +803,63 @@ fn tpch_q16() -> RelExpr {
                 alias: Some("supplier_cnt".into()),
             }],
         ),
-        vec![desc("supplier_cnt"), asc("p_brand"), asc("p_type"), asc("p_size")],
+        vec![
+            desc("supplier_cnt"),
+            asc("p_brand"),
+            asc("p_type"),
+            asc("p_size"),
+        ],
     )
 }
 
 /// Q17: Small-quantity-order revenue (2-way join + agg).
 fn tpch_q17() -> RelExpr {
-    let p = filter(scan("part"), and(
-        eq(col("p_brand"), str_const("Brand#23")),
-        eq(col("p_container"), str_const("MED BOX")),
-    ));
+    let p = filter(
+        scan("part"),
+        and(
+            eq(col("p_brand"), str_const("Brand#23")),
+            eq(col("p_container"), str_const("MED BOX")),
+        ),
+    );
     let l_p = join(scan("lineitem"), p, eq(col("l_partkey"), col("p_partkey")));
-    aggregate(l_p, vec![], vec![agg(AggregateFunction::Sum, col("l_extendedprice"))])
+    aggregate(
+        l_p,
+        vec![],
+        vec![agg(AggregateFunction::Sum, col("l_extendedprice"))],
+    )
 }
 
 /// Q18: Large volume customer (3-way join + agg + having).
 fn tpch_q18() -> RelExpr {
     let li_agg = filter(
-        aggregate(scan("lineitem"), vec![col("l_orderkey")], vec![agg(AggregateFunction::Sum, col("l_quantity"))]),
+        aggregate(
+            scan("lineitem"),
+            vec![col("l_orderkey")],
+            vec![agg(AggregateFunction::Sum, col("l_quantity"))],
+        ),
         gt(col("sum_quantity"), int(300)),
     );
-    let o_li = join(scan("orders"), li_agg, eq(col("o_orderkey"), col("l_orderkey")));
-    let full = join(scan("customer"), o_li, eq(col("c_custkey"), col("o_custkey")));
+    let o_li = join(
+        scan("orders"),
+        li_agg,
+        eq(col("o_orderkey"), col("l_orderkey")),
+    );
+    let full = join(
+        scan("customer"),
+        o_li,
+        eq(col("c_custkey"), col("o_custkey")),
+    );
     limit(
         sort(
             aggregate(
                 full,
-                vec![col("c_name"), col("c_custkey"), col("o_orderkey"), col("o_orderdate"), col("o_totalprice")],
+                vec![
+                    col("c_name"),
+                    col("c_custkey"),
+                    col("o_orderkey"),
+                    col("o_orderdate"),
+                    col("o_totalprice"),
+                ],
                 vec![agg(AggregateFunction::Sum, col("l_quantity"))],
             ),
             vec![desc("o_totalprice"), asc("o_orderdate")],
@@ -648,32 +870,51 @@ fn tpch_q18() -> RelExpr {
 
 /// Q19: Discounted revenue (join + complex OR predicate).
 fn tpch_q19() -> RelExpr {
-    let l_p = join(scan("lineitem"), scan("part"), eq(col("l_partkey"), col("p_partkey")));
+    let l_p = join(
+        scan("lineitem"),
+        scan("part"),
+        eq(col("l_partkey"), col("p_partkey")),
+    );
     let pred = or(
-        and(eq(col("p_brand"), str_const("Brand#12")), le(col("l_quantity"), int(11))),
-        and(eq(col("p_brand"), str_const("Brand#23")), le(col("l_quantity"), int(20))),
+        and(
+            eq(col("p_brand"), str_const("Brand#12")),
+            le(col("l_quantity"), int(11)),
+        ),
+        and(
+            eq(col("p_brand"), str_const("Brand#23")),
+            le(col("l_quantity"), int(20)),
+        ),
     );
     aggregate(
         filter(l_p, pred),
         vec![],
-        vec![agg(AggregateFunction::Sum, mul(col("l_extendedprice"), sub(int(1), col("l_discount"))))],
+        vec![agg(
+            AggregateFunction::Sum,
+            mul(col("l_extendedprice"), sub(int(1), col("l_discount"))),
+        )],
     )
 }
 
 /// Q20: Potential part promotion (semi-join + subquery).
 fn tpch_q20() -> RelExpr {
     let li_agg = aggregate(
-        filter(scan("lineitem"), and(
-            ge(col("l_shipdate"), str_const("1994-01-01")),
-            lt(col("l_shipdate"), str_const("1995-01-01")),
-        )),
+        filter(
+            scan("lineitem"),
+            and(
+                ge(col("l_shipdate"), str_const("1994-01-01")),
+                lt(col("l_shipdate"), str_const("1995-01-01")),
+            ),
+        ),
         vec![col("l_partkey"), col("l_suppkey")],
         vec![agg(AggregateFunction::Sum, col("l_quantity"))],
     );
     let ps_match = semi_join(
         scan("partsupp"),
         li_agg,
-        and(eq(col("ps_partkey"), col("l_partkey")), eq(col("ps_suppkey"), col("l_suppkey"))),
+        and(
+            eq(col("ps_partkey"), col("l_partkey")),
+            eq(col("ps_suppkey"), col("l_suppkey")),
+        ),
     );
     let s_n = join(
         scan("supplier"),
@@ -693,7 +934,10 @@ fn tpch_q21() -> RelExpr {
         filter(scan("nation"), eq(col("n_name"), str_const("SAUDI ARABIA"))),
         eq(col("s_nationkey"), col("n_nationkey")),
     );
-    let l1 = filter(scan("lineitem"), gt(col("l_receiptdate"), col("l_commitdate")));
+    let l1 = filter(
+        scan("lineitem"),
+        gt(col("l_receiptdate"), col("l_commitdate")),
+    );
     let o = filter(scan("orders"), eq(col("o_orderstatus"), str_const("F")));
     let l1_o = join(l1, o, eq(col("l_orderkey"), col("o_orderkey")));
     let s_l = join(s_n, l1_o, eq(col("s_suppkey"), col("l_suppkey")));
@@ -701,13 +945,22 @@ fn tpch_q21() -> RelExpr {
     let l2 = semi_join(
         s_l.clone(),
         scan("lineitem"),
-        and(eq(col("l_orderkey"), col("l2_orderkey")), ne(col("l_suppkey"), col("l2_suppkey"))),
+        and(
+            eq(col("l_orderkey"), col("l2_orderkey")),
+            ne(col("l_suppkey"), col("l2_suppkey")),
+        ),
     );
     // NOT EXISTS: no other late supplier
     let result = anti_join(
         l2,
-        filter(scan("lineitem"), gt(col("l_receiptdate"), col("l_commitdate"))),
-        and(eq(col("l_orderkey"), col("l3_orderkey")), ne(col("l_suppkey"), col("l3_suppkey"))),
+        filter(
+            scan("lineitem"),
+            gt(col("l_receiptdate"), col("l_commitdate")),
+        ),
+        and(
+            eq(col("l_orderkey"), col("l3_orderkey")),
+            ne(col("l_suppkey"), col("l3_suppkey")),
+        ),
     );
     limit(
         sort(
@@ -721,19 +974,12 @@ fn tpch_q21() -> RelExpr {
 /// Q22: Global sales opportunity (anti-join + agg).
 fn tpch_q22() -> RelExpr {
     let cust = filter(scan("customer"), gt(col("c_acctbal"), int(0)));
-    let no_orders = anti_join(
-        cust,
-        scan("orders"),
-        eq(col("c_custkey"), col("o_custkey")),
-    );
+    let no_orders = anti_join(cust, scan("orders"), eq(col("c_custkey"), col("o_custkey")));
     sort(
         aggregate(
             no_orders,
             vec![col("cntrycode")],
-            vec![
-                count_star(),
-                agg(AggregateFunction::Sum, col("c_acctbal")),
-            ],
+            vec![count_star(), agg(AggregateFunction::Sum, col("c_acctbal"))],
         ),
         vec![asc("cntrycode")],
     )

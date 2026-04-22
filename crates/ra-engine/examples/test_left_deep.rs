@@ -3,8 +3,8 @@
 #![allow(clippy::expect_used)]
 
 use ra_core::statistics::Statistics;
-use ra_engine::Optimizer;
 use ra_engine::left_deep::can_use_left_deep;
+use ra_engine::Optimizer;
 use ra_parser::sql_to_relexpr;
 use std::fs;
 use std::path::PathBuf;
@@ -67,10 +67,7 @@ fn main() {
         let path = dir.join(format!("{target}.sql"));
         let sql = fs::read_to_string(&path).expect("read");
         let relexpr = sql_to_relexpr(&sql).expect("parse");
-        let tables =
-            ra_engine::large_join::LargeJoinOptimizer::count_tables(
-                &relexpr,
-            );
+        let tables = ra_engine::large_join::LargeJoinOptimizer::count_tables(&relexpr);
         let eligible = can_use_left_deep(&relexpr);
 
         let start = std::time::Instant::now();

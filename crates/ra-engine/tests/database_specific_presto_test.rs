@@ -119,9 +119,6 @@ fn test_presto_dynamic_partition_pruning_join() {
 #[test]
 fn test_presto_dynamic_partition_pruning_multi_level() {
     let optimizer = create_optimizer();
-    let plan = filter(
-        scan("multi_partitioned"),
-        eq_pred("year", "2024")
-    );
+    let plan = filter(scan("multi_partitioned"), eq_pred("year", "2024"));
     assert!(optimizer.optimize(&plan).is_ok());
 }

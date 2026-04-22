@@ -87,7 +87,10 @@ fn test_trino_dynamic_filtering_hash_join() {
     let plan = join(probe, build, eq_pred("dept_id", "dept_id"));
 
     let result = optimizer.optimize(&plan);
-    assert!(result.is_ok(), "dynamic filtering optimization should succeed");
+    assert!(
+        result.is_ok(),
+        "dynamic filtering optimization should succeed"
+    );
 }
 
 #[test]
@@ -100,7 +103,10 @@ fn test_trino_dynamic_filtering_high_selectivity() {
     let plan = join(probe, build, eq_pred("dim_id", "id"));
 
     let result = optimizer.optimize(&plan);
-    assert!(result.is_ok(), "high selectivity optimization should succeed");
+    assert!(
+        result.is_ok(),
+        "high selectivity optimization should succeed"
+    );
 }
 
 #[test]
@@ -127,7 +133,10 @@ fn test_trino_adaptive_partitioning_basic_join() {
     let plan = join(left, right, eq_pred("product_id", "id"));
 
     let result = optimizer.optimize(&plan);
-    assert!(result.is_ok(), "adaptive partitioning should handle basic join");
+    assert!(
+        result.is_ok(),
+        "adaptive partitioning should handle basic join"
+    );
 }
 
 #[test]
@@ -139,7 +148,10 @@ fn test_trino_adaptive_partitioning_large_tables() {
     let plan = join(left, right, eq_pred("user_id", "id"));
 
     let result = optimizer.optimize(&plan);
-    assert!(result.is_ok(), "adaptive partitioning should handle large tables");
+    assert!(
+        result.is_ok(),
+        "adaptive partitioning should handle large tables"
+    );
 }
 
 #[test]
@@ -153,7 +165,10 @@ fn test_trino_adaptive_partitioning_multi_join() {
     let plan = join(join1, t3, eq_pred("id", "id"));
 
     let result = optimizer.optimize(&plan);
-    assert!(result.is_ok(), "adaptive partitioning should handle multi-way joins");
+    assert!(
+        result.is_ok(),
+        "adaptive partitioning should handle multi-way joins"
+    );
 }
 
 // ── Rule 3: Limit Pushdown to Connector ─────────────────────
@@ -285,7 +300,10 @@ fn test_trino_adaptive_optimization_join() {
     let plan = join(left, right, eq_pred("dim_id", "id"));
 
     let result = optimizer.optimize(&plan);
-    assert!(result.is_ok(), "adaptive optimization should handle filtered join");
+    assert!(
+        result.is_ok(),
+        "adaptive optimization should handle filtered join"
+    );
 }
 
 #[test]
@@ -300,7 +318,10 @@ fn test_trino_adaptive_optimization_multi_join() {
     let plan = join(join1, t3, eq_pred("id", "id"));
 
     let result = optimizer.optimize(&plan);
-    assert!(result.is_ok(), "adaptive optimization should handle multi-way joins");
+    assert!(
+        result.is_ok(),
+        "adaptive optimization should handle multi-way joins"
+    );
 }
 
 #[test]

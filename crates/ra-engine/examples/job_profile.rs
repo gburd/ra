@@ -62,12 +62,12 @@ fn main() {
 
     // Pick representative queries for each path
     let test_queries = vec![
-        "2a.sql",   // 5 tables, left-deep
-        "6a.sql",   // 5 tables, left-deep
-        "7a.sql",   // 8 tables, e-graph
-        "13a.sql",  // 9 tables, e-graph
-        "22a.sql",  // 11 tables, large-join
-        "29a.sql",  // 17 tables, large-join
+        "2a.sql",  // 5 tables, left-deep
+        "6a.sql",  // 5 tables, left-deep
+        "7a.sql",  // 8 tables, e-graph
+        "13a.sql", // 9 tables, e-graph
+        "22a.sql", // 11 tables, large-join
+        "29a.sql", // 17 tables, large-join
     ];
 
     // Warmup: run each query once to heat caches
@@ -91,8 +91,7 @@ fn main() {
         let relexpr = sql_to_relexpr(&sql).unwrap();
 
         let tables = count_tables(&relexpr);
-        let eligible =
-            ra_engine::left_deep::can_use_left_deep(&relexpr);
+        let eligible = ra_engine::left_deep::can_use_left_deep(&relexpr);
         let path_name = if eligible {
             "left-deep"
         } else if tables >= 10 {
@@ -108,16 +107,9 @@ fn main() {
             times.push(start.elapsed().as_micros() as f64);
         }
 
-        let min = times
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, f64::min);
-        let max = times
-            .iter()
-            .copied()
-            .fold(0.0_f64, f64::max);
-        let avg = times.iter().sum::<f64>()
-            / times.len() as f64;
+        let min = times.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = times.iter().copied().fold(0.0_f64, f64::max);
+        let avg = times.iter().sum::<f64>() / times.len() as f64;
 
         println!(
             "{:<8} {:>6} {:>10.0} {:>10.0} {:>10.0} {:>10}",
@@ -158,8 +150,7 @@ fn main() {
     );
 
     // sql_to_relexpr for a simple query
-    let sql =
-        fs::read_to_string(dir.join("2a.sql")).unwrap();
+    let sql = fs::read_to_string(dir.join("2a.sql")).unwrap();
     let start = Instant::now();
     for _ in 0..iters {
         let _ = sql_to_relexpr(&sql);
@@ -176,8 +167,7 @@ fn main() {
     let relexpr = sql_to_relexpr(&sql).unwrap();
     let start = Instant::now();
     for _ in 0..iters {
-        let _ =
-            ra_engine::egraph::to_rec_expr(&relexpr);
+        let _ = ra_engine::egraph::to_rec_expr(&relexpr);
     }
     let elapsed = start.elapsed();
     println!(
@@ -192,9 +182,7 @@ fn count_tables(expr: &ra_core::algebra::RelExpr) -> usize {
     use ra_core::algebra::RelExpr;
     match expr {
         RelExpr::Scan { .. } => 1,
-        RelExpr::Join { left, right, .. } => {
-            count_tables(left) + count_tables(right)
-        }
+        RelExpr::Join { left, right, .. } => count_tables(left) + count_tables(right),
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }

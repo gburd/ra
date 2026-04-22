@@ -2,11 +2,11 @@
 //!
 //! Measures the performance impact of lazy rule loading for queries of varying complexity.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{LazyQueryPattern, LazyRuleCompiler};
 use ra_engine::rewrite::all_rules;
+use ra_engine::{LazyQueryPattern, LazyRuleCompiler};
 
 /// Create a simple single-table query
 fn simple_query() -> RelExpr {

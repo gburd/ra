@@ -28,12 +28,11 @@
 //! ```
 
 use crate::timeline_config::{
-    ColumnStatsDef, FingerPrintSnapshot, HardwareProfileDef, IndexDef,
-    StatisticsSnapshot,
+    ColumnStatsDef, FingerPrintSnapshot, HardwareProfileDef, IndexDef, StatisticsSnapshot,
 };
 use ra_core::facts::{
-    DataType, FactsProvider, ForeignKey, HardwareProfile, IndexInfo,
-    OperatorStats, SqlDialect, TableInfo, TableStats,
+    DataType, FactsProvider, ForeignKey, HardwareProfile, IndexInfo, OperatorStats, SqlDialect,
+    TableInfo, TableStats,
 };
 use ra_core::statistics::ColumnStats;
 use std::collections::HashMap;
@@ -74,10 +73,7 @@ pub struct SnapshotFactsProvider {
 
 impl SnapshotFactsProvider {
     /// Create a new `SnapshotFactsProvider` from a timeline snapshot.
-    pub fn new(
-        snapshot: &FingerPrintSnapshot,
-        hardware_profile: &HardwareProfileDef,
-    ) -> Self {
+    pub fn new(snapshot: &FingerPrintSnapshot, hardware_profile: &HardwareProfileDef) -> Self {
         let hardware = hardware_profile.to_hardware_profile();
 
         // Build table stats
@@ -139,7 +135,8 @@ impl FactsProvider for SnapshotFactsProvider {
     }
 
     fn get_column_stats(&self, table: &str, column: &str) -> Option<&ColumnStats> {
-        self.column_stats.get(&(table.to_string(), column.to_string()))
+        self.column_stats
+            .get(&(table.to_string(), column.to_string()))
     }
 
     fn hardware_profile(&self) -> &HardwareProfile {
@@ -188,8 +185,7 @@ fn build_table_stats(stats: &StatisticsSnapshot) -> HashMap<String, TableStats> 
             row_count: table.row_count as f64,
             page_count: table.page_count.unwrap_or(
                 // Estimate page count from row count and avg row size
-                (table.row_count * table.avg_row_size.unwrap_or(100.0) as u64)
-                    / 8192, // Assume 8KB pages
+                (table.row_count * table.avg_row_size.unwrap_or(100.0) as u64) / 8192, // Assume 8KB pages
             ),
             average_row_size: table.avg_row_size.unwrap_or(100.0),
             table_size_bytes: table.table_size_bytes.unwrap_or(
@@ -199,7 +195,7 @@ fn build_table_stats(stats: &StatisticsSnapshot) -> HashMap<String, TableStats> 
             live_tuples: Some(table.row_count as f64),
             dead_tuples: Some(0.0),
             last_analyzed: Some(0), // Timeline snapshots are always "fresh"
-            confidence: 1.0,         // Perfect confidence for timeline data
+            confidence: 1.0,        // Perfect confidence for timeline data
             estimated_modifications: 0, // No modifications since "analysis"
         };
 
@@ -210,9 +206,7 @@ fn build_table_stats(stats: &StatisticsSnapshot) -> HashMap<String, TableStats> 
 }
 
 /// Build column statistics from snapshot.
-fn build_column_stats(
-    stats: &StatisticsSnapshot,
-) -> HashMap<(String, String), ColumnStats> {
+fn build_column_stats(stats: &StatisticsSnapshot) -> HashMap<(String, String), ColumnStats> {
     let mut result = HashMap::new();
 
     for table in &stats.tables {
@@ -251,8 +245,7 @@ fn build_schemas(snapshot: &FingerPrintSnapshot) -> HashMap<String, TableInfo> {
             .map(|col| (col.name.clone(), col.data_type.clone().into()))
             .collect();
 
-        let indexes: Vec<IndexInfo> =
-            table.indexes.iter().map(convert_index_def).collect();
+        let indexes: Vec<IndexInfo> = table.indexes.iter().map(convert_index_def).collect();
 
         let foreign_keys: Vec<ForeignKey> = table
             .foreign_keys
@@ -317,9 +310,8 @@ fn extract_features(snapshot: &FingerPrintSnapshot) -> HashMap<String, bool> {
 mod tests {
     use super::*;
     use crate::timeline_config::{
-        ColumnDef, DataTypeDef, FactsSnapshot, HardwareProfileDef, IndexDef,
-        IndexTypeDef, SchemaSnapshot, StatisticsSnapshot, StorageFormatDef,
-        TableDef, TableStatsDef,
+        ColumnDef, DataTypeDef, FactsSnapshot, HardwareProfileDef, IndexDef, IndexTypeDef,
+        SchemaSnapshot, StatisticsSnapshot, StorageFormatDef, TableDef, TableStatsDef,
     };
 
     fn create_test_hardware() -> HardwareProfileDef {
@@ -434,7 +426,11 @@ mod tests {
 
         // Check index exists
         assert!(facts.has_index("orders", &["customer_id"], None));
-        assert!(facts.has_index("orders", &["customer_id"], Some(ra_core::facts::IndexType::BTree)));
+        assert!(facts.has_index(
+            "orders",
+            &["customer_id"],
+            Some(ra_core::facts::IndexType::BTree)
+        ));
         assert!(!facts.has_index("orders", &["order_id"], None));
     }
 

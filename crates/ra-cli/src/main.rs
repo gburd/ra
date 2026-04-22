@@ -246,6 +246,18 @@ enum Commands {
         /// Deprecated: use --rules-applied, --rules-evaluated, --rules-available, or --rules-all.
         #[arg(long, hide = true)]
         rules: bool,
+        /// Enable the rule advisor pipeline for intelligent rule filtering.
+        /// Eliminates irrelevant rules based on database context and query shape.
+        #[arg(long)]
+        rule_advisor: bool,
+        /// Enable rule advisor learning (Stage 3). Persists effectiveness
+        /// data to ~/.ra/rule-knowledge.json for future optimization runs.
+        #[arg(long)]
+        rule_advisor_learn: bool,
+        /// Target database for rule advisor context filtering
+        /// (e.g. "postgresql", "mysql", "documentdb", "oracle").
+        #[arg(long)]
+        rule_advisor_db: Option<String>,
         /// Timeline TOML file to use for schema/statistics/hardware context.
         #[arg(long)]
         timeline: Option<PathBuf>,
@@ -848,6 +860,9 @@ fn run_main() -> Result<()> {
             rules_available,
             rules_all,
             rules,
+            rule_advisor,
+            rule_advisor_learn,
+            rule_advisor_db,
             timeline,
             snapshot,
             schema_json,
@@ -890,6 +905,9 @@ fn run_main() -> Result<()> {
                 schema_json.as_deref(),
                 schema_sql.as_deref(),
                 db.as_deref(),
+                rule_advisor,
+                rule_advisor_learn,
+                rule_advisor_db.as_deref(),
             )
         }
         Commands::GatherMetadata { db, schema, output } => cmd_gather_metadata(
@@ -1824,6 +1842,9 @@ fn cmd_optimize(
     schema_json: Option<&Path>,
     schema_sql: Option<&Path>,
     db: Option<&str>,
+    use_rule_advisor: bool,
+    use_rule_advisor_learn: bool,
+    rule_advisor_db: Option<&str>,
 ) -> Result<()> {
     use ra_engine::{SnapshotFactsProvider, TimelineConfig};
 
@@ -1886,7 +1907,21 @@ fn cmd_optimize(
         (load_hardware_profile(hardware_profile_name)?, None)
     };
 
-    let mut optimizer = Optimizer::new();
+    let mut optimizer = if use_rule_advisor || use_rule_advisor_learn {
+        let advisor_config = ra_engine::RuleAdvisorConfig {
+            database_name: rule_advisor_db.unwrap_or("").to_string(),
+            enable_learning: use_rule_advisor_learn,
+            ..ra_engine::RuleAdvisorConfig::default()
+        };
+        let config = ra_engine::OptimizerConfig {
+            use_rule_advisor: true,
+            rule_advisor_config: advisor_config,
+            ..ra_engine::OptimizerConfig::default()
+        };
+        Optimizer::with_config(config)
+    } else {
+        Optimizer::new()
+    };
     optimizer.set_hardware_profile(hardware.clone());
 
     if let Some(b) = budget {
@@ -1948,7 +1983,7 @@ fn cmd_optimize(
         }
     }
 
-    if budget.is_some() {
+    let result = if budget.is_some() {
         optimize_bounded(
             &optimizer,
             &plan,
@@ -1975,7 +2010,45 @@ fn cmd_optimize(
             quiet,
             query,
         )
+    };
+
+    // Print rule advisor stats if enabled and not quiet
+    if (use_rule_advisor || use_rule_advisor_learn) && !quiet && (verbose || show_stats) {
+        if let Some(stats) = optimizer.advisor_stats() {
+            eprintln!();
+            eprintln!("{}", "Rule Advisor Statistics:".bold());
+            eprintln!(
+                "  Total rules:      {}",
+                stats.total_rules,
+            );
+            eprintln!(
+                "  After Stage 1:    {} (context elimination)",
+                stats.after_stage1,
+            );
+            eprintln!(
+                "  After Stage 2:    {} (query-shape elimination)",
+                stats.after_stage2,
+            );
+            eprintln!(
+                "  After Stage 3:    {} (learned ranking)",
+                stats.after_stage3,
+            );
+            if !stats.stage1_eliminated.is_empty() {
+                eprintln!(
+                    "  Stage 1 excluded: {}",
+                    stats.stage1_eliminated.join(", "),
+                );
+            }
+            if !stats.stage2_eliminated.is_empty() {
+                eprintln!(
+                    "  Stage 2 excluded: {}",
+                    stats.stage2_eliminated.join(", "),
+                );
+            }
+        }
     }
+
+    result
 }
 
 fn optimize_bounded(

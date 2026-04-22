@@ -8,11 +8,9 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_engine::fts_cost::{
-    BooleanOperator, FtsIndexType, RankingAlgorithm,
-    boolean_query_cost, fulltext_scan_cost, gin_scan_cost,
-    index_vs_seqscan_speedup, inverted_index_lookup_cost,
-    rum_scan_cost, select_fts_index_type, skip_list_intersection_cost,
-    top_k_ranking_cost,
+    boolean_query_cost, fulltext_scan_cost, gin_scan_cost, index_vs_seqscan_speedup,
+    inverted_index_lookup_cost, rum_scan_cost, select_fts_index_type, skip_list_intersection_cost,
+    top_k_ranking_cost, BooleanOperator, FtsIndexType, RankingAlgorithm,
 };
 use ra_engine::fts_rules::optimize_top_k_fts;
 
@@ -91,34 +89,42 @@ fn boolean_query_benchmark(c: &mut Criterion) {
         ("3_terms_and", terms_3.as_slice(), freqs_3.as_slice()),
         ("5_terms_and", terms_5.as_slice(), freqs_5.as_slice()),
     ] {
-        group.bench_with_input(BenchmarkId::from_parameter(label), &(terms, freqs), |b, &(t, f)| {
-            b.iter(|| {
-                let cost = boolean_query_cost(
-                    black_box(t),
-                    black_box(BooleanOperator::And),
-                    black_box(total_docs),
-                    black_box(f),
-                );
-                black_box(cost)
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(label),
+            &(terms, freqs),
+            |b, &(t, f)| {
+                b.iter(|| {
+                    let cost = boolean_query_cost(
+                        black_box(t),
+                        black_box(BooleanOperator::And),
+                        black_box(total_docs),
+                        black_box(f),
+                    );
+                    black_box(cost)
+                });
+            },
+        );
     }
 
     for (label, terms, freqs) in [
         ("2_terms_phrase", terms_2.as_slice(), freqs_2.as_slice()),
         ("3_terms_phrase", terms_3.as_slice(), freqs_3.as_slice()),
     ] {
-        group.bench_with_input(BenchmarkId::from_parameter(label), &(terms, freqs), |b, &(t, f)| {
-            b.iter(|| {
-                let cost = boolean_query_cost(
-                    black_box(t),
-                    black_box(BooleanOperator::Phrase),
-                    black_box(total_docs),
-                    black_box(f),
-                );
-                black_box(cost)
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(label),
+            &(terms, freqs),
+            |b, &(t, f)| {
+                b.iter(|| {
+                    let cost = boolean_query_cost(
+                        black_box(t),
+                        black_box(BooleanOperator::Phrase),
+                        black_box(total_docs),
+                        black_box(f),
+                    );
+                    black_box(cost)
+                });
+            },
+        );
     }
 
     group.finish();
@@ -171,7 +177,12 @@ fn index_selection_benchmark(c: &mut Criterion) {
 
     let test_cases = vec![
         ("small_table_boolean", BooleanOperator::And, false, 500),
-        ("large_table_boolean", BooleanOperator::And, false, 1_000_000),
+        (
+            "large_table_boolean",
+            BooleanOperator::And,
+            false,
+            1_000_000,
+        ),
         ("phrase_no_rank", BooleanOperator::Phrase, false, 100_000),
         ("phrase_ranked", BooleanOperator::Phrase, true, 100_000),
         ("ranked_large", BooleanOperator::And, true, 1_000_000),

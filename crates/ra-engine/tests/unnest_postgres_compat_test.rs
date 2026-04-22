@@ -27,12 +27,8 @@ fn compat_unnest_integer_array() {
     let executor = UnnestExecutor::new(expr, None, false);
     let rows = executor.execute(None).expect("should succeed");
     assert_eq!(rows.len(), 3);
-    let values: Vec<&Const> =
-        rows.iter().map(|r| &r.values[0]).collect();
-    assert_eq!(
-        values,
-        vec![&Const::Int(1), &Const::Int(2), &Const::Int(3)]
-    );
+    let values: Vec<&Const> = rows.iter().map(|r| &r.values[0]).collect();
+    assert_eq!(values, vec![&Const::Int(1), &Const::Int(2), &Const::Int(3)]);
 }
 
 /// Verifies UNNEST with ordinality matches PG.
@@ -131,9 +127,7 @@ fn compat_multi_unnest_null_padding() {
                 Expr::Const(Const::Int(2)),
                 Expr::Const(Const::Int(3)),
             ]),
-            Expr::Array(vec![Expr::Const(
-                Const::String("a".into()),
-            )]),
+            Expr::Array(vec![Expr::Const(Const::String("a".into()))]),
         ],
         vec![Some("num".into()), Some("letter".into())],
         false,
@@ -155,10 +149,7 @@ fn compat_multi_unnest_null_padding() {
 fn compat_generate_series() {
     let exec = TableFunctionExecutor::new(
         "generate_series",
-        vec![
-            Expr::Const(Const::Int(1)),
-            Expr::Const(Const::Int(5)),
-        ],
+        vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(5))],
     );
     let rows = exec.execute(None).expect("should succeed");
     assert_eq!(rows.len(), 5);

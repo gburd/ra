@@ -56,16 +56,13 @@ fn main() {
     println!("Profiling JOB Query 13a (multi-table join)");
     println!("==========================================\n");
 
-    let mut query_path =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut query_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     query_path.pop(); // crates/
     query_path.pop(); // project root
     query_path.push("benchmarks/job/queries/13a.sql");
 
-    let sql = std::fs::read_to_string(&query_path)
-        .expect("JOB 13a SQL file not found");
-    let query = sql_to_relexpr(&sql)
-        .expect("Failed to parse JOB 13a");
+    let sql = std::fs::read_to_string(&query_path).expect("JOB 13a SQL file not found");
+    let query = sql_to_relexpr(&sql).expect("Failed to parse JOB 13a");
 
     let optimizer = make_optimizer();
 

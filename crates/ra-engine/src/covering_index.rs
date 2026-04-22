@@ -125,11 +125,8 @@ mod tests {
     use ra_core::algebra::{ProjectionColumn, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 
-    fn run_with_covering_rules(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_with_covering_rules(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         let rules = covering_index_rules();
         Runner::default()
             .with_expr(&rec)
@@ -145,22 +142,16 @@ mod tests {
         let expr = RelExpr::scan("orders")
             .filter(Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("customer_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("customer_id"))),
                 right: Box::new(Expr::Const(Const::Int(42))),
             })
             .project(vec![
                 ProjectionColumn {
-                    expr: Expr::Column(
-                        ColumnRef::new("customer_id"),
-                    ),
+                    expr: Expr::Column(ColumnRef::new("customer_id")),
                     alias: None,
                 },
                 ProjectionColumn {
-                    expr: Expr::Column(
-                        ColumnRef::new("order_date"),
-                    ),
+                    expr: Expr::Column(ColumnRef::new("order_date")),
                     alias: None,
                 },
             ]);
@@ -189,8 +180,7 @@ mod tests {
     #[test]
     fn plain_scan_not_rewritten() {
         let expr = RelExpr::scan("users");
-        let rec =
-            to_rec_expr(&expr).expect("conversion should succeed");
+        let rec = to_rec_expr(&expr).expect("conversion should succeed");
         let rules = covering_index_rules();
         let runner = Runner::default()
             .with_expr(&rec)
@@ -214,8 +204,7 @@ mod tests {
             left: Box::new(Expr::Column(ColumnRef::new("age"))),
             right: Box::new(Expr::Const(Const::Int(18))),
         });
-        let rec =
-            to_rec_expr(&expr).expect("conversion should succeed");
+        let rec = to_rec_expr(&expr).expect("conversion should succeed");
         let rules = covering_index_rules();
         let runner = Runner::default()
             .with_expr(&rec)
@@ -247,9 +236,7 @@ mod tests {
         let expr = RelExpr::scan("products")
             .filter(Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("category"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("category"))),
                 right: Box::new(Expr::Const(Const::Int(5))),
             })
             .project(vec![ProjectionColumn {
@@ -313,9 +300,7 @@ mod tests {
         let expr = RelExpr::scan("users")
             .filter(Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("status"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("status"))),
                 right: Box::new(Expr::Const(Const::Int(1))),
             })
             .project(vec![
@@ -352,15 +337,12 @@ mod tests {
     /// because the pattern requires filter + project.
     #[test]
     fn project_only_not_rewritten() {
-        let expr = RelExpr::scan("orders").project(vec![
-            ProjectionColumn {
-                expr: Expr::Column(ColumnRef::new("id")),
-                alias: None,
-            },
-        ]);
+        let expr = RelExpr::scan("orders").project(vec![ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new("id")),
+            alias: None,
+        }]);
 
-        let rec =
-            to_rec_expr(&expr).expect("conversion should succeed");
+        let rec = to_rec_expr(&expr).expect("conversion should succeed");
         let rules = covering_index_rules();
         let runner = Runner::default()
             .with_expr(&rec)

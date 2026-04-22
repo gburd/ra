@@ -232,10 +232,7 @@ fn collect_table_names(plan: &RelExpr, out: &mut Vec<String>) {
 /// regardless of join order. This is a necessary (not sufficient)
 /// condition for plan equivalence.
 #[must_use]
-pub fn verify_join_order_equivalence(
-    old_plan: &RelExpr,
-    new_plan: &RelExpr,
-) -> bool {
+pub fn verify_join_order_equivalence(old_plan: &RelExpr, new_plan: &RelExpr) -> bool {
     let mut old_tables = Vec::new();
     let mut new_tables = Vec::new();
     collect_table_names(old_plan, &mut old_tables);
@@ -304,11 +301,7 @@ pub fn count_stitch_points(plan: &RelExpr) -> usize {
 /// Replace the first subtree matching `target` with `replacement`.
 /// Returns the modified plan and `true` if a replacement was made.
 #[must_use]
-pub fn replace_subtree(
-    plan: &RelExpr,
-    target: &RelExpr,
-    replacement: &RelExpr,
-) -> (RelExpr, bool) {
+pub fn replace_subtree(plan: &RelExpr, target: &RelExpr, replacement: &RelExpr) -> (RelExpr, bool) {
     if plan == target {
         return (replacement.clone(), true);
     }
@@ -319,8 +312,7 @@ pub fn replace_subtree(
             left,
             right,
         } => {
-            let (new_left, replaced) =
-                replace_subtree(left, target, replacement);
+            let (new_left, replaced) = replace_subtree(left, target, replacement);
             if replaced {
                 return (
                     RelExpr::Join {
@@ -332,8 +324,7 @@ pub fn replace_subtree(
                     true,
                 );
             }
-            let (new_right, replaced) =
-                replace_subtree(right, target, replacement);
+            let (new_right, replaced) = replace_subtree(right, target, replacement);
             (
                 RelExpr::Join {
                     join_type: *join_type,
@@ -345,8 +336,7 @@ pub fn replace_subtree(
             )
         }
         RelExpr::Filter { predicate, input } => {
-            let (new_input, replaced) =
-                replace_subtree(input, target, replacement);
+            let (new_input, replaced) = replace_subtree(input, target, replacement);
             (
                 RelExpr::Filter {
                     predicate: predicate.clone(),
@@ -356,8 +346,7 @@ pub fn replace_subtree(
             )
         }
         RelExpr::Project { columns, input } => {
-            let (new_input, replaced) =
-                replace_subtree(input, target, replacement);
+            let (new_input, replaced) = replace_subtree(input, target, replacement);
             (
                 RelExpr::Project {
                     columns: columns.clone(),
@@ -371,8 +360,7 @@ pub fn replace_subtree(
             aggregates,
             input,
         } => {
-            let (new_input, replaced) =
-                replace_subtree(input, target, replacement);
+            let (new_input, replaced) = replace_subtree(input, target, replacement);
             (
                 RelExpr::Aggregate {
                     group_by: group_by.clone(),
@@ -383,8 +371,7 @@ pub fn replace_subtree(
             )
         }
         RelExpr::Sort { keys, input } => {
-            let (new_input, replaced) =
-                replace_subtree(input, target, replacement);
+            let (new_input, replaced) = replace_subtree(input, target, replacement);
             (
                 RelExpr::Sort {
                     keys: keys.clone(),
@@ -398,8 +385,7 @@ pub fn replace_subtree(
             offset,
             input,
         } => {
-            let (new_input, replaced) =
-                replace_subtree(input, target, replacement);
+            let (new_input, replaced) = replace_subtree(input, target, replacement);
             (
                 RelExpr::Limit {
                     count: *count,
@@ -410,8 +396,7 @@ pub fn replace_subtree(
             )
         }
         RelExpr::Distinct { input } => {
-            let (new_input, replaced) =
-                replace_subtree(input, target, replacement);
+            let (new_input, replaced) = replace_subtree(input, target, replacement);
             (
                 RelExpr::Distinct {
                     input: Box::new(new_input),
@@ -420,8 +405,7 @@ pub fn replace_subtree(
             )
         }
         RelExpr::Window { functions, input } => {
-            let (new_input, replaced) =
-                replace_subtree(input, target, replacement);
+            let (new_input, replaced) = replace_subtree(input, target, replacement);
             (
                 RelExpr::Window {
                     functions: functions.clone(),
@@ -438,12 +422,8 @@ pub fn replace_subtree(
 /// preserves the set of base tables (a necessary condition for
 /// semantic equivalence).
 #[must_use]
-pub fn differential_verify(
-    old_plan: &RelExpr,
-    new_plan: &RelExpr,
-) -> DifferentialResult {
-    let tables_match =
-        verify_join_order_equivalence(old_plan, new_plan);
+pub fn differential_verify(old_plan: &RelExpr, new_plan: &RelExpr) -> DifferentialResult {
+    let tables_match = verify_join_order_equivalence(old_plan, new_plan);
 
     let old_stitch_count = count_stitch_points(old_plan);
     let new_stitch_count = count_stitch_points(new_plan);
@@ -494,8 +474,7 @@ pub fn find_deepest_join(plan: &RelExpr) -> Option<&RelExpr> {
 mod tests {
     use super::*;
     use ra_core::algebra::{
-        AggregateExpr, AggregateFunction, JoinType, NullOrdering,
-        SortDirection, SortKey,
+        AggregateExpr, AggregateFunction, JoinType, NullOrdering, SortDirection, SortKey,
     };
     use ra_core::expr::{BinOp, ColumnRef, Expr};
 
@@ -939,7 +918,11 @@ mod tests {
             build_side_rows: 50,
             probe_side_cursor: 0,
         };
-        let points = vec![(materialized.clone(), StitchPointKind::JoinBuildComplete, state)];
+        let points = vec![(
+            materialized.clone(),
+            StitchPointKind::JoinBuildComplete,
+            state,
+        )];
         let result = stitch_multi(&reoptimized, &points);
         assert_eq!(result.stitch_points_applied, 1);
         assert!(result.stitch_overhead > 0.0);

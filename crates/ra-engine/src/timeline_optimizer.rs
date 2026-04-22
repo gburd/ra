@@ -340,8 +340,7 @@ pub fn detect_schema_changes(
     // Detect index changes for common tables
     for (name, current_table) in &current_tables {
         if let Some(prev_table) = prev_tables.get(name) {
-            let prev_indexes: HashSet<_> =
-                prev_table.indexes.iter().map(|i| &i.name).collect();
+            let prev_indexes: HashSet<_> = prev_table.indexes.iter().map(|i| &i.name).collect();
             let current_indexes: HashSet<_> =
                 current_table.indexes.iter().map(|i| &i.name).collect();
 
@@ -376,8 +375,7 @@ pub fn detect_schema_changes(
             }
 
             // Detect column changes
-            let prev_columns: HashSet<_> =
-                prev_table.columns.iter().map(|c| &c.name).collect();
+            let prev_columns: HashSet<_> = prev_table.columns.iter().map(|c| &c.name).collect();
             let current_columns: HashSet<_> =
                 current_table.columns.iter().map(|c| &c.name).collect();
 
@@ -492,13 +490,12 @@ pub fn detect_hardware_changes(
 
     // CPU cores change
     if prev.cpu_cores != current.cpu_cores {
-        let severity = if current.cpu_cores > prev.cpu_cores * 2
-            || prev.cpu_cores > current.cpu_cores * 2
-        {
-            ChangeSeverity::High
-        } else {
-            ChangeSeverity::Medium
-        };
+        let severity =
+            if current.cpu_cores > prev.cpu_cores * 2 || prev.cpu_cores > current.cpu_cores * 2 {
+                ChangeSeverity::High
+            } else {
+                ChangeSeverity::Medium
+            };
 
         changes.push(ChangeDescription {
             change_type: ChangeType::Hardware,
@@ -702,28 +699,49 @@ impl TimelineOptimizationResult {
     pub fn to_markdown(&self) -> String {
         let mut md = String::new();
 
-        md.push_str(&format!("# Timeline Optimization Report: {}\n\n", self.timeline_config.metadata.name));
-        md.push_str(&format!("{}\n\n", self.timeline_config.metadata.description));
+        md.push_str(&format!(
+            "# Timeline Optimization Report: {}\n\n",
+            self.timeline_config.metadata.name
+        ));
+        md.push_str(&format!(
+            "{}\n\n",
+            self.timeline_config.metadata.description
+        ));
 
         if let Some(query) = &self.timeline_config.metadata.query {
             md.push_str(&format!("**Query:** `{query}`\n\n"));
         }
 
-        md.push_str(&format!("**Snapshots:** {}\n\n", self.snapshot_results.len()));
-        md.push_str(&format!("**Duration:** {} seconds\n\n", self.timeline_config.metadata.duration_seconds.unwrap_or(0)));
+        md.push_str(&format!(
+            "**Snapshots:** {}\n\n",
+            self.snapshot_results.len()
+        ));
+        md.push_str(&format!(
+            "**Duration:** {} seconds\n\n",
+            self.timeline_config.metadata.duration_seconds.unwrap_or(0)
+        ));
 
         md.push_str("## Snapshots\n\n");
 
         for result in &self.snapshot_results {
-            md.push_str(&format!("### Snapshot {} (t={}s)\n\n", result.snapshot_index, result.time_offset));
+            md.push_str(&format!(
+                "### Snapshot {} (t={}s)\n\n",
+                result.snapshot_index, result.time_offset
+            ));
 
             if let Some(label) = &result.label {
                 md.push_str(&format!("**Label:** {label}\n\n"));
             }
 
             md.push_str(&format!("- **Cost:** {:.2}\n", result.cost));
-            md.push_str(&format!("- **Optimization time:** {}ms\n", result.optimization_time_ms));
-            md.push_str(&format!("- **Changes detected:** {}\n", result.changes_from_previous.len()));
+            md.push_str(&format!(
+                "- **Optimization time:** {}ms\n",
+                result.optimization_time_ms
+            ));
+            md.push_str(&format!(
+                "- **Changes detected:** {}\n",
+                result.changes_from_previous.len()
+            ));
 
             if !result.changes_from_previous.is_empty() {
                 md.push_str("\n**Changes from previous snapshot:**\n\n");
@@ -734,7 +752,10 @@ impl TimelineOptimizationResult {
                         ChangeSeverity::High => "🔴",
                         ChangeSeverity::Critical => "🚨",
                     };
-                    md.push_str(&format!("- {severity_icon} [{:?}] {}\n", change.change_type, change.description));
+                    md.push_str(&format!(
+                        "- {severity_icon} [{:?}] {}\n",
+                        change.change_type, change.description
+                    ));
                 }
             }
 
@@ -748,7 +769,10 @@ impl TimelineOptimizationResult {
     pub fn to_text(&self) -> String {
         let mut text = String::new();
 
-        text.push_str(&format!("Timeline Optimization Report: {}\n", self.timeline_config.metadata.name));
+        text.push_str(&format!(
+            "Timeline Optimization Report: {}\n",
+            self.timeline_config.metadata.name
+        ));
         text.push_str(&format!("{}\n", self.timeline_config.metadata.description));
         text.push_str(&format!("Snapshots: {}\n\n", self.snapshot_results.len()));
 
@@ -803,7 +827,10 @@ impl Serialize for SnapshotResult {
         state.serialize_field("optimization_time_ms", &self.optimization_time_ms)?;
         state.serialize_field("rules_applied", &self.rules_applied)?;
         state.serialize_field("changes_from_previous", &self.changes_from_previous)?;
-        state.serialize_field("dependencies_count", &self.dependencies.all_resources().len())?;
+        state.serialize_field(
+            "dependencies_count",
+            &self.dependencies.all_resources().len(),
+        )?;
         state.end()
     }
 }
@@ -826,9 +853,8 @@ impl Serialize for ChangeDescription {
 mod tests {
     use super::*;
     use crate::timeline_config::{
-        ColumnDef, ColumnStatsDef, DataTypeDef, FactsSnapshot, HardwareProfileDef,
-        IndexDef, IndexTypeDef, SchemaSnapshot, StorageFormatDef, TableDef,
-        TableStatsDef, TimelineMetadata,
+        ColumnDef, ColumnStatsDef, DataTypeDef, FactsSnapshot, HardwareProfileDef, IndexDef,
+        IndexTypeDef, SchemaSnapshot, StorageFormatDef, TableDef, TableStatsDef, TimelineMetadata,
     };
 
     fn create_test_config() -> TimelineConfig {
@@ -982,10 +1008,7 @@ mod tests {
         let changes = detect_stats_changes(&prev, &current, &thresholds);
 
         assert!(!changes.is_empty());
-        assert!(matches!(
-            changes[0].change_type,
-            ChangeType::Statistics
-        ));
+        assert!(matches!(changes[0].change_type, ChangeType::Statistics));
     }
 
     #[test]

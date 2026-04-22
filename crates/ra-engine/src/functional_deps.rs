@@ -25,8 +25,7 @@ use crate::egraph::RelLang;
 /// produces unique groups, DISTINCT is idempotent) to eliminate
 /// redundant operations. Only unconditional rules are included.
 #[must_use]
-pub fn functional_dependency_rules(
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn functional_dependency_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // GROUP BY already produces unique groups, so DISTINCT is redundant
         rewrite!("eliminate-distinct-after-groupby";
@@ -60,16 +59,12 @@ mod tests {
     use crate::egraph::{to_rec_expr, RelLang};
     use egg::Runner;
     use ra_core::algebra::{
-        AggregateExpr, AggregateFunction, NullOrdering, RelExpr,
-        SortDirection, SortKey,
+        AggregateExpr, AggregateFunction, NullOrdering, RelExpr, SortDirection, SortKey,
     };
     use ra_core::expr::{ColumnRef, Expr};
 
-    fn run_functional_deps(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_functional_deps(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(10_000)

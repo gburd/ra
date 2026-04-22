@@ -18,15 +18,12 @@ use std::collections::{HashMap, HashSet};
 
 use ra_core::algebra::{AggregateExpr, JoinType, RelExpr};
 use ra_core::cost::Cost;
-use ra_core::distribution::{
-    DataDistribution, DistributedRelExpr, NodeId,
-};
+use ra_core::distribution::{DataDistribution, DistributedRelExpr, NodeId};
 use ra_core::expr::Expr;
 use ra_core::statistics::Statistics;
 
 use crate::distributed_optimizer::{
-    ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig,
-    DistributedOptimizerError,
+    ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig, DistributedOptimizerError,
 };
 
 // ------------------------------------------------------------------
@@ -146,11 +143,7 @@ impl CitusMetadata {
     }
 
     /// Register a distributed table.
-    pub fn add_distributed_table(
-        &mut self,
-        table: &str,
-        info: DistributedTableInfo,
-    ) {
+    pub fn add_distributed_table(&mut self, table: &str, info: DistributedTableInfo) {
         self.colocation_groups
             .entry(info.colocation_group)
             .or_default()
@@ -174,20 +167,12 @@ impl CitusMetadata {
     }
 
     /// Register columnar storage info for a table.
-    pub fn add_columnar_table(
-        &mut self,
-        table: &str,
-        info: ColumnarTableInfo,
-    ) {
+    pub fn add_columnar_table(&mut self, table: &str, info: ColumnarTableInfo) {
         self.columnar_tables.insert(table.to_owned(), info);
     }
 
     /// Register statistics for a table.
-    pub fn add_table_stats(
-        &mut self,
-        table: &str,
-        stats: Statistics,
-    ) {
+    pub fn add_table_stats(&mut self, table: &str, stats: Statistics) {
         self.table_stats.insert(table.to_owned(), stats);
     }
 
@@ -211,27 +196,18 @@ impl CitusMetadata {
 
     /// Check if two distributed tables are co-located.
     #[must_use]
-    pub fn are_colocated(
-        &self,
-        table_a: &str,
-        table_b: &str,
-    ) -> bool {
+    pub fn are_colocated(&self, table_a: &str, table_b: &str) -> bool {
         let info_a = self.distributed_tables.get(table_a);
         let info_b = self.distributed_tables.get(table_b);
         match (info_a, info_b) {
-            (Some(a), Some(b)) => {
-                a.colocation_group == b.colocation_group
-            }
+            (Some(a), Some(b)) => a.colocation_group == b.colocation_group,
             _ => false,
         }
     }
 
     /// Get the distribution column for a table, if distributed.
     #[must_use]
-    pub fn distribution_column(
-        &self,
-        table: &str,
-    ) -> Option<&str> {
+    pub fn distribution_column(&self, table: &str) -> Option<&str> {
         self.distributed_tables
             .get(table)
             .map(|info| info.distribution_column.as_str())
@@ -240,9 +216,7 @@ impl CitusMetadata {
     /// Return the number of active worker nodes.
     #[must_use]
     pub fn active_worker_count(&self) -> u32 {
-        let count =
-            self.worker_nodes.iter().filter(|n| n.is_active).count()
-                as u32;
+        let count = self.worker_nodes.iter().filter(|n| n.is_active).count() as u32;
         count
     }
 }
@@ -290,12 +264,8 @@ pub fn analyze_shard_pruning(
             left,
             right,
         } => {
-            let references_dist_col =
-                expr_references_column(left, distribution_column)
-                    || expr_references_column(
-                        right,
-                        distribution_column,
-                    );
+            let references_dist_col = expr_references_column(left, distribution_column)
+                || expr_references_column(right, distribution_column);
             if references_dist_col {
                 return ShardPruningResult {
                     shards_remaining: 1,
@@ -318,12 +288,8 @@ pub fn analyze_shard_pruning(
             left,
             right,
         } => {
-            let references_dist_col =
-                expr_references_column(left, distribution_column)
-                    || expr_references_column(
-                        right,
-                        distribution_column,
-                    );
+            let references_dist_col = expr_references_column(left, distribution_column)
+                || expr_references_column(right, distribution_column);
             if references_dist_col {
                 let remaining = (total_shards / 2).max(1);
                 return ShardPruningResult {
@@ -343,16 +309,8 @@ pub fn analyze_shard_pruning(
             left,
             right,
         } => {
-            let left_result = analyze_shard_pruning(
-                left,
-                distribution_column,
-                total_shards,
-            );
-            let right_result = analyze_shard_pruning(
-                right,
-                distribution_column,
-                total_shards,
-            );
+            let left_result = analyze_shard_pruning(left, distribution_column, total_shards);
+            let right_result = analyze_shard_pruning(right, distribution_column, total_shards);
             if left_result.is_single_shard {
                 return left_result;
             }
@@ -381,12 +339,9 @@ fn expr_references_column(expr: &Expr, column: &str) -> bool {
     match expr {
         Expr::Column(col_ref) => col_ref.column == column,
         Expr::BinOp { left, right, .. } => {
-            expr_references_column(left, column)
-                || expr_references_column(right, column)
+            expr_references_column(left, column) || expr_references_column(right, column)
         }
-        Expr::UnaryOp { operand, .. } => {
-            expr_references_column(operand, column)
-        }
+        Expr::UnaryOp { operand, .. } => expr_references_column(operand, column),
         _ => false,
     }
 }
@@ -438,8 +393,7 @@ pub fn columnar_scan_cost_factor(
     .max(params.min_column_selectivity);
 
     let io_factor =
-        column_selectivity * params.io_cost_factor
-            / columnar_info.compression_ratio.max(1.0);
+        column_selectivity * params.io_cost_factor / columnar_info.compression_ratio.max(1.0);
 
     let cpu_factor = params.decompression_cpu_factor;
 
@@ -514,20 +468,13 @@ impl CitusOptimizer {
     /// Builds the underlying `ClusterTopology` and
     /// `DistributedOptimizer` from the Citus metadata.
     #[must_use]
-    pub fn new(
-        config: CitusOptimizerConfig,
-        metadata: CitusMetadata,
-    ) -> Self {
+    pub fn new(config: CitusOptimizerConfig, metadata: CitusMetadata) -> Self {
         let num_workers = metadata.active_worker_count().max(1);
-        let mut topology =
-            ClusterTopology::uniform(num_workers + 1);
+        let mut topology = ClusterTopology::uniform(num_workers + 1);
 
         for (table, info) in &metadata.distributed_tables {
-            let dist_col_expr = Expr::Column(
-                ra_core::expr::ColumnRef::new(
-                    &info.distribution_column,
-                ),
-            );
+            let dist_col_expr =
+                Expr::Column(ra_core::expr::ColumnRef::new(&info.distribution_column));
             topology.register_table(
                 table,
                 NodeId(0),
@@ -539,27 +486,18 @@ impl CitusOptimizer {
         }
 
         for table in &metadata.reference_tables {
-            topology.register_table(
-                table,
-                NodeId(0),
-                DataDistribution::Replicated,
-            );
+            topology.register_table(table, NodeId(0), DataDistribution::Replicated);
         }
 
         for table in &metadata.local_tables {
             topology.register_table(
                 table,
                 NodeId(0),
-                DataDistribution::SinglePartition {
-                    node: NodeId(0),
-                },
+                DataDistribution::SinglePartition { node: NodeId(0) },
             );
         }
 
-        let mut inner = DistributedOptimizer::new(
-            config.distributed.clone(),
-            topology,
-        );
+        let mut inner = DistributedOptimizer::new(config.distributed.clone(), topology);
 
         for (table, stats) in &metadata.table_stats {
             inner.register_stats(table, stats.clone());
@@ -584,13 +522,8 @@ impl CitusOptimizer {
     ///
     /// Returns an error if the cluster has no active workers or
     /// the underlying distributed optimizer fails.
-    pub fn optimize(
-        &self,
-        plan: &RelExpr,
-    ) -> Result<CitusOptimizedPlan, CitusOptimizerError> {
-        if self.metadata.active_worker_count() == 0
-            && self.metadata.worker_nodes.is_empty()
-        {
+    pub fn optimize(&self, plan: &RelExpr) -> Result<CitusOptimizedPlan, CitusOptimizerError> {
+        if self.metadata.active_worker_count() == 0 && self.metadata.worker_nodes.is_empty() {
             return Err(CitusOptimizerError::NoWorkerNodes);
         }
 
@@ -599,22 +532,15 @@ impl CitusOptimizer {
     }
 
     /// Recursively annotate a plan with Citus-aware distribution.
-    fn annotate(
-        &self,
-        plan: &RelExpr,
-    ) -> Result<CitusOptimizedPlan, CitusOptimizerError> {
+    fn annotate(&self, plan: &RelExpr) -> Result<CitusOptimizedPlan, CitusOptimizerError> {
         match plan {
-            RelExpr::Scan { table, .. } => {
-                self.annotate_scan(table, plan)
-            }
+            RelExpr::Scan { table, .. } => self.annotate_scan(table, plan),
             RelExpr::Join {
                 join_type,
                 condition,
                 left,
                 right,
-            } => self.annotate_join(
-                *join_type, condition, left, right, plan,
-            ),
+            } => self.annotate_join(*join_type, condition, left, right, plan),
             RelExpr::Filter {
                 predicate, input, ..
             } => self.annotate_filter(predicate, input, plan),
@@ -625,10 +551,7 @@ impl CitusOptimizer {
                     distribution: child.distribution,
                     strategy: child.strategy,
                     shard_pruning: None,
-                    columnar_adjustment: self
-                        .columnar_project_adjustment(
-                            input, columns,
-                        ),
+                    columnar_adjustment: self.columnar_project_adjustment(input, columns),
                     execution: child.execution,
                 })
             }
@@ -636,15 +559,10 @@ impl CitusOptimizer {
                 input,
                 group_by,
                 aggregates,
-            } => self.annotate_aggregate(
-                input, group_by, aggregates, plan,
-            ),
+            } => self.annotate_aggregate(input, group_by, aggregates, plan),
             _ => {
-                let distributed =
-                    self.inner.optimize_distribution(plan)?;
-                Ok(CitusOptimizedPlan::from_distributed(
-                    distributed,
-                ))
+                let distributed = self.inner.optimize_distribution(plan)?;
+                Ok(CitusOptimizedPlan::from_distributed(distributed))
             }
         }
     }
@@ -657,11 +575,7 @@ impl CitusOptimizer {
     ) -> Result<CitusOptimizedPlan, CitusOptimizerError> {
         let distribution = if self.metadata.is_distributed(table) {
             let info = &self.metadata.distributed_tables[table];
-            let dist_col = Expr::Column(
-                ra_core::expr::ColumnRef::new(
-                    &info.distribution_column,
-                ),
-            );
+            let dist_col = Expr::Column(ra_core::expr::ColumnRef::new(&info.distribution_column));
             DataDistribution::HashPartitioned {
                 keys: vec![dist_col],
                 partition_count: info.shard_count,
@@ -669,9 +583,7 @@ impl CitusOptimizer {
         } else if self.metadata.is_reference(table) {
             DataDistribution::Replicated
         } else {
-            DataDistribution::SinglePartition {
-                node: NodeId(0),
-            }
+            DataDistribution::SinglePartition { node: NodeId(0) }
         };
 
         let execution = if self.metadata.is_distributed(table) {
@@ -714,14 +626,9 @@ impl CitusOptimizer {
 
         let table_name = extract_table_name(input);
         let pruning = table_name.and_then(|t| {
-            let dist_col =
-                self.metadata.distribution_column(&t)?;
+            let dist_col = self.metadata.distribution_column(&t)?;
             let info = &self.metadata.distributed_tables[&t];
-            let result = analyze_shard_pruning(
-                predicate,
-                dist_col,
-                info.shard_count,
-            );
+            let result = analyze_shard_pruning(predicate, dist_col, info.shard_count);
             if result.shards_remaining < result.total_shards {
                 Some(result)
             } else {
@@ -729,10 +636,7 @@ impl CitusOptimizer {
             }
         });
 
-        let strategy = if pruning
-            .as_ref()
-            .is_some_and(|p| p.is_single_shard)
-        {
+        let strategy = if pruning.as_ref().is_some_and(|p| p.is_single_shard) {
             CitusStrategy::SingleShardQuery
         } else if pruning.is_some() {
             CitusStrategy::ShardPruned
@@ -740,12 +644,11 @@ impl CitusOptimizer {
             child.strategy
         };
 
-        let execution =
-            if pruning.as_ref().is_some_and(|p| p.is_single_shard) {
-                ExecutionLocation::SingleWorker
-            } else {
-                child.execution
-            };
+        let execution = if pruning.as_ref().is_some_and(|p| p.is_single_shard) {
+            ExecutionLocation::SingleWorker
+        } else {
+            child.execution
+        };
 
         Ok(CitusOptimizedPlan {
             plan: plan.clone(),
@@ -773,12 +676,8 @@ impl CitusOptimizer {
         let right_table = extract_table_name(right);
 
         // Rule 1: Co-located join detection
-        if let (Some(lt), Some(rt)) =
-            (&left_table, &right_table)
-        {
-            if self.is_colocated_join(
-                lt, rt, condition, join_type,
-            ) {
+        if let (Some(lt), Some(rt)) = (&left_table, &right_table) {
+            if self.is_colocated_join(lt, rt, condition, join_type) {
                 return Ok(CitusOptimizedPlan {
                     plan: plan.clone(),
                     distribution: left_ann.distribution,
@@ -817,8 +716,7 @@ impl CitusOptimizer {
         }
 
         // Fall back to generic distributed optimizer
-        let distributed =
-            self.inner.optimize_distribution(plan)?;
+        let distributed = self.inner.optimize_distribution(plan)?;
         Ok(CitusOptimizedPlan::from_distributed(distributed))
     }
 
@@ -840,22 +738,16 @@ impl CitusOptimizer {
             return false;
         }
 
-        let left_dist_col =
-            match self.metadata.distribution_column(left_table) {
-                Some(col) => col,
-                None => return false,
-            };
-        let right_dist_col =
-            match self.metadata.distribution_column(right_table) {
-                Some(col) => col,
-                None => return false,
-            };
+        let left_dist_col = match self.metadata.distribution_column(left_table) {
+            Some(col) => col,
+            None => return false,
+        };
+        let right_dist_col = match self.metadata.distribution_column(right_table) {
+            Some(col) => col,
+            None => return false,
+        };
 
-        condition_has_equality_on(
-            condition,
-            left_dist_col,
-            right_dist_col,
-        )
+        condition_has_equality_on(condition, left_dist_col, right_dist_col)
     }
 
     /// Annotate an aggregate with distributed pushdown awareness.
@@ -873,24 +765,18 @@ impl CitusOptimizer {
         // Rule 3: Check if GROUP BY includes the distribution
         // column, enabling worker-side aggregation.
         if let Some(ref t) = table_name {
-            if let Some(dist_col) =
-                self.metadata.distribution_column(t)
-            {
-                let group_by_includes_dist =
-                    group_by.iter().any(|expr| {
-                        expr_references_column(expr, dist_col)
-                    });
+            if let Some(dist_col) = self.metadata.distribution_column(t) {
+                let group_by_includes_dist = group_by
+                    .iter()
+                    .any(|expr| expr_references_column(expr, dist_col));
 
                 if group_by_includes_dist {
-                    let can_pushdown =
-                        aggregates_are_pushdownable(aggregates);
+                    let can_pushdown = aggregates_are_pushdownable(aggregates);
                     if can_pushdown {
                         return Ok(CitusOptimizedPlan {
                             plan: plan.clone(),
-                            distribution:
-                                child.distribution.clone(),
-                            strategy:
-                                CitusStrategy::DistributedAggregation,
+                            distribution: child.distribution.clone(),
+                            strategy: CitusStrategy::DistributedAggregation,
                             shard_pruning: None,
                             columnar_adjustment: None,
                             execution: ExecutionLocation::Workers,
@@ -901,8 +787,7 @@ impl CitusOptimizer {
         }
 
         // Fall back to distributed optimizer
-        let distributed =
-            self.inner.optimize_distribution(plan)?;
+        let distributed = self.inner.optimize_distribution(plan)?;
         Ok(CitusOptimizedPlan::from_distributed(distributed))
     }
 
@@ -924,40 +809,26 @@ impl CitusOptimizer {
 
     /// Estimate the cost of a Citus-optimized plan.
     #[must_use]
-    pub fn estimate_cost(
-        &self,
-        plan: &CitusOptimizedPlan,
-    ) -> Cost {
+    pub fn estimate_cost(&self, plan: &CitusOptimizedPlan) -> Cost {
         let base_cost = match &plan.strategy {
             CitusStrategy::ColocatedJoin => Cost::ZERO,
             CitusStrategy::ReferenceJoin => Cost::ZERO,
             CitusStrategy::DistributedAggregation => {
-                let workers =
-                    self.metadata.active_worker_count().max(1);
+                let workers = self.metadata.active_worker_count().max(1);
                 let agg_cpu = 100.0 / f64::from(workers);
-                let gather_network =
-                    f64::from(workers) * 0.1;
+                let gather_network = f64::from(workers) * 0.1;
                 Cost::new(agg_cpu, 0.0, gather_network, 0)
             }
-            CitusStrategy::SingleShardQuery => {
-                Cost::new(1.0, 1.0, 0.1, 0)
-            }
+            CitusStrategy::SingleShardQuery => Cost::new(1.0, 1.0, 0.1, 0),
             CitusStrategy::ShardPruned => {
                 let selectivity = plan
                     .shard_pruning
                     .as_ref()
                     .map_or(1.0, ShardPruningResult::selectivity);
-                Cost::new(
-                    100.0 * selectivity,
-                    100.0 * selectivity,
-                    selectivity,
-                    0,
-                )
+                Cost::new(100.0 * selectivity, 100.0 * selectivity, selectivity, 0)
             }
             CitusStrategy::LocalScan => Cost::new(1.0, 1.0, 0.0, 0),
-            CitusStrategy::GenericDistributed => {
-                Cost::new(100.0, 100.0, 10.0, 0)
-            }
+            CitusStrategy::GenericDistributed => Cost::new(100.0, 100.0, 10.0, 0),
         };
 
         if let Some(col_adj) = plan.columnar_adjustment {
@@ -1016,9 +887,7 @@ impl CitusStrategy {
         match self {
             Self::ColocatedJoin => "ColocatedJoin",
             Self::ReferenceJoin => "ReferenceJoin",
-            Self::DistributedAggregation => {
-                "DistributedAggregation"
-            }
+            Self::DistributedAggregation => "DistributedAggregation",
             Self::SingleShardQuery => "SingleShardQuery",
             Self::ShardPruned => "ShardPruned",
             Self::LocalScan => "LocalScan",
@@ -1034,9 +903,7 @@ impl CitusStrategy {
             | Self::ReferenceJoin
             | Self::SingleShardQuery
             | Self::LocalScan => false,
-            Self::DistributedAggregation
-            | Self::ShardPruned
-            | Self::GenericDistributed => true,
+            Self::DistributedAggregation | Self::ShardPruned | Self::GenericDistributed => true,
         }
     }
 }
@@ -1088,33 +955,24 @@ fn extract_table_name(plan: &RelExpr) -> Option<String> {
         | RelExpr::Distinct { input, .. }
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
-        | RelExpr::Aggregate { input, .. } => {
-            extract_table_name(input)
-        }
+        | RelExpr::Aggregate { input, .. } => extract_table_name(input),
         RelExpr::Join { left, right, .. } => {
-            extract_table_name(left)
-                .or_else(|| extract_table_name(right))
+            extract_table_name(left).or_else(|| extract_table_name(right))
         }
         _ => None,
     }
 }
 
 /// Check if a condition contains `col_a = col_b` (in either order).
-fn condition_has_equality_on(
-    condition: &Expr,
-    col_a: &str,
-    col_b: &str,
-) -> bool {
+fn condition_has_equality_on(condition: &Expr, col_a: &str, col_b: &str) -> bool {
     match condition {
         Expr::BinOp {
             op: ra_core::expr::BinOp::Eq,
             left,
             right,
         } => {
-            (expr_references_column(left, col_a)
-                && expr_references_column(right, col_b))
-                || (expr_references_column(left, col_b)
-                    && expr_references_column(right, col_a))
+            (expr_references_column(left, col_a) && expr_references_column(right, col_b))
+                || (expr_references_column(left, col_b) && expr_references_column(right, col_a))
         }
         Expr::BinOp {
             op: ra_core::expr::BinOp::And,
@@ -1133,9 +991,7 @@ fn condition_has_equality_on(
 /// Decomposable aggregates (SUM, COUNT, MIN, MAX, AVG) can run
 /// as partial aggregates on workers with final aggregation on
 /// the coordinator.
-fn aggregates_are_pushdownable(
-    aggregates: &[AggregateExpr],
-) -> bool {
+fn aggregates_are_pushdownable(aggregates: &[AggregateExpr]) -> bool {
     use ra_core::algebra::AggregateFunction;
 
     if aggregates.is_empty() {
@@ -1331,14 +1187,8 @@ mod tests {
     #[test]
     fn metadata_distribution_column() {
         let meta = sample_metadata();
-        assert_eq!(
-            meta.distribution_column("orders"),
-            Some("customer_id")
-        );
-        assert_eq!(
-            meta.distribution_column("products"),
-            Some("product_id")
-        );
+        assert_eq!(meta.distribution_column("orders"), Some("customer_id"));
+        assert_eq!(meta.distribution_column("products"), Some("product_id"));
         assert_eq!(meta.distribution_column("countries"), None);
     }
 
@@ -1379,12 +1229,8 @@ mod tests {
 
     #[test]
     fn shard_pruning_equality() {
-        let pred = eq(
-            col("customer_id"),
-            Expr::Const(Const::Int(42)),
-        );
-        let result =
-            analyze_shard_pruning(&pred, "customer_id", 32);
+        let pred = eq(col("customer_id"), Expr::Const(Const::Int(42)));
+        let result = analyze_shard_pruning(&pred, "customer_id", 32);
         assert!(result.is_single_shard);
         assert_eq!(result.shards_remaining, 1);
         assert_eq!(result.total_shards, 32);
@@ -1392,12 +1238,8 @@ mod tests {
 
     #[test]
     fn shard_pruning_range() {
-        let pred = gt(
-            col("customer_id"),
-            Expr::Const(Const::Int(1000)),
-        );
-        let result =
-            analyze_shard_pruning(&pred, "customer_id", 32);
+        let pred = gt(col("customer_id"), Expr::Const(Const::Int(1000)));
+        let result = analyze_shard_pruning(&pred, "customer_id", 32);
         assert!(!result.is_single_shard);
         assert_eq!(result.shards_remaining, 16);
     }
@@ -1408,43 +1250,30 @@ mod tests {
             eq(col("customer_id"), Expr::Const(Const::Int(42))),
             gt(col("amount"), Expr::Const(Const::Int(100))),
         );
-        let result =
-            analyze_shard_pruning(&pred, "customer_id", 32);
+        let result = analyze_shard_pruning(&pred, "customer_id", 32);
         assert!(result.is_single_shard);
         assert_eq!(result.shards_remaining, 1);
     }
 
     #[test]
     fn shard_pruning_unrelated_column() {
-        let pred = eq(
-            col("status"),
-            Expr::Const(Const::String("active".into())),
-        );
-        let result =
-            analyze_shard_pruning(&pred, "customer_id", 32);
+        let pred = eq(col("status"), Expr::Const(Const::String("active".into())));
+        let result = analyze_shard_pruning(&pred, "customer_id", 32);
         assert!(!result.is_single_shard);
         assert_eq!(result.shards_remaining, 32);
     }
 
     #[test]
     fn shard_pruning_selectivity() {
-        let pred = eq(
-            col("customer_id"),
-            Expr::Const(Const::Int(1)),
-        );
-        let result =
-            analyze_shard_pruning(&pred, "customer_id", 32);
+        let pred = eq(col("customer_id"), Expr::Const(Const::Int(1)));
+        let result = analyze_shard_pruning(&pred, "customer_id", 32);
         assert!((result.selectivity() - 1.0 / 32.0).abs() < 0.001);
     }
 
     #[test]
     fn shard_pruning_zero_shards() {
-        let pred = eq(
-            col("customer_id"),
-            Expr::Const(Const::Int(1)),
-        );
-        let result =
-            analyze_shard_pruning(&pred, "customer_id", 0);
+        let pred = eq(col("customer_id"), Expr::Const(Const::Int(1)));
+        let result = analyze_shard_pruning(&pred, "customer_id", 0);
         assert!((result.selectivity() - 1.0).abs() < f64::EPSILON);
     }
 
@@ -1495,10 +1324,8 @@ mod tests {
             ..ColumnarTableInfo::default()
         };
         let params = ColumnarCostParams::default();
-        let factor_low =
-            columnar_scan_cost_factor(5, &info_low, &params);
-        let factor_high =
-            columnar_scan_cost_factor(5, &info_high, &params);
+        let factor_low = columnar_scan_cost_factor(5, &info_low, &params);
+        let factor_high = columnar_scan_cost_factor(5, &info_high, &params);
         assert!(
             factor_high < factor_low,
             "higher compression should give lower cost: \
@@ -1627,10 +1454,7 @@ mod tests {
             input: Box::new(RelExpr::scan("orders")),
         };
         let result = opt.optimize(&plan).expect("should succeed");
-        assert_eq!(
-            result.strategy,
-            CitusStrategy::DistributedAggregation
-        );
+        assert_eq!(result.strategy, CitusStrategy::DistributedAggregation);
         assert_eq!(result.execution, ExecutionLocation::Workers);
     }
 
@@ -1690,10 +1514,7 @@ mod tests {
             input: Box::new(RelExpr::scan("orders")),
         };
         let result = opt.optimize(&plan).expect("should succeed");
-        assert_eq!(
-            result.strategy,
-            CitusStrategy::DistributedAggregation,
-        );
+        assert_eq!(result.strategy, CitusStrategy::DistributedAggregation,);
     }
 
     #[test]
@@ -1724,10 +1545,7 @@ mod tests {
             input: Box::new(RelExpr::scan("orders")),
         };
         let result = opt.optimize(&plan).expect("should succeed");
-        assert_eq!(
-            result.strategy,
-            CitusStrategy::DistributedAggregation,
-        );
+        assert_eq!(result.strategy, CitusStrategy::DistributedAggregation,);
     }
 
     // ------ Filter / shard pruning integration tests ------
@@ -1736,10 +1554,7 @@ mod tests {
     fn filter_with_shard_pruning_equality() {
         let opt = make_optimizer();
         let plan = RelExpr::Filter {
-            predicate: eq(
-                col("customer_id"),
-                Expr::Const(Const::Int(42)),
-            ),
+            predicate: eq(col("customer_id"), Expr::Const(Const::Int(42))),
             input: Box::new(RelExpr::scan("orders")),
         };
         let result = opt.optimize(&plan).expect("should succeed");
@@ -1754,10 +1569,7 @@ mod tests {
     fn filter_without_dist_key() {
         let opt = make_optimizer();
         let plan = RelExpr::Filter {
-            predicate: eq(
-                col("status"),
-                Expr::Const(Const::String("active".into())),
-            ),
+            predicate: eq(col("status"), Expr::Const(Const::String("active".into()))),
             input: Box::new(RelExpr::scan("orders")),
         };
         let result = opt.optimize(&plan).expect("should succeed");
@@ -1769,10 +1581,7 @@ mod tests {
     fn filter_with_range_pruning() {
         let opt = make_optimizer();
         let plan = RelExpr::Filter {
-            predicate: gt(
-                col("customer_id"),
-                Expr::Const(Const::Int(1000)),
-            ),
+            predicate: gt(col("customer_id"), Expr::Const(Const::Int(1000))),
             input: Box::new(RelExpr::scan("orders")),
         };
         let result = opt.optimize(&plan).expect("should succeed");
@@ -1805,10 +1614,7 @@ mod tests {
         let result = opt.optimize(&plan).expect("should succeed");
         assert_eq!(result.strategy, CitusStrategy::LocalScan);
         assert_eq!(result.execution, ExecutionLocation::AllNodes);
-        assert_eq!(
-            result.distribution,
-            DataDistribution::Replicated,
-        );
+        assert_eq!(result.distribution, DataDistribution::Replicated,);
     }
 
     #[test]
@@ -1936,14 +1742,8 @@ mod tests {
 
     #[test]
     fn strategy_labels() {
-        assert_eq!(
-            CitusStrategy::ColocatedJoin.label(),
-            "ColocatedJoin"
-        );
-        assert_eq!(
-            CitusStrategy::ReferenceJoin.label(),
-            "ReferenceJoin"
-        );
+        assert_eq!(CitusStrategy::ColocatedJoin.label(), "ColocatedJoin");
+        assert_eq!(CitusStrategy::ReferenceJoin.label(), "ReferenceJoin");
         assert_eq!(
             CitusStrategy::DistributedAggregation.label(),
             "DistributedAggregation"
@@ -1952,26 +1752,11 @@ mod tests {
 
     #[test]
     fn strategy_network_transfer() {
-        assert!(
-            !CitusStrategy::ColocatedJoin
-                .requires_network_transfer()
-        );
-        assert!(
-            !CitusStrategy::ReferenceJoin
-                .requires_network_transfer()
-        );
-        assert!(
-            CitusStrategy::DistributedAggregation
-                .requires_network_transfer()
-        );
-        assert!(
-            CitusStrategy::GenericDistributed
-                .requires_network_transfer()
-        );
-        assert!(
-            !CitusStrategy::SingleShardQuery
-                .requires_network_transfer()
-        );
+        assert!(!CitusStrategy::ColocatedJoin.requires_network_transfer());
+        assert!(!CitusStrategy::ReferenceJoin.requires_network_transfer());
+        assert!(CitusStrategy::DistributedAggregation.requires_network_transfer());
+        assert!(CitusStrategy::GenericDistributed.requires_network_transfer());
+        assert!(!CitusStrategy::SingleShardQuery.requires_network_transfer());
     }
 
     // ------ Error handling tests ------
@@ -1994,8 +1779,7 @@ mod tests {
 
     #[test]
     fn extract_table_name_from_scan() {
-        let name =
-            extract_table_name(&RelExpr::scan("users"));
+        let name = extract_table_name(&RelExpr::scan("users"));
         assert_eq!(name, Some("users".to_owned()));
     }
 
@@ -2074,14 +1858,8 @@ mod tests {
 
     #[test]
     fn expr_references_column_simple() {
-        assert!(expr_references_column(
-            &col("customer_id"),
-            "customer_id"
-        ));
-        assert!(!expr_references_column(
-            &col("customer_id"),
-            "order_id"
-        ));
+        assert!(expr_references_column(&col("customer_id"), "customer_id"));
+        assert!(!expr_references_column(&col("customer_id"), "order_id"));
     }
 
     #[test]
@@ -2097,16 +1875,10 @@ mod tests {
     fn full_query_colocated_join_with_filter() {
         let opt = make_optimizer();
         let plan = RelExpr::Filter {
-            predicate: eq(
-                col("customer_id"),
-                Expr::Const(Const::Int(42)),
-            ),
+            predicate: eq(col("customer_id"), Expr::Const(Const::Int(42))),
             input: Box::new(RelExpr::Join {
                 join_type: JoinType::Inner,
-                condition: eq(
-                    col("customer_id"),
-                    col("customer_id"),
-                ),
+                condition: eq(col("customer_id"), col("customer_id")),
                 left: Box::new(RelExpr::scan("orders")),
                 right: Box::new(RelExpr::scan("order_items")),
             }),
@@ -2114,8 +1886,7 @@ mod tests {
         let result = opt.optimize(&plan).expect("should succeed");
         // The filter should detect shard pruning
         assert!(
-            result.strategy == CitusStrategy::SingleShardQuery
-                || result.shard_pruning.is_some()
+            result.strategy == CitusStrategy::SingleShardQuery || result.shard_pruning.is_some()
         );
     }
 
@@ -2140,10 +1911,7 @@ mod tests {
         };
         let result = opt.optimize(&plan).expect("should succeed");
         // Should detect distributed aggregation by customer_id
-        assert_eq!(
-            result.strategy,
-            CitusStrategy::DistributedAggregation,
-        );
+        assert_eq!(result.strategy, CitusStrategy::DistributedAggregation,);
     }
 
     // ------ Columnar scan annotation tests ------
@@ -2301,10 +2069,7 @@ mod tests {
             CitusStrategy::GenericDistributed,
         ];
         for s in &strategies {
-            assert!(
-                !s.label().is_empty(),
-                "strategy label should be non-empty"
-            );
+            assert!(!s.label().is_empty(), "strategy label should be non-empty");
         }
     }
 
@@ -2352,8 +2117,7 @@ mod tests {
             gt(col("customer_id"), Expr::Const(Const::Int(100))),
             gt(col("customer_id"), Expr::Const(Const::Int(200))),
         );
-        let result =
-            analyze_shard_pruning(&pred, "customer_id", 32);
+        let result = analyze_shard_pruning(&pred, "customer_id", 32);
         assert!(!result.is_single_shard);
         assert_eq!(
             result.shards_remaining, 16,
@@ -2371,9 +2135,7 @@ mod tests {
         let err = CitusOptimizerError::NoWorkerNodes;
         assert!(err.to_string().contains("no active worker"));
 
-        let err = CitusOptimizerError::TableNotFound(
-            "missing_table".to_owned(),
-        );
+        let err = CitusOptimizerError::TableNotFound("missing_table".to_owned());
         assert!(err.to_string().contains("missing_table"));
     }
 
@@ -2393,13 +2155,7 @@ mod tests {
     #[test]
     fn citus_optimizer_config_default() {
         let config = CitusOptimizerConfig::default();
-        assert!(
-            (config.coordinator_network_factor - 1.0).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (config.worker_network_factor - 2.0).abs()
-                < f64::EPSILON
-        );
+        assert!((config.coordinator_network_factor - 1.0).abs() < f64::EPSILON);
+        assert!((config.worker_network_factor - 2.0).abs() < f64::EPSILON);
     }
 }

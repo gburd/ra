@@ -11,20 +11,18 @@ use std::collections::HashMap;
 use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::cost::Cost;
 use ra_core::distributed_agg::{
-    all_decomposable, decompose_all, is_two_phase_worthwhile,
-    AggValue, AggregationStrategy, DistributedAggConfig,
+    all_decomposable, decompose_all, is_two_phase_worthwhile, AggValue, AggregationStrategy,
+    DistributedAggConfig,
 };
 use ra_core::distribution::{
-    check_join_compatibility, DataDistribution, DistributedRelExpr,
-    DistributionCompatibility, DistributionStrategy, NodeId,
+    check_join_compatibility, DataDistribution, DistributedRelExpr, DistributionCompatibility,
+    DistributionStrategy, NodeId,
 };
 use ra_core::expr::Expr;
 use ra_core::statistics::Statistics;
 use ra_stats::skew::{FrequencyHistogram, SkewDetector, SkewStrategy};
 
-use crate::network_cost::{
-    self, JoinSides, NetworkCostModel,
-};
+use crate::network_cost::{self, JoinSides, NetworkCostModel};
 
 /// Errors from the distributed optimizer.
 #[derive(Debug, thiserror::Error)]
@@ -94,8 +92,7 @@ impl ClusterTopology {
     /// Create a simple uniform cluster with N nodes.
     #[must_use]
     pub fn uniform(num_nodes: u32) -> Self {
-        let nodes: Vec<NodeId> =
-            (0..num_nodes).map(NodeId).collect();
+        let nodes: Vec<NodeId> = (0..num_nodes).map(NodeId).collect();
         let mut bandwidth = HashMap::new();
         let mut latency_us = HashMap::new();
 
@@ -118,24 +115,15 @@ impl ClusterTopology {
     }
 
     /// Register a table's location and distribution.
-    pub fn register_table(
-        &mut self,
-        table: &str,
-        node: NodeId,
-        distribution: DataDistribution,
-    ) {
-        self.table_locations
-            .insert(table.to_owned(), node);
+    pub fn register_table(&mut self, table: &str, node: NodeId, distribution: DataDistribution) {
+        self.table_locations.insert(table.to_owned(), node);
         self.table_distributions
             .insert(table.to_owned(), distribution);
     }
 
     /// Get the distribution for a table.
     #[must_use]
-    pub fn table_distribution(
-        &self,
-        table: &str,
-    ) -> DataDistribution {
+    pub fn table_distribution(&self, table: &str) -> DataDistribution {
         self.table_distributions
             .get(table)
             .cloned()
@@ -144,12 +132,7 @@ impl ClusterTopology {
 
     /// Estimate transfer time in milliseconds.
     #[must_use]
-    pub fn transfer_time_ms(
-        &self,
-        from: NodeId,
-        to: NodeId,
-        bytes: u64,
-    ) -> f64 {
+    pub fn transfer_time_ms(&self, from: NodeId, to: NodeId, bytes: u64) -> f64 {
         if from == to {
             return 0.0;
         }
@@ -158,11 +141,7 @@ impl ClusterTopology {
             .get(&(from, to))
             .copied()
             .unwrap_or(1_000_000_000); // default 1 Gbps
-        let lat = self
-            .latency_us
-            .get(&(from, to))
-            .copied()
-            .unwrap_or(1000); // default 1 ms
+        let lat = self.latency_us.get(&(from, to)).copied().unwrap_or(1000); // default 1 ms
 
         let latency_ms = lat as f64 / 1000.0;
         let transfer_ms = bytes as f64 / bw as f64 * 1000.0;
@@ -191,30 +170,25 @@ fn to_network_strategy(
         }
         DistributionStrategy::Shuffle {
             source, targets, ..
-        } => {
-            Some(network_cost::DistributionStrategy::Shuffle {
-                source: ra_hardware::network::NodeId(source.0),
-                targets: targets
-                    .iter()
-                    .map(|n| ra_hardware::network::NodeId(n.0))
-                    .collect(),
-            })
-        }
-        DistributionStrategy::CoLocated
-        | DistributionStrategy::PartitionWise { .. } => {
+        } => Some(network_cost::DistributionStrategy::Shuffle {
+            source: ra_hardware::network::NodeId(source.0),
+            targets: targets
+                .iter()
+                .map(|n| ra_hardware::network::NodeId(n.0))
+                .collect(),
+        }),
+        DistributionStrategy::CoLocated | DistributionStrategy::PartitionWise { .. } => {
             Some(network_cost::DistributionStrategy::CoLocated)
         }
         DistributionStrategy::PartialBroadcast {
             source, targets, ..
-        } => {
-            Some(network_cost::DistributionStrategy::Broadcast {
-                source: ra_hardware::network::NodeId(source.0),
-                targets: targets
-                    .iter()
-                    .map(|n| ra_hardware::network::NodeId(n.0))
-                    .collect(),
-            })
-        }
+        } => Some(network_cost::DistributionStrategy::Broadcast {
+            source: ra_hardware::network::NodeId(source.0),
+            targets: targets
+                .iter()
+                .map(|n| ra_hardware::network::NodeId(n.0))
+                .collect(),
+        }),
         DistributionStrategy::RangePartition { .. } => None,
     }
 }
@@ -230,30 +204,20 @@ fn from_network_strategy(
     nodes: &[NodeId],
 ) -> Option<DistributionStrategy> {
     match strategy {
-        network_cost::DistributionStrategy::Broadcast {
-            source,
-            targets,
-        } => Some(DistributionStrategy::Broadcast {
-            source: NodeId(source.0),
-            targets: targets
-                .iter()
-                .map(|n| NodeId(n.0))
-                .collect(),
-        }),
-        network_cost::DistributionStrategy::Shuffle {
-            source,
-            targets,
-        } => {
+        network_cost::DistributionStrategy::Broadcast { source, targets } => {
+            Some(DistributionStrategy::Broadcast {
+                source: NodeId(source.0),
+                targets: targets.iter().map(|n| NodeId(n.0)).collect(),
+            })
+        }
+        network_cost::DistributionStrategy::Shuffle { source, targets } => {
             // We don't have join keys from the network model's
             // recommendation, so use an empty key list. The
             // caller's existing Shuffle strategy with keys will
             // typically be preferred if keys are available.
             Some(DistributionStrategy::Shuffle {
                 source: NodeId(source.0),
-                targets: targets
-                    .iter()
-                    .map(|n| NodeId(n.0))
-                    .collect(),
+                targets: targets.iter().map(|n| NodeId(n.0)).collect(),
                 partition_keys: Vec::new(),
             })
         }
@@ -307,12 +271,8 @@ pub struct DistributedOptimizer {
 impl DistributedOptimizer {
     /// Create a new distributed optimizer.
     #[must_use]
-    pub fn new(
-        config: DistributedOptimizerConfig,
-        topology: ClusterTopology,
-    ) -> Self {
-        let skew_detector =
-            SkewDetector::new(config.skew_threshold);
+    pub fn new(config: DistributedOptimizerConfig, topology: ClusterTopology) -> Self {
+        let skew_detector = SkewDetector::new(config.skew_threshold);
         Self {
             config,
             topology,
@@ -330,10 +290,7 @@ impl DistributedOptimizer {
     /// heuristic estimates. Strategy enumeration also consults
     /// `recommend_join_strategy` from the network cost model.
     #[must_use]
-    pub fn with_network_cost(
-        mut self,
-        model: NetworkCostModel,
-    ) -> Self {
+    pub fn with_network_cost(mut self, model: NetworkCostModel) -> Self {
         self.network_cost = Some(model);
         self
     }
@@ -351,11 +308,7 @@ impl DistributedOptimizer {
     }
 
     /// Register statistics for a table.
-    pub fn register_stats(
-        &mut self,
-        table: &str,
-        stats: Statistics,
-    ) {
+    pub fn register_stats(&mut self, table: &str, stats: Statistics) {
         self.table_stats.insert(table.to_owned(), stats);
     }
 
@@ -363,16 +316,9 @@ impl DistributedOptimizer {
     ///
     /// Used by skew detection to identify hot keys in group-by
     /// columns.
-    pub fn register_histogram(
-        &mut self,
-        table: &str,
-        column: &str,
-        histogram: FrequencyHistogram,
-    ) {
-        self.histograms.insert(
-            (table.to_owned(), column.to_owned()),
-            histogram,
-        );
+    pub fn register_histogram(&mut self, table: &str, column: &str, histogram: FrequencyHistogram) {
+        self.histograms
+            .insert((table.to_owned(), column.to_owned()), histogram);
     }
 
     /// Optimize the distribution for a complete plan.
@@ -394,22 +340,15 @@ impl DistributedOptimizer {
     }
 
     /// Recursively annotate a plan with distribution info.
-    fn annotate(
-        &self,
-        plan: &RelExpr,
-    ) -> Result<DistributedRelExpr, DistributedOptimizerError> {
+    fn annotate(&self, plan: &RelExpr) -> Result<DistributedRelExpr, DistributedOptimizerError> {
         match plan {
-            RelExpr::Scan { table, .. } => {
-                self.annotate_scan(table, plan)
-            }
+            RelExpr::Scan { table, .. } => self.annotate_scan(table, plan),
             RelExpr::Join {
                 join_type,
                 condition,
                 left,
                 right,
-            } => self.annotate_join(
-                *join_type, condition, left, right, plan,
-            ),
+            } => self.annotate_join(*join_type, condition, left, right, plan),
             RelExpr::Filter { input, .. } => {
                 let child = self.annotate(input)?;
                 Ok(DistributedRelExpr {
@@ -428,9 +367,9 @@ impl DistributedOptimizer {
                     input_strategy: None,
                 })
             }
-            RelExpr::Aggregate { input, group_by, .. } => {
-                self.annotate_aggregate(input, group_by, plan)
-            }
+            RelExpr::Aggregate {
+                input, group_by, ..
+            } => self.annotate_aggregate(input, group_by, plan),
             _ => {
                 // For other operators, use arbitrary distribution.
                 Ok(DistributedRelExpr::new(plan.clone()))
@@ -467,8 +406,7 @@ impl DistributedOptimizer {
         let right_ann = self.annotate(right)?;
 
         let join_keys = extract_equi_join_keys(condition);
-        let (keys_l, keys_r): (Vec<Expr>, Vec<Expr>) =
-            join_keys.into_iter().unzip();
+        let (keys_l, keys_r): (Vec<Expr>, Vec<Expr>) = join_keys.into_iter().unzip();
 
         let left_bytes = self.estimate_bytes(left);
         let right_bytes = self.estimate_bytes(right);
@@ -488,29 +426,26 @@ impl DistributedOptimizer {
         let best = candidates
             .into_iter()
             .map(|s| {
-                let cost = self.cost_strategy(
-                    &s, left_bytes, right_bytes,
-                );
+                let cost = self.cost_strategy(&s, left_bytes, right_bytes);
                 (s, cost)
             })
             .min_by(|(_, a), (_, b)| {
-                a.total().partial_cmp(&b.total()).unwrap_or(
-                    std::cmp::Ordering::Equal,
-                )
+                a.total()
+                    .partial_cmp(&b.total())
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(s, _)| s)
             .unwrap_or(DistributionStrategy::CoLocated);
 
         // Determine output distribution.
         let output_dist = match &best {
-            DistributionStrategy::Shuffle {
-                partition_keys, ..
-            } => DataDistribution::HashPartitioned {
-                keys: partition_keys.clone(),
-                partition_count: self.topology.nodes.len() as u32,
-            },
-            DistributionStrategy::CoLocated
-            | DistributionStrategy::PartitionWise { .. } => {
+            DistributionStrategy::Shuffle { partition_keys, .. } => {
+                DataDistribution::HashPartitioned {
+                    keys: partition_keys.clone(),
+                    partition_count: self.topology.nodes.len() as u32,
+                }
+            }
+            DistributionStrategy::CoLocated | DistributionStrategy::PartitionWise { .. } => {
                 left_ann.distribution.clone()
             }
             DistributionStrategy::Broadcast { .. }
@@ -554,47 +489,33 @@ impl DistributedOptimizer {
                 plan: plan.clone(),
                 distribution: child.distribution,
                 node_assignment: child.node_assignment,
-                input_strategy: Some(
-                    DistributionStrategy::PartitionWise {
-                        partition_key: group_by
-                            .first()
-                            .cloned()
-                            .unwrap_or(Expr::Const(
-                                ra_core::expr::Const::Null,
-                            )),
-                    },
-                ),
+                input_strategy: Some(DistributionStrategy::PartitionWise {
+                    partition_key: group_by
+                        .first()
+                        .cloned()
+                        .unwrap_or(Expr::Const(ra_core::expr::Const::Null)),
+                }),
             });
         }
 
         // Extract aggregates from the plan.
-        let aggregates = if let RelExpr::Aggregate {
-            aggregates, ..
-        } = plan
-        {
+        let aggregates = if let RelExpr::Aggregate { aggregates, .. } = plan {
             aggregates.clone()
         } else {
             Vec::new()
         };
 
         // Check if two-phase aggregation is applicable.
-        let agg_result =
-            self.select_agg_strategy(input, group_by, &aggregates);
+        let agg_result = self.select_agg_strategy(input, group_by, &aggregates);
 
         match &agg_result.strategy {
-            AggregationStrategy::TwoPhase { .. }
-            | AggregationStrategy::ThreePhase { .. } => {
-                self.build_two_phase_plan(
-                    plan, group_by, &agg_result,
-                )
+            AggregationStrategy::TwoPhase { .. } | AggregationStrategy::ThreePhase { .. } => {
+                self.build_two_phase_plan(plan, group_by, &agg_result)
             }
             AggregationStrategy::SkewAware { .. } => {
-                self.build_skew_aware_plan(
-                    plan, group_by, &agg_result,
-                )
+                self.build_skew_aware_plan(plan, group_by, &agg_result)
             }
-            AggregationStrategy::SinglePhase
-            | AggregationStrategy::MapReduce { .. } => {
+            AggregationStrategy::SinglePhase | AggregationStrategy::MapReduce { .. } => {
                 self.build_single_phase_plan(plan, group_by)
             }
         }
@@ -618,18 +539,12 @@ impl DistributedOptimizer {
         }
 
         let input_rows = self.estimate_row_count(input);
-        let distinct_groups = self.estimate_distinct_groups(
-            input, group_by,
-        );
+        let distinct_groups = self.estimate_distinct_groups(input, group_by);
 
         let agg_config = self.make_agg_config();
 
         // Check if two-phase is worthwhile.
-        if !is_two_phase_worthwhile(
-            input_rows,
-            distinct_groups,
-            &agg_config,
-        ) {
+        if !is_two_phase_worthwhile(input_rows, distinct_groups, &agg_config) {
             return AggStrategyResult {
                 strategy: AggregationStrategy::SinglePhase,
                 decomposed: None,
@@ -658,9 +573,7 @@ impl DistributedOptimizer {
         let decomposed = match &strategy {
             AggregationStrategy::TwoPhase { .. }
             | AggregationStrategy::ThreePhase { .. }
-            | AggregationStrategy::SkewAware { .. } => {
-                decompose_all(aggregates)
-            }
+            | AggregationStrategy::SkewAware { .. } => decompose_all(aggregates),
             _ => None,
         };
 
@@ -685,17 +598,10 @@ impl DistributedOptimizer {
         if group_by.is_empty() {
             // Global aggregate with two-phase: local partial on
             // each node, then gather to one node for global.
-            let target = self
-                .topology
-                .nodes
-                .first()
-                .copied()
-                .unwrap_or(NodeId(0));
+            let target = self.topology.nodes.first().copied().unwrap_or(NodeId(0));
             return Ok(DistributedRelExpr {
                 plan: plan.clone(),
-                distribution: DataDistribution::SinglePartition {
-                    node: target,
-                },
+                distribution: DataDistribution::SinglePartition { node: target },
                 node_assignment: Some(target),
                 input_strategy: None,
             });
@@ -703,12 +609,7 @@ impl DistributedOptimizer {
 
         // For grouped aggregates: local pre-agg on each node,
         // then shuffle by group keys to finalize.
-        let source = self
-            .topology
-            .nodes
-            .first()
-            .copied()
-            .unwrap_or(NodeId(0));
+        let source = self.topology.nodes.first().copied().unwrap_or(NodeId(0));
 
         // Both two-phase and three-phase use shuffle by group keys.
         // Three-phase adds an intermediate shuffle internally,
@@ -744,28 +645,16 @@ impl DistributedOptimizer {
         _agg_result: &AggStrategyResult,
     ) -> Result<DistributedRelExpr, DistributedOptimizerError> {
         if group_by.is_empty() {
-            let target = self
-                .topology
-                .nodes
-                .first()
-                .copied()
-                .unwrap_or(NodeId(0));
+            let target = self.topology.nodes.first().copied().unwrap_or(NodeId(0));
             return Ok(DistributedRelExpr {
                 plan: plan.clone(),
-                distribution: DataDistribution::SinglePartition {
-                    node: target,
-                },
+                distribution: DataDistribution::SinglePartition { node: target },
                 node_assignment: Some(target),
                 input_strategy: None,
             });
         }
 
-        let source = self
-            .topology
-            .nodes
-            .first()
-            .copied()
-            .unwrap_or(NodeId(0));
+        let source = self.topology.nodes.first().copied().unwrap_or(NodeId(0));
 
         let partition_count = self.topology.nodes.len() as u32;
 
@@ -792,12 +681,7 @@ impl DistributedOptimizer {
         group_by: &[Expr],
     ) -> Result<DistributedRelExpr, DistributedOptimizerError> {
         if !group_by.is_empty() {
-            let source = self
-                .topology
-                .nodes
-                .first()
-                .copied()
-                .unwrap_or(NodeId(0));
+            let source = self.topology.nodes.first().copied().unwrap_or(NodeId(0));
 
             let partition_count = self.topology.nodes.len() as u32;
 
@@ -808,24 +692,19 @@ impl DistributedOptimizer {
                     partition_count,
                 },
                 node_assignment: None,
-                input_strategy: Some(
-                    DistributionStrategy::Shuffle {
-                        source,
-                        targets: self.topology.nodes.clone(),
-                        partition_keys: group_by.to_vec(),
-                    },
-                ),
+                input_strategy: Some(DistributionStrategy::Shuffle {
+                    source,
+                    targets: self.topology.nodes.clone(),
+                    partition_keys: group_by.to_vec(),
+                }),
             });
         }
 
         // Global aggregate: gather to one node.
-        let target =
-            self.topology.nodes.first().copied().unwrap_or(NodeId(0));
+        let target = self.topology.nodes.first().copied().unwrap_or(NodeId(0));
         Ok(DistributedRelExpr {
             plan: plan.clone(),
-            distribution: DataDistribution::SinglePartition {
-                node: target,
-            },
+            distribution: DataDistribution::SinglePartition { node: target },
             node_assignment: Some(target),
             input_strategy: None,
         })
@@ -833,27 +712,19 @@ impl DistributedOptimizer {
 
     /// Detect skew in group-by keys by checking registered
     /// histograms.
-    fn detect_group_key_skew(
-        &self,
-        input: &RelExpr,
-        group_by: &[Expr],
-    ) -> bool {
+    fn detect_group_key_skew(&self, input: &RelExpr, group_by: &[Expr]) -> bool {
         let Some(table) = Self::extract_table_name(input) else {
             return false;
         };
 
         for key in group_by {
-            let Some(col_name) = Self::extract_column_name(key)
-            else {
+            let Some(col_name) = Self::extract_column_name(key) else {
                 continue;
             };
 
             let hist_key = (table.clone(), col_name.clone());
-            if let Some(histogram) = self.histograms.get(&hist_key)
-            {
-                let analysis = self
-                    .skew_detector
-                    .analyze(&col_name, histogram);
+            if let Some(histogram) = self.histograms.get(&hist_key) {
+                let analysis = self.skew_detector.analyze(&col_name, histogram);
                 if !analysis.hot_keys.is_empty() {
                     return true;
                 }
@@ -878,18 +749,14 @@ impl DistributedOptimizer {
             let hist_key = (table.clone(), col_name.clone());
             let histogram = self.histograms.get(&hist_key)?;
 
-            let analysis =
-                self.skew_detector.analyze(&col_name, histogram);
+            let analysis = self.skew_detector.analyze(&col_name, histogram);
             if !analysis.hot_keys.is_empty() {
                 let hot_values: Vec<AggValue> = analysis
                     .hot_keys
                     .iter()
                     .map(|hk| AggValue::String(hk.value.clone()))
                     .collect();
-                return Some((
-                    analysis.recommended_strategy,
-                    hot_values,
-                ));
+                return Some((analysis.recommended_strategy, hot_values));
             }
         }
 
@@ -904,9 +771,7 @@ impl DistributedOptimizer {
             | RelExpr::Project { input, .. }
             | RelExpr::Distinct { input, .. }
             | RelExpr::Sort { input, .. }
-            | RelExpr::Limit { input, .. } => {
-                Self::extract_table_name(input)
-            }
+            | RelExpr::Limit { input, .. } => Self::extract_table_name(input),
             _ => None,
         }
     }
@@ -943,15 +808,9 @@ impl DistributedOptimizer {
                     1000
                 }
             }
-            RelExpr::Filter { input, .. } => {
-                self.estimate_row_count(input) / 10
-            }
-            RelExpr::Project { input, .. } => {
-                self.estimate_row_count(input)
-            }
-            RelExpr::Aggregate { input, .. } => {
-                self.estimate_row_count(input) / 100
-            }
+            RelExpr::Filter { input, .. } => self.estimate_row_count(input) / 10,
+            RelExpr::Project { input, .. } => self.estimate_row_count(input),
+            RelExpr::Aggregate { input, .. } => self.estimate_row_count(input) / 100,
             RelExpr::Join { left, right, .. } => {
                 let l = self.estimate_row_count(left);
                 let r = self.estimate_row_count(right);
@@ -962,11 +821,7 @@ impl DistributedOptimizer {
     }
 
     /// Estimate distinct group count for group-by keys.
-    fn estimate_distinct_groups(
-        &self,
-        input: &RelExpr,
-        group_by: &[Expr],
-    ) -> u64 {
+    fn estimate_distinct_groups(&self, input: &RelExpr, group_by: &[Expr]) -> u64 {
         if group_by.is_empty() {
             return 1;
         }
@@ -1002,25 +857,16 @@ impl DistributedOptimizer {
             return strategies;
         }
 
-        let compat = check_join_compatibility(
-            left_dist,
-            right_dist,
-            join_keys_left,
-            join_keys_right,
-        );
+        let compat =
+            check_join_compatibility(left_dist, right_dist, join_keys_left, join_keys_right);
 
         // Strategy 1: Co-located / Partition-wise.
         if compat == DistributionCompatibility::Compatible {
-            if let DataDistribution::HashPartitioned {
-                keys, ..
-            } = left_dist
-            {
+            if let DataDistribution::HashPartitioned { keys, .. } = left_dist {
                 if let Some(key) = keys.first() {
-                    strategies.push(
-                        DistributionStrategy::PartitionWise {
-                            partition_key: key.clone(),
-                        },
-                    );
+                    strategies.push(DistributionStrategy::PartitionWise {
+                        partition_key: key.clone(),
+                    });
                 }
             } else {
                 strategies.push(DistributionStrategy::CoLocated);
@@ -1031,8 +877,7 @@ impl DistributedOptimizer {
         if right_bytes < self.config.broadcast_threshold
             && is_broadcast_compatible(join_type, false)
         {
-            let source =
-                nodes.first().copied().unwrap_or(NodeId(0));
+            let source = nodes.first().copied().unwrap_or(NodeId(0));
             strategies.push(DistributionStrategy::Broadcast {
                 source,
                 targets: nodes.clone(),
@@ -1040,11 +885,9 @@ impl DistributedOptimizer {
         }
 
         // Strategy 3: Broadcast left side.
-        if left_bytes < self.config.broadcast_threshold
-            && is_broadcast_compatible(join_type, true)
+        if left_bytes < self.config.broadcast_threshold && is_broadcast_compatible(join_type, true)
         {
-            let source =
-                nodes.first().copied().unwrap_or(NodeId(0));
+            let source = nodes.first().copied().unwrap_or(NodeId(0));
             strategies.push(DistributionStrategy::Broadcast {
                 source,
                 targets: nodes.clone(),
@@ -1067,67 +910,44 @@ impl DistributedOptimizer {
         }
 
         // Strategy 5: Range partition (if enabled).
-        if self.config.enable_range_partition
-            && !join_keys_left.is_empty()
-        {
+        if self.config.enable_range_partition && !join_keys_left.is_empty() {
             let key = join_keys_left[0].clone();
             let range_count = nodes.len().min(32);
             let ranges: Vec<(String, String)> = (0..range_count)
-                .map(|i| {
-                    (i.to_string(), (i + 1).to_string())
-                })
+                .map(|i| (i.to_string(), (i + 1).to_string()))
                 .collect();
-            strategies.push(
-                DistributionStrategy::RangePartition {
-                    partition_key: key,
-                    ranges,
-                },
-            );
+            strategies.push(DistributionStrategy::RangePartition {
+                partition_key: key,
+                ranges,
+            });
         }
 
         // Strategy 6: Network cost model recommendation.
         if let Some(ncm) = &self.network_cost {
-            let row_width =
-                self.config.default_row_width.max(1) as usize;
+            let row_width = self.config.default_row_width.max(1) as usize;
             let left_rows = left_bytes / row_width as u64;
             let right_rows = right_bytes / row_width as u64;
 
-            let left_node = nodes
-                .first()
-                .copied()
-                .unwrap_or(NodeId(0));
-            let right_node = nodes
-                .last()
-                .copied()
-                .unwrap_or(NodeId(0));
+            let left_node = nodes.first().copied().unwrap_or(NodeId(0));
+            let right_node = nodes.last().copied().unwrap_or(NodeId(0));
 
-            let hw_nodes: Vec<ra_hardware::network::NodeId> =
-                nodes
-                    .iter()
-                    .map(|n| ra_hardware::network::NodeId(n.0))
-                    .collect();
+            let hw_nodes: Vec<ra_hardware::network::NodeId> = nodes
+                .iter()
+                .map(|n| ra_hardware::network::NodeId(n.0))
+                .collect();
 
             let sides = JoinSides {
-                left_node: ra_hardware::network::NodeId(
-                    left_node.0,
-                ),
-                right_node: ra_hardware::network::NodeId(
-                    right_node.0,
-                ),
+                left_node: ra_hardware::network::NodeId(left_node.0),
+                right_node: ra_hardware::network::NodeId(right_node.0),
                 left_rows,
                 right_rows,
                 row_width,
             };
 
-            let recommended = ncm.recommend_join_strategy(
-                &sides,
-                &hw_nodes,
-                self.config.broadcast_threshold,
-            );
+            let recommended =
+                ncm.recommend_join_strategy(&sides, &hw_nodes, self.config.broadcast_threshold);
 
-            if let Some(converted) =
-                from_network_strategy(&recommended, nodes)
-            {
+            if let Some(converted) = from_network_strategy(&recommended, nodes) {
                 strategies.push(converted);
             }
         }
@@ -1174,8 +994,7 @@ impl DistributedOptimizer {
         left_bytes: u64,
         right_bytes: u64,
     ) -> Cost {
-        let row_width =
-            self.config.default_row_width.max(1) as usize;
+        let row_width = self.config.default_row_width.max(1) as usize;
 
         let input_rows = match orig {
             DistributionStrategy::Broadcast { .. }
@@ -1183,14 +1002,11 @@ impl DistributedOptimizer {
                 let small = left_bytes.min(right_bytes);
                 small / row_width as u64
             }
-            DistributionStrategy::Shuffle { .. } => {
-                (left_bytes + right_bytes) / row_width as u64
-            }
+            DistributionStrategy::Shuffle { .. } => (left_bytes + right_bytes) / row_width as u64,
             _ => 0,
         };
 
-        let est =
-            ncm.distribution_cost(net_strat, input_rows, row_width);
+        let est = ncm.distribution_cost(net_strat, input_rows, row_width);
 
         // Combine: network component from topology model,
         // add CPU hashing cost for shuffle, add monetary weight.
@@ -1198,17 +1014,14 @@ impl DistributedOptimizer {
         let monetary = est.monetary_cost;
 
         let cpu = match orig {
-            DistributionStrategy::Shuffle { .. } => {
-                (left_bytes + right_bytes) as f64 * 0.001
-            }
+            DistributionStrategy::Shuffle { .. } => (left_bytes + right_bytes) as f64 * 0.001,
             _ => 0.0,
         };
 
         Cost::new(
             cpu,
             0.0,
-            network_ms * self.config.network_weight
-                + monetary * self.config.monetary_weight,
+            network_ms * self.config.network_weight + monetary * self.config.monetary_weight,
             est.bytes_transferred,
         )
     }
@@ -1221,21 +1034,14 @@ impl DistributedOptimizer {
         right_bytes: u64,
     ) -> Cost {
         match strategy {
-            DistributionStrategy::CoLocated
-            | DistributionStrategy::PartitionWise { .. } => {
+            DistributionStrategy::CoLocated | DistributionStrategy::PartitionWise { .. } => {
                 Cost::ZERO
             }
             DistributionStrategy::Broadcast { source, targets } => {
                 let small_bytes = left_bytes.min(right_bytes);
                 let mut total_network = 0.0;
                 for &target in targets {
-                    total_network += self
-                        .topology
-                        .transfer_time_ms(
-                            *source,
-                            target,
-                            small_bytes,
-                        );
+                    total_network += self.topology.transfer_time_ms(*source, target, small_bytes);
                 }
                 Cost::new(
                     0.0,
@@ -1245,9 +1051,7 @@ impl DistributedOptimizer {
                 )
             }
             DistributionStrategy::Shuffle {
-                source,
-                targets,
-                ..
+                source, targets, ..
             } => {
                 let total_bytes = left_bytes + right_bytes;
                 let per_node = if targets.is_empty() {
@@ -1257,11 +1061,7 @@ impl DistributedOptimizer {
                 };
                 let mut total_network = 0.0;
                 for &target in targets {
-                    total_network += self
-                        .topology
-                        .transfer_time_ms(
-                            *source, target, per_node,
-                        );
+                    total_network += self.topology.transfer_time_ms(*source, target, per_node);
                 }
                 let hash_cpu = total_bytes as f64 * 0.001;
                 Cost::new(
@@ -1272,20 +1072,12 @@ impl DistributedOptimizer {
                 )
             }
             DistributionStrategy::PartialBroadcast {
-                source,
-                targets,
-                ..
+                source, targets, ..
             } => {
                 let small_bytes = left_bytes.min(right_bytes);
                 let mut total_network = 0.0;
                 for &target in targets {
-                    total_network += self
-                        .topology
-                        .transfer_time_ms(
-                            *source,
-                            target,
-                            small_bytes,
-                        );
+                    total_network += self.topology.transfer_time_ms(*source, target, small_bytes);
                 }
                 Cost::new(
                     0.0,
@@ -1294,9 +1086,7 @@ impl DistributedOptimizer {
                     small_bytes * targets.len() as u64,
                 )
             }
-            DistributionStrategy::RangePartition {
-                ranges, ..
-            } => {
+            DistributionStrategy::RangePartition { ranges, .. } => {
                 let total_bytes = left_bytes + right_bytes;
                 let per_range = if ranges.is_empty() {
                     0
@@ -1304,8 +1094,7 @@ impl DistributedOptimizer {
                     total_bytes / ranges.len() as u64
                 };
                 let sort_cpu = total_bytes as f64 * 0.005;
-                let network = total_bytes as f64 * 0.001
-                    * self.config.network_weight;
+                let network = total_bytes as f64 * 0.001 * self.config.network_weight;
                 Cost::new(sort_cpu, 0.0, network, per_range)
             }
         }
@@ -1316,10 +1105,9 @@ impl DistributedOptimizer {
         match plan {
             RelExpr::Scan { table, .. } => {
                 if let Some(stats) = self.table_stats.get(table) {
-                    stats.total_size.max(
-                        (stats.row_count as u64)
-                            .saturating_mul(stats.avg_row_size),
-                    )
+                    stats
+                        .total_size
+                        .max((stats.row_count as u64).saturating_mul(stats.avg_row_size))
                 } else {
                     1000 * self.config.default_row_width
                 }
@@ -1349,10 +1137,7 @@ impl DistributedOptimizer {
 
 /// Whether broadcast is compatible with the given join type and
 /// which side is being broadcast.
-fn is_broadcast_compatible(
-    join_type: JoinType,
-    broadcast_left: bool,
-) -> bool {
+fn is_broadcast_compatible(join_type: JoinType, broadcast_left: bool) -> bool {
     match join_type {
         JoinType::Inner | JoinType::Cross | JoinType::Semi => true,
         JoinType::LeftOuter | JoinType::Anti => !broadcast_left,
@@ -1370,10 +1155,7 @@ fn extract_equi_join_keys(condition: &Expr) -> Vec<(Expr, Expr)> {
     keys
 }
 
-fn collect_equi_keys(
-    expr: &Expr,
-    keys: &mut Vec<(Expr, Expr)>,
-) {
+fn collect_equi_keys(expr: &Expr, keys: &mut Vec<(Expr, Expr)>) {
     match expr {
         Expr::BinOp {
             op: ra_core::expr::BinOp::Eq,
@@ -1420,17 +1202,13 @@ mod tests {
         }
     }
 
-    fn make_optimizer(
-        num_nodes: u32,
-    ) -> DistributedOptimizer {
+    fn make_optimizer(num_nodes: u32) -> DistributedOptimizer {
         let config = DistributedOptimizerConfig::default();
         let topology = ClusterTopology::uniform(num_nodes);
         DistributedOptimizer::new(config, topology)
     }
 
-    fn make_optimizer_with_tables(
-        num_nodes: u32,
-    ) -> DistributedOptimizer {
+    fn make_optimizer_with_tables(num_nodes: u32) -> DistributedOptimizer {
         let config = DistributedOptimizerConfig::default();
         let mut topology = ClusterTopology::uniform(num_nodes);
 
@@ -1453,11 +1231,7 @@ mod tests {
         countries_stats.avg_row_size = 64;
         countries_stats.total_size = 12_800;
 
-        topology.register_table(
-            "countries",
-            NodeId(0),
-            DataDistribution::Replicated,
-        );
+        topology.register_table("countries", NodeId(0), DataDistribution::Replicated);
 
         // Register a medium customers table.
         let mut customers_stats = Statistics::new(1_000_000.0);
@@ -1473,8 +1247,7 @@ mod tests {
             },
         );
 
-        let mut opt =
-            DistributedOptimizer::new(config, topology);
+        let mut opt = DistributedOptimizer::new(config, topology);
         opt.register_stats("orders", orders_stats);
         opt.register_stats("countries", countries_stats);
         opt.register_stats("customers", customers_stats);
@@ -1496,19 +1269,9 @@ mod tests {
     #[test]
     fn register_table_topology() {
         let mut t = ClusterTopology::uniform(4);
-        t.register_table(
-            "users",
-            NodeId(0),
-            DataDistribution::Replicated,
-        );
-        assert_eq!(
-            t.table_distribution("users"),
-            DataDistribution::Replicated,
-        );
-        assert_eq!(
-            t.table_locations.get("users"),
-            Some(&NodeId(0)),
-        );
+        t.register_table("users", NodeId(0), DataDistribution::Replicated);
+        assert_eq!(t.table_distribution("users"), DataDistribution::Replicated,);
+        assert_eq!(t.table_locations.get("users"), Some(&NodeId(0)),);
     }
 
     #[test]
@@ -1523,10 +1286,7 @@ mod tests {
     #[test]
     fn transfer_time_same_node() {
         let t = ClusterTopology::uniform(4);
-        assert_eq!(
-            t.transfer_time_ms(NodeId(0), NodeId(0), 1_000_000),
-            0.0,
-        );
+        assert_eq!(t.transfer_time_ms(NodeId(0), NodeId(0), 1_000_000), 0.0,);
     }
 
     #[test]
@@ -1577,9 +1337,7 @@ mod tests {
     fn optimize_scan_replicated() {
         let opt = make_optimizer_with_tables(4);
         let plan = RelExpr::scan("countries");
-        let dre = opt
-            .optimize_distribution(&plan)
-            .expect("should succeed");
+        let dre = opt.optimize_distribution(&plan).expect("should succeed");
         assert!(dre.is_replicated());
     }
 
@@ -1590,13 +1348,9 @@ mod tests {
             col("status"),
             Expr::Const(Const::String("active".into())),
         ));
-        let dre = opt
-            .optimize_distribution(&plan)
-            .expect("should succeed");
+        let dre = opt.optimize_distribution(&plan).expect("should succeed");
         // Filter preserves the input's distribution.
-        if let DataDistribution::HashPartitioned { keys, .. } =
-            &dre.distribution
-        {
+        if let DataDistribution::HashPartitioned { keys, .. } = &dre.distribution {
             assert_eq!(keys, &[col("order_id")]);
         } else {
             panic!("expected HashPartitioned after filter");
@@ -1612,19 +1366,18 @@ mod tests {
             left: Box::new(RelExpr::scan("orders")),
             right: Box::new(RelExpr::scan("countries")),
         };
-        let dre = opt
-            .optimize_distribution(&plan)
-            .expect("should succeed");
+        let dre = opt.optimize_distribution(&plan).expect("should succeed");
         // Countries is replicated, so should be co-located.
-        let strategy = dre.input_strategy.as_ref()
+        let strategy = dre
+            .input_strategy
+            .as_ref()
             .expect("join should have a strategy");
         // The cheapest should be CoLocated or PartitionWise
         // since countries is replicated.
         assert!(
             matches!(
                 strategy,
-                DistributionStrategy::CoLocated
-                    | DistributionStrategy::PartitionWise { .. }
+                DistributionStrategy::CoLocated | DistributionStrategy::PartitionWise { .. }
             ),
             "expected CoLocated or PartitionWise, got {strategy:?}"
         );
@@ -1640,10 +1393,10 @@ mod tests {
             left: Box::new(RelExpr::scan("orders")),
             right: Box::new(RelExpr::scan("customers")),
         };
-        let dre = opt
-            .optimize_distribution(&plan)
-            .expect("should succeed");
-        let strategy = dre.input_strategy.as_ref()
+        let dre = opt.optimize_distribution(&plan).expect("should succeed");
+        let strategy = dre
+            .input_strategy
+            .as_ref()
             .expect("join should have a strategy");
         // Should pick shuffle or partition-wise, not broadcast.
         assert!(
@@ -1665,10 +1418,10 @@ mod tests {
             }],
             input: Box::new(RelExpr::scan("orders")),
         };
-        let dre = opt
-            .optimize_distribution(&plan)
-            .expect("should succeed");
-        let strategy = dre.input_strategy.as_ref()
+        let dre = opt.optimize_distribution(&plan).expect("should succeed");
+        let strategy = dre
+            .input_strategy
+            .as_ref()
             .expect("aggregate should have a strategy");
         // Should shuffle by group-by key.
         assert_eq!(strategy.label(), "Shuffle");
@@ -1687,9 +1440,7 @@ mod tests {
             }],
             input: Box::new(RelExpr::scan("orders")),
         };
-        let dre = opt
-            .optimize_distribution(&plan)
-            .expect("should succeed");
+        let dre = opt.optimize_distribution(&plan).expect("should succeed");
         assert!(dre.is_single_partition());
     }
 
@@ -1717,9 +1468,9 @@ mod tests {
             JoinType::Inner,
         );
         assert!(
-            strategies.iter().any(|s| {
-                matches!(s, DistributionStrategy::PartitionWise { .. })
-            }),
+            strategies
+                .iter()
+                .any(|s| { matches!(s, DistributionStrategy::PartitionWise { .. }) }),
             "should include PartitionWise"
         );
     }
@@ -1737,9 +1488,9 @@ mod tests {
             JoinType::Inner,
         );
         assert!(
-            strategies.iter().any(|s| {
-                matches!(s, DistributionStrategy::Broadcast { .. })
-            }),
+            strategies
+                .iter()
+                .any(|s| { matches!(s, DistributionStrategy::Broadcast { .. }) }),
             "should include Broadcast for small right side"
         );
     }
@@ -1757,9 +1508,9 @@ mod tests {
             JoinType::FullOuter,
         );
         assert!(
-            !strategies.iter().any(|s| {
-                matches!(s, DistributionStrategy::Broadcast { .. })
-            }),
+            !strategies
+                .iter()
+                .any(|s| { matches!(s, DistributionStrategy::Broadcast { .. }) }),
             "should not include Broadcast for FULL OUTER"
         );
     }
@@ -1777,9 +1528,9 @@ mod tests {
             JoinType::Inner,
         );
         assert!(
-            strategies.iter().any(|s| {
-                matches!(s, DistributionStrategy::Shuffle { .. })
-            }),
+            strategies
+                .iter()
+                .any(|s| { matches!(s, DistributionStrategy::Shuffle { .. }) }),
             "should always include Shuffle"
         );
     }
@@ -1802,12 +1553,9 @@ mod tests {
             JoinType::Inner,
         );
         assert!(
-            strategies.iter().any(|s| {
-                matches!(
-                    s,
-                    DistributionStrategy::RangePartition { .. }
-                )
-            }),
+            strategies
+                .iter()
+                .any(|s| { matches!(s, DistributionStrategy::RangePartition { .. }) }),
             "should include RangePartition when enabled"
         );
     }
@@ -1832,11 +1580,7 @@ mod tests {
     #[test]
     fn cost_colocated_is_zero() {
         let opt = make_optimizer(4);
-        let cost = opt.cost_strategy(
-            &DistributionStrategy::CoLocated,
-            1_000_000,
-            1_000_000,
-        );
+        let cost = opt.cost_strategy(&DistributionStrategy::CoLocated, 1_000_000, 1_000_000);
         assert_eq!(cost, Cost::ZERO);
     }
 
@@ -1874,12 +1618,7 @@ mod tests {
         let cost = opt.cost_strategy(
             &DistributionStrategy::Shuffle {
                 source: NodeId(0),
-                targets: vec![
-                    NodeId(0),
-                    NodeId(1),
-                    NodeId(2),
-                    NodeId(3),
-                ],
+                targets: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
                 partition_keys: vec![col("id")],
             },
             1_000_000_000,
@@ -1895,10 +1634,7 @@ mod tests {
         let cost = opt.cost_strategy(
             &DistributionStrategy::RangePartition {
                 partition_key: col("ts"),
-                ranges: vec![
-                    ("0".into(), "100".into()),
-                    ("100".into(), "200".into()),
-                ],
+                ranges: vec![("0".into(), "100".into()), ("100".into(), "200".into())],
             },
             1_000_000,
             1_000_000,
@@ -1920,10 +1656,7 @@ mod tests {
 
     #[test]
     fn extract_conjunctive_equalities() {
-        let cond = and(
-            eq(col("a"), col("b")),
-            eq(col("c"), col("d")),
-        );
+        let cond = and(eq(col("a"), col("b")), eq(col("c"), col("d")));
         let keys = extract_equi_join_keys(&cond);
         assert_eq!(keys.len(), 2);
     }
@@ -1949,38 +1682,20 @@ mod tests {
 
     #[test]
     fn broadcast_compat_left_outer() {
-        assert!(!is_broadcast_compatible(
-            JoinType::LeftOuter,
-            true
-        ));
-        assert!(is_broadcast_compatible(
-            JoinType::LeftOuter,
-            false
-        ));
+        assert!(!is_broadcast_compatible(JoinType::LeftOuter, true));
+        assert!(is_broadcast_compatible(JoinType::LeftOuter, false));
     }
 
     #[test]
     fn broadcast_compat_right_outer() {
-        assert!(is_broadcast_compatible(
-            JoinType::RightOuter,
-            true
-        ));
-        assert!(!is_broadcast_compatible(
-            JoinType::RightOuter,
-            false
-        ));
+        assert!(is_broadcast_compatible(JoinType::RightOuter, true));
+        assert!(!is_broadcast_compatible(JoinType::RightOuter, false));
     }
 
     #[test]
     fn broadcast_compat_full_outer() {
-        assert!(!is_broadcast_compatible(
-            JoinType::FullOuter,
-            true
-        ));
-        assert!(!is_broadcast_compatible(
-            JoinType::FullOuter,
-            false
-        ));
+        assert!(!is_broadcast_compatible(JoinType::FullOuter, true));
+        assert!(!is_broadcast_compatible(JoinType::FullOuter, false));
     }
 
     #[test]
@@ -2023,9 +1738,7 @@ mod tests {
     #[test]
     fn estimate_bytes_filter() {
         let opt = make_optimizer_with_tables(4);
-        let plan = RelExpr::scan("orders").filter(
-            Expr::Const(Const::Bool(true)),
-        );
+        let plan = RelExpr::scan("orders").filter(Expr::Const(Const::Bool(true)));
         let bytes = opt.estimate_bytes(&plan);
         // 25_600_000_000 / 10 = 2_560_000_000
         assert_eq!(bytes, 2_560_000_000);
@@ -2039,12 +1752,10 @@ mod tests {
         let plan = RelExpr::Join {
             join_type: JoinType::Inner,
             condition: eq(col("customer_id"), col("id")),
-            left: Box::new(
-                RelExpr::scan("orders").filter(eq(
-                    col("status"),
-                    Expr::Const(Const::String("active".into())),
-                )),
-            ),
+            left: Box::new(RelExpr::scan("orders").filter(eq(
+                col("status"),
+                Expr::Const(Const::String("active".into())),
+            ))),
             right: Box::new(RelExpr::scan("customers")),
         };
         let result = opt.optimize_distribution(&plan);
@@ -2060,12 +1771,8 @@ mod tests {
             columns: vec![],
             input: Box::new(RelExpr::scan("orders")),
         };
-        let dre = opt
-            .optimize_distribution(&plan)
-            .expect("should succeed");
-        if let DataDistribution::HashPartitioned { .. } =
-            &dre.distribution
-        {
+        let dre = opt.optimize_distribution(&plan).expect("should succeed");
+        if let DataDistribution::HashPartitioned { .. } = &dre.distribution {
             // OK - preserved.
         } else {
             panic!("project should preserve distribution");
@@ -2083,15 +1790,9 @@ mod tests {
             distinct: false,
             alias: None,
         }];
-        let result = opt.select_agg_strategy(
-            &RelExpr::scan("orders"),
-            &[col("country_code")],
-            &aggs,
-        );
-        assert!(matches!(
-            result.strategy,
-            AggregationStrategy::SinglePhase
-        ));
+        let result =
+            opt.select_agg_strategy(&RelExpr::scan("orders"), &[col("country_code")], &aggs);
+        assert!(matches!(result.strategy, AggregationStrategy::SinglePhase));
         assert!(result.decomposed.is_none());
     }
 
@@ -2104,18 +1805,14 @@ mod tests {
             distinct: false,
             alias: Some("total".into()),
         }];
-        let result = opt.select_agg_strategy(
-            &RelExpr::scan("orders"),
-            &[col("country_code")],
-            &aggs,
-        );
+        let result =
+            opt.select_agg_strategy(&RelExpr::scan("orders"), &[col("country_code")], &aggs);
         // 100M rows on orders, should pick two-phase or
         // three-phase.
         assert!(
             matches!(
                 result.strategy,
-                AggregationStrategy::TwoPhase { .. }
-                    | AggregationStrategy::ThreePhase { .. }
+                AggregationStrategy::TwoPhase { .. } | AggregationStrategy::ThreePhase { .. }
             ),
             "expected two/three-phase for large table, got {:?}",
             result.strategy
@@ -2127,17 +1824,12 @@ mod tests {
     fn select_agg_strategy_with_skew_histogram() {
         let config = DistributedOptimizerConfig::default();
         let mut topology = ClusterTopology::uniform(4);
-        topology.register_table(
-            "sales",
-            NodeId(0),
-            DataDistribution::Arbitrary,
-        );
+        topology.register_table("sales", NodeId(0), DataDistribution::Arbitrary);
         let mut sales_stats = Statistics::new(50_000_000.0);
         sales_stats.avg_row_size = 128;
         sales_stats.total_size = 6_400_000_000;
 
-        let mut opt =
-            DistributedOptimizer::new(config, topology);
+        let mut opt = DistributedOptimizer::new(config, topology);
         opt.register_stats("sales", sales_stats);
 
         // Register a skewed histogram for the region column.
@@ -2157,29 +1849,15 @@ mod tests {
                 count: 100,
             });
         }
-        let histogram =
-            ra_stats::skew::FrequencyHistogram::new(buckets);
+        let histogram = ra_stats::skew::FrequencyHistogram::new(buckets);
         opt.register_histogram("sales", "region", histogram);
 
-        let result = opt.analyze_group_key_skew(
-            &RelExpr::scan("sales"),
-            &[col("region")],
-        );
-        assert!(
-            result.is_some(),
-            "should detect skew on region column"
-        );
+        let result = opt.analyze_group_key_skew(&RelExpr::scan("sales"), &[col("region")]);
+        assert!(result.is_some(), "should detect skew on region column");
         let (strategy, hot_values) = result.expect("has skew");
+        assert!(!hot_values.is_empty(), "should have hot key values");
         assert!(
-            !hot_values.is_empty(),
-            "should have hot key values"
-        );
-        assert!(
-            matches!(
-                strategy,
-                SkewStrategy::ThreePhase
-                    | SkewStrategy::SkewAware
-            ),
+            matches!(strategy, SkewStrategy::ThreePhase | SkewStrategy::SkewAware),
             "expected non-TwoPhase strategy, got {strategy:?}"
         );
     }
@@ -2187,48 +1865,32 @@ mod tests {
     #[test]
     fn select_agg_strategy_empty_aggregates() {
         let opt = make_optimizer_with_tables(4);
-        let result = opt.select_agg_strategy(
-            &RelExpr::scan("orders"),
-            &[col("status")],
-            &[],
-        );
-        assert!(matches!(
-            result.strategy,
-            AggregationStrategy::SinglePhase
-        ));
+        let result = opt.select_agg_strategy(&RelExpr::scan("orders"), &[col("status")], &[]);
+        assert!(matches!(result.strategy, AggregationStrategy::SinglePhase));
     }
 
     #[test]
     fn extract_table_name_from_scan() {
-        let name = DistributedOptimizer::extract_table_name(
-            &RelExpr::scan("users"),
-        );
+        let name = DistributedOptimizer::extract_table_name(&RelExpr::scan("users"));
         assert_eq!(name, Some("users".to_owned()));
     }
 
     #[test]
     fn extract_table_name_through_filter() {
-        let plan = RelExpr::scan("orders").filter(
-            Expr::Const(Const::Bool(true)),
-        );
-        let name =
-            DistributedOptimizer::extract_table_name(&plan);
+        let plan = RelExpr::scan("orders").filter(Expr::Const(Const::Bool(true)));
+        let name = DistributedOptimizer::extract_table_name(&plan);
         assert_eq!(name, Some("orders".to_owned()));
     }
 
     #[test]
     fn extract_column_name_from_column_expr() {
-        let name = DistributedOptimizer::extract_column_name(
-            &col("region"),
-        );
+        let name = DistributedOptimizer::extract_column_name(&col("region"));
         assert_eq!(name, Some("region".to_owned()));
     }
 
     #[test]
     fn extract_column_name_from_non_column() {
-        let name = DistributedOptimizer::extract_column_name(
-            &Expr::Const(Const::Int(42)),
-        );
+        let name = DistributedOptimizer::extract_column_name(&Expr::Const(Const::Int(42)));
         assert!(name.is_none());
     }
 
@@ -2236,71 +1898,62 @@ mod tests {
     fn register_histogram_and_detect() {
         let config = DistributedOptimizerConfig::default();
         let topology = ClusterTopology::uniform(4);
-        let mut opt =
-            DistributedOptimizer::new(config, topology);
-        let histogram = ra_stats::skew::FrequencyHistogram::new(
-            vec![
-                ra_stats::skew::FrequencyBucket {
-                    value: "hot".to_owned(),
-                    count: 100_000,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "a".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "b".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "c".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "d".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "e".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "f".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "g".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "h".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "i".to_owned(),
-                    count: 100,
-                },
-                ra_stats::skew::FrequencyBucket {
-                    value: "j".to_owned(),
-                    count: 100,
-                },
-            ],
-        );
+        let mut opt = DistributedOptimizer::new(config, topology);
+        let histogram = ra_stats::skew::FrequencyHistogram::new(vec![
+            ra_stats::skew::FrequencyBucket {
+                value: "hot".to_owned(),
+                count: 100_000,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "a".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "b".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "c".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "d".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "e".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "f".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "g".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "h".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "i".to_owned(),
+                count: 100,
+            },
+            ra_stats::skew::FrequencyBucket {
+                value: "j".to_owned(),
+                count: 100,
+            },
+        ]);
         opt.register_histogram("t", "key", histogram);
-        let has_skew = opt.detect_group_key_skew(
-            &RelExpr::scan("t"),
-            &[col("key")],
-        );
+        let has_skew = opt.detect_group_key_skew(&RelExpr::scan("t"), &[col("key")]);
         assert!(has_skew);
     }
 
     #[test]
     fn no_skew_without_histogram() {
         let opt = make_optimizer_with_tables(4);
-        let has_skew = opt.detect_group_key_skew(
-            &RelExpr::scan("orders"),
-            &[col("country_code")],
-        );
+        let has_skew = opt.detect_group_key_skew(&RelExpr::scan("orders"), &[col("country_code")]);
         assert!(!has_skew);
     }
 
@@ -2314,27 +1967,21 @@ mod tests {
     #[test]
     fn estimate_row_count_known_table() {
         let opt = make_optimizer_with_tables(4);
-        let rows = opt.estimate_row_count(
-            &RelExpr::scan("orders"),
-        );
+        let rows = opt.estimate_row_count(&RelExpr::scan("orders"));
         assert_eq!(rows, 100_000_000);
     }
 
     #[test]
     fn estimate_row_count_unknown_table() {
         let opt = make_optimizer(4);
-        let rows =
-            opt.estimate_row_count(&RelExpr::scan("unknown"));
+        let rows = opt.estimate_row_count(&RelExpr::scan("unknown"));
         assert_eq!(rows, 1000);
     }
 
     #[test]
     fn estimate_distinct_groups_grouped() {
         let opt = make_optimizer_with_tables(4);
-        let groups = opt.estimate_distinct_groups(
-            &RelExpr::scan("orders"),
-            &[col("country_code")],
-        );
+        let groups = opt.estimate_distinct_groups(&RelExpr::scan("orders"), &[col("country_code")]);
         // 100M / 10 = 10M, capped at 1M.
         assert_eq!(groups, 1_000_000);
     }
@@ -2342,10 +1989,7 @@ mod tests {
     #[test]
     fn estimate_distinct_groups_global() {
         let opt = make_optimizer_with_tables(4);
-        let groups = opt.estimate_distinct_groups(
-            &RelExpr::scan("orders"),
-            &[],
-        );
+        let groups = opt.estimate_distinct_groups(&RelExpr::scan("orders"), &[]);
         assert_eq!(groups, 1);
     }
 }

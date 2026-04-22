@@ -12,8 +12,7 @@
 
 use ra_core::algebra::RelExpr;
 use ra_core::federated::{
-    ExecutionLocation, FederatedCostBreakdown, FederatedQuery,
-    RemoteConnection,
+    ExecutionLocation, FederatedCostBreakdown, FederatedQuery, RemoteConnection,
 };
 use ra_core::statistics::Statistics;
 
@@ -74,10 +73,7 @@ impl FederatedCostModel {
     /// and latency from the topology instead of the flat estimates
     /// in [`RemoteConnection`].
     #[must_use]
-    pub fn with_network_model(
-        mut self,
-        model: NetworkCostModel,
-    ) -> Self {
+    pub fn with_network_model(mut self, model: NetworkCostModel) -> Self {
         self.network_model = Some(model);
         self
     }
@@ -100,20 +96,11 @@ impl FederatedCostModel {
         if let Some(net) = &self.network_model {
             if let Some(source_node) = net.node_for_table(table) {
                 // Transfer to local node (node 0 by convention)
-                let local_node =
-                    ra_hardware::network::NodeId(0);
+                let local_node = ra_hardware::network::NodeId(0);
                 // Use row_width=1 so rows*width = bytes
-                let est = net.node_transfer_cost(
-                    source_node,
-                    local_node,
-                    bytes,
-                    1,
-                );
+                let est = net.node_transfer_cost(source_node, local_node, bytes, 1);
                 return NetworkTransferResult {
-                    transfer_ms: est
-                        .transfer_time
-                        .as_secs_f64()
-                        * 1000.0,
+                    transfer_ms: est.transfer_time.as_secs_f64() * 1000.0,
                 };
             }
         }
@@ -135,13 +122,7 @@ impl FederatedCostModel {
         result_rows: f64,
         result_row_size: u64,
     ) -> FederatedCostBreakdown {
-        self.estimate_ship_query_for_table(
-            connection,
-            stats,
-            result_rows,
-            result_row_size,
-            "",
-        )
+        self.estimate_ship_query_for_table(connection, stats, result_rows, result_row_size, "")
     }
 
     /// Estimate cost of shipping a query to a remote, with
@@ -155,27 +136,18 @@ impl FederatedCostModel {
         result_row_size: u64,
         table: &str,
     ) -> FederatedCostBreakdown {
-        let row_count = stats
-            .map_or(self.default_row_count, |s| s.row_count);
-        let avg_row_size = stats
-            .map_or(self.default_avg_row_size, |s| s.avg_row_size);
+        let row_count = stats.map_or(self.default_row_count, |s| s.row_count);
+        let avg_row_size = stats.map_or(self.default_avg_row_size, |s| s.avg_row_size);
 
         // Remote execution: scan + process
-        let pages = (row_count * avg_row_size as f64)
-            / self.page_size as f64;
-        let remote_exec_ms = (pages * self.io_cost_per_page
-            + row_count * self.cpu_cost_per_row)
+        let pages = (row_count * avg_row_size as f64) / self.page_size as f64;
+        let remote_exec_ms = (pages * self.io_cost_per_page + row_count * self.cpu_cost_per_row)
             * self.remote_execution_overhead;
 
         // Result transfer
-        let result_bytes =
-            (result_rows * result_row_size as f64) as u64;
+        let result_bytes = (result_rows * result_row_size as f64) as u64;
 
-        let transfer = self.network_transfer_ms(
-            connection,
-            table,
-            result_bytes,
-        );
+        let transfer = self.network_transfer_ms(connection, table, result_bytes);
 
         let total_ms = remote_exec_ms + transfer.transfer_ms;
 
@@ -203,9 +175,7 @@ impl FederatedCostModel {
         stats: Option<&Statistics>,
         has_filter: bool,
     ) -> FederatedCostBreakdown {
-        self.estimate_ship_data_for_table(
-            connection, stats, has_filter, "",
-        )
+        self.estimate_ship_data_for_table(connection, stats, has_filter, "")
     }
 
     /// Estimate cost of fetching data from remote with
@@ -218,10 +188,8 @@ impl FederatedCostModel {
         has_filter: bool,
         table: &str,
     ) -> FederatedCostBreakdown {
-        let row_count = stats
-            .map_or(self.default_row_count, |s| s.row_count);
-        let avg_row_size = stats
-            .map_or(self.default_avg_row_size, |s| s.avg_row_size);
+        let row_count = stats.map_or(self.default_row_count, |s| s.row_count);
+        let avg_row_size = stats.map_or(self.default_avg_row_size, |s| s.avg_row_size);
 
         // How many rows actually get transferred
         let transfer_rows = if has_filter {
@@ -231,27 +199,18 @@ impl FederatedCostModel {
         };
 
         // Remote scan cost (even for ship-data, remote scans)
-        let pages = (row_count * avg_row_size as f64)
-            / self.page_size as f64;
-        let remote_exec_ms = pages * self.io_cost_per_page
-            * self.remote_execution_overhead;
+        let pages = (row_count * avg_row_size as f64) / self.page_size as f64;
+        let remote_exec_ms = pages * self.io_cost_per_page * self.remote_execution_overhead;
 
         // Transfer cost
-        let transfer_bytes =
-            (transfer_rows * avg_row_size as f64) as u64;
+        let transfer_bytes = (transfer_rows * avg_row_size as f64) as u64;
 
-        let transfer = self.network_transfer_ms(
-            connection,
-            table,
-            transfer_bytes,
-        );
+        let transfer = self.network_transfer_ms(connection, table, transfer_bytes);
 
         // Local execution cost
-        let local_exec_ms =
-            transfer_rows * self.cpu_cost_per_row;
+        let local_exec_ms = transfer_rows * self.cpu_cost_per_row;
 
-        let total_ms =
-            remote_exec_ms + transfer.transfer_ms + local_exec_ms;
+        let total_ms = remote_exec_ms + transfer.transfer_ms + local_exec_ms;
 
         let rows_transferred = transfer_rows as u64;
 
@@ -303,38 +262,25 @@ impl FederatedCostModel {
         local_complexity_factor: f64,
         table: &str,
     ) -> FederatedCostBreakdown {
-        let row_count = stats
-            .map_or(self.default_row_count, |s| s.row_count);
-        let avg_row_size = stats
-            .map_or(self.default_avg_row_size, |s| s.avg_row_size);
+        let row_count = stats.map_or(self.default_row_count, |s| s.row_count);
+        let avg_row_size = stats.map_or(self.default_avg_row_size, |s| s.avg_row_size);
 
         // Remote pushdown execution
-        let pages = (row_count * avg_row_size as f64)
-            / self.page_size as f64;
+        let pages = (row_count * avg_row_size as f64) / self.page_size as f64;
         let remote_exec_ms = (pages * self.io_cost_per_page
-            + row_count
-                * self.cpu_cost_per_row
-                * pushdown_selectivity)
+            + row_count * self.cpu_cost_per_row * pushdown_selectivity)
             * self.remote_execution_overhead;
 
         // Intermediate result transfer
         let intermediate_rows = row_count * pushdown_selectivity;
-        let transfer_bytes =
-            (intermediate_rows * avg_row_size as f64) as u64;
+        let transfer_bytes = (intermediate_rows * avg_row_size as f64) as u64;
 
-        let transfer = self.network_transfer_ms(
-            connection,
-            table,
-            transfer_bytes,
-        );
+        let transfer = self.network_transfer_ms(connection, table, transfer_bytes);
 
         // Local operations on intermediate results
-        let local_exec_ms = intermediate_rows
-            * self.cpu_cost_per_row
-            * local_complexity_factor;
+        let local_exec_ms = intermediate_rows * self.cpu_cost_per_row * local_complexity_factor;
 
-        let total_ms =
-            remote_exec_ms + transfer.transfer_ms + local_exec_ms;
+        let total_ms = remote_exec_ms + transfer.transfer_ms + local_exec_ms;
 
         let rows_transferred = intermediate_rows as u64;
 
@@ -352,19 +298,12 @@ impl FederatedCostModel {
     /// Estimate the cost of local-only execution (no remote
     /// involvement).
     #[must_use]
-    pub fn estimate_local(
-        &self,
-        stats: Option<&Statistics>,
-    ) -> FederatedCostBreakdown {
-        let row_count = stats
-            .map_or(self.default_row_count, |s| s.row_count);
-        let avg_row_size = stats
-            .map_or(self.default_avg_row_size, |s| s.avg_row_size);
+    pub fn estimate_local(&self, stats: Option<&Statistics>) -> FederatedCostBreakdown {
+        let row_count = stats.map_or(self.default_row_count, |s| s.row_count);
+        let avg_row_size = stats.map_or(self.default_avg_row_size, |s| s.avg_row_size);
 
-        let pages = (row_count * avg_row_size as f64)
-            / self.page_size as f64;
-        let local_exec_ms = pages * self.io_cost_per_page
-            + row_count * self.cpu_cost_per_row;
+        let pages = (row_count * avg_row_size as f64) / self.page_size as f64;
+        let local_exec_ms = pages * self.io_cost_per_page + row_count * self.cpu_cost_per_row;
 
         FederatedCostBreakdown {
             strategy: "local".into(),
@@ -390,23 +329,11 @@ impl FederatedCostModel {
             } => {
                 let table = Self::first_table(q);
                 let stats = self.best_stats(query);
-                let row_count = stats
-                    .map_or(self.default_row_count, |s| {
-                        s.row_count
-                    });
-                let avg_row_size = stats
-                    .map_or(self.default_avg_row_size, |s| {
-                        s.avg_row_size
-                    });
+                let row_count = stats.map_or(self.default_row_count, |s| s.row_count);
+                let avg_row_size = stats.map_or(self.default_avg_row_size, |s| s.avg_row_size);
                 // Assume result is 10% of source for full queries
                 let result_rows = row_count * 0.1;
-                self.estimate_ship_query_for_table(
-                    target,
-                    stats,
-                    result_rows,
-                    avg_row_size,
-                    &table,
-                )
+                self.estimate_ship_query_for_table(target, stats, result_rows, avg_row_size, &table)
             }
             ExecutionLocation::ShipData {
                 source,
@@ -414,12 +341,7 @@ impl FederatedCostModel {
                 predicate,
             } => {
                 let stats = self.best_stats(query);
-                self.estimate_ship_data_for_table(
-                    source,
-                    stats,
-                    predicate.is_some(),
-                    table,
-                )
+                self.estimate_ship_data_for_table(source, stats, predicate.is_some(), table)
             }
             ExecutionLocation::Hybrid { target, .. } => {
                 let table = Self::first_remote_table(query);
@@ -449,15 +371,11 @@ impl FederatedCostModel {
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
             | RelExpr::Window { input, .. }
-            | RelExpr::Distinct { input, .. } => {
-                Self::first_table(input)
-            }
+            | RelExpr::Distinct { input, .. } => Self::first_table(input),
             RelExpr::Join { left, .. }
             | RelExpr::Union { left, .. }
             | RelExpr::Intersect { left, .. }
-            | RelExpr::Except { left, .. } => {
-                Self::first_table(left)
-            }
+            | RelExpr::Except { left, .. } => Self::first_table(left),
             _ => String::new(),
         }
     }
@@ -473,10 +391,7 @@ impl FederatedCostModel {
     }
 
     /// Extract the best available statistics from the query.
-    fn best_stats<'a>(
-        &self,
-        query: &'a FederatedQuery,
-    ) -> Option<&'a Statistics> {
+    fn best_stats<'a>(&self, query: &'a FederatedQuery) -> Option<&'a Statistics> {
         let _ = self; // used for future expansion
         for source in query.sources.values() {
             if let Some(stats) = source.statistics() {
@@ -489,22 +404,13 @@ impl FederatedCostModel {
     /// Estimate row count for a relational expression given a
     /// source table's statistics.
     #[must_use]
-    pub fn estimate_output_rows(
-        &self,
-        expr: &RelExpr,
-        stats: Option<&Statistics>,
-    ) -> f64 {
-        let base_rows = stats
-            .map_or(self.default_row_count, |s| s.row_count);
+    pub fn estimate_output_rows(&self, expr: &RelExpr, stats: Option<&Statistics>) -> f64 {
+        let base_rows = stats.map_or(self.default_row_count, |s| s.row_count);
 
         match expr {
             RelExpr::Scan { .. } => base_rows,
-            RelExpr::Filter { .. } => {
-                base_rows * self.default_filter_selectivity
-            }
-            RelExpr::Project { input, .. } => {
-                self.estimate_output_rows(input, stats)
-            }
+            RelExpr::Filter { .. } => base_rows * self.default_filter_selectivity,
+            RelExpr::Project { input, .. } => self.estimate_output_rows(input, stats),
             RelExpr::Aggregate { .. } => {
                 // Aggregation typically reduces rows significantly
                 (base_rows * 0.01).max(1.0)
@@ -513,14 +419,10 @@ impl FederatedCostModel {
                 let limit = *count as f64;
                 base_rows.min(limit)
             }
-            RelExpr::Distinct { input, .. } => {
-                self.estimate_output_rows(input, stats) * 0.8
-            }
+            RelExpr::Distinct { input, .. } => self.estimate_output_rows(input, stats) * 0.8,
             RelExpr::Join { left, right, .. } => {
-                let left_rows =
-                    self.estimate_output_rows(left, stats);
-                let right_rows =
-                    self.estimate_output_rows(right, stats);
+                let left_rows = self.estimate_output_rows(left, stats);
+                let right_rows = self.estimate_output_rows(right, stats);
                 // Assume 10% selectivity for joins
                 left_rows * right_rows * 0.1
             }
@@ -530,14 +432,9 @@ impl FederatedCostModel {
 
     /// Estimate total data size in bytes for a relation.
     #[must_use]
-    pub fn estimate_data_size(
-        &self,
-        stats: Option<&Statistics>,
-    ) -> u64 {
-        let row_count = stats
-            .map_or(self.default_row_count, |s| s.row_count);
-        let avg_row_size = stats
-            .map_or(self.default_avg_row_size, |s| s.avg_row_size);
+    pub fn estimate_data_size(&self, stats: Option<&Statistics>) -> u64 {
+        let row_count = stats.map_or(self.default_row_count, |s| s.row_count);
+        let avg_row_size = stats.map_or(self.default_avg_row_size, |s| s.avg_row_size);
         let size = (row_count * avg_row_size as f64) as u64;
         size
     }
@@ -547,19 +444,12 @@ impl FederatedCostModel {
 mod tests {
     use std::collections::HashMap;
 
-    use ra_core::federated::{
-        DataSource, DatabaseType, QueryCapabilities,
-    };
+    use ra_core::federated::{DataSource, DatabaseType, QueryCapabilities};
 
     use super::*;
 
     fn sample_connection() -> RemoteConnection {
-        RemoteConnection::new(
-            DatabaseType::PostgreSQL,
-            "db.example.com:5432",
-            10,
-            100,
-        )
+        RemoteConnection::new(DatabaseType::PostgreSQL, "db.example.com:5432", 10, 100)
     }
 
     fn sample_stats() -> Statistics {
@@ -589,12 +479,7 @@ mod tests {
         let conn = sample_connection();
         let stats = sample_stats();
 
-        let cost = model.estimate_ship_query(
-            &conn,
-            Some(&stats),
-            10_000.0,
-            200,
-        );
+        let cost = model.estimate_ship_query(&conn, Some(&stats), 10_000.0, 200);
 
         assert!(cost.remote_exec_ms > 0.0);
         assert!(cost.network_transfer_ms > 0.0);
@@ -610,8 +495,7 @@ mod tests {
         let conn = sample_connection();
         let stats = sample_stats();
 
-        let cost =
-            model.estimate_ship_data(&conn, Some(&stats), false);
+        let cost = model.estimate_ship_data(&conn, Some(&stats), false);
 
         assert!(cost.remote_exec_ms > 0.0);
         assert!(cost.network_transfer_ms > 0.0);
@@ -627,10 +511,8 @@ mod tests {
         let conn = sample_connection();
         let stats = sample_stats();
 
-        let full =
-            model.estimate_ship_data(&conn, Some(&stats), false);
-        let filtered =
-            model.estimate_ship_data(&conn, Some(&stats), true);
+        let full = model.estimate_ship_data(&conn, Some(&stats), false);
+        let filtered = model.estimate_ship_data(&conn, Some(&stats), true);
 
         assert!(filtered.total_ms < full.total_ms);
         assert!(filtered.transfer_bytes < full.transfer_bytes);
@@ -643,12 +525,7 @@ mod tests {
         let conn = sample_connection();
         let stats = sample_stats();
 
-        let cost = model.estimate_hybrid(
-            &conn,
-            Some(&stats),
-            0.01,
-            2.0,
-        );
+        let cost = model.estimate_hybrid(&conn, Some(&stats), 0.01, 2.0);
 
         assert!(cost.remote_exec_ms > 0.0);
         assert!(cost.network_transfer_ms > 0.0);
@@ -664,14 +541,8 @@ mod tests {
         let conn = sample_connection();
         let stats = sample_stats();
 
-        let full =
-            model.estimate_ship_data(&conn, Some(&stats), false);
-        let hybrid = model.estimate_hybrid(
-            &conn,
-            Some(&stats),
-            0.01,
-            2.0,
-        );
+        let full = model.estimate_ship_data(&conn, Some(&stats), false);
+        let hybrid = model.estimate_hybrid(&conn, Some(&stats), 0.01, 2.0);
 
         assert!(hybrid.total_ms < full.total_ms);
         assert!(hybrid.transfer_bytes < full.transfer_bytes);
@@ -761,10 +632,7 @@ mod tests {
     fn estimate_output_rows_scan() {
         let model = FederatedCostModel::new();
         let stats = sample_stats();
-        let rows = model.estimate_output_rows(
-            &RelExpr::scan("t"),
-            Some(&stats),
-        );
+        let rows = model.estimate_output_rows(&RelExpr::scan("t"), Some(&stats));
         assert!((rows - 1_000_000.0).abs() < f64::EPSILON);
     }
 
@@ -773,13 +641,10 @@ mod tests {
         let model = FederatedCostModel::new();
         let stats = sample_stats();
         let expr = RelExpr::Filter {
-            predicate: ra_core::expr::Expr::Const(
-                ra_core::expr::Const::Bool(true),
-            ),
+            predicate: ra_core::expr::Expr::Const(ra_core::expr::Const::Bool(true)),
             input: Box::new(RelExpr::scan("t")),
         };
-        let rows =
-            model.estimate_output_rows(&expr, Some(&stats));
+        let rows = model.estimate_output_rows(&expr, Some(&stats));
         assert!((rows - 100_000.0).abs() < f64::EPSILON);
     }
 
@@ -792,8 +657,7 @@ mod tests {
             offset: 0,
             input: Box::new(RelExpr::scan("t")),
         };
-        let rows =
-            model.estimate_output_rows(&expr, Some(&stats));
+        let rows = model.estimate_output_rows(&expr, Some(&stats));
         assert!((rows - 100.0).abs() < f64::EPSILON);
     }
 
@@ -806,8 +670,7 @@ mod tests {
             aggregates: vec![],
             input: Box::new(RelExpr::scan("t")),
         };
-        let rows =
-            model.estimate_output_rows(&expr, Some(&stats));
+        let rows = model.estimate_output_rows(&expr, Some(&stats));
         assert!(rows < 100_000.0);
     }
 

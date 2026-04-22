@@ -60,10 +60,7 @@ fn test_push_based_operator_inlining() {
 fn test_push_based_expression_inlining() {
     // Inline expression evaluation
     let input = scan("calculations");
-    let filtered = input.filter(gt(
-        binop(BinOp::Add, col("a"), col("b")),
-        int(100),
-    ));
+    let filtered = input.filter(gt(binop(BinOp::Add, col("a"), col("b")), int(100)));
     assert_cost_calculated(filtered);
 }
 

@@ -3,9 +3,7 @@
 #![cfg(feature = "timeline")]
 
 use ra_core::algebra::RelExpr;
-use ra_engine::{
-    ChangeType, ChangeSeverity, Optimizer, TimelineConfig, TimelineOptimizer,
-};
+use ra_engine::{ChangeSeverity, ChangeType, Optimizer, TimelineConfig, TimelineOptimizer};
 use std::path::PathBuf;
 
 /// Get the path to test data directory.
@@ -64,10 +62,9 @@ fn optimize_index_addition_timeline() {
     assert!(!snap1.changes_from_previous.is_empty());
 
     // Should detect index addition
-    let has_index_change = snap1
-        .changes_from_previous
-        .iter()
-        .any(|c| matches!(c.change_type, ChangeType::Schema) && c.description.contains("idx_orders_customer"));
+    let has_index_change = snap1.changes_from_previous.iter().any(|c| {
+        matches!(c.change_type, ChangeType::Schema) && c.description.contains("idx_orders_customer")
+    });
     assert!(has_index_change, "Index addition should be detected");
 
     // Verify third snapshot (hardware upgrade)
@@ -114,7 +111,10 @@ fn detect_changes_across_snapshots() {
         .iter()
         .filter(|c| matches!(c.change_type, ChangeType::Hardware))
         .collect();
-    assert!(!hardware_changes.is_empty(), "Should detect hardware changes");
+    assert!(
+        !hardware_changes.is_empty(),
+        "Should detect hardware changes"
+    );
 }
 
 #[test]
@@ -157,9 +157,7 @@ fn change_severity_levels() {
                     // Hardware changes are typically Medium or High
                     assert!(matches!(
                         change.severity,
-                        ChangeSeverity::Low
-                            | ChangeSeverity::Medium
-                            | ChangeSeverity::High
+                        ChangeSeverity::Low | ChangeSeverity::Medium | ChangeSeverity::High
                     ));
                 }
                 ChangeType::Facts => {
@@ -290,16 +288,18 @@ fn custom_thresholds() {
         .map(|s| s.changes_from_previous.len())
         .sum();
 
-    assert!(total_changes > 0, "Should detect changes with custom thresholds");
+    assert!(
+        total_changes > 0,
+        "Should detect changes with custom thresholds"
+    );
 }
 
 #[test]
 fn empty_timeline_handling() {
     // Create a minimal timeline with just one snapshot
     use ra_engine::timeline_config::{
-        FactsSnapshot, FingerPrintSnapshot,
-        HardwareProfileDef, SchemaSnapshot, StatisticsSnapshot, StorageFormatDef,
-        TableDef, TableStatsDef, TimelineMetadata,
+        FactsSnapshot, FingerPrintSnapshot, HardwareProfileDef, SchemaSnapshot, StatisticsSnapshot,
+        StorageFormatDef, TableDef, TableStatsDef, TimelineMetadata,
     };
     use std::collections::HashMap;
 
@@ -400,5 +400,8 @@ fn statistics_drift_detection() {
         })
     });
 
-    assert!(has_row_count_change, "Should detect row count changes with lower threshold");
+    assert!(
+        has_row_count_change,
+        "Should detect row count changes with lower threshold"
+    );
 }

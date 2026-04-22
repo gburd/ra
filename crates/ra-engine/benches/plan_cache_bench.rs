@@ -8,17 +8,10 @@
 
 #![allow(clippy::expect_used)]
 
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId,
-    Criterion,
-};
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, RelExpr,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{
-    Optimizer, OptimizerConfig, PlanCacheConfig,
-};
+use ra_engine::{Optimizer, OptimizerConfig, PlanCacheConfig};
 
 // ── Query templates ─────────────────────────────────────────────
 
@@ -45,9 +38,7 @@ fn range_scan(threshold: i64, status: &str) -> RelExpr {
         right: Box::new(Expr::BinOp {
             op: BinOp::Eq,
             left: Box::new(Expr::Column(ColumnRef::new("status"))),
-            right: Box::new(Expr::Const(Const::String(
-                status.to_owned(),
-            ))),
+            right: Box::new(Expr::Const(Const::String(status.to_owned()))),
         }),
     })
 }
@@ -60,12 +51,8 @@ fn join_with_filter(age: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
             op: BinOp::Gt,
@@ -88,17 +75,11 @@ fn aggregation(salary_threshold: i64) -> RelExpr {
             distinct: false,
             alias: Some("cnt".to_owned()),
         }],
-        input: Box::new(
-            RelExpr::scan("employees").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new(
-                    "salary",
-                ))),
-                right: Box::new(Expr::Const(Const::Int(
-                    salary_threshold,
-                ))),
-            }),
-        ),
+        input: Box::new(RelExpr::scan("employees").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("salary"))),
+            right: Box::new(Expr::Const(Const::Int(salary_threshold))),
+        })),
     }
 }
 
@@ -112,12 +93,8 @@ fn three_table_join(price: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users")),
         right: Box::new(RelExpr::scan("orders")),
@@ -126,23 +103,15 @@ fn three_table_join(price: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "product_id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("products", "id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("orders", "product_id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("products", "id"))),
         },
         left: Box::new(user_orders),
-        right: Box::new(
-            RelExpr::scan("products").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new(
-                    "price",
-                ))),
-                right: Box::new(Expr::Const(Const::Int(price))),
-            }),
-        ),
+        right: Box::new(RelExpr::scan("products").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("price"))),
+            right: Box::new(Expr::Const(Const::Int(price))),
+        })),
     }
 }
 

@@ -17,8 +17,8 @@ use ra_core::algebra::{
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
 use ra_engine::{
-    all_rules, extract_best, rec_expr_to_rel_expr, structural_hash, to_rec_expr, Optimizer,
-    OptimizerConfig, egraph::ParallelConfig,
+    all_rules, egraph::ParallelConfig, extract_best, rec_expr_to_rel_expr, structural_hash,
+    to_rec_expr, Optimizer, OptimizerConfig,
 };
 
 // ---------------------------------------------------------------
@@ -301,6 +301,7 @@ proptest! {
             max_staleness_penalty: 10.0,
             use_lazy_rules: false,
             transaction_context: None,
+            ..OptimizerConfig::default()
         };
         let optimizer = Optimizer::with_config(config);
         // It's OK if optimization returns an error (e.g., for
@@ -333,6 +334,7 @@ proptest! {
             max_staleness_penalty: 10.0,
             use_lazy_rules: false,
             transaction_context: None,
+            ..OptimizerConfig::default()
         };
         let optimizer = Optimizer::with_config(config);
         if let Ok(optimized) = optimizer.optimize(&expr) {
@@ -381,6 +383,7 @@ proptest! {
             max_staleness_penalty: 10.0,
             use_lazy_rules: false,
             transaction_context: None,
+            ..OptimizerConfig::default()
         };
         let optimizer = Optimizer::with_config(config);
         if let Ok(first) = optimizer.optimize(&expr) {
@@ -521,6 +524,7 @@ proptest! {
             max_staleness_penalty: 10.0,
             use_lazy_rules: false,
             transaction_context: None,
+            ..OptimizerConfig::default()
         };
         let optimizer = Optimizer::with_config(config);
 
@@ -681,45 +685,34 @@ fn contains_joins(expr: &RelExpr) -> bool {
         | RelExpr::VectorFilter { input, .. } => contains_joins(input),
         RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => {
-            contains_joins(left) || contains_joins(right)
-        }
-        RelExpr::CTE { definition, body, .. } => {
-            contains_joins(definition) || contains_joins(body)
-        }
+        | RelExpr::Except { left, right, .. } => contains_joins(left) || contains_joins(right),
+        RelExpr::CTE {
+            definition, body, ..
+        } => contains_joins(definition) || contains_joins(body),
         RelExpr::RecursiveCTE {
             base_case,
             recursive_case,
             body,
             ..
-        } => {
-            contains_joins(base_case)
-                || contains_joins(recursive_case)
-                || contains_joins(body)
-        }
-        RelExpr::Scan { .. }
-        | RelExpr::Values { .. }
-        | RelExpr::MultiUnnest { .. } => false,
-        RelExpr::Unnest { input, .. }
-        | RelExpr::TableFunction { input, .. } => {
+        } => contains_joins(base_case) || contains_joins(recursive_case) || contains_joins(body),
+        RelExpr::Scan { .. } | RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => false,
+        RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             input.as_ref().is_some_and(|i| contains_joins(i))
         }
-        RelExpr::RowPattern { input, .. } => {
-            contains_joins(input)
-        }
+        RelExpr::RowPattern { input, .. } => contains_joins(input),
         RelExpr::IndexScan { .. }
         | RelExpr::BitmapIndexScan { .. }
         | RelExpr::IndexOnlyScan { .. }
         | RelExpr::ParallelScan { .. }
         | RelExpr::MvScan { .. } => false,
-        RelExpr::BitmapAnd { inputs }
-        | RelExpr::BitmapOr { inputs } => {
+        RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
             inputs.iter().any(|i| contains_joins(i))
         }
         RelExpr::BitmapHeapScan { bitmap, .. } => contains_joins(bitmap),
         RelExpr::ParallelHashJoin { .. } => true,
-        RelExpr::ParallelAggregate { input, .. }
-        | RelExpr::Gather { input, .. } => contains_joins(input),
+        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
+            contains_joins(input)
+        }
     }
 }
 
@@ -826,14 +819,14 @@ proptest! {
 /// computing the extraction cost using the integrated cost model.
 fn estimate_cost(expr: &RelExpr) -> Result<f64, Box<dyn std::error::Error>> {
     use egg::{Extractor, Runner};
-    use ra_engine::{RelLang, RelAnalysis, RelCostFn};
+    use ra_engine::{RelAnalysis, RelCostFn, RelLang};
 
     let rec = to_rec_expr(expr)?;
     let runner: Runner<RelLang, RelAnalysis> = Runner::default()
         .with_expr(&rec)
         .with_node_limit(10_000)
-        .with_iter_limit(1)  // No optimization, just cost estimation
-        .run(&[]);  // Empty rules - just build the egraph
+        .with_iter_limit(1) // No optimization, just cost estimation
+        .run(&[]); // Empty rules - just build the egraph
 
     let root = runner.roots[0];
     let hardware = ra_hardware::HardwareProfile::cpu_only();
@@ -880,8 +873,7 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             collect_tables_rec(definition, out);
             collect_tables_rec(body, out);
         }
-        RelExpr::Window { input, .. }
-        | RelExpr::Distinct { input, .. } => {
+        RelExpr::Window { input, .. } | RelExpr::Distinct { input, .. } => {
             collect_tables_rec(input, out);
         }
         RelExpr::RecursiveCTE {
@@ -894,10 +886,8 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             collect_tables_rec(recursive_case, out);
             collect_tables_rec(body, out);
         }
-        RelExpr::Values { .. }
-        | RelExpr::MultiUnnest { .. } => {}
-        RelExpr::Unnest { input, .. }
-        | RelExpr::TableFunction { input, .. } => {
+        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_tables_rec(inp, out);
             }
@@ -909,15 +899,16 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         | RelExpr::BitmapIndexScan { table, .. }
         | RelExpr::IndexOnlyScan { table, .. }
         | RelExpr::ParallelScan { table, .. }
-        | RelExpr::MvScan { view_name: table, .. } => {
+        | RelExpr::MvScan {
+            view_name: table, ..
+        } => {
             out.insert(table.clone());
         }
         RelExpr::BitmapHeapScan { table, bitmap, .. } => {
             out.insert(table.clone());
             collect_tables_rec(bitmap, out);
         }
-        RelExpr::BitmapAnd { inputs }
-        | RelExpr::BitmapOr { inputs } => {
+        RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
             for inp in inputs {
                 collect_tables_rec(inp, out);
             }
@@ -926,8 +917,7 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             collect_tables_rec(left, out);
             collect_tables_rec(right, out);
         }
-        RelExpr::ParallelAggregate { input, .. }
-        | RelExpr::Gather { input, .. } => {
+        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
             collect_tables_rec(input, out);
         }
     }

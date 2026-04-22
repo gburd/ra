@@ -30,10 +30,7 @@ use crate::egraph::RelLang;
 #[derive(Debug, Clone, PartialEq)]
 pub enum DualityFieldMapping {
     /// Scalar column in the root or a joined table.
-    Column {
-        table: String,
-        column: String,
-    },
+    Column { table: String, column: String },
     /// Nested JSON object assembled from a joined table.
     Nested {
         table: String,
@@ -68,12 +65,20 @@ pub struct Updatability {
 impl Updatability {
     #[must_use]
     pub fn read_only() -> Self {
-        Self { insert: false, update: false, delete: false }
+        Self {
+            insert: false,
+            update: false,
+            delete: false,
+        }
     }
 
     #[must_use]
     pub fn full() -> Self {
-        Self { insert: true, update: true, delete: true }
+        Self {
+            insert: true,
+            update: true,
+            delete: true,
+        }
     }
 }
 
@@ -116,10 +121,7 @@ impl DualityView {
 
     /// Return fields that require the given table.
     #[must_use]
-    pub fn fields_from_table(
-        &self,
-        table: &str,
-    ) -> Vec<&DualityField> {
+    pub fn fields_from_table(&self, table: &str) -> Vec<&DualityField> {
         self.fields
             .iter()
             .filter(|f| field_uses_table(&f.mapping, table))
@@ -127,10 +129,7 @@ impl DualityView {
     }
 }
 
-fn collect_tables(
-    mapping: &DualityFieldMapping,
-    tables: &mut Vec<String>,
-) {
+fn collect_tables(mapping: &DualityFieldMapping, tables: &mut Vec<String>) {
     match mapping {
         DualityFieldMapping::Column { table, .. } => {
             if !tables.contains(table) {
@@ -152,8 +151,7 @@ fn collect_tables(
 fn count_leaf_fields(field: &DualityField) -> usize {
     match &field.mapping {
         DualityFieldMapping::Column { .. } => 1,
-        DualityFieldMapping::Nested { fields, .. }
-        | DualityFieldMapping::Array { fields, .. } => {
+        DualityFieldMapping::Nested { fields, .. } | DualityFieldMapping::Array { fields, .. } => {
             fields.iter().map(count_leaf_fields).sum()
         }
     }
@@ -162,26 +160,21 @@ fn count_leaf_fields(field: &DualityField) -> usize {
 fn count_joins(field: &DualityField) -> usize {
     match &field.mapping {
         DualityFieldMapping::Column { .. } => 0,
-        DualityFieldMapping::Nested { fields, .. }
-        | DualityFieldMapping::Array { fields, .. } => {
+        DualityFieldMapping::Nested { fields, .. } | DualityFieldMapping::Array { fields, .. } => {
             1 + fields.iter().map(count_joins).sum::<usize>()
         }
     }
 }
 
-fn field_uses_table(
-    mapping: &DualityFieldMapping,
-    table: &str,
-) -> bool {
+fn field_uses_table(mapping: &DualityFieldMapping, table: &str) -> bool {
     match mapping {
         DualityFieldMapping::Column { table: t, .. } => t == table,
-        DualityFieldMapping::Nested { table: t, fields, .. }
-        | DualityFieldMapping::Array { table: t, fields, .. } => {
-            t == table
-                || fields
-                    .iter()
-                    .any(|f| field_uses_table(&f.mapping, table))
+        DualityFieldMapping::Nested {
+            table: t, fields, ..
         }
+        | DualityFieldMapping::Array {
+            table: t, fields, ..
+        } => t == table || fields.iter().any(|f| field_uses_table(&f.mapping, table)),
     }
 }
 
@@ -252,16 +245,13 @@ pub fn estimate_document_cost(
     let matching = (total_rows * selectivity).max(1.0);
 
     let predicate_scan = if n_predicates > 0 {
-        total_rows
-            * f64::from(n_predicates)
-            * params.json_predicate_cost
+        total_rows * f64::from(n_predicates) * params.json_predicate_cost
     } else {
         0.0
     };
 
-    let per_match = params.document_fetch_cost
-        + f64::from(n_fields_accessed)
-            * params.json_field_extract_cost;
+    let per_match =
+        params.document_fetch_cost + f64::from(n_fields_accessed) * params.json_field_extract_cost;
     let fetch_cost = matching * per_match;
 
     predicate_scan + fetch_cost
@@ -285,29 +275,18 @@ pub fn estimate_relational_cost(
 ) -> f64 {
     let scan_cost: f64 = table_row_counts
         .iter()
-        .map(|rows| {
-            rows * selectivity * params.relational_scan_cost_per_row
-        })
+        .map(|rows| rows * selectivity * params.relational_scan_cost_per_row)
         .sum();
 
-    let root_rows = table_row_counts
-        .first()
-        .copied()
-        .unwrap_or(1000.0);
+    let root_rows = table_row_counts.first().copied().unwrap_or(1000.0);
     let result_rows = (root_rows * selectivity).max(1.0);
-    let join_cost = f64::from(n_joins)
-        * params.relational_join_cost
-        * result_rows.sqrt();
+    let join_cost = f64::from(n_joins) * params.relational_join_cost * result_rows.sqrt();
 
     let assembly_rows = result_rows;
     let assembly = if n_fields_accessed < total_fields {
-        params.partial_assembly_cost
-            * f64::from(n_fields_accessed)
-            * assembly_rows
+        params.partial_assembly_cost * f64::from(n_fields_accessed) * assembly_rows
     } else {
-        params.partial_assembly_cost
-            * f64::from(total_fields)
-            * assembly_rows
+        params.partial_assembly_cost * f64::from(total_fields) * assembly_rows
     };
 
     scan_cost + join_cost + assembly
@@ -411,13 +390,9 @@ pub struct AccessPathDecision {
 /// When a query accesses only a subset of the duality view's fields,
 /// joins to tables whose columns are not referenced can be skipped.
 #[must_use]
-pub fn eliminable_joins(
-    view: &DualityView,
-    accessed_fields: &[String],
-) -> Vec<String> {
+pub fn eliminable_joins(view: &DualityView, accessed_fields: &[String]) -> Vec<String> {
     let all_tables = view.referenced_tables();
-    let mut needed_tables: Vec<String> =
-        vec![view.root_table.clone()];
+    let mut needed_tables: Vec<String> = vec![view.root_table.clone()];
 
     for field_name in accessed_fields {
         for field in &view.fields {
@@ -442,10 +417,7 @@ pub fn join_elimination_savings(
 ) -> f64 {
     let mut savings = 0.0;
     for table in eliminated_tables {
-        let rows = table_row_counts
-            .get(table)
-            .copied()
-            .unwrap_or(1000.0);
+        let rows = table_row_counts.get(table).copied().unwrap_or(1000.0);
         savings += params.relational_join_cost * rows.sqrt();
         savings += rows * params.relational_scan_cost_per_row * 0.1;
     }
@@ -488,8 +460,7 @@ pub fn predicate_target(
                         PredicateTarget::RelationalColumn
                     }
                 }
-                DualityFieldMapping::Nested { .. }
-                | DualityFieldMapping::Array { .. } => {
+                DualityFieldMapping::Nested { .. } | DualityFieldMapping::Array { .. } => {
                     PredicateTarget::JsonPath
                 }
             };
@@ -504,10 +475,7 @@ pub fn predicate_target(
 /// Relational pushdown with an index is typically 10-100x more
 /// selective than a full document scan with JSON path evaluation.
 #[must_use]
-pub fn pushdown_selectivity_benefit(
-    has_index: bool,
-    base_selectivity: f64,
-) -> f64 {
+pub fn pushdown_selectivity_benefit(has_index: bool, base_selectivity: f64) -> f64 {
     if has_index {
         base_selectivity * 0.1
     } else {
@@ -594,8 +562,7 @@ fn var(s: &str) -> Var {
 /// JSON field operations.
 fn is_json_field_predicate(
     pred_var: Var,
-) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool
-{
+) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool {
     move |egraph, _id, subst| {
         let pred_id = subst[pred_var];
         contains_json_pattern(egraph, pred_id, 3)
@@ -603,11 +570,7 @@ fn is_json_field_predicate(
 }
 
 /// Recursively check if an e-class contains JSON access patterns.
-fn contains_json_pattern(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    id: Id,
-    depth: u32,
-) -> bool {
+fn contains_json_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
     if depth == 0 {
         return false;
     }
@@ -625,26 +588,20 @@ fn contains_json_pattern(
             | RelLang::Gt([l, r])
             | RelLang::Ge([l, r]) => {
                 if contains_json_pattern(egraph, *l, depth - 1)
-                    || contains_json_pattern(
-                        egraph, *r, depth - 1,
-                    )
+                    || contains_json_pattern(egraph, *r, depth - 1)
                 {
                     return true;
                 }
             }
             RelLang::And([l, r]) | RelLang::Or([l, r]) => {
                 if contains_json_pattern(egraph, *l, depth - 1)
-                    || contains_json_pattern(
-                        egraph, *r, depth - 1,
-                    )
+                    || contains_json_pattern(egraph, *r, depth - 1)
                 {
                     return true;
                 }
             }
             RelLang::Not([inner]) => {
-                if contains_json_pattern(
-                    egraph, *inner, depth - 1,
-                ) {
+                if contains_json_pattern(egraph, *inner, depth - 1) {
                     return true;
                 }
             }
@@ -669,29 +626,21 @@ pub enum DualityError {
         "failed to parse duality view {view}: {reason}; \
          falling back to standard optimization"
     )]
-    ViewParseFailed {
-        view: String,
-        reason: String,
-    },
+    ViewParseFailed { view: String, reason: String },
 
     /// Field mapping not found in the duality view.
     #[error(
         "field {field} not found in duality view {view}; \
          skipping predicate pushdown"
     )]
-    FieldNotFound {
-        view: String,
-        field: String,
-    },
+    FieldNotFound { view: String, field: String },
 
     /// Unsupported Oracle version for duality views.
     #[error(
         "Oracle version {version} does not support duality views; \
          minimum required: 23ai"
     )]
-    UnsupportedVersion {
-        version: String,
-    },
+    UnsupportedVersion { version: String },
 }
 
 // ------------------------------------------------------------------
@@ -733,8 +682,7 @@ pub fn benchmark_access_patterns(
         params,
     );
 
-    let speedup = if decision.document_cost < decision.relational_cost
-    {
+    let speedup = if decision.document_cost < decision.relational_cost {
         decision.relational_cost / decision.document_cost
     } else {
         decision.document_cost / decision.relational_cost
@@ -779,29 +727,21 @@ mod tests {
                     json_path: "customer".to_string(),
                     mapping: DualityFieldMapping::Nested {
                         table: "customers".to_string(),
-                        join_condition:
-                            "orders.customer_id = customers.id"
-                                .to_string(),
+                        join_condition: "orders.customer_id = customers.id".to_string(),
                         fields: vec![
                             DualityField {
                                 json_path: "name".to_string(),
-                                mapping:
-                                    DualityFieldMapping::Column {
-                                        table: "customers"
-                                            .to_string(),
-                                        column: "name"
-                                            .to_string(),
-                                    },
+                                mapping: DualityFieldMapping::Column {
+                                    table: "customers".to_string(),
+                                    column: "name".to_string(),
+                                },
                             },
                             DualityField {
                                 json_path: "email".to_string(),
-                                mapping:
-                                    DualityFieldMapping::Column {
-                                        table: "customers"
-                                            .to_string(),
-                                        column: "email"
-                                            .to_string(),
-                                    },
+                                mapping: DualityFieldMapping::Column {
+                                    table: "customers".to_string(),
+                                    column: "email".to_string(),
+                                },
                             },
                         ],
                     },
@@ -810,29 +750,21 @@ mod tests {
                     json_path: "items".to_string(),
                     mapping: DualityFieldMapping::Array {
                         table: "order_items".to_string(),
-                        join_condition:
-                            "orders.order_id = order_items.order_id"
-                                .to_string(),
+                        join_condition: "orders.order_id = order_items.order_id".to_string(),
                         fields: vec![
                             DualityField {
                                 json_path: "product".to_string(),
-                                mapping:
-                                    DualityFieldMapping::Column {
-                                        table: "order_items"
-                                            .to_string(),
-                                        column: "product_name"
-                                            .to_string(),
-                                    },
+                                mapping: DualityFieldMapping::Column {
+                                    table: "order_items".to_string(),
+                                    column: "product_name".to_string(),
+                                },
                             },
                             DualityField {
                                 json_path: "qty".to_string(),
-                                mapping:
-                                    DualityFieldMapping::Column {
-                                        table: "order_items"
-                                            .to_string(),
-                                        column: "quantity"
-                                            .to_string(),
-                                    },
+                                mapping: DualityFieldMapping::Column {
+                                    table: "order_items".to_string(),
+                                    column: "quantity".to_string(),
+                                },
                             },
                         ],
                     },
@@ -893,14 +825,7 @@ mod tests {
         let counts = sample_row_counts();
         let params = DualityCostParams::default();
 
-        let decision = choose_access_path(
-            &view,
-            &counts,
-            1.0,
-            6,
-            0,
-            &params,
-        );
+        let decision = choose_access_path(&view, &counts, 1.0, 6, 0, &params);
 
         assert_eq!(
             decision.path,
@@ -918,14 +843,7 @@ mod tests {
         let counts = sample_row_counts();
         let params = DualityCostParams::default();
 
-        let decision = choose_access_path(
-            &view,
-            &counts,
-            0.001,
-            2,
-            1,
-            &params,
-        );
+        let decision = choose_access_path(&view, &counts, 0.001, 2, 1, &params);
 
         assert_eq!(
             decision.path,
@@ -940,12 +858,8 @@ mod tests {
     #[test]
     fn document_cost_scales_with_rows() {
         let params = DualityCostParams::default();
-        let small = estimate_document_cost(
-            100.0, 1.0, 6, 1, &params,
-        );
-        let large = estimate_document_cost(
-            100_000.0, 1.0, 6, 1, &params,
-        );
+        let small = estimate_document_cost(100.0, 1.0, 6, 1, &params);
+        let large = estimate_document_cost(100_000.0, 1.0, 6, 1, &params);
         assert!(
             large > small * 900.0,
             "cost should scale roughly linearly: \
@@ -956,22 +870,8 @@ mod tests {
     #[test]
     fn relational_cost_scales_with_joins() {
         let params = DualityCostParams::default();
-        let no_joins = estimate_relational_cost(
-            &[1000.0],
-            0.1,
-            0,
-            3,
-            6,
-            &params,
-        );
-        let with_joins = estimate_relational_cost(
-            &[1000.0, 500.0, 2000.0],
-            0.1,
-            2,
-            3,
-            6,
-            &params,
-        );
+        let no_joins = estimate_relational_cost(&[1000.0], 0.1, 0, 3, 6, &params);
+        let with_joins = estimate_relational_cost(&[1000.0, 500.0, 2000.0], 0.1, 2, 3, 6, &params);
         assert!(
             with_joins > no_joins,
             "joins should increase cost: \
@@ -997,10 +897,7 @@ mod tests {
         let params = DualityCostParams::default();
         let few = estimate_update_cost(2, 10.0, &params);
         let many = estimate_update_cost(2, 10_000.0, &params);
-        assert!(
-            many > few * 900.0,
-            "more rows should increase update cost"
-        );
+        assert!(many > few * 900.0, "more rows should increase update cost");
     }
 
     // -- Partial assembly tests --
@@ -1008,10 +905,7 @@ mod tests {
     #[test]
     fn eliminable_joins_for_root_fields_only() {
         let view = sample_orders_view();
-        let eliminated = eliminable_joins(
-            &view,
-            &["_id".to_string(), "status".to_string()],
-        );
+        let eliminated = eliminable_joins(&view, &["_id".to_string(), "status".to_string()]);
         assert!(
             eliminated.contains(&"customers".to_string()),
             "customers table should be eliminable"
@@ -1045,12 +939,8 @@ mod tests {
         let counts = sample_row_counts();
         let params = DualityCostParams::default();
         let eliminated = vec!["order_items".to_string()];
-        let savings =
-            join_elimination_savings(&eliminated, &counts, &params);
-        assert!(
-            savings > 0.0,
-            "eliminating a join should save cost"
-        );
+        let savings = join_elimination_savings(&eliminated, &counts, &params);
+        assert!(savings > 0.0, "eliminating a join should save cost");
     }
 
     // -- Predicate pushdown tests --
@@ -1058,31 +948,27 @@ mod tests {
     #[test]
     fn scalar_field_pushes_to_relational() {
         let view = sample_orders_view();
-        let target =
-            predicate_target(&view, "status", true);
+        let target = predicate_target(&view, "status", true);
         assert_eq!(target, PredicateTarget::RelationalColumn);
     }
 
     #[test]
     fn nested_field_stays_as_json() {
         let view = sample_orders_view();
-        let target =
-            predicate_target(&view, "customer", false);
+        let target = predicate_target(&view, "customer", false);
         assert_eq!(target, PredicateTarget::JsonPath);
     }
 
     #[test]
     fn unknown_field_is_post_assembly() {
         let view = sample_orders_view();
-        let target =
-            predicate_target(&view, "nonexistent", false);
+        let target = predicate_target(&view, "nonexistent", false);
         assert_eq!(target, PredicateTarget::PostAssembly);
     }
 
     #[test]
     fn pushdown_benefit_with_index() {
-        let benefit =
-            pushdown_selectivity_benefit(true, 0.01);
+        let benefit = pushdown_selectivity_benefit(true, 0.01);
         assert!(
             benefit < 0.01,
             "indexed pushdown should improve selectivity"
@@ -1091,27 +977,16 @@ mod tests {
 
     #[test]
     fn pushdown_benefit_without_index() {
-        let benefit =
-            pushdown_selectivity_benefit(false, 0.01);
-        assert!(
-            benefit < 0.01,
-            "non-indexed pushdown should still help"
-        );
-        let indexed =
-            pushdown_selectivity_benefit(true, 0.01);
-        assert!(
-            indexed < benefit,
-            "indexed pushdown should be better"
-        );
+        let benefit = pushdown_selectivity_benefit(false, 0.01);
+        assert!(benefit < 0.01, "non-indexed pushdown should still help");
+        let indexed = pushdown_selectivity_benefit(true, 0.01);
+        assert!(indexed < benefit, "indexed pushdown should be better");
     }
 
     // -- E-graph rewrite rule tests --
 
-    fn run_with_duality_rules(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_with_duality_rules(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         let rules = duality_rewrite_rules();
         Runner::default()
             .with_expr(&rec)
@@ -1120,24 +995,15 @@ mod tests {
             .run(&rules)
     }
 
-    fn make_json_predicate(
-        field: &str,
-        value: &str,
-    ) -> Expr {
+    fn make_json_predicate(field: &str, value: &str) -> Expr {
         Expr::BinOp {
             op: BinOp::Eq,
             left: Box::new(Expr::BinOp {
                 op: BinOp::JsonAccess,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("document"),
-                )),
-                right: Box::new(Expr::Const(Const::String(
-                    field.to_string(),
-                ))),
+                left: Box::new(Expr::Column(ColumnRef::new("document"))),
+                right: Box::new(Expr::Const(Const::String(field.to_string()))),
             }),
-            right: Box::new(Expr::Const(Const::String(
-                value.to_string(),
-            ))),
+            right: Box::new(Expr::Const(Const::String(value.to_string()))),
         }
     }
 
@@ -1152,9 +1018,7 @@ mod tests {
             right: Box::new(right),
         };
         let filtered = RelExpr::Filter {
-            predicate: make_json_predicate(
-                "status", "active",
-            ),
+            predicate: make_json_predicate("status", "active"),
             input: Box::new(joined),
         };
 
@@ -1170,14 +1034,8 @@ mod tests {
         let scan = RelExpr::scan("orders_dv");
         let pred = Expr::BinOp {
             op: BinOp::And,
-            left: Box::new(make_json_predicate(
-                "status",
-                "shipped",
-            )),
-            right: Box::new(make_json_predicate(
-                "priority",
-                "high",
-            )),
+            left: Box::new(make_json_predicate("status", "shipped")),
+            right: Box::new(make_json_predicate("priority", "high")),
         };
         let filtered = RelExpr::Filter {
             predicate: pred,
@@ -1204,9 +1062,7 @@ mod tests {
             input: Box::new(scan),
         };
         let filtered = RelExpr::Filter {
-            predicate: make_json_predicate(
-                "status", "active",
-            ),
+            predicate: make_json_predicate("status", "active"),
             input: Box::new(projected),
         };
 
@@ -1223,21 +1079,15 @@ mod tests {
         let filtered = RelExpr::Filter {
             predicate: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("id"))),
                 right: Box::new(Expr::Const(Const::Int(42))),
             },
             input: Box::new(scan),
         };
 
-        let rec = to_rec_expr(&filtered)
-            .expect("conversion should succeed");
+        let rec = to_rec_expr(&filtered).expect("conversion should succeed");
         let initial_classes = {
-            let mut eg = egg::EGraph::<
-                RelLang,
-                RelAnalysis,
-            >::default();
+            let mut eg = egg::EGraph::<RelLang, RelAnalysis>::default();
             eg.add_expr(&rec);
             eg.number_of_classes()
         };
@@ -1252,15 +1102,11 @@ mod tests {
 
     #[test]
     fn json_filter_below_aggregate() {
-        use ra_core::algebra::{
-            AggregateExpr, AggregateFunction,
-        };
+        use ra_core::algebra::{AggregateExpr, AggregateFunction};
 
         let scan = RelExpr::scan("orders_dv");
         let agg = RelExpr::Aggregate {
-            group_by: vec![Expr::Column(
-                ColumnRef::new("region"),
-            )],
+            group_by: vec![Expr::Column(ColumnRef::new("region"))],
             aggregates: vec![AggregateExpr {
                 function: AggregateFunction::Count,
                 arg: None,
@@ -1270,9 +1116,7 @@ mod tests {
             input: Box::new(scan),
         };
         let filtered = RelExpr::Filter {
-            predicate: make_json_predicate(
-                "status", "active",
-            ),
+            predicate: make_json_predicate("status", "active"),
             input: Box::new(agg),
         };
 
@@ -1330,15 +1174,10 @@ mod tests {
         let view = sample_orders_view();
         let counts = sample_row_counts();
         let params = DualityCostParams::default();
-        let (doc, rel, speedup) = benchmark_access_patterns(
-            &view, &counts, 0.01, 3, 1, &params,
-        );
+        let (doc, rel, speedup) = benchmark_access_patterns(&view, &counts, 0.01, 3, 1, &params);
         assert!(doc > 0.0, "document cost should be positive");
         assert!(rel > 0.0, "relational cost should be positive");
-        assert!(
-            speedup >= 1.0,
-            "speedup should be >= 1.0: {speedup:.2}"
-        );
+        assert!(speedup >= 1.0, "speedup should be >= 1.0: {speedup:.2}");
     }
 
     // -- Updatability tests --
@@ -1399,14 +1238,7 @@ mod tests {
         let mut params = DualityCostParams::default();
         params.document_fetch_cost = 50.0;
 
-        let decision = choose_access_path(
-            &view,
-            &counts,
-            0.01,
-            3,
-            1,
-            &params,
-        );
+        let decision = choose_access_path(&view, &counts, 0.01, 3, 1, &params);
 
         assert_eq!(
             decision.path,
@@ -1422,14 +1254,7 @@ mod tests {
         let mut params = DualityCostParams::default();
         params.relational_join_cost = 100.0;
 
-        let decision = choose_access_path(
-            &view,
-            &counts,
-            1.0,
-            6,
-            0,
-            &params,
-        );
+        let decision = choose_access_path(&view, &counts, 1.0, 6, 0, &params);
 
         assert_eq!(
             decision.path,
@@ -1443,13 +1268,7 @@ mod tests {
     #[test]
     fn eliminable_joins_keeps_needed_nested_table() {
         let view = sample_orders_view();
-        let eliminated = eliminable_joins(
-            &view,
-            &[
-                "_id".to_string(),
-                "customer".to_string(),
-            ],
-        );
+        let eliminated = eliminable_joins(&view, &["_id".to_string(), "customer".to_string()]);
         // Customers table is needed for "customer" field
         assert!(
             !eliminated.contains(&"customers".to_string()),
@@ -1467,10 +1286,7 @@ mod tests {
     #[test]
     fn eliminable_joins_keeps_array_table() {
         let view = sample_orders_view();
-        let eliminated = eliminable_joins(
-            &view,
-            &["_id".to_string(), "items".to_string()],
-        );
+        let eliminated = eliminable_joins(&view, &["_id".to_string(), "items".to_string()]);
         assert!(
             !eliminated.contains(&"order_items".to_string()),
             "order_items should not be eliminated"
@@ -1487,8 +1303,7 @@ mod tests {
     fn join_elimination_savings_zero_for_empty() {
         let counts = sample_row_counts();
         let params = DualityCostParams::default();
-        let savings =
-            join_elimination_savings(&[], &counts, &params);
+        let savings = join_elimination_savings(&[], &counts, &params);
         assert!(
             savings.abs() < f64::EPSILON,
             "no eliminated tables should mean zero savings"
@@ -1500,8 +1315,7 @@ mod tests {
     #[test]
     fn array_field_pushes_to_json() {
         let view = sample_orders_view();
-        let target =
-            predicate_target(&view, "items", false);
+        let target = predicate_target(&view, "items", false);
         assert_eq!(target, PredicateTarget::JsonPath);
     }
 
@@ -1513,9 +1327,7 @@ mod tests {
         let counts = sample_row_counts();
         let params = DualityCostParams::default();
 
-        let decision = choose_access_path(
-            &view, &counts, 1.0, 6, 0, &params,
-        );
+        let decision = choose_access_path(&view, &counts, 1.0, 6, 0, &params);
 
         if decision.path == AccessPath::Document {
             assert!(
@@ -1538,9 +1350,7 @@ mod tests {
         let counts = HashMap::new();
         let params = DualityCostParams::default();
 
-        let decision = choose_access_path(
-            &view, &counts, 0.5, 3, 1, &params,
-        );
+        let decision = choose_access_path(&view, &counts, 0.5, 3, 1, &params);
         // Should not panic; uses default of 1000.0
         assert!(decision.document_cost > 0.0);
         assert!(decision.relational_cost > 0.0);
@@ -1551,15 +1361,11 @@ mod tests {
     #[test]
     fn document_cost_zero_predicates_no_scan() {
         let params = DualityCostParams::default();
-        let cost = estimate_document_cost(
-            100_000.0, 1.0, 6, 0, &params,
-        );
+        let cost = estimate_document_cost(100_000.0, 1.0, 6, 0, &params);
         // No predicate scan cost, only fetch + extract
-        let expected_per_row = params.document_fetch_cost
-            + 6.0 * params.json_field_extract_cost;
+        let expected_per_row = params.document_fetch_cost + 6.0 * params.json_field_extract_cost;
         assert!(
-            (cost - 100_000.0 * expected_per_row).abs()
-                < 1.0,
+            (cost - 100_000.0 * expected_per_row).abs() < 1.0,
             "cost without predicates should be \
              rows * (fetch + extract)"
         );
@@ -1570,15 +1376,10 @@ mod tests {
     #[test]
     fn relational_cost_empty_tables_defaults() {
         let params = DualityCostParams::default();
-        let cost = estimate_relational_cost(
-            &[], 0.5, 0, 3, 6, &params,
-        );
+        let cost = estimate_relational_cost(&[], 0.5, 0, 3, 6, &params);
         // Empty table list -> no scan cost, but assembly
         // uses default 1000 for root
-        assert!(
-            cost > 0.0,
-            "cost should be positive even with empty tables"
-        );
+        assert!(cost > 0.0, "cost should be positive even with empty tables");
     }
 
     // -- DualityCostParams default values test --

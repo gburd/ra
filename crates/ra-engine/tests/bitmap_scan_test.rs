@@ -73,22 +73,20 @@ fn bitmap_and_combines_scans() {
 fn bitmap_heap_scan_with_recheck() {
     // Verify BitmapHeapScan with recheck condition
     let bitmap = Box::new(RelExpr::BitmapAnd {
-        inputs: vec![
-            Box::new(RelExpr::BitmapIndexScan {
-                table: "orders".to_string(),
-                index: "orders_status_idx".to_string(),
-                predicate: Expr::BinOp {
-                    op: BinOp::Eq,
-                    left: Box::new(Expr::Column(ColumnRef {
-                        table: Some("orders".to_string()),
-                        column: "status".to_string(),
-                    })),
-                    right: Box::new(Expr::Const(ra_core::expr::Const::String(
-                        "shipped".to_string(),
-                    ))),
-                },
-            }),
-        ],
+        inputs: vec![Box::new(RelExpr::BitmapIndexScan {
+            table: "orders".to_string(),
+            index: "orders_status_idx".to_string(),
+            predicate: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef {
+                    table: Some("orders".to_string()),
+                    column: "status".to_string(),
+                })),
+                right: Box::new(Expr::Const(ra_core::expr::Const::String(
+                    "shipped".to_string(),
+                ))),
+            },
+        })],
     });
 
     let heap_scan = RelExpr::BitmapHeapScan {
@@ -112,10 +110,8 @@ fn bitmap_heap_scan_with_recheck() {
 #[test]
 fn cost_model_bitmap_index_scan() {
     // Test bitmap index scan cost calculation
-    let mut model = IntegratedCostModel::new(
-        StatisticsProfile::standard(),
-        HardwareProfile::cpu_only(),
-    );
+    let mut model =
+        IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
 
     let managed = ra_stats::integration::ManagedTableStats {
         table: ra_stats::types::TableStats {
@@ -144,10 +140,8 @@ fn cost_model_bitmap_index_scan() {
 #[test]
 fn cost_model_bitmap_combine() {
     // Test bitmap combine cost
-    let mut model = IntegratedCostModel::new(
-        StatisticsProfile::standard(),
-        HardwareProfile::cpu_only(),
-    );
+    let mut model =
+        IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
 
     let managed = ra_stats::integration::ManagedTableStats {
         table: ra_stats::types::TableStats {
@@ -176,10 +170,8 @@ fn cost_model_bitmap_combine() {
 #[test]
 fn cost_model_bitmap_heap_scan() {
     // Test bitmap heap scan cost
-    let mut model = IntegratedCostModel::new(
-        StatisticsProfile::standard(),
-        HardwareProfile::cpu_only(),
-    );
+    let mut model =
+        IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
 
     let managed = ra_stats::integration::ManagedTableStats {
         table: ra_stats::types::TableStats {
@@ -208,10 +200,8 @@ fn cost_model_bitmap_heap_scan() {
 #[test]
 fn cost_model_full_bitmap_scan() {
     // Test full bitmap scan with multiple predicates
-    let mut model = IntegratedCostModel::new(
-        StatisticsProfile::standard(),
-        HardwareProfile::cpu_only(),
-    );
+    let mut model =
+        IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
 
     let managed = ra_stats::integration::ManagedTableStats {
         table: ra_stats::types::TableStats {
@@ -238,18 +228,15 @@ fn cost_model_full_bitmap_scan() {
     assert!(cost.is_finite());
 
     // More selective predicates should produce lower cost
-    let more_selective =
-        model.full_bitmap_scan_cost("users", &[0.01, 0.01, 0.01]);
+    let more_selective = model.full_bitmap_scan_cost("users", &[0.01, 0.01, 0.01]);
     assert!(more_selective < cost);
 }
 
 #[test]
 fn bitmap_scan_cheaper_than_multiple_scans() {
     // Bitmap scan should be cheaper than multiple sequential scans
-    let mut model = IntegratedCostModel::new(
-        StatisticsProfile::standard(),
-        HardwareProfile::cpu_only(),
-    );
+    let mut model =
+        IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
 
     let managed = ra_stats::integration::ManagedTableStats {
         table: ra_stats::types::TableStats {
@@ -301,10 +288,8 @@ fn egraph_roundtrip_bitmap_index_scan() {
         },
     };
 
-    let rec_expr = to_rec_expr(&expr)
-        .expect("should convert to rec_expr");
-    let result = rec_expr_to_rel_expr(&rec_expr)
-        .expect("should convert back to RelExpr");
+    let rec_expr = to_rec_expr(&expr).expect("should convert to rec_expr");
+    let result = rec_expr_to_rel_expr(&rec_expr).expect("should convert back to RelExpr");
 
     assert!(matches!(result, RelExpr::BitmapIndexScan { .. }));
 }
@@ -333,10 +318,8 @@ fn egraph_roundtrip_bitmap_and() {
         ],
     };
 
-    let rec_expr = to_rec_expr(&expr)
-        .expect("should convert to rec_expr");
-    let result = rec_expr_to_rel_expr(&rec_expr)
-        .expect("should convert back to RelExpr");
+    let rec_expr = to_rec_expr(&expr).expect("should convert to rec_expr");
+    let result = rec_expr_to_rel_expr(&rec_expr).expect("should convert back to RelExpr");
 
     assert!(matches!(result, RelExpr::BitmapAnd { .. }));
 }
@@ -357,10 +340,8 @@ fn egraph_roundtrip_bitmap_heap_scan() {
         recheck_cond: None,
     };
 
-    let rec_expr = to_rec_expr(&expr)
-        .expect("should convert to rec_expr");
-    let result = rec_expr_to_rel_expr(&rec_expr)
-        .expect("should convert back to RelExpr");
+    let rec_expr = to_rec_expr(&expr).expect("should convert to rec_expr");
+    let result = rec_expr_to_rel_expr(&rec_expr).expect("should convert back to RelExpr");
 
     assert!(matches!(result, RelExpr::BitmapHeapScan { .. }));
 }

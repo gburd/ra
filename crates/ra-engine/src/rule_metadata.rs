@@ -17,8 +17,7 @@ use tracing::{debug, warn};
 /// Used to weight rule application priority: cheaper rules
 /// should fire before expensive ones when both have similar
 /// expected benefit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ComplexityClass {
     /// Constant-time pattern match and rewrite.
     #[serde(rename = "O(1)")]
@@ -144,15 +143,9 @@ pub enum Precondition {
         description: String,
     },
     /// Database system requirement
-    Database {
-        system: String,
-        description: String,
-    },
+    Database { system: String, description: String },
     /// Feature flag requirement
-    Feature {
-        flag: String,
-        description: String,
-    },
+    Feature { flag: String, description: String },
 }
 
 /// Parsed rule metadata with content.
@@ -224,7 +217,11 @@ pub fn load_rules_from_directory(dir: &Path) -> Result<Vec<ParsedRule>> {
                 if ext == "rra" {
                     match parse_rra_file(entry.path()) {
                         Ok(rule) => {
-                            debug!("Loaded rule: {} from {}", rule.metadata.id, entry.path().display());
+                            debug!(
+                                "Loaded rule: {} from {}",
+                                rule.metadata.id,
+                                entry.path().display()
+                            );
                             rules.push(rule);
                         }
                         Err(e) => {
@@ -272,15 +269,14 @@ fn is_rule_applicable(metadata: &RuleMetadata, facts: &dyn FactsProvider) -> boo
     // Check database compatibility
     if !metadata.databases.is_empty() {
         let db_name = facts.database_name();
-        let db_matches = metadata.databases.iter().any(|db| {
-            db.eq_ignore_ascii_case(db_name) || db == "all"
-        });
+        let db_matches = metadata
+            .databases
+            .iter()
+            .any(|db| db.eq_ignore_ascii_case(db_name) || db == "all");
         if !db_matches {
             debug!(
                 "Rule {} filtered: database {} not in {:?}",
-                metadata.id,
-                db_name,
-                metadata.databases
+                metadata.id, db_name, metadata.databases
             );
             return false;
         }
@@ -443,8 +439,8 @@ pub fn build_metadata_index(rules: &[ParsedRule]) -> HashMap<String, RuleMetadat
 mod tests {
     use super::*;
     use ra_core::facts::{
-        FactsProvider, HardwareProfile as CoreHardwareProfile, SqlDialect,
-        TableInfo, TableStats as CoreTableStats,
+        FactsProvider, HardwareProfile as CoreHardwareProfile, SqlDialect, TableInfo,
+        TableStats as CoreTableStats,
     };
     use ra_core::statistics::ColumnStats;
     use std::time::Duration;
@@ -478,11 +474,7 @@ mod tests {
         fn get_table_stats(&self, _table: &str) -> Option<&CoreTableStats> {
             None
         }
-        fn get_column_stats(
-            &self,
-            _table: &str,
-            _column: &str,
-        ) -> Option<&ColumnStats> {
+        fn get_column_stats(&self, _table: &str, _column: &str) -> Option<&ColumnStats> {
             None
         }
         fn hardware_profile(&self) -> &CoreHardwareProfile {
@@ -491,10 +483,7 @@ mod tests {
         fn get_schema(&self, _table: &str) -> Option<&TableInfo> {
             None
         }
-        fn runtime_stats(
-            &self,
-            _id: &str,
-        ) -> Option<&ra_core::facts::OperatorStats> {
+        fn runtime_stats(&self, _id: &str) -> Option<&ra_core::facts::OperatorStats> {
             None
         }
         fn database_name(&self) -> &'static str {
@@ -540,11 +529,7 @@ mod tests {
     fn parse_comparison_gte() {
         assert_eq!(
             parse_comparison("cpu_cores() >= 4"),
-            Some((
-                "cpu_cores()".to_string(),
-                ">=".to_string(),
-                "4".to_string(),
-            ))
+            Some(("cpu_cores()".to_string(), ">=".to_string(), "4".to_string(),))
         );
     }
 
@@ -576,11 +561,7 @@ mod tests {
     fn parse_comparison_eq() {
         assert_eq!(
             parse_comparison("cpu_cores() == 8"),
-            Some((
-                "cpu_cores()".to_string(),
-                "==".to_string(),
-                "8".to_string(),
-            ))
+            Some(("cpu_cores()".to_string(), "==".to_string(), "8".to_string(),))
         );
     }
 
@@ -588,11 +569,7 @@ mod tests {
     fn parse_comparison_neq() {
         assert_eq!(
             parse_comparison("cpu_cores() != 0"),
-            Some((
-                "cpu_cores()".to_string(),
-                "!=".to_string(),
-                "0".to_string(),
-            ))
+            Some(("cpu_cores()".to_string(), "!=".to_string(), "0".to_string(),))
         );
     }
 
@@ -703,19 +680,13 @@ mod tests {
     #[test]
     fn predicate_comparison_expression() {
         let facts = TestFacts::new("test", 8, 16_000_000_000, false);
-        assert!(evaluate_predicate_condition(
-            "cpu_cores() >= 4",
-            &facts,
-        ));
+        assert!(evaluate_predicate_condition("cpu_cores() >= 4", &facts,));
     }
 
     #[test]
     fn predicate_unknown_returns_true() {
         let facts = TestFacts::new("test", 4, 8_000_000_000, false);
-        assert!(evaluate_predicate_condition(
-            "some_unknown_check()",
-            &facts,
-        ));
+        assert!(evaluate_predicate_condition("some_unknown_check()", &facts,));
     }
 
     // ---- evaluate_hardware_requirement tests ----
@@ -940,11 +911,7 @@ mod tests {
 
     // ---- parse_rra_file tests ----
 
-    fn write_temp_rra(
-        dir: &std::path::Path,
-        name: &str,
-        content: &str,
-    ) -> std::path::PathBuf {
+    fn write_temp_rra(dir: &std::path::Path, name: &str, content: &str) -> std::path::PathBuf {
         let path = dir.join(name);
         fs::write(&path, content).unwrap();
         path
@@ -952,9 +919,7 @@ mod tests {
 
     #[test]
     fn parse_rra_file_valid() {
-        let dir = std::env::temp_dir().join(
-            format!("ra_test_rra_{}", std::process::id()),
-        );
+        let dir = std::env::temp_dir().join(format!("ra_test_rra_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
         let rra = write_temp_rra(
@@ -976,14 +941,8 @@ mod tests {
         let parsed = result.unwrap();
         assert_eq!(parsed.metadata.id, "push-filter");
         assert_eq!(parsed.metadata.name, "Push Filter Down");
-        assert_eq!(
-            parsed.metadata.category,
-            "logical/predicate-pushdown",
-        );
-        assert_eq!(
-            parsed.metadata.databases,
-            vec!["postgresql"],
-        );
+        assert_eq!(parsed.metadata.category, "logical/predicate-pushdown",);
+        assert_eq!(parsed.metadata.databases, vec!["postgresql"],);
         assert!(parsed.content.contains("Push filter"));
 
         let _ = fs::remove_dir_all(&dir);
@@ -991,33 +950,22 @@ mod tests {
 
     #[test]
     fn parse_rra_file_missing_frontmatter() {
-        let dir = std::env::temp_dir().join(
-            format!("ra_test_nofm_{}", std::process::id()),
-        );
+        let dir = std::env::temp_dir().join(format!("ra_test_nofm_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
-        let rra = write_temp_rra(
-            &dir,
-            "bad.rra",
-            "No frontmatter here, just content.",
-        );
+        let rra = write_temp_rra(&dir, "bad.rra", "No frontmatter here, just content.");
 
         let result = parse_rra_file(&rra);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("Invalid .rra file format"),
-            "got: {msg}",
-        );
+        assert!(msg.contains("Invalid .rra file format"), "got: {msg}",);
 
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn parse_rra_file_invalid_yaml() {
-        let dir = std::env::temp_dir().join(
-            format!("ra_test_badyml_{}", std::process::id()),
-        );
+        let dir = std::env::temp_dir().join(format!("ra_test_badyml_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
         let rra = write_temp_rra(
@@ -1032,33 +980,25 @@ mod tests {
         let result = parse_rra_file(&rra);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("Failed to parse YAML"),
-            "got: {msg}",
-        );
+        assert!(msg.contains("Failed to parse YAML"), "got: {msg}",);
 
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn parse_rra_file_nonexistent() {
-        let path =
-            std::path::Path::new("/tmp/nonexistent_rule.rra");
+        let path = std::path::Path::new("/tmp/nonexistent_rule.rra");
         let result = parse_rra_file(path);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("Failed to read rule file"),
-            "got: {msg}",
-        );
+        assert!(msg.contains("Failed to read rule file"), "got: {msg}",);
     }
 
     // ---- load_rules_from_directory tests ----
 
     #[test]
     fn load_rules_nonexistent_dir_returns_empty() {
-        let dir =
-            std::path::Path::new("/tmp/nonexistent_rules_dir");
+        let dir = std::path::Path::new("/tmp/nonexistent_rules_dir");
         let result = load_rules_from_directory(dir);
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
@@ -1066,9 +1006,7 @@ mod tests {
 
     #[test]
     fn load_rules_from_dir_with_valid_rra() {
-        let dir = std::env::temp_dir().join(
-            format!("ra_test_loaddir_{}", std::process::id()),
-        );
+        let dir = std::env::temp_dir().join(format!("ra_test_loaddir_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
         write_temp_rra(
@@ -1094,19 +1032,14 @@ mod tests {
         );
 
         // Non-rra file should be ignored
-        write_temp_rra(
-            &dir,
-            "notes.txt",
-            "Not a rule file.",
-        );
+        write_temp_rra(&dir, "notes.txt", "Not a rule file.");
 
         let result = load_rules_from_directory(&dir);
         assert!(result.is_ok(), "{:?}", result.err());
         let rules = result.unwrap();
         assert_eq!(rules.len(), 2);
 
-        let ids: Vec<&str> =
-            rules.iter().map(|r| r.metadata.id.as_str()).collect();
+        let ids: Vec<&str> = rules.iter().map(|r| r.metadata.id.as_str()).collect();
         assert!(ids.contains(&"rule-one"));
         assert!(ids.contains(&"rule-two"));
 
@@ -1115,9 +1048,7 @@ mod tests {
 
     #[test]
     fn load_rules_skips_malformed_rra() {
-        let dir = std::env::temp_dir().join(
-            format!("ra_test_malformed_{}", std::process::id()),
-        );
+        let dir = std::env::temp_dir().join(format!("ra_test_malformed_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
         write_temp_rra(
@@ -1131,11 +1062,7 @@ mod tests {
              Good content.\n",
         );
 
-        write_temp_rra(
-            &dir,
-            "bad.rra",
-            "no frontmatter at all",
-        );
+        write_temp_rra(&dir, "bad.rra", "no frontmatter at all");
 
         let result = load_rules_from_directory(&dir);
         assert!(result.is_ok());
@@ -1148,9 +1075,7 @@ mod tests {
 
     #[test]
     fn load_rules_recursive_subdirectory() {
-        let dir = std::env::temp_dir().join(
-            format!("ra_test_recursive_{}", std::process::id()),
-        );
+        let dir = std::env::temp_dir().join(format!("ra_test_recursive_{}", std::process::id()));
         let subdir = dir.join("subdir");
         fs::create_dir_all(&subdir).unwrap();
 
@@ -1188,9 +1113,7 @@ mod tests {
 
     #[test]
     fn parse_rra_file_with_preconditions() {
-        let dir = std::env::temp_dir().join(
-            format!("ra_test_precond_{}", std::process::id()),
-        );
+        let dir = std::env::temp_dir().join(format!("ra_test_precond_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
         let rra = write_temp_rra(

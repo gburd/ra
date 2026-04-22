@@ -8,10 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ra_metadata::schema::{
-    SchemaInfo, TriggerEvent, TriggerInfo, TriggerScope,
-    TriggerTiming,
-};
+use ra_metadata::schema::{SchemaInfo, TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming};
 
 /// Cost multiplier for different trigger types.
 const BEFORE_ROW_COST: f64 = 1.5;
@@ -85,10 +82,7 @@ pub enum CascadeSeverity {
 }
 
 impl std::fmt::Display for CascadeSeverity {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Info => write!(f, "INFO"),
             Self::Warning => write!(f, "WARNING"),
@@ -132,11 +126,7 @@ pub fn analyze_dml_cost(
     let mut breakdown = Vec::new();
 
     for trigger in &triggers {
-        let cost = estimate_trigger_cost(
-            trigger,
-            base_cost,
-            estimated_rows,
-        );
+        let cost = estimate_trigger_cost(trigger, base_cost, estimated_rows);
         trigger_cost += cost;
 
         breakdown.push(TriggerCostItem {
@@ -156,33 +146,20 @@ pub fn analyze_dml_cost(
     }
 }
 
-fn estimate_trigger_cost(
-    trigger: &TriggerInfo,
-    base_cost: f64,
-    estimated_rows: f64,
-) -> f64 {
+fn estimate_trigger_cost(trigger: &TriggerInfo, base_cost: f64, estimated_rows: f64) -> f64 {
     match (trigger.timing, trigger.scope) {
         (TriggerTiming::Before, TriggerScope::Row) => {
-            base_cost * BEFORE_ROW_COST * estimated_rows
-                / estimated_rows.max(1.0)
+            base_cost * BEFORE_ROW_COST * estimated_rows / estimated_rows.max(1.0)
         }
         (TriggerTiming::After, TriggerScope::Row) => {
-            base_cost * AFTER_ROW_COST * estimated_rows
-                / estimated_rows.max(1.0)
+            base_cost * AFTER_ROW_COST * estimated_rows / estimated_rows.max(1.0)
         }
-        (TriggerTiming::Before, TriggerScope::Statement) => {
-            base_cost * BEFORE_STMT_COST
-        }
-        (TriggerTiming::After, TriggerScope::Statement) => {
-            base_cost * AFTER_STMT_COST
-        }
+        (TriggerTiming::Before, TriggerScope::Statement) => base_cost * BEFORE_STMT_COST,
+        (TriggerTiming::After, TriggerScope::Statement) => base_cost * AFTER_STMT_COST,
         (TriggerTiming::InsteadOf, TriggerScope::Row) => {
-            base_cost * BEFORE_ROW_COST * estimated_rows
-                / estimated_rows.max(1.0)
+            base_cost * BEFORE_ROW_COST * estimated_rows / estimated_rows.max(1.0)
         }
-        (TriggerTiming::InsteadOf, TriggerScope::Statement) => {
-            base_cost * BEFORE_STMT_COST
-        }
+        (TriggerTiming::InsteadOf, TriggerScope::Statement) => base_cost * BEFORE_STMT_COST,
     }
 }
 
@@ -190,21 +167,12 @@ fn estimate_trigger_cost(
 ///
 /// Analyzes trigger action SQL to find triggers that reference
 /// other tables that also have triggers, forming chains.
-pub fn detect_cascade(
-    table_name: &str,
-    schema: &SchemaInfo,
-) -> Vec<CascadeWarning> {
+pub fn detect_cascade(table_name: &str, schema: &SchemaInfo) -> Vec<CascadeWarning> {
     let mut warnings = Vec::new();
     let mut visited = HashSet::new();
     let mut chain = Vec::new();
 
-    detect_cascade_recursive(
-        table_name,
-        schema,
-        &mut visited,
-        &mut chain,
-        &mut warnings,
-    );
+    detect_cascade_recursive(table_name, schema, &mut visited, &mut chain, &mut warnings);
 
     warnings
 }
@@ -242,8 +210,7 @@ fn detect_cascade_recursive(
     visited.insert(table_name.to_owned());
     chain.push(table_name.to_owned());
 
-    let referenced_tables =
-        find_tables_referenced_by_triggers(&table.triggers, schema);
+    let referenced_tables = find_tables_referenced_by_triggers(&table.triggers, schema);
 
     if referenced_tables.len() > 2 {
         warnings.push(CascadeWarning {
@@ -258,9 +225,7 @@ fn detect_cascade_recursive(
     }
 
     for ref_table in &referenced_tables {
-        detect_cascade_recursive(
-            ref_table, schema, visited, chain, warnings,
-        );
+        detect_cascade_recursive(ref_table, schema, visited, chain, warnings);
     }
 
     chain.pop();
@@ -272,11 +237,7 @@ fn find_tables_referenced_by_triggers(
     triggers: &[TriggerInfo],
     schema: &SchemaInfo,
 ) -> Vec<String> {
-    let table_names: HashMap<&str, ()> = schema
-        .tables
-        .keys()
-        .map(|k| (k.as_str(), ()))
-        .collect();
+    let table_names: HashMap<&str, ()> = schema.tables.keys().map(|k| (k.as_str(), ())).collect();
 
     let mut referenced = Vec::new();
     for trigger in triggers {
@@ -339,9 +300,8 @@ pub fn analyze_table_triggers(
 mod tests {
     use super::*;
     use ra_metadata::schema::{
-        ColumnInfo, ConstraintInfo, ConstraintKind, DatabaseKind,
-        TableInfo, TriggerEvent, TriggerInfo, TriggerScope,
-        TriggerTiming,
+        ColumnInfo, ConstraintInfo, ConstraintKind, DatabaseKind, TableInfo, TriggerEvent,
+        TriggerInfo, TriggerScope, TriggerTiming,
     };
     use std::collections::HashMap;
 
@@ -385,8 +345,7 @@ mod tests {
                         event: TriggerEvent::Insert,
                         timing: TriggerTiming::Before,
                         scope: TriggerScope::Row,
-                        action_sql: "EXECUTE validate_order()"
-                            .to_owned(),
+                        action_sql: "EXECUTE validate_order()".to_owned(),
                         table_name: "orders".to_owned(),
                         enabled: true,
                     },
@@ -406,8 +365,7 @@ mod tests {
                         event: TriggerEvent::Delete,
                         timing: TriggerTiming::After,
                         scope: TriggerScope::Row,
-                        action_sql: "DELETE FROM archive"
-                            .to_owned(),
+                        action_sql: "DELETE FROM archive".to_owned(),
                         table_name: "orders".to_owned(),
                         enabled: false,
                     },
@@ -434,8 +392,7 @@ mod tests {
                     event: TriggerEvent::Insert,
                     timing: TriggerTiming::After,
                     scope: TriggerScope::Row,
-                    action_sql: "INSERT INTO orders VALUES (1)"
-                        .to_owned(),
+                    action_sql: "INSERT INTO orders VALUES (1)".to_owned(),
                     table_name: "audit_log".to_owned(),
                     enabled: true,
                 }],
@@ -471,13 +428,7 @@ mod tests {
     #[test]
     fn dml_cost_with_triggers() {
         let schema = schema_with_triggers();
-        let cost = analyze_dml_cost(
-            "orders",
-            TriggerEvent::Insert,
-            10.0,
-            100.0,
-            &schema,
-        );
+        let cost = analyze_dml_cost("orders", TriggerEvent::Insert, 10.0, 100.0, &schema);
 
         assert_eq!(cost.trigger_count, 2);
         assert!(cost.trigger_cost > 0.0);
@@ -488,32 +439,17 @@ mod tests {
     #[test]
     fn dml_cost_no_triggers() {
         let schema = schema_with_triggers();
-        let cost = analyze_dml_cost(
-            "stats",
-            TriggerEvent::Insert,
-            10.0,
-            1.0,
-            &schema,
-        );
+        let cost = analyze_dml_cost("stats", TriggerEvent::Insert, 10.0, 1.0, &schema);
 
         assert_eq!(cost.trigger_count, 0);
         assert!(cost.trigger_cost.abs() < f64::EPSILON);
-        assert!(
-            (cost.total_cost - cost.base_cost).abs()
-                < f64::EPSILON
-        );
+        assert!((cost.total_cost - cost.base_cost).abs() < f64::EPSILON);
     }
 
     #[test]
     fn dml_cost_disabled_trigger_excluded() {
         let schema = schema_with_triggers();
-        let cost = analyze_dml_cost(
-            "orders",
-            TriggerEvent::Delete,
-            10.0,
-            50.0,
-            &schema,
-        );
+        let cost = analyze_dml_cost("orders", TriggerEvent::Delete, 10.0, 50.0, &schema);
 
         assert_eq!(cost.trigger_count, 0);
     }
@@ -521,30 +457,16 @@ mod tests {
     #[test]
     fn dml_cost_unknown_table() {
         let schema = schema_with_triggers();
-        let cost = analyze_dml_cost(
-            "nonexistent",
-            TriggerEvent::Insert,
-            10.0,
-            1.0,
-            &schema,
-        );
+        let cost = analyze_dml_cost("nonexistent", TriggerEvent::Insert, 10.0, 1.0, &schema);
 
         assert_eq!(cost.trigger_count, 0);
-        assert!(
-            (cost.total_cost - 10.0).abs() < f64::EPSILON
-        );
+        assert!((cost.total_cost - 10.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn dml_cost_statement_trigger() {
         let schema = schema_with_triggers();
-        let cost = analyze_dml_cost(
-            "orders",
-            TriggerEvent::Update,
-            10.0,
-            100.0,
-            &schema,
-        );
+        let cost = analyze_dml_cost("orders", TriggerEvent::Update, 10.0, 100.0, &schema);
 
         assert_eq!(cost.trigger_count, 1);
         assert!(cost.trigger_cost > 0.0);
@@ -557,13 +479,10 @@ mod tests {
         let schema = schema_with_triggers();
         let warnings = detect_cascade("orders", &schema);
 
-        let has_error = warnings.iter().any(|w| {
-            w.severity == CascadeSeverity::Error
-        });
-        assert!(
-            has_error,
-            "Should detect circular trigger chain"
-        );
+        let has_error = warnings
+            .iter()
+            .any(|w| w.severity == CascadeSeverity::Error);
+        assert!(has_error, "Should detect circular trigger chain");
     }
 
     #[test]
@@ -583,9 +502,7 @@ mod tests {
     #[test]
     fn full_trigger_analysis() {
         let schema = schema_with_triggers();
-        let analysis = analyze_table_triggers(
-            "orders", &schema, 100.0,
-        );
+        let analysis = analyze_table_triggers("orders", &schema, 100.0);
 
         assert_eq!(analysis.table_name, "orders");
         assert!(analysis.insert_cost.is_some());
@@ -605,10 +522,7 @@ mod tests {
     #[test]
     fn cascade_severity_display() {
         assert_eq!(CascadeSeverity::Info.to_string(), "INFO");
-        assert_eq!(
-            CascadeSeverity::Warning.to_string(),
-            "WARNING"
-        );
+        assert_eq!(CascadeSeverity::Warning.to_string(), "WARNING");
         assert_eq!(CascadeSeverity::Error.to_string(), "ERROR");
     }
 
@@ -616,10 +530,7 @@ mod tests {
     fn find_tables_referenced_basic() {
         let schema = schema_with_triggers();
         let table = schema.get_table("orders").unwrap();
-        let refs = find_tables_referenced_by_triggers(
-            &table.triggers,
-            &schema,
-        );
+        let refs = find_tables_referenced_by_triggers(&table.triggers, &schema);
 
         assert!(refs.contains(&"audit_log".to_string()));
     }

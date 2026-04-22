@@ -9,8 +9,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ra_engine::{
-    HybridStrategy, ScoreFusion, choose_hybrid_strategy, fuse_scores,
-    hybrid_scan_cost_factor,
+    choose_hybrid_strategy, fuse_scores, hybrid_scan_cost_factor, HybridStrategy, ScoreFusion,
 };
 
 fn bench_strategy_selection(c: &mut Criterion) {
@@ -105,11 +104,7 @@ fn bench_score_fusion(c: &mut Criterion) {
 fn bench_cost_estimation(c: &mut Criterion) {
     c.bench_function("hybrid_scan_cost_factor_fts_first", |b| {
         b.iter(|| {
-            hybrid_scan_cost_factor(
-                HybridStrategy::FTSFirst,
-                black_box(0.01),
-                black_box(0.05),
-            )
+            hybrid_scan_cost_factor(HybridStrategy::FTSFirst, black_box(0.01), black_box(0.05))
         });
     });
 
@@ -125,11 +120,7 @@ fn bench_cost_estimation(c: &mut Criterion) {
 
     c.bench_function("hybrid_scan_cost_factor_parallel", |b| {
         b.iter(|| {
-            hybrid_scan_cost_factor(
-                HybridStrategy::Parallel,
-                black_box(0.05),
-                black_box(0.05),
-            )
+            hybrid_scan_cost_factor(HybridStrategy::Parallel, black_box(0.05), black_box(0.05))
         });
     });
 }

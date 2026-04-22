@@ -71,33 +71,28 @@ impl QueryFingerprint {
     /// - Structural flags match (10% weight)
     #[must_use]
     pub fn similarity(&self, other: &Self) -> f64 {
-        let join_match =
-            if self.join_graph_hash == other.join_graph_hash {
-                1.0
-            } else if self.table_count == other.table_count
-                && self.join_count == other.join_count
-            {
-                // Same shape but different tables: partial match
-                0.3
-            } else {
-                0.0
-            };
+        let join_match = if self.join_graph_hash == other.join_graph_hash {
+            1.0
+        } else if self.table_count == other.table_count && self.join_count == other.join_count {
+            // Same shape but different tables: partial match
+            0.3
+        } else {
+            0.0
+        };
 
-        let pred_match =
-            if self.predicate_hash == other.predicate_hash {
-                1.0
-            } else {
-                0.0
-            };
+        let pred_match = if self.predicate_hash == other.predicate_hash {
+            1.0
+        } else {
+            0.0
+        };
 
-        let agg_match =
-            if self.aggregation_hash == other.aggregation_hash {
-                1.0
-            } else if self.has_aggregation == other.has_aggregation {
-                0.3
-            } else {
-                0.0
-            };
+        let agg_match = if self.aggregation_hash == other.aggregation_hash {
+            1.0
+        } else if self.has_aggregation == other.has_aggregation {
+            0.3
+        } else {
+            0.0
+        };
 
         let mut flag_matches: u32 = 0;
         let flag_total: u32 = 4;
@@ -113,13 +108,9 @@ impl QueryFingerprint {
         if self.has_sort == other.has_sort {
             flag_matches += 1;
         }
-        let flag_score = f64::from(flag_matches)
-            / f64::from(flag_total);
+        let flag_score = f64::from(flag_matches) / f64::from(flag_total);
 
-        0.4 * join_match
-            + 0.3 * pred_match
-            + 0.2 * agg_match
-            + 0.1 * flag_score
+        0.4 * join_match + 0.3 * pred_match + 0.2 * agg_match + 0.1 * flag_score
     }
 
     /// Whether two fingerprints are exact matches (identical queries
@@ -262,8 +253,7 @@ impl FingerprintCollector {
                     self.visit_expr(cond);
                 }
             }
-            RelExpr::BitmapAnd { inputs }
-            | RelExpr::BitmapOr { inputs } => {
+            RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
                 for inp in inputs {
                     self.visit(inp);
                 }
@@ -344,8 +334,7 @@ impl FingerprintCollector {
             }
             Expr::UnaryOp { op, operand } => {
                 self.predicate_ops.push(0x04);
-                self.predicate_ops
-                    .push(unaryop_discriminant(op));
+                self.predicate_ops.push(unaryop_discriminant(op));
                 self.visit_expr(operand);
             }
             Expr::Function { name, args } => {
@@ -442,8 +431,7 @@ impl FingerprintCollector {
     fn finish(self) -> QueryFingerprint {
         let table_count = self.tables.len() as u16;
         let join_count = self.join_types.len() as u16;
-        let has_aggregation = !self.agg_functions.is_empty()
-            || self.group_by_count > 0;
+        let has_aggregation = !self.agg_functions.is_empty() || self.group_by_count > 0;
 
         QueryFingerprint {
             join_graph_hash: self.compute_join_hash(),
@@ -588,16 +576,12 @@ mod tests {
         let q1 = RelExpr::scan("users").filter(Expr::BinOp {
             op: BinOp::Eq,
             left: Box::new(Expr::Column(ColumnRef::new("name"))),
-            right: Box::new(Expr::Const(Const::String(
-                "Alice".to_owned(),
-            ))),
+            right: Box::new(Expr::Const(Const::String("Alice".to_owned()))),
         });
         let q2 = RelExpr::scan("users").filter(Expr::BinOp {
             op: BinOp::Eq,
             left: Box::new(Expr::Column(ColumnRef::new("name"))),
-            right: Box::new(Expr::Const(Const::String(
-                "Bob".to_owned(),
-            ))),
+            right: Box::new(Expr::Const(Const::String("Bob".to_owned()))),
         });
         assert!(QueryFingerprint::from_rel_expr(&q1)
             .is_exact_match(&QueryFingerprint::from_rel_expr(&q2)));
@@ -672,12 +656,8 @@ mod tests {
                 join_type: JoinType::Inner,
                 condition: Expr::BinOp {
                     op: BinOp::Eq,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::qualified("orders", "uid"),
-                    )),
-                    right: Box::new(Expr::Column(
-                        ColumnRef::qualified("items", "oid"),
-                    )),
+                    left: Box::new(Expr::Column(ColumnRef::qualified("orders", "uid"))),
+                    right: Box::new(Expr::Column(ColumnRef::qualified("items", "oid"))),
                 },
                 left: Box::new(RelExpr::scan("orders")),
                 right: Box::new(RelExpr::scan("items")),
@@ -696,12 +676,8 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(ColumnRef::qualified(
-                    "u", "id",
-                ))),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("o", "user_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("o", "user_id"))),
             },
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
@@ -758,34 +734,22 @@ mod tests {
 
     #[test]
     fn same_agg_different_values_match() {
-        let make_query = |threshold: i64| {
-            RelExpr::Aggregate {
-                group_by: vec![Expr::Column(ColumnRef::new(
-                    "dept",
-                ))],
-                aggregates: vec![AggregateExpr {
-                    function: AggregateFunction::Count,
-                    arg: None,
-                    distinct: false,
-                    alias: None,
-                }],
-                input: Box::new(
-                    RelExpr::scan("employees").filter(Expr::BinOp {
-                        op: BinOp::Gt,
-                        left: Box::new(Expr::Column(
-                            ColumnRef::new("salary"),
-                        )),
-                        right: Box::new(Expr::Const(Const::Int(
-                            threshold,
-                        ))),
-                    }),
-                ),
-            }
+        let make_query = |threshold: i64| RelExpr::Aggregate {
+            group_by: vec![Expr::Column(ColumnRef::new("dept"))],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: None,
+                distinct: false,
+                alias: None,
+            }],
+            input: Box::new(RelExpr::scan("employees").filter(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("salary"))),
+                right: Box::new(Expr::Const(Const::Int(threshold))),
+            })),
         };
-        let fp1 =
-            QueryFingerprint::from_rel_expr(&make_query(50000));
-        let fp2 =
-            QueryFingerprint::from_rel_expr(&make_query(80000));
+        let fp1 = QueryFingerprint::from_rel_expr(&make_query(50000));
+        let fp2 = QueryFingerprint::from_rel_expr(&make_query(80000));
         assert!(fp1.is_exact_match(&fp2));
     }
 

@@ -114,11 +114,7 @@ impl HistogramDigest {
         let epsilon = 1e-10;
         let mut kl_pq = 0.0;
         let mut kl_qp = 0.0;
-        for (p, q) in self
-            .frequencies
-            .iter()
-            .zip(other.frequencies.iter())
-        {
+        for (p, q) in self.frequencies.iter().zip(other.frequencies.iter()) {
             let p_safe = p.max(epsilon);
             let q_safe = q.max(epsilon);
             kl_pq += p_safe * (p_safe / q_safe).ln();
@@ -138,8 +134,7 @@ pub struct PlanDependencies {
     /// Column distinct counts that affect selectivity.
     pub distinct_counts: HashMap<(String, String), f64>,
     /// Column histogram digests at optimization time.
-    pub histogram_digests:
-        HashMap<(String, String), HistogramDigest>,
+    pub histogram_digests: HashMap<(String, String), HistogramDigest>,
     /// Facts that enabled certain optimization rules.
     pub facts: HashSet<String>,
 }
@@ -147,10 +142,7 @@ pub struct PlanDependencies {
 impl PlanDependencies {
     /// Build dependencies from a plan and statistics provider.
     #[must_use]
-    pub fn from_plan_and_stats(
-        plan: &RelExpr,
-        stats: &dyn StatisticsProvider,
-    ) -> Self {
+    pub fn from_plan_and_stats(plan: &RelExpr, stats: &dyn StatisticsProvider) -> Self {
         let tables = collect_referenced_tables(plan);
         let mut deps = Self {
             table_cardinalities: HashMap::new(),
@@ -160,16 +152,12 @@ impl PlanDependencies {
             facts: HashSet::new(),
         };
         for table in &tables {
-            if let Some(table_stats) =
-                stats.get_statistics(table)
-            {
+            if let Some(table_stats) = stats.get_statistics(table) {
                 deps.table_cardinalities
                     .insert(table.clone(), table_stats.row_count);
                 for (col, col_stats) in &table_stats.columns {
-                    deps.distinct_counts.insert(
-                        (table.clone(), col.clone()),
-                        col_stats.distinct_count,
-                    );
+                    deps.distinct_counts
+                        .insert((table.clone(), col.clone()), col_stats.distinct_count);
                     if let Some(hist) = &col_stats.histogram {
                         deps.histogram_digests.insert(
                             (table.clone(), col.clone()),
@@ -178,8 +166,7 @@ impl PlanDependencies {
                     }
                 }
                 for idx_name in table_stats.indexes.keys() {
-                    deps.indexes
-                        .insert((table.clone(), idx_name.clone()));
+                    deps.indexes.insert((table.clone(), idx_name.clone()));
                 }
             }
         }
@@ -191,26 +178,16 @@ impl PlanDependencies {
     pub fn all_resources(&self) -> Vec<ResourceId> {
         let mut resources = Vec::new();
         for table in self.table_cardinalities.keys() {
-            resources
-                .push(ResourceId::RowCount(table.clone()));
+            resources.push(ResourceId::RowCount(table.clone()));
         }
         for (table, col) in self.distinct_counts.keys() {
-            resources.push(ResourceId::NDistinct(
-                table.clone(),
-                col.clone(),
-            ));
+            resources.push(ResourceId::NDistinct(table.clone(), col.clone()));
         }
         for (table, idx) in &self.indexes {
-            resources.push(ResourceId::Index(
-                table.clone(),
-                idx.clone(),
-            ));
+            resources.push(ResourceId::Index(table.clone(), idx.clone()));
         }
         for (table, col) in self.histogram_digests.keys() {
-            resources.push(ResourceId::Histogram(
-                table.clone(),
-                col.clone(),
-            ));
+            resources.push(ResourceId::Histogram(table.clone(), col.clone()));
         }
         for fact in &self.facts {
             resources.push(ResourceId::Fact(fact.clone()));
@@ -265,9 +242,7 @@ impl ChangeSource {
         match self {
             Self::Statistics(s) => s.resource_id(),
             Self::Index(i) => i.resource_id(),
-            Self::Fact(f) => {
-                ResourceId::Fact(f.fact_name.clone())
-            }
+            Self::Fact(f) => ResourceId::Fact(f.fact_name.clone()),
         }
     }
 }
@@ -315,21 +290,13 @@ impl StatisticsChange {
     #[must_use]
     pub fn resource_id(&self) -> ResourceId {
         match self {
-            Self::RowCount { table, .. } => {
-                ResourceId::RowCount(table.clone())
+            Self::RowCount { table, .. } => ResourceId::RowCount(table.clone()),
+            Self::DistinctCount { table, column, .. } => {
+                ResourceId::NDistinct(table.clone(), column.clone())
             }
-            Self::DistinctCount {
-                table, column, ..
-            } => ResourceId::NDistinct(
-                table.clone(),
-                column.clone(),
-            ),
-            Self::HistogramDrift {
-                table, column, ..
-            } => ResourceId::Histogram(
-                table.clone(),
-                column.clone(),
-            ),
+            Self::HistogramDrift { table, column, .. } => {
+                ResourceId::Histogram(table.clone(), column.clone())
+            }
         }
     }
 }
@@ -364,10 +331,7 @@ impl IndexChange {
                 table, index_name, ..
             }
             | Self::Dropped { table, index_name } => {
-                ResourceId::Index(
-                    table.clone(),
-                    index_name.clone(),
-                )
+                ResourceId::Index(table.clone(), index_name.clone())
             }
         }
     }
@@ -393,10 +357,7 @@ fn collect_referenced_tables(plan: &RelExpr) -> Vec<String> {
     tables
 }
 
-fn collect_tables_recursive(
-    plan: &RelExpr,
-    tables: &mut Vec<String>,
-) {
+fn collect_tables_recursive(plan: &RelExpr, tables: &mut Vec<String>) {
     if let RelExpr::Scan { table, .. } = plan {
         tables.push(table.clone());
     }
@@ -416,7 +377,11 @@ pub fn change_ratio(old: f64, new: f64) -> f64 {
         return f64::MAX;
     }
     let r = new / old;
-    if r >= 1.0 { r } else { 1.0 / r }
+    if r >= 1.0 {
+        r
+    } else {
+        1.0 / r
+    }
 }
 
 // ── Original types ──────────────────────────────────────────────
@@ -440,10 +405,7 @@ impl RuleId {
 }
 
 impl std::fmt::Display for RuleId {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -514,28 +476,18 @@ pub struct IncrementalOptimizer {
     next_query_id: u64,
     _timely_config: TimelyConfig,
     // RFC 0059: plan dependency tracking
-    plan_dependencies:
-        HashMap<QueryFingerprint, PlanDependencies>,
+    plan_dependencies: HashMap<QueryFingerprint, PlanDependencies>,
     thresholds: StalenessThresholds,
 }
 
 impl std::fmt::Debug for IncrementalOptimizer {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IncrementalOptimizer")
             .field("generation", &self.generation)
             .field("query_count", &self.queries.len())
             .field("active_rules", &self.active_rules.len())
-            .field(
-                "pending_changes",
-                &self.pending_changes.len(),
-            )
-            .field(
-                "plan_dependencies",
-                &self.plan_dependencies.len(),
-            )
+            .field("pending_changes", &self.pending_changes.len())
+            .field("plan_dependencies", &self.plan_dependencies.len())
             .finish_non_exhaustive()
     }
 }
@@ -544,20 +496,13 @@ impl IncrementalOptimizer {
     /// Create a new incremental optimizer with default settings.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_config(
-            OptimizerConfig::default(),
-            TimelyConfig::default(),
-        )
+        Self::with_config(OptimizerConfig::default(), TimelyConfig::default())
     }
 
     /// Create an incremental optimizer with custom configuration.
     #[must_use]
-    pub fn with_config(
-        optimizer_config: OptimizerConfig,
-        timely_config: TimelyConfig,
-    ) -> Self {
-        let optimizer =
-            Optimizer::with_config(optimizer_config);
+    pub fn with_config(optimizer_config: OptimizerConfig, timely_config: TimelyConfig) -> Self {
+        let optimizer = Optimizer::with_config(optimizer_config);
         Self {
             optimizer,
             memo: MemoTable::new(),
@@ -580,8 +525,7 @@ impl IncrementalOptimizer {
         timely_config: TimelyConfig,
         thresholds: StalenessThresholds,
     ) -> Self {
-        let mut opt =
-            Self::with_config(optimizer_config, timely_config);
+        let mut opt = Self::with_config(optimizer_config, timely_config);
         opt.thresholds = thresholds;
         opt
     }
@@ -615,10 +559,7 @@ impl IncrementalOptimizer {
     /// # Errors
     ///
     /// Returns an error if the initial optimization fails.
-    pub fn register_query(
-        &mut self,
-        expr: &RelExpr,
-    ) -> Result<u64, IncrementalError> {
+    pub fn register_query(&mut self, expr: &RelExpr) -> Result<u64, IncrementalError> {
         let id = self.next_query_id;
         self.next_query_id += 1;
 
@@ -648,10 +589,7 @@ impl IncrementalOptimizer {
     /// # Errors
     ///
     /// Returns an error if the query ID is not found.
-    pub fn unregister_query(
-        &mut self,
-        query_id: u64,
-    ) -> Result<(), IncrementalError> {
+    pub fn unregister_query(&mut self, query_id: u64) -> Result<(), IncrementalError> {
         if self.queries.remove(&query_id).is_some() {
             debug!(query_id, "unregistered query");
             Ok(())
@@ -665,10 +603,7 @@ impl IncrementalOptimizer {
     /// # Errors
     ///
     /// Returns an error if the query ID is not found.
-    pub fn get_optimized(
-        &self,
-        query_id: u64,
-    ) -> Result<Option<&RelExpr>, IncrementalError> {
+    pub fn get_optimized(&self, query_id: u64) -> Result<Option<&RelExpr>, IncrementalError> {
         let query = self
             .queries
             .get(&query_id)
@@ -679,8 +614,7 @@ impl IncrementalOptimizer {
     /// Add a rule to the active set.
     pub fn add_rule(&mut self, rule_id: RuleId) {
         if !self.active_rules.contains(&rule_id) {
-            self.pending_changes
-                .push(RuleChange::Added(rule_id));
+            self.pending_changes.push(RuleChange::Added(rule_id));
         }
     }
 
@@ -704,11 +638,8 @@ impl IncrementalOptimizer {
     /// # Errors
     ///
     /// Returns an error if reoptimization of any query fails.
-    pub fn apply_changes(
-        &mut self,
-    ) -> Result<UpdateResult, IncrementalError> {
-        let rule_diffs =
-            std::mem::take(&mut self.pending_changes);
+    pub fn apply_changes(&mut self) -> Result<UpdateResult, IncrementalError> {
+        let rule_diffs = std::mem::take(&mut self.pending_changes);
         if rule_diffs.is_empty() {
             return Ok(UpdateResult {
                 reoptimized_count: 0,
@@ -738,9 +669,7 @@ impl IncrementalOptimizer {
         let stale_ids: Vec<u64> = self
             .queries
             .values()
-            .filter(|q| {
-                q.optimized_at_generation < self.generation
-            })
+            .filter(|q| q.optimized_at_generation < self.generation)
             .map(|q| q.id)
             .collect();
 
@@ -752,19 +681,13 @@ impl IncrementalOptimizer {
                 let original = query.original.clone();
                 match self.optimize_and_cache(&original) {
                     Ok(new_optimized) => {
-                        if let Some(q) =
-                            self.queries.get_mut(id)
-                        {
+                        if let Some(q) = self.queries.get_mut(id) {
                             let result_differs = q
                                 .optimized
                                 .as_ref()
-                                .map_or(true, |old| {
-                                    *old != new_optimized
-                                });
-                            q.optimized =
-                                Some(new_optimized);
-                            q.optimized_at_generation =
-                                self.generation;
+                                .map_or(true, |old| *old != new_optimized);
+                            q.optimized = Some(new_optimized);
+                            q.optimized_at_generation = self.generation;
                             if result_differs {
                                 reoptimized += 1;
                             } else {
@@ -821,31 +744,24 @@ impl IncrementalOptimizer {
         let diff_rule_names: Vec<String> = rule_diffs
             .iter()
             .map(|c| match c {
-                RuleChange::Added(id)
-                | RuleChange::Removed(id) => {
-                    id.name().to_owned()
-                }
+                RuleChange::Added(id) | RuleChange::Removed(id) => id.name().to_owned(),
             })
             .collect();
 
-        let query_ids: Vec<u64> =
-            self.queries.keys().copied().collect();
+        let query_ids: Vec<u64> = self.queries.keys().copied().collect();
         let rule_names: Vec<String> = self
             .active_rules
             .iter()
             .map(|r| r.name().to_owned())
             .collect();
 
-        let output_buf =
-            Arc::new(Mutex::new(Vec::<u64>::new()));
+        let output_buf = Arc::new(Mutex::new(Vec::<u64>::new()));
         let buf_clone = Arc::clone(&output_buf);
 
         timely::execute_directly(move |worker| {
             worker.dataflow::<u64, _, _>(|scope| {
-                let (mut changes_input, changes_coll) =
-                    scope.new_collection::<String, isize>();
-                let (mut deps_input, deps_coll) = scope
-                    .new_collection::<(String, u64), isize>();
+                let (mut changes_input, changes_coll) = scope.new_collection::<String, isize>();
+                let (mut deps_input, deps_coll) = scope.new_collection::<(String, u64), isize>();
 
                 let affected_coll = changes_coll
                     .map(|name| (name, ()))
@@ -853,21 +769,18 @@ impl IncrementalOptimizer {
                     .map(|(_rule, ((), qid))| qid);
 
                 let buf = Arc::clone(&buf_clone);
-                affected_coll.inspect(
-                    move |&(qid, _time, _diff)| {
-                        if let Ok(mut v) = buf.lock() {
-                            v.push(qid);
-                        }
-                    },
-                );
+                affected_coll.inspect(move |&(qid, _time, _diff)| {
+                    if let Ok(mut v) = buf.lock() {
+                        v.push(qid);
+                    }
+                });
 
                 for name in &diff_rule_names {
                     changes_input.insert(name.clone());
                 }
                 for qid in &query_ids {
                     for rule in &rule_names {
-                        deps_input
-                            .insert((rule.clone(), *qid));
+                        deps_input.insert((rule.clone(), *qid));
                     }
                 }
 
@@ -882,17 +795,9 @@ impl IncrementalOptimizer {
         });
 
         let mut unique: Vec<u64> = Arc::try_unwrap(output_buf)
-            .map_err(|_| {
-                IncrementalError::SerializationError(
-                    "failed to unwrap results".into(),
-                )
-            })?
+            .map_err(|_| IncrementalError::SerializationError("failed to unwrap results".into()))?
             .into_inner()
-            .map_err(|e| {
-                IncrementalError::SerializationError(
-                    format!("lock poisoned: {e}"),
-                )
-            })?;
+            .map_err(|e| IncrementalError::SerializationError(format!("lock poisoned: {e}")))?;
         unique.sort_unstable();
         unique.dedup();
 
@@ -908,10 +813,7 @@ impl IncrementalOptimizer {
     }
 
     /// Set the staleness thresholds.
-    pub fn set_thresholds(
-        &mut self,
-        thresholds: StalenessThresholds,
-    ) {
+    pub fn set_thresholds(&mut self, thresholds: StalenessThresholds) {
         self.thresholds = thresholds;
     }
 
@@ -932,10 +834,7 @@ impl IncrementalOptimizer {
     }
 
     /// Remove a plan's dependencies (on cache eviction).
-    pub fn unregister_plan_dependencies(
-        &mut self,
-        fingerprint: &QueryFingerprint,
-    ) {
+    pub fn unregister_plan_dependencies(&mut self, fingerprint: &QueryFingerprint) {
         self.plan_dependencies.remove(fingerprint);
     }
 
@@ -949,9 +848,7 @@ impl IncrementalOptimizer {
         &self,
         changes: &[ChangeSource],
     ) -> Result<Vec<QueryFingerprint>, IncrementalError> {
-        if changes.is_empty()
-            || self.plan_dependencies.is_empty()
-        {
+        if changes.is_empty() || self.plan_dependencies.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -960,13 +857,9 @@ impl IncrementalOptimizer {
         use differential_dataflow::input::Input;
         use differential_dataflow::operators::Join;
 
-        let change_keys: Vec<String> = changes
-            .iter()
-            .map(|c| c.resource_id().key())
-            .collect();
+        let change_keys: Vec<String> = changes.iter().map(|c| c.resource_id().key()).collect();
 
-        let fp_list: Vec<QueryFingerprint> =
-            self.plan_dependencies.keys().cloned().collect();
+        let fp_list: Vec<QueryFingerprint> = self.plan_dependencies.keys().cloned().collect();
 
         let dep_edges: Vec<(String, usize)> = fp_list
             .iter()
@@ -979,17 +872,13 @@ impl IncrementalOptimizer {
             })
             .collect();
 
-        let output_buf =
-            Arc::new(Mutex::new(Vec::<usize>::new()));
+        let output_buf = Arc::new(Mutex::new(Vec::<usize>::new()));
         let buf_clone = Arc::clone(&output_buf);
 
         timely::execute_directly(move |worker| {
             worker.dataflow::<u64, _, _>(|scope| {
-                let (mut changes_input, changes_coll) =
-                    scope.new_collection::<String, isize>();
-                let (mut deps_input, deps_coll) = scope
-                    .new_collection::<(String, usize), isize>(
-                    );
+                let (mut changes_input, changes_coll) = scope.new_collection::<String, isize>();
+                let (mut deps_input, deps_coll) = scope.new_collection::<(String, usize), isize>();
 
                 let affected = changes_coll
                     .map(|key| (key, ()))
@@ -997,22 +886,17 @@ impl IncrementalOptimizer {
                     .map(|(_resource, ((), fp_idx))| fp_idx);
 
                 let buf = Arc::clone(&buf_clone);
-                affected.inspect(
-                    move |&(fp_idx, _time, _diff)| {
-                        if let Ok(mut v) = buf.lock() {
-                            v.push(fp_idx);
-                        }
-                    },
-                );
+                affected.inspect(move |&(fp_idx, _time, _diff)| {
+                    if let Ok(mut v) = buf.lock() {
+                        v.push(fp_idx);
+                    }
+                });
 
                 for key in &change_keys {
                     changes_input.insert(key.clone());
                 }
                 for (resource_key, fp_idx) in &dep_edges {
-                    deps_input.insert((
-                        resource_key.clone(),
-                        *fp_idx,
-                    ));
+                    deps_input.insert((resource_key.clone(), *fp_idx));
                 }
 
                 changes_input.advance_to(1);
@@ -1025,20 +909,12 @@ impl IncrementalOptimizer {
             worker.step();
         });
 
-        let mut indices: Vec<usize> =
-            Arc::try_unwrap(output_buf)
-                .map_err(|_| {
-                    IncrementalError::SerializationError(
-                        "failed to unwrap invalidation results"
-                            .into(),
-                    )
-                })?
-                .into_inner()
-                .map_err(|e| {
-                    IncrementalError::SerializationError(
-                        format!("lock poisoned: {e}"),
-                    )
-                })?;
+        let mut indices: Vec<usize> = Arc::try_unwrap(output_buf)
+            .map_err(|_| {
+                IncrementalError::SerializationError("failed to unwrap invalidation results".into())
+            })?
+            .into_inner()
+            .map_err(|e| IncrementalError::SerializationError(format!("lock poisoned: {e}")))?;
         indices.sort_unstable();
         indices.dedup();
 
@@ -1060,55 +936,39 @@ impl IncrementalOptimizer {
         let mut changes = Vec::new();
         let th = &self.thresholds;
 
-        let card_ratio =
-            change_ratio(old.row_count, new.row_count);
+        let card_ratio = change_ratio(old.row_count, new.row_count);
         if card_ratio >= th.cardinality_ratio {
-            changes.push(ChangeSource::Statistics(
-                StatisticsChange::RowCount {
-                    table: table.to_owned(),
-                    old_value: old.row_count,
-                    new_value: new.row_count,
-                    ratio: card_ratio,
-                },
-            ));
+            changes.push(ChangeSource::Statistics(StatisticsChange::RowCount {
+                table: table.to_owned(),
+                old_value: old.row_count,
+                new_value: new.row_count,
+                ratio: card_ratio,
+            }));
         }
 
         for (col, old_col) in &old.columns {
             if let Some(new_col) = new.columns.get(col) {
-                let ndv_ratio = change_ratio(
-                    old_col.distinct_count,
-                    new_col.distinct_count,
-                );
+                let ndv_ratio = change_ratio(old_col.distinct_count, new_col.distinct_count);
                 if ndv_ratio >= th.ndistinct_ratio {
-                    changes.push(ChangeSource::Statistics(
-                        StatisticsChange::DistinctCount {
-                            table: table.to_owned(),
-                            column: col.clone(),
-                            old_value: old_col.distinct_count,
-                            new_value: new_col.distinct_count,
-                            ratio: ndv_ratio,
-                        },
-                    ));
+                    changes.push(ChangeSource::Statistics(StatisticsChange::DistinctCount {
+                        table: table.to_owned(),
+                        column: col.clone(),
+                        old_value: old_col.distinct_count,
+                        new_value: new_col.distinct_count,
+                        ratio: ndv_ratio,
+                    }));
                 }
 
-                if let (Some(old_h), Some(new_h)) =
-                    (&old_col.histogram, &new_col.histogram)
-                {
-                    let old_d =
-                        HistogramDigest::from_histogram(old_h);
-                    let new_d =
-                        HistogramDigest::from_histogram(new_h);
+                if let (Some(old_h), Some(new_h)) = (&old_col.histogram, &new_col.histogram) {
+                    let old_d = HistogramDigest::from_histogram(old_h);
+                    let new_d = HistogramDigest::from_histogram(new_h);
                     let kl = old_d.kl_divergence(&new_d);
                     if kl > th.histogram_kl_threshold {
-                        changes.push(
-                            ChangeSource::Statistics(
-                                StatisticsChange::HistogramDrift {
-                                    table: table.to_owned(),
-                                    column: col.clone(),
-                                    kl_divergence: kl,
-                                },
-                            ),
-                        );
+                        changes.push(ChangeSource::Statistics(StatisticsChange::HistogramDrift {
+                            table: table.to_owned(),
+                            column: col.clone(),
+                            kl_divergence: kl,
+                        }));
                     }
                 }
             }
@@ -1117,25 +977,20 @@ impl IncrementalOptimizer {
         if th.index_changes_trigger {
             for idx_name in new.indexes.keys() {
                 if !old.indexes.contains_key(idx_name) {
-                    let cols =
-                        new.indexes[idx_name].columns.clone();
-                    changes.push(ChangeSource::Index(
-                        IndexChange::Added {
-                            table: table.to_owned(),
-                            index_name: idx_name.clone(),
-                            columns: cols,
-                        },
-                    ));
+                    let cols = new.indexes[idx_name].columns.clone();
+                    changes.push(ChangeSource::Index(IndexChange::Added {
+                        table: table.to_owned(),
+                        index_name: idx_name.clone(),
+                        columns: cols,
+                    }));
                 }
             }
             for idx_name in old.indexes.keys() {
                 if !new.indexes.contains_key(idx_name) {
-                    changes.push(ChangeSource::Index(
-                        IndexChange::Dropped {
-                            table: table.to_owned(),
-                            index_name: idx_name.clone(),
-                        },
-                    ));
+                    changes.push(ChangeSource::Index(IndexChange::Dropped {
+                        table: table.to_owned(),
+                        index_name: idx_name.clone(),
+                    }));
                 }
             }
         }
@@ -1144,10 +999,7 @@ impl IncrementalOptimizer {
     }
 
     /// Optimize an expression, using the memo cache.
-    fn optimize_and_cache(
-        &mut self,
-        expr: &RelExpr,
-    ) -> Result<RelExpr, IncrementalError> {
+    fn optimize_and_cache(&mut self, expr: &RelExpr) -> Result<RelExpr, IncrementalError> {
         let hash = structural_hash(expr);
 
         if let Some(cached) = self.memo.get(hash) {
@@ -1181,9 +1033,7 @@ mod tests {
     fn filter_query() -> RelExpr {
         RelExpr::scan("users").filter(Expr::BinOp {
             op: BinOp::Gt,
-            left: Box::new(Expr::Column(ColumnRef::new(
-                "age",
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::new("age"))),
             right: Box::new(Expr::Const(Const::Int(18))),
         })
     }
@@ -1200,9 +1050,7 @@ mod tests {
     #[test]
     fn register_query_returns_id() {
         let mut opt = IncrementalOptimizer::new();
-        let id = opt
-            .register_query(&simple_scan())
-            .expect("should succeed");
+        let id = opt.register_query(&simple_scan()).expect("should succeed");
         assert_eq!(id, 1);
         assert_eq!(opt.query_count(), 1);
     }
@@ -1210,12 +1058,8 @@ mod tests {
     #[test]
     fn register_multiple_queries() {
         let mut opt = IncrementalOptimizer::new();
-        let id1 = opt
-            .register_query(&simple_scan())
-            .expect("should succeed");
-        let id2 = opt
-            .register_query(&filter_query())
-            .expect("should succeed");
+        let id1 = opt.register_query(&simple_scan()).expect("should succeed");
+        let id2 = opt.register_query(&filter_query()).expect("should succeed");
         assert_ne!(id1, id2);
         assert_eq!(opt.query_count(), 2);
     }
@@ -1223,11 +1067,8 @@ mod tests {
     #[test]
     fn get_optimized_returns_result() {
         let mut opt = IncrementalOptimizer::new();
-        let id = opt
-            .register_query(&simple_scan())
-            .expect("should succeed");
-        let result =
-            opt.get_optimized(id).expect("should succeed");
+        let id = opt.register_query(&simple_scan()).expect("should succeed");
+        let result = opt.get_optimized(id).expect("should succeed");
         assert!(result.is_some());
     }
 
@@ -1235,18 +1076,13 @@ mod tests {
     fn get_optimized_not_found() {
         let opt = IncrementalOptimizer::new();
         let err = opt.get_optimized(999).unwrap_err();
-        assert!(matches!(
-            err,
-            IncrementalError::QueryNotFound(999)
-        ));
+        assert!(matches!(err, IncrementalError::QueryNotFound(999)));
     }
 
     #[test]
     fn unregister_query() {
         let mut opt = IncrementalOptimizer::new();
-        let id = opt
-            .register_query(&simple_scan())
-            .expect("should succeed");
+        let id = opt.register_query(&simple_scan()).expect("should succeed");
         opt.unregister_query(id).expect("should succeed");
         assert_eq!(opt.query_count(), 0);
     }
@@ -1255,10 +1091,7 @@ mod tests {
     fn unregister_not_found() {
         let mut opt = IncrementalOptimizer::new();
         let err = opt.unregister_query(999).unwrap_err();
-        assert!(matches!(
-            err,
-            IncrementalError::QueryNotFound(999)
-        ));
+        assert!(matches!(err, IncrementalError::QueryNotFound(999)));
     }
 
     #[test]
@@ -1273,8 +1106,7 @@ mod tests {
     fn apply_changes_advances_generation() {
         let mut opt = IncrementalOptimizer::new();
         opt.add_rule(RuleId::new("filter-merge"));
-        let result =
-            opt.apply_changes().expect("should succeed");
+        let result = opt.apply_changes().expect("should succeed");
         assert_eq!(result.generation, 1);
         assert_eq!(opt.generation(), 1);
         assert_eq!(opt.active_rules().len(), 1);
@@ -1283,8 +1115,7 @@ mod tests {
     #[test]
     fn apply_empty_changes_noop() {
         let mut opt = IncrementalOptimizer::new();
-        let result =
-            opt.apply_changes().expect("should succeed");
+        let result = opt.apply_changes().expect("should succeed");
         assert_eq!(result.reoptimized_count, 0);
         assert_eq!(result.generation, 0);
     }
@@ -1292,9 +1123,7 @@ mod tests {
     #[test]
     fn rule_change_triggers_reoptimization() {
         let mut opt = IncrementalOptimizer::new();
-        let id = opt
-            .register_query(&filter_query())
-            .expect("should succeed");
+        let id = opt.register_query(&filter_query()).expect("should succeed");
         let initial = opt
             .get_optimized(id)
             .expect("should succeed")
@@ -1302,12 +1131,8 @@ mod tests {
             .clone();
 
         opt.add_rule(RuleId::new("filter-merge"));
-        let result =
-            opt.apply_changes().expect("should succeed");
-        assert!(
-            result.reoptimized_count + result.skipped_count
-                > 0
-        );
+        let result = opt.apply_changes().expect("should succeed");
+        assert!(result.reoptimized_count + result.skipped_count > 0);
         assert_eq!(result.generation, 1);
 
         let new_result = opt
@@ -1316,11 +1141,7 @@ mod tests {
             .expect("should have result");
         assert!(
             *new_result == initial
-                || matches!(
-                    new_result,
-                    RelExpr::Filter { .. }
-                        | RelExpr::Scan { .. }
-                )
+                || matches!(new_result, RelExpr::Filter { .. } | RelExpr::Scan { .. })
         );
     }
 
@@ -1336,14 +1157,11 @@ mod tests {
     #[test]
     fn multiple_rule_changes() {
         let mut opt = IncrementalOptimizer::new();
-        opt.register_query(&simple_scan())
-            .expect("should succeed");
-        opt.register_query(&filter_query())
-            .expect("should succeed");
+        opt.register_query(&simple_scan()).expect("should succeed");
+        opt.register_query(&filter_query()).expect("should succeed");
         opt.add_rule(RuleId::new("rule-a"));
         opt.add_rule(RuleId::new("rule-b"));
-        let result =
-            opt.apply_changes().expect("should succeed");
+        let result = opt.apply_changes().expect("should succeed");
         assert_eq!(result.generation, 1);
         assert_eq!(opt.active_rules().len(), 2);
     }
@@ -1351,8 +1169,7 @@ mod tests {
     #[test]
     fn stats_track_operations() {
         let mut opt = IncrementalOptimizer::new();
-        opt.register_query(&simple_scan())
-            .expect("should succeed");
+        opt.register_query(&simple_scan()).expect("should succeed");
         assert_eq!(opt.stats().input_records, 1);
         opt.add_rule(RuleId::new("test-rule"));
         opt.apply_changes().expect("should succeed");
@@ -1378,14 +1195,11 @@ mod tests {
     #[test]
     fn compute_affected_queries_basic() {
         let mut opt = IncrementalOptimizer::new();
-        opt.register_query(&simple_scan())
-            .expect("should succeed");
+        opt.register_query(&simple_scan()).expect("should succeed");
         opt.add_rule(RuleId::new("test-rule"));
         opt.apply_changes().expect("should succeed");
 
-        let rule_diffs = vec![RuleChange::Removed(
-            RuleId::new("test-rule"),
-        )];
+        let rule_diffs = vec![RuleChange::Removed(RuleId::new("test-rule"))];
         let affected = opt
             .compute_affected_queries(&rule_diffs)
             .expect("should succeed");
@@ -1395,17 +1209,14 @@ mod tests {
     #[test]
     fn compute_affected_empty_changes() {
         let opt = IncrementalOptimizer::new();
-        let affected = opt
-            .compute_affected_queries(&[])
-            .expect("should succeed");
+        let affected = opt.compute_affected_queries(&[]).expect("should succeed");
         assert!(affected.is_empty());
     }
 
     #[test]
     fn compute_affected_no_queries() {
         let opt = IncrementalOptimizer::new();
-        let rule_diffs =
-            vec![RuleChange::Removed(RuleId::new("gone"))];
+        let rule_diffs = vec![RuleChange::Removed(RuleId::new("gone"))];
         let affected = opt
             .compute_affected_queries(&rule_diffs)
             .expect("should succeed");
@@ -1433,15 +1244,12 @@ mod tests {
         let mut opt = IncrementalOptimizer::new();
         for i in 0..5 {
             let expr = RelExpr::scan(format!("table_{i}"));
-            opt.register_query(&expr)
-                .expect("should succeed");
+            opt.register_query(&expr).expect("should succeed");
         }
         opt.add_rule(RuleId::new("rule-1"));
-        let r1 =
-            opt.apply_changes().expect("should succeed");
+        let r1 = opt.apply_changes().expect("should succeed");
         opt.add_rule(RuleId::new("rule-2"));
-        let r2 =
-            opt.apply_changes().expect("should succeed");
+        let r2 = opt.apply_changes().expect("should succeed");
         assert_eq!(r1.generation, 1);
         assert_eq!(r2.generation, 2);
     }
@@ -1450,16 +1258,10 @@ mod tests {
     fn memo_cache_reused_within_generation() {
         let mut opt = IncrementalOptimizer::new();
         let expr = simple_scan();
-        let id1 = opt
-            .register_query(&expr)
-            .expect("should succeed");
-        let id2 = opt
-            .register_query(&expr)
-            .expect("should succeed");
-        let r1 =
-            opt.get_optimized(id1).expect("ok").expect("r");
-        let r2 =
-            opt.get_optimized(id2).expect("ok").expect("r");
+        let id1 = opt.register_query(&expr).expect("should succeed");
+        let id2 = opt.register_query(&expr).expect("should succeed");
+        let r1 = opt.get_optimized(id1).expect("ok").expect("r");
+        let r2 = opt.get_optimized(id2).expect("ok").expect("r");
         assert_eq!(r1, r2);
     }
 
@@ -1468,13 +1270,9 @@ mod tests {
     #[test]
     fn register_and_unregister_plan_deps() {
         let mut opt = IncrementalOptimizer::new();
-        let fp = QueryFingerprint::from_rel_expr(
-            &simple_scan(),
-        );
+        let fp = QueryFingerprint::from_rel_expr(&simple_scan());
         let deps = PlanDependencies {
-            table_cardinalities: [("users".into(), 1000.0)]
-                .into_iter()
-                .collect(),
+            table_cardinalities: [("users".into(), 1000.0)].into_iter().collect(),
             indexes: HashSet::new(),
             distinct_counts: HashMap::new(),
             histogram_digests: HashMap::new(),
@@ -1490,13 +1288,9 @@ mod tests {
     #[test]
     fn compute_affected_plans_row_count() {
         let mut opt = IncrementalOptimizer::new();
-        let fp = QueryFingerprint::from_rel_expr(
-            &simple_scan(),
-        );
+        let fp = QueryFingerprint::from_rel_expr(&simple_scan());
         let deps = PlanDependencies {
-            table_cardinalities: [("users".into(), 1000.0)]
-                .into_iter()
-                .collect(),
+            table_cardinalities: [("users".into(), 1000.0)].into_iter().collect(),
             indexes: HashSet::new(),
             distinct_counts: HashMap::new(),
             histogram_digests: HashMap::new(),
@@ -1504,14 +1298,12 @@ mod tests {
         };
         opt.register_plan_dependencies(&fp, &deps);
 
-        let changes = vec![ChangeSource::Statistics(
-            StatisticsChange::RowCount {
-                table: "users".into(),
-                old_value: 1000.0,
-                new_value: 10_000.0,
-                ratio: 10.0,
-            },
-        )];
+        let changes = vec![ChangeSource::Statistics(StatisticsChange::RowCount {
+            table: "users".into(),
+            old_value: 1000.0,
+            new_value: 10_000.0,
+            ratio: 10.0,
+        })];
         let affected = opt
             .compute_affected_plans(&changes)
             .expect("should succeed");
@@ -1523,49 +1315,33 @@ mod tests {
     fn unaffected_plans_not_invalidated() {
         let mut opt = IncrementalOptimizer::new();
 
-        let fp_users = QueryFingerprint::from_rel_expr(
-            &RelExpr::scan("users"),
-        );
-        let fp_orders = QueryFingerprint::from_rel_expr(
-            &RelExpr::scan("orders"),
-        );
+        let fp_users = QueryFingerprint::from_rel_expr(&RelExpr::scan("users"));
+        let fp_orders = QueryFingerprint::from_rel_expr(&RelExpr::scan("orders"));
 
         let deps_users = PlanDependencies {
-            table_cardinalities: [("users".into(), 1000.0)]
-                .into_iter()
-                .collect(),
+            table_cardinalities: [("users".into(), 1000.0)].into_iter().collect(),
             indexes: HashSet::new(),
             distinct_counts: HashMap::new(),
             histogram_digests: HashMap::new(),
             facts: HashSet::new(),
         };
         let deps_orders = PlanDependencies {
-            table_cardinalities: [("orders".into(), 5000.0)]
-                .into_iter()
-                .collect(),
+            table_cardinalities: [("orders".into(), 5000.0)].into_iter().collect(),
             indexes: HashSet::new(),
             distinct_counts: HashMap::new(),
             histogram_digests: HashMap::new(),
             facts: HashSet::new(),
         };
 
-        opt.register_plan_dependencies(
-            &fp_users,
-            &deps_users,
-        );
-        opt.register_plan_dependencies(
-            &fp_orders,
-            &deps_orders,
-        );
+        opt.register_plan_dependencies(&fp_users, &deps_users);
+        opt.register_plan_dependencies(&fp_orders, &deps_orders);
 
-        let changes = vec![ChangeSource::Statistics(
-            StatisticsChange::RowCount {
-                table: "orders".into(),
-                old_value: 5000.0,
-                new_value: 50_000.0,
-                ratio: 10.0,
-            },
-        )];
+        let changes = vec![ChangeSource::Statistics(StatisticsChange::RowCount {
+            table: "orders".into(),
+            old_value: 5000.0,
+            new_value: 50_000.0,
+            ratio: 10.0,
+        })];
         let affected = opt
             .compute_affected_plans(&changes)
             .expect("should succeed");
@@ -1634,22 +1410,14 @@ mod tests {
 
     #[test]
     fn resource_id_keys() {
+        assert_eq!(ResourceId::RowCount("t".into()).key(), "t.row_count");
         assert_eq!(
-            ResourceId::RowCount("t".into()).key(),
-            "t.row_count"
-        );
-        assert_eq!(
-            ResourceId::NDistinct("t".into(), "c".into())
-                .key(),
+            ResourceId::NDistinct("t".into(), "c".into()).key(),
             "t.c.ndistinct"
         );
+        assert_eq!(ResourceId::Index("t".into(), "idx".into()).key(), "t.idx");
         assert_eq!(
-            ResourceId::Index("t".into(), "idx".into()).key(),
-            "t.idx"
-        );
-        assert_eq!(
-            ResourceId::Histogram("t".into(), "c".into())
-                .key(),
+            ResourceId::Histogram("t".into(), "c".into()).key(),
             "t.c.histogram"
         );
     }

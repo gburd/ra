@@ -368,7 +368,7 @@ fn test_clique_join_pattern() {
         join_type: JoinType::Inner,
         condition: and(
             eq(col("t1_id"), col("t2_id")),
-            eq(col("t1_key"), col("t2_key"))
+            eq(col("t1_key"), col("t2_key")),
         ),
         left: Box::new(t1),
         right: Box::new(t2),
@@ -378,7 +378,7 @@ fn test_clique_join_pattern() {
         join_type: JoinType::Inner,
         condition: and(
             eq(col("t2_id"), col("t3_id")),
-            eq(col("t1_id"), col("t3_id"))
+            eq(col("t1_id"), col("t3_id")),
         ),
         left: Box::new(j12),
         right: Box::new(t3),
@@ -416,9 +416,7 @@ fn test_dp_join_enumeration_small() {
 #[test]
 fn test_greedy_join_ordering_large() {
     // 5+ tables - should use greedy heuristic
-    let tables: Vec<RelExpr> = (1..=6)
-        .map(|i| scan(&format!("table{}", i)))
-        .collect();
+    let tables: Vec<RelExpr> = (1..=6).map(|i| scan(&format!("table{}", i))).collect();
 
     let mut current = tables[0].clone();
     for table in tables.iter().skip(1) {

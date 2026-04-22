@@ -14,14 +14,9 @@
 
 use std::time::{Duration, Instant};
 
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, RelExpr,
-};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{
-    CacheMatchType, Optimizer, PlanCache, PlanCacheConfig,
-    QueryFingerprint,
-};
+use ra_engine::{CacheMatchType, Optimizer, PlanCache, PlanCacheConfig, QueryFingerprint};
 
 // ── Query template helpers ──────────────────────────────────────
 
@@ -42,19 +37,13 @@ fn range_scan(threshold: i64, status: &str) -> RelExpr {
         op: BinOp::And,
         left: Box::new(Expr::BinOp {
             op: BinOp::Gt,
-            left: Box::new(Expr::Column(
-                ColumnRef::new("amount"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::new("amount"))),
             right: Box::new(Expr::Const(Const::Int(threshold))),
         }),
         right: Box::new(Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::new("status"),
-            )),
-            right: Box::new(Expr::Const(Const::String(
-                status.to_owned(),
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::new("status"))),
+            right: Box::new(Expr::Const(Const::String(status.to_owned()))),
         }),
     })
 }
@@ -67,12 +56,8 @@ fn join_with_filter(age: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
             op: BinOp::Gt,
@@ -103,17 +88,11 @@ fn aggregation(salary_threshold: i64) -> RelExpr {
                 alias: None,
             },
         ],
-        input: Box::new(
-            RelExpr::scan("employees").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("salary"),
-                )),
-                right: Box::new(Expr::Const(Const::Int(
-                    salary_threshold,
-                ))),
-            }),
-        ),
+        input: Box::new(RelExpr::scan("employees").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("salary"))),
+            right: Box::new(Expr::Const(Const::Int(salary_threshold))),
+        })),
     }
 }
 
@@ -127,12 +106,8 @@ fn three_table_join(price: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users")),
         right: Box::new(RelExpr::scan("orders")),
@@ -141,23 +116,15 @@ fn three_table_join(price: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "product_id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("products", "id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("orders", "product_id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("products", "id"))),
         },
         left: Box::new(user_orders),
-        right: Box::new(
-            RelExpr::scan("products").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("price"),
-                )),
-                right: Box::new(Expr::Const(Const::Int(price))),
-            }),
-        ),
+        right: Box::new(RelExpr::scan("products").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("price"))),
+            right: Box::new(Expr::Const(Const::Int(price))),
+        })),
     }
 }
 
@@ -169,9 +136,7 @@ fn three_table_join(price: i64) -> RelExpr {
 fn bulk_insert_plan(cutoff: i64) -> RelExpr {
     RelExpr::scan("orders").filter(Expr::BinOp {
         op: BinOp::Lt,
-        left: Box::new(Expr::Column(
-            ColumnRef::new("created_at"),
-        )),
+        left: Box::new(Expr::Column(ColumnRef::new("created_at"))),
         right: Box::new(Expr::Const(Const::Int(cutoff))),
     })
 }
@@ -203,17 +168,18 @@ fn percentile(sorted: &[Duration], pct: f64) -> Duration {
     if sorted.is_empty() {
         return Duration::ZERO;
     }
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let idx = ((sorted.len() as f64 * pct / 100.0).ceil() as usize)
         .saturating_sub(1)
         .min(sorted.len() - 1);
     sorted[idx]
 }
 
-fn measure_latencies(
-    opt: &Optimizer,
-    queries: &[RelExpr],
-) -> Vec<Duration> {
+fn measure_latencies(opt: &Optimizer, queries: &[RelExpr]) -> Vec<Duration> {
     queries
         .iter()
         .map(|q| {
@@ -244,22 +210,16 @@ fn connection_pool_10_conns_5_templates_200_each() {
                 }
                 1 => {
                     let s = statuses[offset as usize % 4];
-                    let _ =
-                        opt.optimize(&range_scan(offset * 10, s));
+                    let _ = opt.optimize(&range_scan(offset * 10, s));
                 }
                 2 => {
-                    let _ =
-                        opt.optimize(&join_with_filter(18 + offset));
+                    let _ = opt.optimize(&join_with_filter(18 + offset));
                 }
                 3 => {
-                    let _ = opt.optimize(
-                        &aggregation(30000 + offset * 100),
-                    );
+                    let _ = opt.optimize(&aggregation(30000 + offset * 100));
                 }
                 _ => {
-                    let _ = opt.optimize(
-                        &three_table_join(10 + offset * 5),
-                    );
+                    let _ = opt.optimize(&three_table_join(10 + offset * 5));
                 }
             }
         }
@@ -298,8 +258,7 @@ fn connection_pool_all_connections_share_cache() {
 
     // Connection 0 warms the cache
     let _ = opt.optimize(&point_lookup(1));
-    let stats_after_warmup =
-        opt.cache_stats().expect("cache enabled");
+    let stats_after_warmup = opt.cache_stats().expect("cache enabled");
     assert_eq!(stats_after_warmup.misses, 1);
     assert_eq!(stats_after_warmup.exact_hits, 0);
 
@@ -332,9 +291,9 @@ fn prepared_stmt_int_bind_values() {
     for i in 0..100 {
         let q = point_lookup(i * 37 + 42);
         let qfp = QueryFingerprint::from_rel_expr(&q);
-        let result = cache.lookup(&qfp).expect(
-            "integer bind variation should always hit cache",
-        );
+        let result = cache
+            .lookup(&qfp)
+            .expect("integer bind variation should always hit cache");
         assert_eq!(result.match_type, CacheMatchType::Exact);
     }
 
@@ -352,8 +311,14 @@ fn prepared_stmt_string_bind_values() {
     cache.insert(fp, seed);
 
     let statuses = [
-        "active", "pending", "shipped", "returned",
-        "cancelled", "refunded", "processing", "hold",
+        "active",
+        "pending",
+        "shipped",
+        "returned",
+        "cancelled",
+        "refunded",
+        "processing",
+        "hold",
     ];
     for status in &statuses {
         for threshold in [50, 100, 500, 1000, 5000] {
@@ -442,8 +407,7 @@ fn batch_mixed_insert_update_plans() {
     // Interleave insert and update planning
     for i in 0..200_i64 {
         if i % 2 == 0 {
-            let _ =
-                opt.optimize(&bulk_insert_plan(i * 86400));
+            let _ = opt.optimize(&bulk_insert_plan(i * 86400));
         } else {
             let _ = opt.optimize(&batch_update_plan(i));
         }
@@ -452,10 +416,7 @@ fn batch_mixed_insert_update_plans() {
     let stats = opt.cache_stats().expect("cache enabled");
     // 2 cold misses (one per template), 198 hits
     assert_eq!(stats.misses, 2);
-    assert_eq!(
-        stats.exact_hits + stats.fuzzy_hits,
-        198,
-    );
+    assert_eq!(stats.exact_hits + stats.fuzzy_hits, 198,);
     assert!(stats.hit_rate() > 0.95);
 }
 
@@ -481,25 +442,19 @@ fn mixed_workload_70_read_30_write() {
                     let _ = opt.optimize(&range_scan(i * 10, s));
                 }
                 2 => {
-                    let _ =
-                        opt.optimize(&join_with_filter(18 + i));
+                    let _ = opt.optimize(&join_with_filter(18 + i));
                 }
                 3 => {
-                    let _ = opt.optimize(
-                        &aggregation(30000 + i * 100),
-                    );
+                    let _ = opt.optimize(&aggregation(30000 + i * 100));
                 }
                 _ => {
-                    let _ = opt.optimize(
-                        &three_table_join(10 + i * 5),
-                    );
+                    let _ = opt.optimize(&three_table_join(10 + i * 5));
                 }
             }
         } else {
             // 30% writes: rotate between insert and update
             if i % 2 == 0 {
-                let _ =
-                    opt.optimize(&bulk_insert_plan(i * 86400));
+                let _ = opt.optimize(&bulk_insert_plan(i * 86400));
             } else {
                 let _ = opt.optimize(&batch_update_plan(i));
             }
@@ -584,9 +539,7 @@ fn latency_cached_vs_uncached_percentiles() {
 
     // Uncached baseline
     let opt_uncached = Optimizer::new();
-    let mut uncached_times = measure_latencies(
-        &opt_uncached, &queries,
-    );
+    let mut uncached_times = measure_latencies(&opt_uncached, &queries);
     uncached_times.sort();
 
     // Cached: warm pass then measurement pass
@@ -594,9 +547,7 @@ fn latency_cached_vs_uncached_percentiles() {
     for q in &queries {
         let _ = opt_cached.optimize(q);
     }
-    let mut cached_times = measure_latencies(
-        &opt_cached, &queries,
-    );
+    let mut cached_times = measure_latencies(&opt_cached, &queries);
     cached_times.sort();
 
     let uncached_p50 = percentile(&uncached_times, 50.0);
@@ -628,10 +579,7 @@ fn latency_cached_vs_uncached_percentiles() {
     #[allow(clippy::print_stdout)]
     {
         println!("\n=== Latency Comparison (200 queries) ===");
-        println!(
-            "         {:>12} {:>12} {:>12}",
-            "p50", "p95", "p99"
-        );
+        println!("         {:>12} {:>12} {:>12}", "p50", "p95", "p99");
         println!(
             "Uncached {:>12?} {:>12?} {:>12?}",
             uncached_p50, uncached_p95, uncached_p99,
@@ -641,8 +589,7 @@ fn latency_cached_vs_uncached_percentiles() {
             cached_p50, cached_p95, cached_p99,
         );
         if !uncached_p50.is_zero() {
-            let speedup = uncached_p50.as_nanos() as f64
-                / cached_p50.as_nanos().max(1) as f64;
+            let speedup = uncached_p50.as_nanos() as f64 / cached_p50.as_nanos().max(1) as f64;
             println!("p50 speedup: {speedup:.1}x");
         }
     }
@@ -683,10 +630,8 @@ fn throughput_cached_exceeds_uncached() {
     }
     let cached_elapsed = start.elapsed();
 
-    let uncached_qps =
-        500.0 / uncached_elapsed.as_secs_f64();
-    let cached_qps =
-        500.0 / cached_elapsed.as_secs_f64();
+    let uncached_qps = 500.0 / uncached_elapsed.as_secs_f64();
+    let cached_qps = 500.0 / cached_elapsed.as_secs_f64();
 
     assert!(
         cached_qps > uncached_qps,
@@ -705,10 +650,7 @@ fn throughput_cached_exceeds_uncached() {
             "Cached:   {cached_qps:.0} queries/sec \
              ({cached_elapsed:?})",
         );
-        println!(
-            "Speedup:  {:.1}x",
-            cached_qps / uncached_qps,
-        );
+        println!("Speedup:  {:.1}x", cached_qps / uncached_qps,);
     }
 }
 
@@ -761,21 +703,16 @@ fn memory_stable_under_sustained_workload() {
                 let _ = opt.optimize(&point_lookup(i));
             }
             1 => {
-                let _ =
-                    opt.optimize(&range_scan(i * 10, "active"));
+                let _ = opt.optimize(&range_scan(i * 10, "active"));
             }
             2 => {
                 let _ = opt.optimize(&join_with_filter(18 + i));
             }
             3 => {
-                let _ = opt.optimize(
-                    &aggregation(30000 + i * 100),
-                );
+                let _ = opt.optimize(&aggregation(30000 + i * 100));
             }
             _ => {
-                let _ = opt.optimize(
-                    &three_table_join(10 + i * 5),
-                );
+                let _ = opt.optimize(&three_table_join(10 + i * 5));
             }
         }
     }
@@ -837,9 +774,7 @@ fn per_template_hit_rate_report() {
     // Report
     #[allow(clippy::print_stdout)]
     {
-        println!(
-            "\n=== Per-Template Hit Rate (200 queries each) ===",
-        );
+        println!("\n=== Per-Template Hit Rate (200 queries each) ===",);
         println!(
             "{:<20} {:>6} {:>6} {:>8}",
             "Template", "Hits", "Misses", "Hit Rate",
@@ -848,8 +783,7 @@ fn per_template_hit_rate_report() {
     }
 
     for t in 0..5 {
-        let rate = f64::from(template_hits[t])
-            / f64::from(template_hits[t] + template_misses[t]);
+        let rate = f64::from(template_hits[t]) / f64::from(template_hits[t] + template_misses[t]);
 
         assert!(
             rate > 0.95,
@@ -891,8 +825,7 @@ fn comprehensive_oltp_report() {
     let statuses = ["active", "pending", "shipped", "returned"];
 
     // Build the workload: 5 templates, 200 variations each
-    let mut workload: Vec<(usize, RelExpr)> =
-        Vec::with_capacity(1000);
+    let mut workload: Vec<(usize, RelExpr)> = Vec::with_capacity(1000);
     for i in 0..200_i64 {
         workload.push((0, point_lookup(i * 7 + 1)));
     }
@@ -954,14 +887,11 @@ fn comprehensive_oltp_report() {
 
     #[allow(clippy::print_stdout)]
     {
-        println!(
-            "\n=== Comprehensive OLTP Report (1000 queries) ===",
-        );
+        println!("\n=== Comprehensive OLTP Report (1000 queries) ===",);
         println!();
         println!(
             "{:<14} | {:>10} {:>10} {:>10} | {:>10} {:>10} {:>10} | {:>8}",
-            "Template", "UC p50", "UC p95", "UC p99",
-            "C p50", "C p95", "C p99", "Speedup",
+            "Template", "UC p50", "UC p95", "UC p99", "C p50", "C p95", "C p99", "Speedup",
         );
         println!("{:-<107}", "");
     }
@@ -975,24 +905,19 @@ fn comprehensive_oltp_report() {
         let c_p95 = percentile(&cached_latencies[t], 95.0);
         let c_p99 = percentile(&cached_latencies[t], 99.0);
 
-        let speedup = uc_p50.as_nanos() as f64
-            / c_p50.as_nanos().max(1) as f64;
+        let speedup = uc_p50.as_nanos() as f64 / c_p50.as_nanos().max(1) as f64;
 
         #[allow(clippy::print_stdout)]
         {
             println!(
                 "{:<14} | {:>10?} {:>10?} {:>10?} | {:>10?} {:>10?} {:>10?} | {:>7.1}x",
-                template_names[t],
-                uc_p50, uc_p95, uc_p99,
-                c_p50, c_p95, c_p99,
-                speedup,
+                template_names[t], uc_p50, uc_p95, uc_p99, c_p50, c_p95, c_p99, speedup,
             );
         }
     }
 
     // Cache stats
-    let stats =
-        opt_cached2.cache_stats().expect("cache enabled");
+    let stats = opt_cached2.cache_stats().expect("cache enabled");
 
     #[allow(clippy::print_stdout)]
     {
@@ -1004,10 +929,7 @@ fn comprehensive_oltp_report() {
         println!("Misses:        {}", stats.misses);
         println!("Evictions:     {}", stats.evictions);
         println!("Entries:       {}", stats.current_entries);
-        println!(
-            "Hit rate:      {:.2}%",
-            stats.hit_rate() * 100.0,
-        );
+        println!("Hit rate:      {:.2}%", stats.hit_rate() * 100.0,);
     }
 
     // Assertions
@@ -1036,21 +958,16 @@ fn rapid_template_switching() {
                 let _ = opt.optimize(&point_lookup(i));
             }
             1 => {
-                let _ =
-                    opt.optimize(&range_scan(i * 10, "active"));
+                let _ = opt.optimize(&range_scan(i * 10, "active"));
             }
             2 => {
                 let _ = opt.optimize(&join_with_filter(18 + i));
             }
             3 => {
-                let _ = opt.optimize(
-                    &aggregation(30000 + i * 100),
-                );
+                let _ = opt.optimize(&aggregation(30000 + i * 100));
             }
             _ => {
-                let _ = opt.optimize(
-                    &three_table_join(10 + i * 5),
-                );
+                let _ = opt.optimize(&three_table_join(10 + i * 5));
             }
         }
     }

@@ -3,9 +3,9 @@
 //! Provides utilities for generating synthetic documents, embeddings,
 //! queries, and expected results for testing hybrid search functionality.
 
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 
 /// A synthetic document with text content and vector embedding.
 #[derive(Debug, Clone)]
@@ -45,11 +45,32 @@ pub struct ExpectedResult {
 /// - Category labels for filtering
 pub fn generate_documents(count: usize, embedding_dim: usize, seed: u64) -> Vec<TestDocument> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let categories = vec!["technology", "science", "sports", "politics", "entertainment"];
+    let categories = vec![
+        "technology",
+        "science",
+        "sports",
+        "politics",
+        "entertainment",
+    ];
     let words = vec![
-        "machine", "learning", "algorithm", "data", "neural", "network",
-        "optimization", "query", "database", "search", "vector", "embedding",
-        "similarity", "distance", "ranking", "relevance", "score", "fusion",
+        "machine",
+        "learning",
+        "algorithm",
+        "data",
+        "neural",
+        "network",
+        "optimization",
+        "query",
+        "database",
+        "search",
+        "vector",
+        "embedding",
+        "similarity",
+        "distance",
+        "ranking",
+        "relevance",
+        "score",
+        "fusion",
     ];
 
     (0..count)
@@ -86,7 +107,7 @@ pub fn generate_high_fts_selectivity_query(embedding_dim: usize) -> TestQuery {
     TestQuery {
         text: "machine learning optimization neural network".to_string(),
         embedding: (0..embedding_dim).map(|i| (i as f64) / 100.0).collect(),
-        expected_fts_selectivity: 0.005, // 0.5% of documents match
+        expected_fts_selectivity: 0.005,  // 0.5% of documents match
         expected_vector_selectivity: 0.1, // 10% of documents match
     }
 }
@@ -96,7 +117,7 @@ pub fn generate_high_vector_selectivity_query(embedding_dim: usize) -> TestQuery
     TestQuery {
         text: "data query search".to_string(),
         embedding: vec![1.0; embedding_dim],
-        expected_fts_selectivity: 0.15, // 15% of documents match
+        expected_fts_selectivity: 0.15,     // 15% of documents match
         expected_vector_selectivity: 0.003, // 0.3% of documents match
     }
 }
@@ -105,8 +126,10 @@ pub fn generate_high_vector_selectivity_query(embedding_dim: usize) -> TestQuery
 pub fn generate_balanced_query(embedding_dim: usize) -> TestQuery {
     TestQuery {
         text: "search algorithm database".to_string(),
-        embedding: (0..embedding_dim).map(|i| ((i % 10) as f64) / 10.0).collect(),
-        expected_fts_selectivity: 0.05, // 5% of documents match
+        embedding: (0..embedding_dim)
+            .map(|i| ((i % 10) as f64) / 10.0)
+            .collect(),
+        expected_fts_selectivity: 0.05,    // 5% of documents match
         expected_vector_selectivity: 0.06, // 6% of documents match
     }
 }
@@ -181,8 +204,8 @@ pub fn simple_bm25_score(doc_text: &str, query_text: &str) -> f64 {
             let b = 0.75;
             let avg_doc_len = 50.0; // Average from generate_documents
             let doc_len = doc_words.len() as f64;
-            let normalized_tf = term_freq * (k1 + 1.0) /
-                (term_freq + k1 * (1.0 - b + b * doc_len / avg_doc_len));
+            let normalized_tf =
+                term_freq * (k1 + 1.0) / (term_freq + k1 * (1.0 - b + b * doc_len / avg_doc_len));
             score += normalized_tf;
         }
     }
@@ -216,7 +239,7 @@ pub fn generate_expected_results(
         .map(|(rank, (doc_id, score))| ExpectedResult {
             doc_id: *doc_id,
             expected_rank_range: (rank, rank + 5), // Allow some variance
-            min_score: score * 0.9, // Allow 10% score variance
+            min_score: score * 0.9,                // Allow 10% score variance
         })
         .collect()
 }

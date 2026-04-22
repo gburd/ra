@@ -47,10 +47,7 @@ fn test_column_at_a_time_vectorized_scan() {
 fn test_column_at_a_time_vectorized_arithmetic() {
     // Vectorized arithmetic on columns
     let input = scan("calculations");
-    let filtered = input.filter(gt(
-        binop(BinOp::Add, col("a"), col("b")),
-        int(100),
-    ));
+    let filtered = input.filter(gt(binop(BinOp::Add, col("a"), col("b")), int(100)));
     assert_cost_calculated(filtered);
 }
 

@@ -768,10 +768,7 @@ fn test_cost_model_multi_column_statistics() {
     // Multi-column statistics improve join estimates
     let plan = RelExpr::Join {
         join_type: JoinType::Inner,
-        condition: and(
-            eq(col("city"), col("city")),
-            eq(col("state"), col("state")),
-        ),
+        condition: and(eq(col("city"), col("city")), eq(col("state"), col("state"))),
         left: Box::new(scan("addresses1")),
         right: Box::new(scan("addresses2")),
     };
@@ -907,10 +904,7 @@ fn test_rewrite_join_commutativity() {
 #[test]
 fn test_rewrite_project_merge() {
     // Nested projects collapse into one
-    let plan = project(
-        project(scan("t"), vec!["a", "b", "c"]),
-        vec!["a", "b"],
-    );
+    let plan = project(project(scan("t"), vec!["a", "b", "c"]), vec!["a", "b"]);
     assert_cost_calculated(plan);
 }
 
@@ -1004,10 +998,7 @@ fn test_rewrite_cartesian_to_join() {
 fn test_rewrite_boolean_and_false_short_circuits() {
     // AND with false short-circuits to false
     let plan = RelExpr::Filter {
-        predicate: and(
-            col("x"),
-            Expr::Const(ra_core::expr::Const::Bool(false)),
-        ),
+        predicate: and(col("x"), Expr::Const(ra_core::expr::Const::Bool(false))),
         input: Box::new(scan("t")),
     };
     assert_cost_calculated(plan);
@@ -1017,10 +1008,7 @@ fn test_rewrite_boolean_and_false_short_circuits() {
 fn test_rewrite_boolean_or_true_short_circuits() {
     // OR with true short-circuits to true, then filter(true) is eliminated
     let plan = RelExpr::Filter {
-        predicate: or(
-            col("x"),
-            Expr::Const(ra_core::expr::Const::Bool(true)),
-        ),
+        predicate: or(col("x"), Expr::Const(ra_core::expr::Const::Bool(true))),
         input: Box::new(scan("t")),
     };
     assert_cost_calculated(plan);

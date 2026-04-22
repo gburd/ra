@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use egg::{define_language, EGraph, Id, RecExpr, Runner};
+use egg::{define_language, EGraph, Id, RecExpr, Rewrite, Runner};
 use ra_core::algebra::{
     AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
     SortDirection, SortKey, WindowExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
@@ -243,6 +243,12 @@ pub struct OptimizerConfig {
     /// Enable lazy rule compilation (on-demand rule loading).
     /// Default: false (loads all rules upfront).
     pub use_lazy_rules: bool,
+    /// Enable the rule advisor pipeline for intelligent rule filtering.
+    /// Default: false (must be opted in).
+    pub use_rule_advisor: bool,
+    /// Configuration for the rule advisor (used when `use_rule_advisor`
+    /// is true).
+    pub rule_advisor_config: crate::rule_advisor::RuleAdvisorConfig,
 }
 
 /// Configuration for parallel query execution.
@@ -265,7 +271,7 @@ impl Default for ParallelConfig {
         Self {
             max_parallel_workers: 8,
             max_parallel_workers_per_gather: 4,
-            min_parallel_table_scan_size: 8_388_608,  // 8 MB
+            min_parallel_table_scan_size: 8_388_608, // 8 MB
             parallel_tuple_cost: 0.1,
             parallel_setup_cost: 1000.0,
         }
@@ -276,22 +282,24 @@ impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
             node_limit: 100_000,
-            iter_limit: 30,  // Fallback when use_adaptive_limits = false
+            iter_limit: 30, // Fallback when use_adaptive_limits = false
             time_limit_secs: 10,
             large_join_threshold: 10,
             large_join_strategy: crate::large_join::LargeJoinStrategy::default(),
             max_optimization_time_ms: 30000,
             parallel: ParallelConfig::default(),
-            use_adaptive_limits: true,  // Enable adaptive limits by default
-            use_cost_pruning: true,  // Enable cost pruning by default
-            cost_pruning_threshold: 1.5,  // Prune plans >50% worse than best
-            use_join_graph_filtering: true,  // Enable join graph filtering by default
+            use_adaptive_limits: true, // Enable adaptive limits by default
+            use_cost_pruning: true,    // Enable cost pruning by default
+            cost_pruning_threshold: 1.5, // Prune plans >50% worse than best
+            use_join_graph_filtering: true, // Enable join graph filtering by default
             beam_search_config: None,  // Disabled by default (can be enabled for complex queries)
-            transaction_context: None,  // No isolation awareness by default
+            transaction_context: None, // No isolation awareness by default
             enable_plan_cache: false,
             plan_cache_config: PlanCacheConfig::default(),
             max_staleness_penalty: 10.0, // Cap at 10x cost penalty
-            use_lazy_rules: false,  // Disabled by default (opt-in for better compatibility)
+            use_lazy_rules: false,       // Disabled by default (opt-in for better compatibility)
+            use_rule_advisor: false,     // Disabled by default (Phase 1 rollout)
+            rule_advisor_config: crate::rule_advisor::RuleAdvisorConfig::default(),
         }
     }
 }
@@ -312,6 +320,7 @@ pub struct Optimizer {
     hardware_profile: Option<ra_hardware::HardwareProfile>,
     resource_budget: Option<ResourceBudget>,
     plan_cache: Option<Mutex<PlanCache>>,
+    rule_advisor: Option<Mutex<crate::rule_advisor::RuleAdvisor>>,
 }
 
 impl Optimizer {
@@ -324,6 +333,7 @@ impl Optimizer {
             hardware_profile: None,
             resource_budget: None,
             plan_cache: None,
+            rule_advisor: None,
         }
     }
 
@@ -331,8 +341,13 @@ impl Optimizer {
     #[must_use]
     pub fn with_config(config: OptimizerConfig) -> Self {
         let plan_cache = if config.enable_plan_cache {
-            Some(Mutex::new(PlanCache::new(
-                config.plan_cache_config.clone(),
+            Some(Mutex::new(PlanCache::new(config.plan_cache_config.clone())))
+        } else {
+            None
+        };
+        let rule_advisor = if config.use_rule_advisor {
+            Some(Mutex::new(crate::rule_advisor::RuleAdvisor::new(
+                config.rule_advisor_config.clone(),
             )))
         } else {
             None
@@ -343,6 +358,7 @@ impl Optimizer {
             hardware_profile: None,
             resource_budget: None,
             plan_cache,
+            rule_advisor,
         }
     }
 
@@ -369,9 +385,37 @@ impl Optimizer {
     /// Clear the plan cache.
     pub fn clear_cache(&self) {
         if let Some(m) = self.plan_cache.as_ref() {
-            let mut cache =
-                m.lock().unwrap_or_else(|e| e.into_inner());
+            let mut cache = m.lock().unwrap_or_else(|e| e.into_inner());
             cache.clear();
+        }
+    }
+
+    /// Return a snapshot of rule advisor statistics.
+    ///
+    /// Returns `None` if the rule advisor is not enabled.
+    #[must_use]
+    pub fn advisor_stats(&self) -> Option<crate::rule_advisor::AdvisorStats> {
+        self.rule_advisor.as_ref().map(|m| {
+            let advisor = m.lock().unwrap_or_else(|e| e.into_inner());
+            advisor.stats().clone()
+        })
+    }
+
+    /// Load rules using the advisor > lazy > all priority chain.
+    ///
+    /// Centralises the rule-loading logic so every optimisation path
+    /// (normal, bounded, tracking, incremental) honours the rule
+    /// advisor when it is configured.
+    fn load_rules(&self, expr: &RelExpr) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+        if let Some(ref advisor_mutex) = self.rule_advisor {
+            let mut advisor = advisor_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            advisor.select_rules(expr)
+        } else if self.config.use_lazy_rules {
+            let pattern = crate::lazy_rules::LazyQueryPattern::analyze(expr);
+            let compiler = crate::lazy_rules::LazyRuleCompiler::new();
+            compiler.compile(&pattern)
+        } else {
+            all_rules()
         }
     }
 
@@ -429,8 +473,7 @@ impl Optimizer {
         let fingerprint = if self.plan_cache.is_some() {
             let fp = QueryFingerprint::from_rel_expr(expr);
             if let Some(ref mutex) = self.plan_cache {
-                let mut cache =
-                    mutex.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cache = mutex.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(hit) = cache.lookup(&fp) {
                     info!(
                         "Plan cache hit ({:?}, similarity={:.2}) \
@@ -451,9 +494,8 @@ impl Optimizer {
         // Fast path: Use left-deep tree for queries with 2-7 tables
         if crate::left_deep::can_use_left_deep(expr) {
             debug!("Using left-deep tree optimization");
-            let cost_model: Arc<dyn ra_core::cost::CostModel> = Arc::new(ra_hardware::HardwareCostModel::new(
-                self.hardware_profile(),
-            ));
+            let cost_model: Arc<dyn ra_core::cost::CostModel> =
+                Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
             let stats_provider = Arc::new(TableStatsProvider {
                 stats: self.table_stats.clone(),
             });
@@ -465,10 +507,7 @@ impl Optimizer {
                         "Left-deep optimization completed in {:?}",
                         total_start.elapsed()
                     );
-                    self.insert_into_cache(
-                        &fingerprint,
-                        &optimized,
-                    );
+                    self.insert_into_cache(&fingerprint, &optimized);
                     return Ok(optimized);
                 }
                 Err(e) => {
@@ -487,9 +526,8 @@ impl Optimizer {
                 }
                 _ => {
                     // Use large join optimizer
-                    let cost_model: Arc<dyn ra_core::cost::CostModel> = Arc::new(ra_hardware::HardwareCostModel::new(
-                        self.hardware_profile(),
-                    ));
+                    let cost_model: Arc<dyn ra_core::cost::CostModel> =
+                        Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
                     let stats_provider = Arc::new(TableStatsProvider {
                         stats: self.table_stats.clone(),
                     });
@@ -502,12 +540,10 @@ impl Optimizer {
 
                     let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
                     if !joins.is_empty() {
-                        let result = large_optimizer.optimize(joins)
+                        let result = large_optimizer
+                            .optimize(joins)
                             .map_err(|e| EGraphError::ExtractionError(e.to_string()))?;
-                        self.insert_into_cache(
-                            &fingerprint,
-                            &result,
-                        );
+                        self.insert_into_cache(&fingerprint, &result);
                         return Ok(result);
                     }
                 }
@@ -558,28 +594,26 @@ impl Optimizer {
         let runner_start = Instant::now();
         let timeout = std::time::Duration::from_millis(timeout_ms);
 
-        // Load rules: lazy or all
-        let rules = if self.config.use_lazy_rules {
-            let pattern = crate::lazy_rules::LazyQueryPattern::analyze(expr);
-            let compiler = crate::lazy_rules::LazyRuleCompiler::new();
-            compiler.compile(&pattern)
-        } else {
-            all_rules()
-        };
+        let rules = self.load_rules(expr);
 
         // Create convergence detector (window size: 3, min growth rate: 5%)
         let mut convergence_detector = crate::convergence::ConvergenceDetector::default_settings();
 
         // Create cost pruner (if enabled)
         let mut cost_pruner = if self.config.use_cost_pruning {
-            Some(crate::cost_pruning::CostPruner::new(self.config.cost_pruning_threshold))
+            Some(crate::cost_pruning::CostPruner::new(
+                self.config.cost_pruning_threshold,
+            ))
         } else {
             None
         };
 
         // Create beam search tracker (if enabled)
-        let mut beam_search_tracker = if let Some(ref beam_config) = self.config.beam_search_config {
-            Some(crate::beam_search::BeamSearchTracker::new(beam_config.clone()))
+        let mut beam_search_tracker = if let Some(ref beam_config) = self.config.beam_search_config
+        {
+            Some(crate::beam_search::BeamSearchTracker::new(
+                beam_config.clone(),
+            ))
         } else {
             None
         };
@@ -711,7 +745,9 @@ impl Optimizer {
             }
 
             // Check for convergence
-            if convergence_detector.should_terminate() == crate::convergence::TerminationDecision::Converged {
+            if convergence_detector.should_terminate()
+                == crate::convergence::TerminationDecision::Converged
+            {
                 termination_reason = "converged";
                 debug!(
                     "Early termination: converged at iteration {} (stats: {:?})",
@@ -785,15 +821,10 @@ impl Optimizer {
     }
 
     /// Insert a plan into the cache if caching is enabled.
-    fn insert_into_cache(
-        &self,
-        fingerprint: &Option<QueryFingerprint>,
-        plan: &RelExpr,
-    ) {
+    fn insert_into_cache(&self, fingerprint: &Option<QueryFingerprint>, plan: &RelExpr) {
         if let Some(fp) = fingerprint {
             if let Some(ref mutex) = self.plan_cache {
-                let mut cache =
-                    mutex.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cache = mutex.lock().unwrap_or_else(|e| e.into_inner());
                 cache.insert(fp.clone(), plan.clone());
             }
         }
@@ -918,12 +949,13 @@ impl Optimizer {
         expr: &RelExpr,
     ) -> Result<(RelExpr, EGraph<RelLang, RelAnalysis>), EGraphError> {
         let rec_expr = to_rec_expr(expr)?;
+        let rules = self.load_rules(expr);
         let runner: Runner<RelLang, RelAnalysis> = Runner::default()
             .with_expr(&rec_expr)
             .with_node_limit(self.config.node_limit)
             .with_iter_limit(self.config.iter_limit)
             .with_time_limit(std::time::Duration::from_secs(self.config.time_limit_secs))
-            .run(&all_rules());
+            .run(&rules);
 
         let root = runner.roots[0];
         let hardware = self.hardware_profile();
@@ -945,35 +977,26 @@ impl Optimizer {
     /// Returns an error if expression conversion fails, or if the
     /// overflow strategy is [`OverflowStrategy::Fail`] and the budget
     /// is exceeded before any plan is extracted.
-    pub fn optimize_bounded(
-        &self,
-        expr: &RelExpr,
-    ) -> Result<OptimizationResult, EGraphError> {
-        let budget = self
-            .resource_budget
-            .clone()
-            .unwrap_or_default();
+    pub fn optimize_bounded(&self, expr: &RelExpr) -> Result<OptimizationResult, EGraphError> {
+        let budget = self.resource_budget.clone().unwrap_or_default();
         let mut tracker = ResourceTracker::start(budget);
 
         let rec_expr = to_rec_expr(expr)?;
         let hardware = self.hardware_profile();
-        let rules = all_rules();
+        let rules = self.load_rules(expr);
 
         let iter_limit = self.config.iter_limit;
         let node_limit = self.config.node_limit;
         let time_limit_secs = self.config.time_limit_secs;
 
-        let mut egraph: EGraph<RelLang, RelAnalysis> =
-            EGraph::default();
+        let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
 
         let mut best_plan: Option<RelExpr> = None;
         let mut best_cost = f64::INFINITY;
 
         // Extract initial plan (the original, unoptimized)
-        if let Ok(plan) = extract_best(
-            &egraph, root, &self.table_stats, &hardware,
-        ) {
+        if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
             best_plan = Some(plan);
             best_cost = estimate_plan_cost(&egraph, root, &hardware);
         }
@@ -982,38 +1005,28 @@ impl Optimizer {
             // Check budget before running an iteration
             let check = tracker.check();
             if !check.is_within_budget() {
-                return handle_overflow(
-                    &tracker, expr, best_plan, best_cost,
-                );
+                return handle_overflow(&tracker, expr, best_plan, best_cost);
             }
 
             // Run one iteration of equality saturation
-            let runner: Runner<RelLang, RelAnalysis> =
-                Runner::default()
-                    .with_egraph(egraph)
-                    .with_node_limit(node_limit)
-                    .with_iter_limit(1)
-                    .with_time_limit(
-                        std::time::Duration::from_secs(time_limit_secs),
-                    )
-                    .run(&rules);
+            let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+                .with_egraph(egraph)
+                .with_node_limit(node_limit)
+                .with_iter_limit(1)
+                .with_time_limit(std::time::Duration::from_secs(time_limit_secs))
+                .run(&rules);
 
             egraph = runner.egraph;
             tracker.record_iteration();
             tracker.record_egraph_nodes(egraph.total_number_of_nodes());
 
             // Estimate memory: ~64 bytes per e-graph node is rough
-            let mem_estimate =
-                (egraph.total_number_of_nodes() as u64).saturating_mul(64);
+            let mem_estimate = (egraph.total_number_of_nodes() as u64).saturating_mul(64);
             tracker.record_memory_estimate(mem_estimate);
 
             // Try to extract the best plan from the current e-graph
-            if let Ok(plan) = extract_best(
-                &egraph, root, &self.table_stats, &hardware,
-            ) {
-                let cost = estimate_plan_cost(
-                    &egraph, root, &hardware,
-                );
+            if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
+                let cost = estimate_plan_cost(&egraph, root, &hardware);
                 if cost < best_cost {
                     best_cost = cost;
                     best_plan = Some(plan);
@@ -1021,9 +1034,11 @@ impl Optimizer {
             }
 
             // Check for egg saturation (no new nodes)
-            if runner.stop_reason.as_ref().is_some_and(|r| {
-                matches!(r, egg::StopReason::Saturated)
-            }) {
+            if runner
+                .stop_reason
+                .as_ref()
+                .is_some_and(|r| matches!(r, egg::StopReason::Saturated))
+            {
                 break;
             }
         }
@@ -1084,21 +1099,17 @@ impl Optimizer {
         expr: &RelExpr,
         verbose: bool,
     ) -> Result<OptimizationResult, EGraphError> {
-        let budget = self
-            .resource_budget
-            .clone()
-            .unwrap_or_default();
+        let budget = self.resource_budget.clone().unwrap_or_default();
         let mut tracker = ResourceTracker::start(budget);
 
         let rec_expr = to_rec_expr(expr)?;
         let hardware = self.hardware_profile();
-        let rules = all_rules();
+        let rules = self.load_rules(expr);
 
         let iter_limit = self.config.iter_limit;
         let node_limit = self.config.node_limit;
 
-        let mut egraph: EGraph<RelLang, RelAnalysis> =
-            EGraph::default();
+        let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
 
         let mut best_plan: Option<RelExpr> = None;
@@ -1106,18 +1117,13 @@ impl Optimizer {
         let initial_cost = estimate_plan_cost(&egraph, root, &hardware);
 
         // Extract initial plan (the original, unoptimized)
-        if let Ok(plan) = extract_best(
-            &egraph, root, &self.table_stats, &hardware,
-        ) {
+        if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
             best_plan = Some(plan);
             best_cost = initial_cost;
         }
 
         // Track per-rule applications
-        let available_rules: Vec<String> = rules
-            .iter()
-            .map(|r| r.name.to_string())
-            .collect();
+        let available_rules: Vec<String> = rules.iter().map(|r| r.name.to_string()).collect();
 
         let mut rule_applications: Vec<RuleApplication> = Vec::new();
         let mut intermediate_steps: Vec<IntermediateStep> = Vec::new();
@@ -1129,12 +1135,13 @@ impl Optimizer {
             // Check budget before running an iteration
             let check = tracker.check();
             if !check.is_within_budget() {
-                let tracking = build_detailed_tracking(
-                    available_rules,
-                    rule_applications,
-                );
+                let tracking = build_detailed_tracking(available_rules, rule_applications);
                 return handle_overflow_with_tracking(
-                    &tracker, expr, best_plan, best_cost, Some(tracking),
+                    &tracker,
+                    expr,
+                    best_plan,
+                    best_cost,
+                    Some(tracking),
                 );
             }
 
@@ -1154,12 +1161,11 @@ impl Optimizer {
                 };
 
                 // Run this single rule once
-                let runner: Runner<RelLang, RelAnalysis> =
-                    Runner::default()
-                        .with_egraph(egraph)
-                        .with_node_limit(node_limit)
-                        .with_iter_limit(1)
-                        .run(&[rule.clone()]);
+                let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+                    .with_egraph(egraph)
+                    .with_node_limit(node_limit)
+                    .with_iter_limit(1)
+                    .run(&[rule.clone()]);
 
                 egraph = runner.egraph;
                 let nodes_after = egraph.total_number_of_nodes();
@@ -1178,9 +1184,7 @@ impl Optimizer {
                     };
 
                     // Try to extract better plan
-                    if let Ok(plan) = extract_best(
-                        &egraph, root, &self.table_stats, &hardware,
-                    ) {
+                    if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
                         if cost_after < best_cost {
                             best_cost = cost_after;
                             best_plan = Some(plan.clone());
@@ -1221,8 +1225,7 @@ impl Optimizer {
             tracker.record_egraph_nodes(egraph.total_number_of_nodes());
 
             // Estimate memory
-            let mem_estimate =
-                (egraph.total_number_of_nodes() as u64).saturating_mul(64);
+            let mem_estimate = (egraph.total_number_of_nodes() as u64).saturating_mul(64);
             tracker.record_memory_estimate(mem_estimate);
 
             // If no rules applied anything this iteration, we're saturated
@@ -1246,7 +1249,11 @@ impl Optimizer {
         let tracking = build_detailed_tracking_with_steps(
             available_rules,
             rule_applications,
-            if verbose { Some(intermediate_steps) } else { None },
+            if verbose {
+                Some(intermediate_steps)
+            } else {
+                None
+            },
         );
 
         match best_plan {
@@ -1292,39 +1299,34 @@ impl Optimizer {
         let tables_updated = self.apply_stats_delta(stats_delta);
 
         // Decide iteration budget based on delta magnitude.
-        let (iter_limit, is_full) = if stats_delta.needs_full_reoptimization()
-        {
+        let (iter_limit, is_full) = if stats_delta.needs_full_reoptimization() {
             (self.config.iter_limit, true)
         } else {
             // Scale iterations by change magnitude.
             let pct = stats_delta.row_count_change_pct();
             let fraction = (pct / 100.0).clamp(0.05, 1.0);
-            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let iters = ((self.config.iter_limit as f64) * fraction)
-                .ceil() as usize;
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
+            let iters = ((self.config.iter_limit as f64) * fraction).ceil() as usize;
             (iters.max(1), false)
         };
 
         let rec_expr = to_rec_expr(expr)?;
-        let rules = all_rules();
+        let rules = self.load_rules(expr);
         let hardware = self.hardware_profile();
 
         let runner: Runner<RelLang, RelAnalysis> = Runner::default()
             .with_expr(&rec_expr)
             .with_node_limit(self.config.node_limit)
             .with_iter_limit(iter_limit)
-            .with_time_limit(std::time::Duration::from_secs(
-                self.config.time_limit_secs,
-            ))
+            .with_time_limit(std::time::Duration::from_secs(self.config.time_limit_secs))
             .run(&rules);
 
         let root = runner.roots[0];
-        let result = extract_best(
-            &runner.egraph,
-            root,
-            &self.table_stats,
-            &hardware,
-        )?;
+        let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
 
         let elapsed = start.elapsed();
         let nodes_in_egraph = runner.egraph.total_number_of_nodes();
@@ -1349,79 +1351,48 @@ impl Optimizer {
     /// Returns the number of tables whose stats were updated.
     #[cfg(feature = "timeline")]
     fn apply_stats_delta(&mut self, delta_set: &DeltaSet) -> usize {
-        let mut updated_tables =
-            std::collections::HashSet::<String>::new();
+        let mut updated_tables = std::collections::HashSet::<String>::new();
 
         for delta in delta_set {
             match delta {
-                ra_stats::delta::StatisticsDelta::TableRowCount {
-                    table,
-                    new,
-                    ..
-                } => {
+                ra_stats::delta::StatisticsDelta::TableRowCount { table, new, .. } => {
                     let stats = self
                         .table_stats
                         .entry(table.clone())
-                        .or_insert_with(|| {
-                            ra_core::statistics::Statistics::new(
-                                *new as f64,
-                            )
-                        });
+                        .or_insert_with(|| ra_core::statistics::Statistics::new(*new as f64));
                     stats.row_count = *new as f64;
                     updated_tables.insert(table.clone());
                 }
                 ra_stats::delta::StatisticsDelta::ColumnNDV {
-                    table,
-                    column,
-                    new,
-                    ..
+                    table, column, new, ..
                 } => {
-                    if let Some(stats) = self.table_stats.get_mut(table)
-                    {
+                    if let Some(stats) = self.table_stats.get_mut(table) {
                         let col = stats
                             .columns
                             .entry(column.clone())
-                            .or_insert_with(|| {
-                                ra_core::statistics::ColumnStats::new(
-                                    *new as f64,
-                                )
-                            });
+                            .or_insert_with(|| ra_core::statistics::ColumnStats::new(*new as f64));
                         col.distinct_count = *new as f64;
                         updated_tables.insert(table.clone());
                     }
                 }
                 ra_stats::delta::StatisticsDelta::ColumnNullFraction {
-                    table,
-                    column,
-                    new,
-                    ..
+                    table, column, new, ..
                 } => {
-                    if let Some(stats) = self.table_stats.get_mut(table)
-                    {
-                        if let Some(col) =
-                            stats.columns.get_mut(column)
-                        {
+                    if let Some(stats) = self.table_stats.get_mut(table) {
+                        if let Some(col) = stats.columns.get_mut(column) {
                             col.null_fraction = *new;
                             updated_tables.insert(table.clone());
                         }
                     }
                 }
-                ra_stats::delta::StatisticsDelta::TableAdded {
-                    table,
-                    row_count,
-                } => {
+                ra_stats::delta::StatisticsDelta::TableAdded { table, row_count } => {
                     self.table_stats.insert(
                         table.clone(),
-                        ra_core::statistics::Statistics::new(
-                            *row_count as f64,
-                        ),
+                        ra_core::statistics::Statistics::new(*row_count as f64),
                     );
                     updated_tables.insert(table.clone());
                 }
-                ra_stats::delta::StatisticsDelta::TableRemoved {
-                    table,
-                    ..
-                } => {
+                ra_stats::delta::StatisticsDelta::TableRemoved { table, .. } => {
                     self.table_stats.remove(table);
                     updated_tables.insert(table.clone());
                 }
@@ -1456,8 +1427,10 @@ fn build_simple_tracking(
 
     let applied = if total_nodes_added > 0 {
         vec![RuleApplication {
-            name: format!("Aggregate: {} iteration(s) with rule applications",
-                iterations_with_changes),
+            name: format!(
+                "Aggregate: {} iteration(s) with rule applications",
+                iterations_with_changes
+            ),
             fired_count: iterations_with_changes,
             nodes_added: total_nodes_added,
             cost_improvement: if cost_improvement > 0.0 {
@@ -1472,7 +1445,10 @@ fn build_simple_tracking(
 
     let evaluated = if total_nodes_added == 0 && !available_rules.is_empty() {
         vec![RuleEvaluation {
-            name: format!("Aggregate: {} rule(s) available but none applied", available_rules.len()),
+            name: format!(
+                "Aggregate: {} rule(s) available but none applied",
+                available_rules.len()
+            ),
             tried_count: available_rules.len(),
             rejection_reason: "no pattern matched or no improvement".to_string(),
         }]
@@ -1506,7 +1482,10 @@ fn build_detailed_tracking_with_steps(
 ) -> RuleTrackingResult {
     let evaluated = if rule_applications.is_empty() && !available_rules.is_empty() {
         vec![RuleEvaluation {
-            name: format!("{} rule(s) available but none applied", available_rules.len()),
+            name: format!(
+                "{} rule(s) available but none applied",
+                available_rules.len()
+            ),
             tried_count: available_rules.len(),
             rejection_reason: "no pattern matched or no improvement".to_string(),
         }]
@@ -1542,26 +1521,24 @@ fn handle_overflow_with_tracking(
 ) -> Result<OptimizationResult, EGraphError> {
     let report = tracker.report();
     match tracker.overflow_strategy() {
-        OverflowStrategy::ReturnBestSoFar => {
-            match best_plan {
-                Some(plan) => Ok(OptimizationResult {
-                    plan,
-                    cost: best_cost,
-                    status: OptimizationStatus::Incomplete,
-                    resource_usage: report,
-                    applied_rules: None,
-                    rule_tracking,
-                }),
-                None => Ok(OptimizationResult {
-                    plan: original.clone(),
-                    cost: f64::INFINITY,
-                    status: OptimizationStatus::Incomplete,
-                    resource_usage: report,
-                    applied_rules: None,
-                    rule_tracking,
-                }),
-            }
-        }
+        OverflowStrategy::ReturnBestSoFar => match best_plan {
+            Some(plan) => Ok(OptimizationResult {
+                plan,
+                cost: best_cost,
+                status: OptimizationStatus::Incomplete,
+                resource_usage: report,
+                applied_rules: None,
+                rule_tracking,
+            }),
+            None => Ok(OptimizationResult {
+                plan: original.clone(),
+                cost: f64::INFINITY,
+                status: OptimizationStatus::Incomplete,
+                resource_usage: report,
+                applied_rules: None,
+                rule_tracking,
+            }),
+        },
         OverflowStrategy::ReturnOriginal => Ok(OptimizationResult {
             plan: original.clone(),
             cost: f64::INFINITY,
@@ -1571,10 +1548,9 @@ fn handle_overflow_with_tracking(
             rule_tracking,
         }),
         OverflowStrategy::Fail => {
-            let exceeded = report.budget_exceeded.map_or(
-                "unknown resource".to_owned(),
-                |r| r.to_string(),
-            );
+            let exceeded = report
+                .budget_exceeded
+                .map_or("unknown resource".to_owned(), |r| r.to_string());
             Err(EGraphError::ResourceBudgetExceeded(exceeded))
         }
     }
@@ -1809,9 +1785,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let prefix_id = add_sort_key_list(rec, prefix_keys)?;
             let suffix_id = add_sort_key_list(rec, suffix_keys)?;
             let input_id = add_rel_expr(rec, input)?;
-            Ok(rec.add(RelLang::IncrementalSort([
-                prefix_id, suffix_id, input_id,
-            ])))
+            Ok(rec.add(RelLang::IncrementalSort([prefix_id, suffix_id, input_id])))
         }
         RelExpr::Limit {
             count,
@@ -1852,9 +1826,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let base_id = add_rel_expr(rec, base_case)?;
             let rec_id = add_rel_expr(rec, recursive_case)?;
             let body_id = add_rel_expr(rec, body)?;
-            Ok(rec.add(RelLang::RecursiveCTE([
-                name_id, base_id, rec_id, body_id,
-            ])))
+            Ok(rec.add(RelLang::RecursiveCTE([name_id, base_id, rec_id, body_id])))
         }
         RelExpr::CTE {
             name,
@@ -1878,21 +1850,20 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
         RelExpr::Values { rows } => {
             let mut row_ids = Vec::with_capacity(rows.len());
             for row in rows {
-                let mut cell_ids =
-                    Vec::with_capacity(row.len());
+                let mut cell_ids = Vec::with_capacity(row.len());
                 for cell in row {
-                    cell_ids
-                        .push(add_scalar_expr(rec, cell)?);
+                    cell_ids.push(add_scalar_expr(rec, cell)?);
                 }
-                row_ids.push(rec.add(RelLang::ValuesRow(
-                    cell_ids.into_boxed_slice(),
-                )));
+                row_ids.push(rec.add(RelLang::ValuesRow(cell_ids.into_boxed_slice())));
             }
-            Ok(rec.add(RelLang::Values(
-                row_ids.into_boxed_slice(),
-            )))
+            Ok(rec.add(RelLang::Values(row_ids.into_boxed_slice())))
         }
-        RelExpr::Unnest { expr, alias, input, with_ordinality } => {
+        RelExpr::Unnest {
+            expr,
+            alias,
+            input,
+            with_ordinality,
+        } => {
             let expr_id = add_scalar_expr(rec, expr)?;
             let alias_id = add_symbol(rec, alias.as_deref().unwrap_or(""));
             let ord_id = add_bool_flag(rec, *with_ordinality);
@@ -1908,23 +1879,22 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             }
         }
         RelExpr::MultiUnnest {
-            exprs, aliases, with_ordinality,
+            exprs,
+            aliases,
+            with_ordinality,
         } => {
             let tag_id = add_symbol(rec, "multi_unnest");
             let ord_id = add_bool_flag(rec, *with_ordinality);
             let mut ids = vec![tag_id, ord_id];
-            for (expr, alias) in
-                exprs.iter().zip(aliases.iter())
-            {
+            for (expr, alias) in exprs.iter().zip(aliases.iter()) {
                 ids.push(add_scalar_expr(rec, expr)?);
-                ids.push(add_symbol(
-                    rec,
-                    alias.as_deref().unwrap_or(""),
-                ));
+                ids.push(add_symbol(rec, alias.as_deref().unwrap_or("")));
             }
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
-        RelExpr::TableFunction { name, args, input, .. } => {
+        RelExpr::TableFunction {
+            name, args, input, ..
+        } => {
             let name_id = add_symbol(rec, name);
             let mut ids = vec![name_id];
             for arg in args {
@@ -1935,7 +1905,11 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             }
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
-        RelExpr::BitmapIndexScan { table, index, predicate } => {
+        RelExpr::BitmapIndexScan {
+            table,
+            index,
+            predicate,
+        } => {
             let table_id = add_symbol(rec, table);
             let index_id = add_symbol(rec, index);
             let pred_id = add_scalar_expr(rec, predicate)?;
@@ -1955,7 +1929,11 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             }
             Ok(rec.add(RelLang::BitmapOr(input_ids.into_boxed_slice())))
         }
-        RelExpr::BitmapHeapScan { table, bitmap, recheck_cond } => {
+        RelExpr::BitmapHeapScan {
+            table,
+            bitmap,
+            recheck_cond,
+        } => {
             let table_id = add_symbol(rec, table);
             let bitmap_id = add_rel_expr(rec, bitmap)?;
             let recheck_id = if let Some(cond) = recheck_cond {
@@ -1970,9 +1948,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let table_id = add_symbol(rec, table);
             let col_id = add_symbol(rec, column);
             let ids = vec![tag_id, table_id, col_id];
-            Ok(rec.add(
-                RelLang::Func(ids.into_boxed_slice()),
-            ))
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
         RelExpr::IndexOnlyScan {
             table,
@@ -1982,10 +1958,8 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
         } => {
             let table_id = add_symbol(rec, table);
             let index_id = add_symbol(rec, index);
-            let cols_id =
-                add_projection_list(rec, columns)?;
-            let pred_id =
-                add_scalar_expr(rec, predicate)?;
+            let cols_id = add_projection_list(rec, columns)?;
+            let pred_id = add_scalar_expr(rec, predicate)?;
             Ok(rec.add(RelLang::IndexOnlyScan([
                 table_id, index_id, cols_id, pred_id,
             ])))
@@ -2043,15 +2017,18 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
         }
         RelExpr::MvScan { view_name, alias } => {
             let view_id = add_symbol(rec, view_name);
-            let alias_id =
-                add_symbol(rec, alias.as_deref().unwrap_or("auto"));
+            let alias_id = add_symbol(rec, alias.as_deref().unwrap_or("auto"));
             let nil_g = rec.add(RelLang::Nil);
             let nil_a = rec.add(RelLang::Nil);
-            Ok(rec.add(RelLang::MvScan([
-                view_id, alias_id, nil_g, nil_a,
-            ])))
+            Ok(rec.add(RelLang::MvScan([view_id, alias_id, nil_g, nil_a])))
         }
-        RelExpr::TopK { vector_expr, query_vector, metric, k, input } => {
+        RelExpr::TopK {
+            vector_expr,
+            query_vector,
+            metric,
+            k,
+            input,
+        } => {
             let tag_id = add_symbol(rec, "topk");
             let vec_expr_id = add_scalar_expr(rec, vector_expr)?;
             let query_id = add_scalar_expr(rec, query_vector)?;
@@ -2061,14 +2038,27 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let ids = vec![tag_id, vec_expr_id, query_id, metric_id, k_id, input_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
-        RelExpr::VectorFilter { vector_expr, query_vector, metric, threshold, input } => {
+        RelExpr::VectorFilter {
+            vector_expr,
+            query_vector,
+            metric,
+            threshold,
+            input,
+        } => {
             let tag_id = add_symbol(rec, "vector_filter");
             let vec_expr_id = add_scalar_expr(rec, vector_expr)?;
             let query_id = add_scalar_expr(rec, query_vector)?;
             let metric_id = add_symbol(rec, &format!("{:?}", metric));
             let threshold_id = add_symbol(rec, &threshold.to_string());
             let input_id = add_rel_expr(rec, input)?;
-            let ids = vec![tag_id, vec_expr_id, query_id, metric_id, threshold_id, input_id];
+            let ids = vec![
+                tag_id,
+                vec_expr_id,
+                query_id,
+                metric_id,
+                threshold_id,
+                input_id,
+            ];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
     }
@@ -2189,9 +2179,7 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
             let ids = vec![tag_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
-        Expr::ArraySlice {
-            array, start, end,
-        } => {
+        Expr::ArraySlice { array, start, end } => {
             let arr_id = add_scalar_expr(rec, array)?;
             let start_id = match start {
                 Some(s) => add_scalar_expr(rec, s)?,
@@ -2202,8 +2190,7 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                 None => rec.add(RelLang::ConstNull),
             };
             let tag_id = add_symbol(rec, "ARRAY_SLICE");
-            let ids =
-                vec![tag_id, arr_id, start_id, end_id];
+            let ids = vec![tag_id, arr_id, start_id, end_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
         Expr::FieldAccess { expr, field_name } => {
@@ -2218,14 +2205,23 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                  e-graph representation"
                 .into(),
         )),
-        Expr::FullTextMatch { vendor, columns, query, mode } => {
+        Expr::FullTextMatch {
+            vendor,
+            columns,
+            query,
+            mode,
+        } => {
             let vendor_id = add_symbol(rec, vendor);
             let cols_id = add_symbol(rec, &columns.join(","));
             let query_id = add_symbol(rec, query);
             let mode_id = add_symbol(rec, mode.as_deref().unwrap_or(""));
             Ok(rec.add(RelLang::FtsMatch([vendor_id, cols_id, query_id, mode_id])))
         }
-        Expr::VectorDistance { metric, column, target } => {
+        Expr::VectorDistance {
+            metric,
+            column,
+            target,
+        } => {
             let metric_id = add_symbol(rec, metric);
             let col_id = add_scalar_expr(rec, column)?;
             let target_id = add_scalar_expr(rec, target)?;
@@ -2401,10 +2397,7 @@ fn add_window_expr_list(
     Ok(rec.add(RelLang::List(ids.into_boxed_slice())))
 }
 
-fn add_window_expr(
-    rec: &mut RecExpr<RelLang>,
-    wexpr: &WindowExpr,
-) -> Result<Id, EGraphError> {
+fn add_window_expr(rec: &mut RecExpr<RelLang>, wexpr: &WindowExpr) -> Result<Id, EGraphError> {
     let fn_name = add_symbol(rec, &format!("{:?}", wexpr.function));
     let fn_id = rec.add(RelLang::WindowFn([fn_name]));
     let arg_id = match &wexpr.arg {
@@ -2437,33 +2430,22 @@ fn add_window_frame(
     };
     let start_id = add_frame_bound(rec, &f.start);
     let end_id = add_frame_bound(rec, &f.end);
-    Ok(rec.add(RelLang::WindowFrameNode([
-        mode_id, start_id, end_id,
-    ])))
+    Ok(rec.add(RelLang::WindowFrameNode([mode_id, start_id, end_id])))
 }
 
-fn add_frame_bound(
-    rec: &mut RecExpr<RelLang>,
-    bound: &WindowFrameBound,
-) -> Id {
+fn add_frame_bound(rec: &mut RecExpr<RelLang>, bound: &WindowFrameBound) -> Id {
     match bound {
-        WindowFrameBound::UnboundedPreceding => {
-            rec.add(RelLang::FrameUnboundedPreceding)
-        }
+        WindowFrameBound::UnboundedPreceding => rec.add(RelLang::FrameUnboundedPreceding),
         WindowFrameBound::Preceding(n) => {
             let n_id = add_symbol(rec, &n.to_string());
             rec.add(RelLang::FramePreceding([n_id]))
         }
-        WindowFrameBound::CurrentRow => {
-            rec.add(RelLang::FrameCurrentRow)
-        }
+        WindowFrameBound::CurrentRow => rec.add(RelLang::FrameCurrentRow),
         WindowFrameBound::Following(n) => {
             let n_id = add_symbol(rec, &n.to_string());
             rec.add(RelLang::FrameFollowing([n_id]))
         }
-        WindowFrameBound::UnboundedFollowing => {
-            rec.add(RelLang::FrameUnboundedFollowing)
-        }
+        WindowFrameBound::UnboundedFollowing => rec.add(RelLang::FrameUnboundedFollowing),
     }
 }
 
@@ -2550,10 +2532,8 @@ fn from_node(
             })
         }
         RelLang::IncrementalSort([prefix_id, suffix_id, input_id]) => {
-            let prefix_keys =
-                extract_sort_key_list(egraph, *prefix_id)?;
-            let suffix_keys =
-                extract_sort_key_list(egraph, *suffix_id)?;
+            let prefix_keys = extract_sort_key_list(egraph, *prefix_id)?;
+            let suffix_keys = extract_sort_key_list(egraph, *suffix_id)?;
             let input = from_egraph_node(egraph, *input_id)?;
             Ok(RelExpr::IncrementalSort {
                 prefix_keys,
@@ -2631,8 +2611,7 @@ fn from_node(
             })
         }
         RelLang::Window([fns_id, input_id]) => {
-            let functions =
-                extract_window_expr_list(egraph, *fns_id)?;
+            let functions = extract_window_expr_list(egraph, *fns_id)?;
             let input = from_egraph_node(egraph, *input_id)?;
             Ok(RelExpr::Window {
                 functions,
@@ -3155,9 +3134,7 @@ fn extract_window_expr_list(
         if let RelLang::List(ids) = node {
             let mut exprs = Vec::with_capacity(ids.len());
             for &child_id in ids.iter() {
-                exprs.push(extract_window_expr(
-                    egraph, child_id,
-                )?);
+                exprs.push(extract_window_expr(egraph, child_id)?);
             }
             return Ok(exprs);
         }
@@ -3173,26 +3150,15 @@ fn extract_window_expr(
 ) -> Result<WindowExpr, EGraphError> {
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
-        if let RelLang::WindowExprNode([
-            fn_id,
-            arg_id,
-            part_id,
-            order_id,
-            frame_id,
-            alias_id,
-        ]) = node
+        if let RelLang::WindowExprNode([fn_id, arg_id, part_id, order_id, frame_id, alias_id]) =
+            node
         {
-            let function =
-                extract_window_function(egraph, *fn_id)?;
+            let function = extract_window_function(egraph, *fn_id)?;
             let arg = extract_optional_expr(egraph, *arg_id)?;
-            let partition_by =
-                extract_expr_list(egraph, *part_id)?;
-            let order_by =
-                extract_sort_key_list(egraph, *order_id)?;
-            let frame =
-                extract_window_frame(egraph, *frame_id)?;
-            let alias =
-                extract_optional_symbol(egraph, *alias_id)?;
+            let partition_by = extract_expr_list(egraph, *part_id)?;
+            let order_by = extract_sort_key_list(egraph, *order_id)?;
+            let frame = extract_window_frame(egraph, *frame_id)?;
+            let alias = extract_optional_symbol(egraph, *alias_id)?;
             return Ok(WindowExpr {
                 function,
                 arg,
@@ -3233,11 +3199,9 @@ fn extract_window_function(
                 "Min" => WindowFunction::Min,
                 "Max" => WindowFunction::Max,
                 other => {
-                    return Err(EGraphError::ExtractionError(
-                        format!(
-                            "unknown window function: {other}"
-                        ),
-                    ));
+                    return Err(EGraphError::ExtractionError(format!(
+                        "unknown window function: {other}"
+                    )));
                 }
             };
             return Ok(func);
@@ -3257,18 +3221,10 @@ fn extract_window_frame(
         if let RelLang::Nil = node {
             return Ok(None);
         }
-        if let RelLang::WindowFrameNode([
-            mode_id,
-            start_id,
-            end_id,
-        ]) = node
-        {
-            let mode =
-                extract_frame_mode(egraph, *mode_id)?;
-            let start =
-                extract_frame_bound(egraph, *start_id)?;
-            let end =
-                extract_frame_bound(egraph, *end_id)?;
+        if let RelLang::WindowFrameNode([mode_id, start_id, end_id]) = node {
+            let mode = extract_frame_mode(egraph, *mode_id)?;
+            let start = extract_frame_bound(egraph, *start_id)?;
+            let end = extract_frame_bound(egraph, *end_id)?;
             return Ok(Some(WindowFrame { mode, start, end }));
         }
     }
@@ -3284,15 +3240,9 @@ fn extract_frame_mode(
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
         match node {
-            RelLang::FrameRows => {
-                return Ok(WindowFrameMode::Rows)
-            }
-            RelLang::FrameRange => {
-                return Ok(WindowFrameMode::Range)
-            }
-            RelLang::FrameGroups => {
-                return Ok(WindowFrameMode::Groups)
-            }
+            RelLang::FrameRows => return Ok(WindowFrameMode::Rows),
+            RelLang::FrameRange => return Ok(WindowFrameMode::Range),
+            RelLang::FrameGroups => return Ok(WindowFrameMode::Groups),
             _ => {}
         }
     }
@@ -3309,16 +3259,12 @@ fn extract_frame_bound(
     for node in &egraph[canonical].nodes {
         match node {
             RelLang::FrameUnboundedPreceding => {
-                return Ok(
-                    WindowFrameBound::UnboundedPreceding,
-                );
+                return Ok(WindowFrameBound::UnboundedPreceding);
             }
             RelLang::FramePreceding([n_id]) => {
                 let s = extract_symbol(egraph, *n_id)?;
                 let n = s.parse::<u64>().map_err(|e| {
-                    EGraphError::ExtractionError(format!(
-                        "invalid frame bound: {e}"
-                    ))
+                    EGraphError::ExtractionError(format!("invalid frame bound: {e}"))
                 })?;
                 return Ok(WindowFrameBound::Preceding(n));
             }
@@ -3328,16 +3274,12 @@ fn extract_frame_bound(
             RelLang::FrameFollowing([n_id]) => {
                 let s = extract_symbol(egraph, *n_id)?;
                 let n = s.parse::<u64>().map_err(|e| {
-                    EGraphError::ExtractionError(format!(
-                        "invalid frame bound: {e}"
-                    ))
+                    EGraphError::ExtractionError(format!("invalid frame bound: {e}"))
                 })?;
                 return Ok(WindowFrameBound::Following(n));
             }
             RelLang::FrameUnboundedFollowing => {
-                return Ok(
-                    WindowFrameBound::UnboundedFollowing,
-                );
+                return Ok(WindowFrameBound::UnboundedFollowing);
             }
             _ => {}
         }
@@ -3356,9 +3298,7 @@ fn extract_values_row(
         if let RelLang::ValuesRow(ids) = node {
             let mut cells = Vec::with_capacity(ids.len());
             for &cell_id in ids.iter() {
-                cells.push(
-                    extract_scalar_expr(egraph, cell_id)?,
-                );
+                cells.push(extract_scalar_expr(egraph, cell_id)?);
             }
             return Ok(cells);
         }
@@ -3510,25 +3450,20 @@ mod tests {
 
     #[test]
     fn bounded_optimize_simple_scan() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(ResourceBudget::unlimited());
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::unlimited());
         let expr = RelExpr::scan("users");
         let result = optimizer
             .optimize_bounded(&expr)
             .expect("bounded optimization should succeed");
         assert_eq!(result.status, OptimizationStatus::Complete);
         assert!(result.cost.is_finite());
-        assert!(
-            result.resource_usage.completed_within_budget()
-        );
+        assert!(result.resource_usage.completed_within_budget());
     }
 
     #[test]
     fn bounded_optimize_with_iteration_limit() {
-        let budget = ResourceBudget::unlimited()
-            .with_iteration_limit(2);
-        let optimizer = Optimizer::new()
-            .with_resource_budget(budget);
+        let budget = ResourceBudget::unlimited().with_iteration_limit(2);
+        let optimizer = Optimizer::new().with_resource_budget(budget);
         let expr = RelExpr::scan("users").filter(Expr::BinOp {
             op: BinOp::Gt,
             left: Box::new(Expr::Column(ColumnRef::new("age"))),
@@ -3544,11 +3479,8 @@ mod tests {
     fn bounded_optimize_returns_plan_on_timeout() {
         let budget = ResourceBudget::unlimited()
             .with_time_limit(std::time::Duration::from_millis(0))
-            .with_overflow_strategy(
-                crate::resource_budget::OverflowStrategy::ReturnBestSoFar,
-            );
-        let optimizer = Optimizer::new()
-            .with_resource_budget(budget);
+            .with_overflow_strategy(crate::resource_budget::OverflowStrategy::ReturnBestSoFar);
+        let optimizer = Optimizer::new().with_resource_budget(budget);
         let expr = RelExpr::scan("users");
         // Even with 0ms budget, we should still get a plan
         // because we extract the initial plan before iterating
@@ -3563,11 +3495,8 @@ mod tests {
     fn bounded_optimize_return_original_strategy() {
         let budget = ResourceBudget::unlimited()
             .with_iteration_limit(0)
-            .with_overflow_strategy(
-                crate::resource_budget::OverflowStrategy::ReturnOriginal,
-            );
-        let optimizer = Optimizer::new()
-            .with_resource_budget(budget);
+            .with_overflow_strategy(crate::resource_budget::OverflowStrategy::ReturnOriginal);
+        let optimizer = Optimizer::new().with_resource_budget(budget);
         let expr = RelExpr::scan("users");
         let result = optimizer
             .optimize_bounded(&expr)
@@ -3580,11 +3509,8 @@ mod tests {
     fn bounded_optimize_fail_strategy() {
         let budget = ResourceBudget::unlimited()
             .with_iteration_limit(0)
-            .with_overflow_strategy(
-                crate::resource_budget::OverflowStrategy::Fail,
-            );
-        let optimizer = Optimizer::new()
-            .with_resource_budget(budget);
+            .with_overflow_strategy(crate::resource_budget::OverflowStrategy::Fail);
+        let optimizer = Optimizer::new().with_resource_budget(budget);
         let expr = RelExpr::scan("users");
         let result = optimizer.optimize_bounded(&expr);
         assert!(result.is_err());
@@ -3604,62 +3530,47 @@ mod tests {
 
     #[test]
     fn bounded_optimize_tracks_egraph_nodes() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(ResourceBudget::standard());
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
         let expr = RelExpr::scan("users").filter(Expr::BinOp {
             op: BinOp::Gt,
             left: Box::new(Expr::Column(ColumnRef::new("age"))),
             right: Box::new(Expr::Const(Const::Int(18))),
         });
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         assert!(result.resource_usage.peak_egraph_nodes > 0);
     }
 
     #[test]
     fn bounded_optimize_tracks_memory_estimate() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(ResourceBudget::standard());
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
         let expr = RelExpr::scan("users");
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         assert!(result.resource_usage.peak_memory_estimate > 0);
     }
 
     #[test]
     fn bounded_optimize_cost_is_finite() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(ResourceBudget::batch());
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::batch());
         let expr = RelExpr::scan("users");
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         assert!(result.cost.is_finite());
         assert!(result.cost > 0.0);
     }
 
     #[test]
     fn bounded_optimize_elapsed_time_recorded() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(ResourceBudget::standard());
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
         let expr = RelExpr::scan("users");
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         // Elapsed time should be non-zero (we did some work)
         let _elapsed = result.resource_usage.elapsed_time;
     }
 
     #[test]
     fn bounded_optimize_interactive_profile() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(ResourceBudget::interactive());
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
         let expr = RelExpr::scan("users");
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         assert!(
             result.cost.is_finite(),
             "interactive budget should produce a plan"
@@ -3668,33 +3579,22 @@ mod tests {
 
     #[test]
     fn bounded_optimize_memory_constrained_profile() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(
-                ResourceBudget::memory_constrained(),
-            );
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::memory_constrained());
         let expr = RelExpr::scan("users");
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         assert!(result.cost.is_finite());
     }
 
     #[test]
     fn bounded_optimize_with_egraph_node_limit() {
-        let budget = ResourceBudget::unlimited()
-            .with_egraph_node_limit(5);
-        let optimizer = Optimizer::new()
-            .with_resource_budget(budget);
+        let budget = ResourceBudget::unlimited().with_egraph_node_limit(5);
+        let optimizer = Optimizer::new().with_resource_budget(budget);
         let expr = RelExpr::Join {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("a", "id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("b", "a_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("a", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("b", "a_id"))),
             },
             left: Box::new(RelExpr::scan("a")),
             right: Box::new(RelExpr::scan("b")),
@@ -3708,32 +3608,18 @@ mod tests {
 
     #[test]
     fn optimization_status_variants() {
-        assert_ne!(
-            OptimizationStatus::Complete,
-            OptimizationStatus::Incomplete
-        );
-        assert_ne!(
-            OptimizationStatus::Complete,
-            OptimizationStatus::Failed
-        );
-        assert_ne!(
-            OptimizationStatus::Incomplete,
-            OptimizationStatus::Failed
-        );
+        assert_ne!(OptimizationStatus::Complete, OptimizationStatus::Incomplete);
+        assert_ne!(OptimizationStatus::Complete, OptimizationStatus::Failed);
+        assert_ne!(OptimizationStatus::Incomplete, OptimizationStatus::Failed);
     }
 
     #[test]
     fn optimization_result_has_plan() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(ResourceBudget::unlimited());
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::unlimited());
         let expr = RelExpr::scan("test_table");
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         // The plan should be a valid RelExpr
-        assert!(
-            matches!(result.plan, RelExpr::Scan { .. })
-        );
+        assert!(matches!(result.plan, RelExpr::Scan { .. }));
     }
 
     #[test]
@@ -3741,17 +3627,13 @@ mod tests {
         let mut optimizer = Optimizer::new();
         optimizer.set_resource_budget(ResourceBudget::interactive());
         let expr = RelExpr::scan("users");
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         assert!(result.cost.is_finite());
     }
 
     #[test]
     fn resource_budget_exceeded_error_display() {
-        let err = EGraphError::ResourceBudgetExceeded(
-            "iterations".to_owned(),
-        );
+        let err = EGraphError::ResourceBudgetExceeded("iterations".to_owned());
         let msg = format!("{err}");
         assert!(msg.contains("iterations"));
         assert!(msg.contains("resource budget exceeded"));
@@ -3763,11 +3645,8 @@ mod tests {
         // the initial plan because we extract before iterating
         let budget = ResourceBudget::unlimited()
             .with_iteration_limit(0)
-            .with_overflow_strategy(
-                crate::resource_budget::OverflowStrategy::ReturnBestSoFar,
-            );
-        let optimizer = Optimizer::new()
-            .with_resource_budget(budget);
+            .with_overflow_strategy(crate::resource_budget::OverflowStrategy::ReturnBestSoFar);
+        let optimizer = Optimizer::new().with_resource_budget(budget);
         let expr = RelExpr::scan("users");
         let result = optimizer
             .optimize_bounded(&expr)
@@ -3777,25 +3656,18 @@ mod tests {
 
     #[test]
     fn bounded_optimize_join_with_budget() {
-        let optimizer = Optimizer::new()
-            .with_resource_budget(ResourceBudget::standard());
+        let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
         let expr = RelExpr::Join {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("a", "id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("b", "a_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("a", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("b", "a_id"))),
             },
             left: Box::new(RelExpr::scan("a")),
             right: Box::new(RelExpr::scan("b")),
         };
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         assert!(result.cost.is_finite());
         assert!(result.resource_usage.iterations_used > 0);
     }
@@ -3803,10 +3675,7 @@ mod tests {
     // ---- optimize_incremental tests ----
 
     #[cfg(feature = "timeline")]
-    fn make_snap(
-        time: u64,
-        rows: u64,
-    ) -> ra_stats::timeline::Snapshot {
+    fn make_snap(time: u64, rows: u64) -> ra_stats::timeline::Snapshot {
         ra_stats::timeline::Snapshot {
             time_offset: time,
             label: None,
@@ -3876,10 +3745,7 @@ mod tests {
         let (result, _) = optimizer
             .optimize_incremental(&expr, &delta)
             .expect("should succeed");
-        assert!(
-            matches!(result, RelExpr::Filter { .. })
-                || matches!(result, RelExpr::Scan { .. })
-        );
+        assert!(matches!(result, RelExpr::Filter { .. }) || matches!(result, RelExpr::Scan { .. }));
     }
 
     #[test]
@@ -4034,12 +3900,8 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("a", "id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("b", "a_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("a", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("b", "a_id"))),
             },
             left: Box::new(RelExpr::scan("a")),
             right: Box::new(RelExpr::scan("b")),
@@ -4048,10 +3910,7 @@ mod tests {
         let (result, _) = optimizer
             .optimize_incremental(&expr, &delta)
             .expect("should succeed");
-        assert!(
-            matches!(result, RelExpr::Join { .. })
-                || matches!(result, RelExpr::Scan { .. })
-        );
+        assert!(matches!(result, RelExpr::Join { .. }) || matches!(result, RelExpr::Scan { .. }));
     }
 
     #[test]
@@ -4226,7 +4085,10 @@ mod tests {
         let _ = opt.optimize(&q2).expect("should succeed");
 
         let stats = opt.cache_stats().expect("cache enabled");
-        assert_eq!(stats.exact_hits, 1, "parameter variation should be exact hit");
+        assert_eq!(
+            stats.exact_hits, 1,
+            "parameter variation should be exact hit"
+        );
         assert_eq!(stats.misses, 1, "only the first query should miss");
     }
 
@@ -4241,16 +4103,10 @@ mod tests {
         let opt = cached_optimizer();
         let q = RelExpr::scan("users");
         let _ = opt.optimize(&q).expect("should succeed");
-        assert_eq!(
-            opt.cache_stats().expect("cache enabled").current_entries,
-            1
-        );
+        assert_eq!(opt.cache_stats().expect("cache enabled").current_entries, 1);
 
         opt.clear_cache();
-        assert_eq!(
-            opt.cache_stats().expect("cache enabled").current_entries,
-            0
-        );
+        assert_eq!(opt.cache_stats().expect("cache enabled").current_entries, 0);
     }
 
     #[test]
@@ -4261,98 +4117,61 @@ mod tests {
         let total = 100_u32;
 
         for i in 0..20_i64 {
-            let _ = opt.optimize(&RelExpr::scan("users").filter(
-                Expr::BinOp {
-                    op: BinOp::Eq,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("id"),
-                    )),
-                    right: Box::new(Expr::Const(Const::Int(i))),
-                },
-            ));
+            let _ = opt.optimize(&RelExpr::scan("users").filter(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("id"))),
+                right: Box::new(Expr::Const(Const::Int(i))),
+            }));
         }
         for i in 0..20_i64 {
-            let _ = opt.optimize(&RelExpr::scan("orders").filter(
-                Expr::BinOp {
-                    op: BinOp::Gt,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("amount"),
-                    )),
-                    right: Box::new(Expr::Const(Const::Int(
-                        i * 100,
-                    ))),
-                },
-            ));
+            let _ = opt.optimize(&RelExpr::scan("orders").filter(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("amount"))),
+                right: Box::new(Expr::Const(Const::Int(i * 100))),
+            }));
         }
         for i in 0..20_i64 {
             let _ = opt.optimize(&RelExpr::Join {
                 join_type: JoinType::Inner,
                 condition: Expr::BinOp {
                     op: BinOp::Eq,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::qualified("u", "id"),
-                    )),
-                    right: Box::new(Expr::Column(
-                        ColumnRef::qualified("o", "uid"),
-                    )),
+                    left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                    right: Box::new(Expr::Column(ColumnRef::qualified("o", "uid"))),
                 },
-                left: Box::new(
-                    RelExpr::scan("users").filter(Expr::BinOp {
-                        op: BinOp::Gt,
-                        left: Box::new(Expr::Column(
-                            ColumnRef::new("age"),
-                        )),
-                        right: Box::new(Expr::Const(
-                            Const::Int(18 + i),
-                        )),
-                    }),
-                ),
+                left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                    right: Box::new(Expr::Const(Const::Int(18 + i))),
+                })),
                 right: Box::new(RelExpr::scan("orders")),
             });
         }
         for i in 0..20_i64 {
             let _ = opt.optimize(&RelExpr::Aggregate {
-                group_by: vec![Expr::Column(
-                    ColumnRef::new("dept"),
-                )],
+                group_by: vec![Expr::Column(ColumnRef::new("dept"))],
                 aggregates: vec![AggregateExpr {
                     function: AggregateFunction::Count,
                     arg: None,
                     distinct: false,
                     alias: None,
                 }],
-                input: Box::new(
-                    RelExpr::scan("employees").filter(
-                        Expr::BinOp {
-                            op: BinOp::Gt,
-                            left: Box::new(Expr::Column(
-                                ColumnRef::new("salary"),
-                            )),
-                            right: Box::new(Expr::Const(
-                                Const::Int(50000 + i * 1000),
-                            )),
-                        },
-                    ),
-                ),
+                input: Box::new(RelExpr::scan("employees").filter(Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(ColumnRef::new("salary"))),
+                    right: Box::new(Expr::Const(Const::Int(50000 + i * 1000))),
+                })),
             });
         }
         for i in 0..20_i64 {
-            let _ = opt.optimize(&RelExpr::scan("products").filter(
-                Expr::BinOp {
-                    op: BinOp::Gt,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("price"),
-                    )),
-                    right: Box::new(Expr::Const(Const::Int(
-                        i * 10,
-                    ))),
-                },
-            ));
+            let _ = opt.optimize(&RelExpr::scan("products").filter(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("price"))),
+                right: Box::new(Expr::Const(Const::Int(i * 10))),
+            }));
         }
 
         let stats = opt.cache_stats().expect("cache enabled");
-        let hit_count =
-            (stats.exact_hits + stats.fuzzy_hits) as u32;
+        let hit_count = (stats.exact_hits + stats.fuzzy_hits) as u32;
 
         // 5 cold misses + 95 hits = 95% hit rate
         let hit_rate = f64::from(hit_count) / f64::from(total);
@@ -4482,8 +4301,10 @@ mod tests {
         let tracking = result.rule_tracking.expect("tracking should be present");
 
         // Non-verbose mode should not populate intermediate_steps
-        assert!(tracking.intermediate_steps.is_none() ||
-                tracking.intermediate_steps.as_ref().unwrap().is_empty());
+        assert!(
+            tracking.intermediate_steps.is_none()
+                || tracking.intermediate_steps.as_ref().unwrap().is_empty()
+        );
     }
 }
 

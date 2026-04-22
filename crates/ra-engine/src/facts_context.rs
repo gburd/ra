@@ -3,11 +3,10 @@
 //! `FactsContext` combines statistics, hardware profiles, schema information,
 //! runtime stats, and database capabilities into a single provider.
 
-use ra_core::{
-    FactsProvider, OperatorStats, SqlDialect, TableInfo,
-    CoreHardwareProfile, CoreTableStats,
-};
 use ra_core::statistics::ColumnStats;
+use ra_core::{
+    CoreHardwareProfile, CoreTableStats, FactsProvider, OperatorStats, SqlDialect, TableInfo,
+};
 use ra_hardware::HardwareProfile;
 use ra_stats::types::{ColumnStats as StatsColumnStats, TableStats};
 use std::collections::HashMap;
@@ -107,7 +106,6 @@ impl FactsContext {
     pub fn register_feature(&mut self, feature: String, supported: bool) {
         self.features.write().unwrap().insert(feature, supported);
     }
-
 }
 
 impl FactsProvider for FactsContext {
@@ -359,11 +357,7 @@ mod tests {
             histogram: None,
             correlation: None,
         };
-        ctx.add_column_stats(
-            "users".to_string(),
-            "age".to_string(),
-            stats,
-        );
+        ctx.add_column_stats("users".to_string(), "age".to_string(), stats);
         let guard = ctx.column_stats.read().unwrap();
         let col_map = guard.get("users").unwrap();
         assert_eq!(col_map.get("age").unwrap().ndv, 100);

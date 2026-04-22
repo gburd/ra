@@ -10,8 +10,8 @@
 use ra_core::algebra::RelExpr;
 use ra_core::expr::Expr;
 use ra_core::federated::{
-    DataSource, ExecutionLocation, FederatedCostBreakdown,
-    FederatedPlan, FederatedQuery, QueryCapabilities,
+    DataSource, ExecutionLocation, FederatedCostBreakdown, FederatedPlan, FederatedQuery,
+    QueryCapabilities,
 };
 
 use crate::federated_cost::FederatedCostModel;
@@ -29,9 +29,7 @@ pub enum FederatedError {
     #[error("no data sources defined in the federated query")]
     NoSources,
     /// No viable strategy found.
-    #[error(
-        "no viable execution strategy found for the query"
-    )]
+    #[error("no viable execution strategy found for the query")]
     NoViableStrategy,
 }
 
@@ -46,9 +44,7 @@ impl FederatedOptimizer {
 
     /// Create an optimizer with a custom cost model.
     #[must_use]
-    pub fn with_cost_model(
-        cost_model: FederatedCostModel,
-    ) -> Self {
+    pub fn with_cost_model(cost_model: FederatedCostModel) -> Self {
         Self { cost_model }
     }
 
@@ -78,12 +74,9 @@ impl FederatedOptimizer {
         }
 
         // Cost each strategy
-        let mut costed: Vec<(ExecutionLocation, FederatedCostBreakdown)> =
-            Vec::new();
+        let mut costed: Vec<(ExecutionLocation, FederatedCostBreakdown)> = Vec::new();
         for strategy in &strategies {
-            let cost = self
-                .cost_model
-                .estimate_location(strategy, query);
+            let cost = self.cost_model.estimate_location(strategy, query);
             costed.push((strategy.clone(), cost));
         }
 
@@ -94,13 +87,11 @@ impl FederatedOptimizer {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        let (best_location, best_cost) =
-            costed.remove(0);
+        let (best_location, best_cost) = costed.remove(0);
         let alternatives: Vec<FederatedCostBreakdown> =
             costed.into_iter().map(|(_, c)| c).collect();
 
-        let steps =
-            self.describe_steps(&best_location, query);
+        let steps = self.describe_steps(&best_location, query);
 
         Ok(FederatedPlan {
             location: best_location,
@@ -112,10 +103,7 @@ impl FederatedOptimizer {
 
     /// Enumerate all viable execution strategies for a query.
     #[must_use]
-    pub fn enumerate_strategies(
-        &self,
-        query: &FederatedQuery,
-    ) -> Vec<ExecutionLocation> {
+    pub fn enumerate_strategies(&self, query: &FederatedQuery) -> Vec<ExecutionLocation> {
         let mut strategies = Vec::new();
 
         // Strategy: execute locally
@@ -133,60 +121,40 @@ impl FederatedOptimizer {
             } = source
             {
                 // Ship Query: if remote supports the full query
-                if self.can_ship_query(
-                    &query.plan,
-                    capabilities,
-                ) {
-                    strategies.push(
-                        ExecutionLocation::ShipQuery {
-                            target: connection.clone(),
-                            query: query.plan.clone(),
-                        },
-                    );
+                if self.can_ship_query(&query.plan, capabilities) {
+                    strategies.push(ExecutionLocation::ShipQuery {
+                        target: connection.clone(),
+                        query: query.plan.clone(),
+                    });
                 }
 
                 // Ship Data: always viable (full scan)
-                strategies.push(
-                    ExecutionLocation::ShipData {
-                        source: connection.clone(),
-                        table: table.clone(),
-                        predicate: None,
-                    },
-                );
+                strategies.push(ExecutionLocation::ShipData {
+                    source: connection.clone(),
+                    table: table.clone(),
+                    predicate: None,
+                });
 
                 // Ship Data with filter pushdown
                 if capabilities.supports_filter_pushdown {
-                    if let Some(pred) =
-                        self.extract_pushable_filter(
-                            &query.plan,
-                            name,
-                        )
-                    {
-                        strategies.push(
-                            ExecutionLocation::ShipData {
-                                source: connection.clone(),
-                                table: table.clone(),
-                                predicate: Some(pred),
-                            },
-                        );
+                    if let Some(pred) = self.extract_pushable_filter(&query.plan, name) {
+                        strategies.push(ExecutionLocation::ShipData {
+                            source: connection.clone(),
+                            table: table.clone(),
+                            predicate: Some(pred),
+                        });
                     }
                 }
 
                 // Hybrid: if partial pushdown is possible
                 if let Some((remote_sub, local_ops)) =
-                    self.plan_hybrid(
-                        &query.plan,
-                        capabilities,
-                        name,
-                    )
+                    self.plan_hybrid(&query.plan, capabilities, name)
                 {
-                    strategies.push(
-                        ExecutionLocation::Hybrid {
-                            remote_subquery: remote_sub,
-                            local_operations: local_ops,
-                            target: connection.clone(),
-                        },
-                    );
+                    strategies.push(ExecutionLocation::Hybrid {
+                        remote_subquery: remote_sub,
+                        local_operations: local_ops,
+                        target: connection.clone(),
+                    });
                 }
             }
         }
@@ -197,20 +165,16 @@ impl FederatedOptimizer {
     /// Check whether the entire query can be shipped to a remote
     /// database.
     #[must_use]
-    pub fn can_ship_query(
-        &self,
-        plan: &RelExpr,
-        capabilities: &QueryCapabilities,
-    ) -> bool {
+    pub fn can_ship_query(&self, plan: &RelExpr, capabilities: &QueryCapabilities) -> bool {
         match plan {
-            RelExpr::Scan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => true,
+            RelExpr::Scan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => {
+                true
+            }
             RelExpr::Filter { input, .. } => {
-                capabilities.supports_filter_pushdown
-                    && self.can_ship_query(input, capabilities)
+                capabilities.supports_filter_pushdown && self.can_ship_query(input, capabilities)
             }
             RelExpr::Project { input, .. } => {
-                capabilities.supports_project_pushdown
-                    && self.can_ship_query(input, capabilities)
+                capabilities.supports_project_pushdown && self.can_ship_query(input, capabilities)
             }
             RelExpr::Join { left, right, .. } => {
                 capabilities.supports_join_pushdown
@@ -218,29 +182,22 @@ impl FederatedOptimizer {
                     && self.can_ship_query(right, capabilities)
             }
             RelExpr::Aggregate { input, .. } => {
-                capabilities.supports_aggregate_pushdown
-                    && self.can_ship_query(input, capabilities)
+                capabilities.supports_aggregate_pushdown && self.can_ship_query(input, capabilities)
             }
             RelExpr::Sort { input, .. } => {
-                capabilities.supports_sort_pushdown
-                    && self.can_ship_query(input, capabilities)
+                capabilities.supports_sort_pushdown && self.can_ship_query(input, capabilities)
             }
             RelExpr::Limit { input, .. } => {
-                capabilities.supports_limit_pushdown
-                    && self.can_ship_query(input, capabilities)
+                capabilities.supports_limit_pushdown && self.can_ship_query(input, capabilities)
             }
             RelExpr::Window { input, .. } => {
-                capabilities.supports_window_pushdown
-                    && self.can_ship_query(input, capabilities)
+                capabilities.supports_window_pushdown && self.can_ship_query(input, capabilities)
             }
-            RelExpr::Distinct { input, .. } => {
-                self.can_ship_query(input, capabilities)
-            }
+            RelExpr::Distinct { input, .. } => self.can_ship_query(input, capabilities),
             RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }
             | RelExpr::Except { left, right, .. } => {
-                self.can_ship_query(left, capabilities)
-                    && self.can_ship_query(right, capabilities)
+                self.can_ship_query(left, capabilities) && self.can_ship_query(right, capabilities)
             }
             // CTEs, VALUES, table functions, and pattern matching
             // are too complex to ship
@@ -268,117 +225,79 @@ impl FederatedOptimizer {
 
     /// Extract a filter predicate that references a specific
     /// remote table and can be pushed down.
-    fn extract_pushable_filter(
-        &self,
-        plan: &RelExpr,
-        table_name: &str,
-    ) -> Option<Expr> {
+    fn extract_pushable_filter(&self, plan: &RelExpr, table_name: &str) -> Option<Expr> {
         match plan {
             RelExpr::Filter { predicate, input } => {
                 // Check if the filter references the target table
-                if self.filter_references_table(
-                    predicate, table_name,
-                ) {
+                if self.filter_references_table(predicate, table_name) {
                     Some(predicate.clone())
                 } else {
-                    self.extract_pushable_filter(
-                        input, table_name,
-                    )
+                    self.extract_pushable_filter(input, table_name)
                 }
             }
             RelExpr::Project { input, .. }
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
-            | RelExpr::Distinct { input, .. } => {
-                self.extract_pushable_filter(input, table_name)
-            }
+            | RelExpr::Distinct { input, .. } => self.extract_pushable_filter(input, table_name),
             _ => None,
         }
     }
 
     /// Check if a filter expression references a specific table.
-    fn filter_references_table(
-        &self,
-        expr: &Expr,
-        table_name: &str,
-    ) -> bool {
+    fn filter_references_table(&self, expr: &Expr, table_name: &str) -> bool {
         match expr {
-            Expr::Column(col) => {
-                col.table.as_deref() == Some(table_name)
-                    || col.table.is_none()
-            }
+            Expr::Column(col) => col.table.as_deref() == Some(table_name) || col.table.is_none(),
             Expr::BinOp { left, right, .. } => {
                 self.filter_references_table(left, table_name)
-                    || self
-                        .filter_references_table(right, table_name)
+                    || self.filter_references_table(right, table_name)
             }
-            Expr::UnaryOp { operand, .. } => {
-                self.filter_references_table(operand, table_name)
-            }
+            Expr::UnaryOp { operand, .. } => self.filter_references_table(operand, table_name),
             Expr::Function { args, .. } => args
                 .iter()
-                .any(|a| {
-                    self.filter_references_table(a, table_name)
-                }),
+                .any(|a| self.filter_references_table(a, table_name)),
             Expr::Const(_) => true,
             Expr::Case {
                 operand,
                 when_clauses,
                 else_result,
             } => {
-                operand.as_ref().map_or(false, |o| {
-                    self.filter_references_table(o, table_name)
-                }) || when_clauses.iter().any(|(c, r)| {
-                    self.filter_references_table(c, table_name)
-                        || self
-                            .filter_references_table(r, table_name)
-                }) || else_result.as_ref().map_or(false, |e| {
-                    self.filter_references_table(e, table_name)
-                })
+                operand
+                    .as_ref()
+                    .map_or(false, |o| self.filter_references_table(o, table_name))
+                    || when_clauses.iter().any(|(c, r)| {
+                        self.filter_references_table(c, table_name)
+                            || self.filter_references_table(r, table_name)
+                    })
+                    || else_result
+                        .as_ref()
+                        .map_or(false, |e| self.filter_references_table(e, table_name))
             }
-            Expr::Cast { expr, .. } => {
-                self.filter_references_table(expr, table_name)
-            }
-            Expr::Array(elements) => elements.iter().any(|e| {
-                self.filter_references_table(e, table_name)
-            }),
+            Expr::Cast { expr, .. } => self.filter_references_table(expr, table_name),
+            Expr::Array(elements) => elements
+                .iter()
+                .any(|e| self.filter_references_table(e, table_name)),
             Expr::ArrayIndex(array, index) => {
                 self.filter_references_table(array, table_name)
-                    || self.filter_references_table(
-                        index, table_name,
-                    )
+                    || self.filter_references_table(index, table_name)
             }
             Expr::PatternPrev(inner, _)
             | Expr::PatternNext(inner, _)
             | Expr::PatternFirst(inner, _)
-            | Expr::PatternLast(inner, _) => {
-                self.filter_references_table(inner, table_name)
-            }
-            Expr::PatternClassifier
-            | Expr::PatternMatchNumber => false,
-            Expr::ArraySlice {
-                array, start, end,
-            } => {
+            | Expr::PatternLast(inner, _) => self.filter_references_table(inner, table_name),
+            Expr::PatternClassifier | Expr::PatternMatchNumber => false,
+            Expr::ArraySlice { array, start, end } => {
                 self.filter_references_table(array, table_name)
-                    || start.as_ref().is_some_and(|s| {
-                        self.filter_references_table(
-                            s, table_name,
-                        )
-                    })
-                    || end.as_ref().is_some_and(|e| {
-                        self.filter_references_table(
-                            e, table_name,
-                        )
-                    })
+                    || start
+                        .as_ref()
+                        .is_some_and(|s| self.filter_references_table(s, table_name))
+                    || end
+                        .as_ref()
+                        .is_some_and(|e| self.filter_references_table(e, table_name))
             }
-            Expr::FieldAccess { expr, .. } => {
-                self.filter_references_table(expr, table_name)
-            }
-            Expr::SubQuery { test_expr, .. } => {
-                test_expr.as_ref().map_or(false, |t| {
-                    self.filter_references_table(t, table_name)
-                })
-            }
+            Expr::FieldAccess { expr, .. } => self.filter_references_table(expr, table_name),
+            Expr::SubQuery { test_expr, .. } => test_expr
+                .as_ref()
+                .map_or(false, |t| self.filter_references_table(t, table_name)),
             Expr::FullTextMatch { .. } => false,
             Expr::VectorDistance { column, target, .. } => {
                 self.filter_references_table(column, table_name)
@@ -398,25 +317,19 @@ impl FederatedOptimizer {
         match plan {
             RelExpr::Filter { predicate, input } => {
                 if capabilities.supports_filter_pushdown
-                    && self.filter_references_table(
-                        predicate, table_name,
-                    )
+                    && self.filter_references_table(predicate, table_name)
                 {
                     // Push filter to remote, keep rest local
                     let remote = RelExpr::Filter {
                         predicate: predicate.clone(),
                         input: Box::new(
                             self.extract_scan(input, table_name)
-                                .unwrap_or_else(|| {
-                                    RelExpr::scan(table_name)
-                                }),
+                                .unwrap_or_else(|| RelExpr::scan(table_name)),
                         ),
                     };
                     let local = self
                         .remove_filter(plan, predicate)
-                        .unwrap_or_else(|| {
-                            RelExpr::scan(table_name)
-                        });
+                        .unwrap_or_else(|| RelExpr::scan(table_name));
                     Some((remote, local))
                 } else {
                     None
@@ -428,19 +341,13 @@ impl FederatedOptimizer {
                         columns: columns.clone(),
                         input: Box::new(
                             self.extract_scan(input, table_name)
-                                .unwrap_or_else(|| {
-                                    RelExpr::scan(table_name)
-                                }),
+                                .unwrap_or_else(|| RelExpr::scan(table_name)),
                         ),
                     };
                     let local = RelExpr::scan(table_name);
                     Some((remote, local))
                 } else {
-                    self.plan_hybrid(
-                        input,
-                        capabilities,
-                        table_name,
-                    )
+                    self.plan_hybrid(input, capabilities, table_name)
                 }
             }
             RelExpr::Aggregate {
@@ -454,9 +361,7 @@ impl FederatedOptimizer {
                         aggregates: aggregates.clone(),
                         input: Box::new(
                             self.extract_scan(input, table_name)
-                                .unwrap_or_else(|| {
-                                    RelExpr::scan(table_name)
-                                }),
+                                .unwrap_or_else(|| RelExpr::scan(table_name)),
                         ),
                     };
                     let local = RelExpr::scan(table_name);
@@ -473,14 +378,10 @@ impl FederatedOptimizer {
             } => {
                 // For joins, try to push the remote side's scan
                 // with a filter if possible
-                if let Some(pred) =
-                    self.extract_pushable_filter(plan, table_name)
-                {
+                if let Some(pred) = self.extract_pushable_filter(plan, table_name) {
                     let remote = RelExpr::Filter {
                         predicate: pred,
-                        input: Box::new(
-                            RelExpr::scan(table_name),
-                        ),
+                        input: Box::new(RelExpr::scan(table_name)),
                     };
                     let local = RelExpr::Join {
                         join_type: *join_type,
@@ -498,11 +399,7 @@ impl FederatedOptimizer {
     }
 
     /// Extract a scan node from a plan tree for a specific table.
-    fn extract_scan(
-        &self,
-        plan: &RelExpr,
-        table_name: &str,
-    ) -> Option<RelExpr> {
+    fn extract_scan(&self, plan: &RelExpr, table_name: &str) -> Option<RelExpr> {
         match plan {
             RelExpr::Scan { table, alias } => {
                 if table == table_name {
@@ -520,35 +417,25 @@ impl FederatedOptimizer {
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
             | RelExpr::Window { input, .. }
-            | RelExpr::Distinct { input, .. } => {
-                self.extract_scan(input, table_name)
-            }
+            | RelExpr::Distinct { input, .. } => self.extract_scan(input, table_name),
             RelExpr::Join { left, right, .. }
             | RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }
-            | RelExpr::Except { left, right, .. } => {
-                self.extract_scan(left, table_name)
-                    .or_else(|| {
-                        self.extract_scan(right, table_name)
-                    })
-            }
+            | RelExpr::Except { left, right, .. } => self
+                .extract_scan(left, table_name)
+                .or_else(|| self.extract_scan(right, table_name)),
             _ => None,
         }
     }
 
     /// Remove a specific filter from a plan tree.
-    fn remove_filter(
-        &self,
-        plan: &RelExpr,
-        target_pred: &Expr,
-    ) -> Option<RelExpr> {
+    fn remove_filter(&self, plan: &RelExpr, target_pred: &Expr) -> Option<RelExpr> {
         match plan {
             RelExpr::Filter { predicate, input } => {
                 if predicate == target_pred {
                     Some(input.as_ref().clone())
                 } else {
-                    let inner =
-                        self.remove_filter(input, target_pred)?;
+                    let inner = self.remove_filter(input, target_pred)?;
                     Some(RelExpr::Filter {
                         predicate: predicate.clone(),
                         input: Box::new(inner),
@@ -560,16 +447,10 @@ impl FederatedOptimizer {
     }
 
     /// Create a local-only execution plan.
-    fn plan_local(
-        &self,
-        query: &FederatedQuery,
-    ) -> FederatedPlan {
-        let cost = self.cost_model.estimate_local(
-            query
-                .sources
-                .values()
-                .find_map(|s| s.statistics()),
-        );
+    fn plan_local(&self, query: &FederatedQuery) -> FederatedPlan {
+        let cost = self
+            .cost_model
+            .estimate_local(query.sources.values().find_map(|s| s.statistics()));
         FederatedPlan {
             location: ExecutionLocation::Local {
                 query: query.plan.clone(),
@@ -581,11 +462,7 @@ impl FederatedOptimizer {
     }
 
     /// Generate human-readable execution steps.
-    fn describe_steps(
-        &self,
-        location: &ExecutionLocation,
-        _query: &FederatedQuery,
-    ) -> Vec<String> {
+    fn describe_steps(&self, location: &ExecutionLocation, _query: &FederatedQuery) -> Vec<String> {
         match location {
             ExecutionLocation::ShipQuery { target, .. } => {
                 vec![
@@ -594,8 +471,7 @@ impl FederatedOptimizer {
                         target.endpoint, target.database_type
                     ),
                     "Execute query on remote database".into(),
-                    "Transfer result set back to local engine"
-                        .into(),
+                    "Transfer result set back to local engine".into(),
                 ]
             }
             ExecutionLocation::ShipData {
@@ -605,25 +481,15 @@ impl FederatedOptimizer {
             } => {
                 let mut steps = Vec::new();
                 if let Some(pred) = predicate {
-                    steps.push(format!(
-                        "Push filter to remote: WHERE {pred:?}"
-                    ));
-                    steps.push(format!(
-                        "Fetch filtered {table} from {}",
-                        source.endpoint
-                    ));
+                    steps.push(format!("Push filter to remote: WHERE {pred:?}"));
+                    steps.push(format!("Fetch filtered {table} from {}", source.endpoint));
                 } else {
-                    steps.push(format!(
-                        "Fetch entire {table} from {}",
-                        source.endpoint
-                    ));
+                    steps.push(format!("Fetch entire {table} from {}", source.endpoint));
                 }
                 steps.push("Execute remaining query locally".into());
                 steps
             }
-            ExecutionLocation::Hybrid {
-                target, ..
-            } => {
+            ExecutionLocation::Hybrid { target, .. } => {
                 vec![
                     format!(
                         "Push down partial query to {} ({})",
@@ -644,17 +510,11 @@ impl FederatedOptimizer {
     /// # Errors
     ///
     /// Returns an error if optimization fails.
-    pub fn analyze(
-        &self,
-        query: &FederatedQuery,
-    ) -> Result<FederatedAnalysis, FederatedError> {
+    pub fn analyze(&self, query: &FederatedQuery) -> Result<FederatedAnalysis, FederatedError> {
         let plan = self.optimize_federated(query)?;
 
-        let best_alternative_cost =
-            plan.best_alternative().map(|a| a.total_ms);
-        let savings = best_alternative_cost.map(|alt| {
-            plan.cost.savings_percent(alt)
-        });
+        let best_alternative_cost = plan.best_alternative().map(|a| a.total_ms);
+        let savings = best_alternative_cost.map(|alt| plan.cost.savings_percent(alt));
 
         Ok(FederatedAnalysis {
             plan,
@@ -693,12 +553,7 @@ mod tests {
     use super::*;
 
     fn sample_connection() -> RemoteConnection {
-        RemoteConnection::new(
-            DatabaseType::PostgreSQL,
-            "db.example.com:5432",
-            10,
-            100,
-        )
+        RemoteConnection::new(DatabaseType::PostgreSQL, "db.example.com:5432", 10, 100)
     }
 
     fn sample_stats() -> Statistics {
@@ -712,12 +567,8 @@ mod tests {
         let plan = RelExpr::Filter {
             predicate: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("remote_table", "status"),
-                )),
-                right: Box::new(Expr::Const(Const::String(
-                    "ACTIVE".into(),
-                ))),
+                left: Box::new(Expr::Column(ColumnRef::qualified("remote_table", "status"))),
+                right: Box::new(Expr::Const(Const::String("ACTIVE".into()))),
             },
             input: Box::new(RelExpr::scan("remote_table")),
         };
@@ -740,12 +591,8 @@ mod tests {
             join_type: ra_core::algebra::JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("local_table", "id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("remote_table", "id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("local_table", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("remote_table", "id"))),
             },
             left: Box::new(RelExpr::scan("local_table")),
             right: Box::new(RelExpr::scan("remote_table")),
@@ -754,10 +601,7 @@ mod tests {
         let mut sources = HashMap::new();
         sources.insert(
             "local_table".into(),
-            DataSource::local(
-                "local_table",
-                Statistics::new(1000.0),
-            ),
+            DataSource::local("local_table", Statistics::new(1000.0)),
         );
         sources.insert(
             "remote_table".into(),
@@ -775,30 +619,20 @@ mod tests {
     fn optimize_local_only() {
         let optimizer = FederatedOptimizer::new();
         let mut sources = HashMap::new();
-        sources.insert(
-            "t".into(),
-            DataSource::local("t", Statistics::new(100.0)),
-        );
-        let query =
-            FederatedQuery::new(RelExpr::scan("t"), sources);
+        sources.insert("t".into(), DataSource::local("t", Statistics::new(100.0)));
+        let query = FederatedQuery::new(RelExpr::scan("t"), sources);
 
         let plan = optimizer
             .optimize_federated(&query)
             .expect("should succeed");
-        assert!(matches!(
-            plan.location,
-            ExecutionLocation::Local { .. }
-        ));
+        assert!(matches!(plan.location, ExecutionLocation::Local { .. }));
         assert!(plan.alternatives.is_empty());
     }
 
     #[test]
     fn optimize_no_sources_error() {
         let optimizer = FederatedOptimizer::new();
-        let query = FederatedQuery::new(
-            RelExpr::scan("t"),
-            HashMap::new(),
-        );
+        let query = FederatedQuery::new(RelExpr::scan("t"), HashMap::new());
         let result = optimizer.optimize_federated(&query);
         assert!(result.is_err());
     }
@@ -814,15 +648,15 @@ mod tests {
         // ship_data (filtered), hybrid
         assert!(strategies.len() >= 4);
 
-        let has_local = strategies.iter().any(|s| {
-            matches!(s, ExecutionLocation::Local { .. })
-        });
-        let has_ship_query = strategies.iter().any(|s| {
-            matches!(s, ExecutionLocation::ShipQuery { .. })
-        });
-        let has_ship_data = strategies.iter().any(|s| {
-            matches!(s, ExecutionLocation::ShipData { .. })
-        });
+        let has_local = strategies
+            .iter()
+            .any(|s| matches!(s, ExecutionLocation::Local { .. }));
+        let has_ship_query = strategies
+            .iter()
+            .any(|s| matches!(s, ExecutionLocation::ShipQuery { .. }));
+        let has_ship_data = strategies
+            .iter()
+            .any(|s| matches!(s, ExecutionLocation::ShipData { .. }));
 
         assert!(has_local);
         assert!(has_ship_query);
@@ -898,9 +732,7 @@ mod tests {
         let optimizer = FederatedOptimizer::new();
         let query = simple_filter_query();
 
-        let analysis = optimizer
-            .analyze(&query)
-            .expect("should succeed");
+        let analysis = optimizer.analyze(&query).expect("should succeed");
 
         assert!(!analysis.plan.steps.is_empty());
     }
@@ -953,18 +785,13 @@ mod tests {
         let plan = RelExpr::Filter {
             predicate: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("orders", "status"),
-                )),
-                right: Box::new(Expr::Const(Const::String(
-                    "ACTIVE".into(),
-                ))),
+                left: Box::new(Expr::Column(ColumnRef::qualified("orders", "status"))),
+                right: Box::new(Expr::Const(Const::String("ACTIVE".into()))),
             },
             input: Box::new(RelExpr::scan("orders")),
         };
 
-        let pred =
-            optimizer.extract_pushable_filter(&plan, "orders");
+        let pred = optimizer.extract_pushable_filter(&plan, "orders");
         assert!(pred.is_some());
     }
 
@@ -973,8 +800,7 @@ mod tests {
         let optimizer = FederatedOptimizer::new();
         let plan = RelExpr::scan("orders");
 
-        let pred =
-            optimizer.extract_pushable_filter(&plan, "orders");
+        let pred = optimizer.extract_pushable_filter(&plan, "orders");
         assert!(pred.is_none());
     }
 
@@ -984,17 +810,14 @@ mod tests {
         let plan = RelExpr::Filter {
             predicate: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("remote", "id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("remote", "id"))),
                 right: Box::new(Expr::Const(Const::Int(42))),
             },
             input: Box::new(RelExpr::scan("remote")),
         };
         let caps = QueryCapabilities::full();
 
-        let result =
-            optimizer.plan_hybrid(&plan, &caps, "remote");
+        let result = optimizer.plan_hybrid(&plan, &caps, "remote");
         assert!(result.is_some());
     }
 
@@ -1002,16 +825,13 @@ mod tests {
     fn hybrid_plan_generated_for_aggregate() {
         let optimizer = FederatedOptimizer::new();
         let plan = RelExpr::Aggregate {
-            group_by: vec![Expr::Column(ColumnRef::new(
-                "category",
-            ))],
+            group_by: vec![Expr::Column(ColumnRef::new("category"))],
             aggregates: vec![],
             input: Box::new(RelExpr::scan("remote")),
         };
         let caps = QueryCapabilities::full();
 
-        let result =
-            optimizer.plan_hybrid(&plan, &caps, "remote");
+        let result = optimizer.plan_hybrid(&plan, &caps, "remote");
         assert!(result.is_some());
     }
 
@@ -1020,8 +840,7 @@ mod tests {
         let mut model = FederatedCostModel::new();
         model.remote_execution_overhead = 2.0;
 
-        let optimizer =
-            FederatedOptimizer::with_cost_model(model);
+        let optimizer = FederatedOptimizer::with_cost_model(model);
         let query = simple_filter_query();
 
         let plan = optimizer

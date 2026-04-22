@@ -86,19 +86,13 @@ mod tests {
     #[test]
     fn interactive_has_time_limit() {
         let budget = ResourceBudget::interactive();
-        assert_eq!(
-            budget.max_time,
-            Some(Duration::from_millis(100))
-        );
+        assert_eq!(budget.max_time, Some(Duration::from_millis(100)));
     }
 
     #[test]
     fn interactive_has_cpu_time_limit() {
         let budget = ResourceBudget::interactive();
-        assert_eq!(
-            budget.max_cpu_time,
-            Some(Duration::from_millis(100))
-        );
+        assert_eq!(budget.max_cpu_time, Some(Duration::from_millis(100)));
     }
 
     #[test]
@@ -122,10 +116,7 @@ mod tests {
     #[test]
     fn interactive_returns_best_so_far() {
         let budget = ResourceBudget::interactive();
-        assert_eq!(
-            budget.overflow_strategy,
-            OverflowStrategy::ReturnBestSoFar
-        );
+        assert_eq!(budget.overflow_strategy, OverflowStrategy::ReturnBestSoFar);
     }
 
     #[test]
@@ -168,10 +159,7 @@ mod tests {
     #[test]
     fn standard_returns_best_so_far() {
         let budget = ResourceBudget::standard();
-        assert_eq!(
-            budget.overflow_strategy,
-            OverflowStrategy::ReturnBestSoFar
-        );
+        assert_eq!(budget.overflow_strategy, OverflowStrategy::ReturnBestSoFar);
     }
 
     #[test]
@@ -190,19 +178,13 @@ mod tests {
     #[test]
     fn batch_has_cpu_time_limit() {
         let budget = ResourceBudget::batch();
-        assert_eq!(
-            budget.max_cpu_time,
-            Some(Duration::from_secs(10))
-        );
+        assert_eq!(budget.max_cpu_time, Some(Duration::from_secs(10)));
     }
 
     #[test]
     fn batch_has_memory_limit() {
         let budget = ResourceBudget::batch();
-        assert_eq!(
-            budget.max_memory,
-            Some(2 * 1024 * 1024 * 1024)
-        );
+        assert_eq!(budget.max_memory, Some(2 * 1024 * 1024 * 1024));
     }
 
     #[test]
@@ -220,10 +202,7 @@ mod tests {
     #[test]
     fn batch_returns_best_so_far() {
         let budget = ResourceBudget::batch();
-        assert_eq!(
-            budget.overflow_strategy,
-            OverflowStrategy::ReturnBestSoFar
-        );
+        assert_eq!(budget.overflow_strategy, OverflowStrategy::ReturnBestSoFar);
     }
 
     #[test]
@@ -260,17 +239,12 @@ mod tests {
     #[test]
     fn memory_constrained_returns_best_so_far() {
         let budget = ResourceBudget::memory_constrained();
-        assert_eq!(
-            budget.overflow_strategy,
-            OverflowStrategy::ReturnBestSoFar
-        );
+        assert_eq!(budget.overflow_strategy, OverflowStrategy::ReturnBestSoFar);
     }
 
     #[test]
     fn memory_constrained_is_not_unlimited() {
-        assert!(
-            !ResourceBudget::memory_constrained().is_unlimited()
-        );
+        assert!(!ResourceBudget::memory_constrained().is_unlimited());
     }
 
     // ---- Unlimited profile ----
@@ -287,18 +261,13 @@ mod tests {
 
     #[test]
     fn unlimited_has_no_egraph_limit() {
-        assert!(
-            ResourceBudget::unlimited().max_egraph_nodes.is_none()
-        );
+        assert!(ResourceBudget::unlimited().max_egraph_nodes.is_none());
     }
 
     #[test]
     fn unlimited_has_no_iteration_limit() {
         // "unlimited" still has a safety iteration cap to prevent infinite loops
-        assert_eq!(
-            ResourceBudget::unlimited().max_iterations,
-            Some(1000)
-        );
+        assert_eq!(ResourceBudget::unlimited().max_iterations, Some(1000));
     }
 
     #[test]
@@ -312,20 +281,14 @@ mod tests {
     fn interactive_time_less_than_standard() {
         let interactive = ResourceBudget::interactive();
         let standard = ResourceBudget::standard();
-        assert!(
-            interactive.max_time.expect("has limit")
-                < standard.max_time.expect("has limit")
-        );
+        assert!(interactive.max_time.expect("has limit") < standard.max_time.expect("has limit"));
     }
 
     #[test]
     fn standard_time_less_than_batch() {
         let standard = ResourceBudget::standard();
         let batch = ResourceBudget::batch();
-        assert!(
-            standard.max_time.expect("has limit")
-                < batch.max_time.expect("has limit")
-        );
+        assert!(standard.max_time.expect("has limit") < batch.max_time.expect("has limit"));
     }
 
     #[test]
@@ -333,8 +296,7 @@ mod tests {
         let interactive = ResourceBudget::interactive();
         let standard = ResourceBudget::standard();
         assert!(
-            interactive.max_memory.expect("has limit")
-                < standard.max_memory.expect("has limit")
+            interactive.max_memory.expect("has limit") < standard.max_memory.expect("has limit")
         );
     }
 
@@ -342,20 +304,14 @@ mod tests {
     fn standard_memory_less_than_batch() {
         let standard = ResourceBudget::standard();
         let batch = ResourceBudget::batch();
-        assert!(
-            standard.max_memory.expect("has limit")
-                < batch.max_memory.expect("has limit")
-        );
+        assert!(standard.max_memory.expect("has limit") < batch.max_memory.expect("has limit"));
     }
 
     #[test]
     fn memory_constrained_memory_less_than_interactive() {
         let mc = ResourceBudget::memory_constrained();
         let interactive = ResourceBudget::interactive();
-        assert!(
-            mc.max_memory.expect("has limit")
-                < interactive.max_memory.expect("has limit")
-        );
+        assert!(mc.max_memory.expect("has limit") < interactive.max_memory.expect("has limit"));
     }
 
     #[test]
@@ -373,8 +329,7 @@ mod tests {
         let standard = ResourceBudget::standard();
         let batch = ResourceBudget::batch();
         assert!(
-            standard.max_iterations.expect("has limit")
-                < batch.max_iterations.expect("has limit")
+            standard.max_iterations.expect("has limit") < batch.max_iterations.expect("has limit")
         );
     }
 
@@ -402,20 +357,15 @@ mod tests {
 
     #[test]
     fn interactive_can_override_time() {
-        let budget = ResourceBudget::interactive()
-            .with_time_limit(Duration::from_millis(200));
-        assert_eq!(
-            budget.max_time,
-            Some(Duration::from_millis(200))
-        );
+        let budget = ResourceBudget::interactive().with_time_limit(Duration::from_millis(200));
+        assert_eq!(budget.max_time, Some(Duration::from_millis(200)));
         // Other fields unchanged
         assert_eq!(budget.max_memory, Some(50 * 1024 * 1024));
     }
 
     #[test]
     fn standard_can_override_strategy() {
-        let budget = ResourceBudget::standard()
-            .with_overflow_strategy(OverflowStrategy::Fail);
+        let budget = ResourceBudget::standard().with_overflow_strategy(OverflowStrategy::Fail);
         assert_eq!(budget.overflow_strategy, OverflowStrategy::Fail);
         // Other fields unchanged
         assert_eq!(budget.max_time, Some(Duration::from_secs(1)));
@@ -423,18 +373,13 @@ mod tests {
 
     #[test]
     fn batch_can_override_memory() {
-        let budget = ResourceBudget::batch()
-            .with_memory_limit(4 * 1024 * 1024 * 1024);
-        assert_eq!(
-            budget.max_memory,
-            Some(4 * 1024 * 1024 * 1024)
-        );
+        let budget = ResourceBudget::batch().with_memory_limit(4 * 1024 * 1024 * 1024);
+        assert_eq!(budget.max_memory, Some(4 * 1024 * 1024 * 1024));
     }
 
     #[test]
     fn memory_constrained_can_override_egraph_limit() {
-        let budget = ResourceBudget::memory_constrained()
-            .with_egraph_node_limit(2_000);
+        let budget = ResourceBudget::memory_constrained().with_egraph_node_limit(2_000);
         assert_eq!(budget.max_egraph_nodes, Some(2_000));
     }
 
@@ -449,10 +394,7 @@ mod tests {
             ResourceBudget::memory_constrained(),
         ];
         for budget in &profiles {
-            assert!(
-                budget.max_time.is_some(),
-                "profile should have time limit"
-            );
+            assert!(budget.max_time.is_some(), "profile should have time limit");
             assert!(
                 budget.max_cpu_time.is_some(),
                 "profile should have CPU time limit"

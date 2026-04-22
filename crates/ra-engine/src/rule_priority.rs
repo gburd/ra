@@ -49,10 +49,7 @@ impl RulePriority {
 /// Higher score = should be applied earlier.
 /// Formula: `expected_benefit / complexity_weight`
 #[must_use]
-pub fn compute_priority(
-    complexity: ComplexityClass,
-    benefit: BenefitRange,
-) -> f64 {
+pub fn compute_priority(complexity: ComplexityClass, benefit: BenefitRange) -> f64 {
     benefit.expected() / complexity.weight()
 }
 
@@ -63,8 +60,7 @@ pub fn compute_priority(
 /// get a default middle-of-the-road priority so they still
 /// participate in optimization.
 #[must_use]
-pub fn default_rule_priorities()
--> HashMap<&'static str, (ComplexityClass, BenefitRange)> {
+pub fn default_rule_priorities() -> HashMap<&'static str, (ComplexityClass, BenefitRange)> {
     let mut m = HashMap::with_capacity(120);
 
     // Helper closures to reduce boilerplate
@@ -138,10 +134,7 @@ pub fn default_rule_priorities()
     m.insert("filter-through-intersect", (on, br(0.3, 0.6)));
     m.insert("filter-through-except-left", (on, br(0.2, 0.5)));
     m.insert("filter-below-aggregate", (on, br(0.5, 0.9)));
-    m.insert(
-        "duckdb-filter-through-left-join-left",
-        (on, br(0.4, 0.8)),
-    );
+    m.insert("duckdb-filter-through-left-join-left", (on, br(0.4, 0.8)));
 
     // -- Join reordering (high benefit, higher complexity) --
     m.insert("join-commutativity", (o1, br(0.2, 0.8)));
@@ -149,14 +142,8 @@ pub fn default_rule_priorities()
     m.insert("join-associativity-left", (on2, br(0.3, 0.9)));
     m.insert("join-associativity-right", (on2, br(0.3, 0.9)));
     m.insert("cartesian-to-join", (o1, br(0.7, 1.0)));
-    m.insert(
-        "left-outer-to-inner-with-filter",
-        (on, br(0.4, 0.8)),
-    );
-    m.insert(
-        "right-outer-to-inner-with-filter",
-        (on, br(0.4, 0.8)),
-    );
+    m.insert("left-outer-to-inner-with-filter", (on, br(0.4, 0.8)));
+    m.insert("right-outer-to-inner-with-filter", (on, br(0.4, 0.8)));
 
     // -- Projection pushdown --
     m.insert("project-merge", (o1, br(0.2, 0.5)));
@@ -200,10 +187,7 @@ pub fn default_rule_priorities()
     m.insert("sqlite-not-in-to-anti", (o1, br(0.2, 0.5)));
     m.insert("sqlite-or-distribute", (o1, br(0.2, 0.5)));
     m.insert("sqlite-eq-implies-not-null-left", (o1, br(0.3, 0.6)));
-    m.insert(
-        "sqlite-eq-implies-not-null-right",
-        (o1, br(0.3, 0.6)),
-    );
+    m.insert("sqlite-eq-implies-not-null-right", (o1, br(0.3, 0.6)));
     m.insert("sqlite-const-prop-join", (on, br(0.3, 0.7)));
 
     // -- Commutativity rules (low benefit, just for canonicalization) --
@@ -228,14 +212,8 @@ pub fn default_rule_priorities()
     m.insert("runtime-filter-through-filter", (o1, br(0.2, 0.5)));
 
     // -- Consensus rules --
-    m.insert(
-        "extract-equijoin-from-and-left",
-        (o1, br(0.5, 0.9)),
-    );
-    m.insert(
-        "extract-equijoin-from-and-right",
-        (o1, br(0.5, 0.9)),
-    );
+    m.insert("extract-equijoin-from-and-left", (o1, br(0.5, 0.9)));
+    m.insert("extract-equijoin-from-and-right", (o1, br(0.5, 0.9)));
     m.insert("filter-null-join-key-left", (on, br(0.3, 0.7)));
     m.insert("filter-null-join-key-right", (on, br(0.3, 0.7)));
     m.insert("empty-filter", (o1, br(0.5, 0.9)));
@@ -247,22 +225,13 @@ pub fn default_rule_priorities()
     m.insert("empty-union-right", (o1, br(0.4, 0.7)));
 
     // -- Join transformations --
-    m.insert(
-        "left-outer-to-inner-with-comparison",
-        (on, br(0.4, 0.8)),
-    );
-    m.insert(
-        "right-outer-to-inner-with-comparison",
-        (on, br(0.4, 0.8)),
-    );
+    m.insert("left-outer-to-inner-with-comparison", (on, br(0.4, 0.8)));
+    m.insert("right-outer-to-inner-with-comparison", (on, br(0.4, 0.8)));
     m.insert("outer-to-semi-exists", (on, br(0.3, 0.7)));
     m.insert("outer-to-anti-not-exists", (on, br(0.3, 0.7)));
 
     // -- Parquet pushdown --
-    m.insert(
-        "parquet-filter-split-for-pushdown",
-        (o1, br(0.3, 0.7)),
-    );
+    m.insert("parquet-filter-split-for-pushdown", (o1, br(0.3, 0.7)));
 
     // -- Metadata shortcuts --
     m.insert("count-star-to-metadata", (o1, br(0.7, 1.0)));
@@ -286,10 +255,7 @@ pub fn default_rule_priorities()
 /// Uses O(n) complexity and moderate benefit so unclassified rules
 /// end up in the middle of the priority ordering.
 pub const DEFAULT_COMPLEXITY: ComplexityClass = ComplexityClass::On;
-pub const DEFAULT_BENEFIT: BenefitRange = BenefitRange {
-    min: 0.2,
-    max: 0.5,
-};
+pub const DEFAULT_BENEFIT: BenefitRange = BenefitRange { min: 0.2, max: 0.5 };
 
 /// Sort rewrite rules by priority (highest priority first).
 ///
@@ -304,22 +270,19 @@ pub fn sort_rules_by_priority(
 ) -> Vec<Rewrite<RelLang, RelAnalysis>> {
     let priorities = default_rule_priorities();
 
-    let mut scored: Vec<(f64, usize, Rewrite<RelLang, RelAnalysis>)> =
-        rules
-            .into_iter()
-            .enumerate()
-            .map(|(idx, rule)| {
-                let name = rule.name.as_str();
-                let score = if let Some(&(complexity, benefit)) =
-                    priorities.get(name)
-                {
-                    compute_priority(complexity, benefit)
-                } else {
-                    compute_priority(DEFAULT_COMPLEXITY, DEFAULT_BENEFIT)
-                };
-                (score, idx, rule)
-            })
-            .collect();
+    let mut scored: Vec<(f64, usize, Rewrite<RelLang, RelAnalysis>)> = rules
+        .into_iter()
+        .enumerate()
+        .map(|(idx, rule)| {
+            let name = rule.name.as_str();
+            let score = if let Some(&(complexity, benefit)) = priorities.get(name) {
+                compute_priority(complexity, benefit)
+            } else {
+                compute_priority(DEFAULT_COMPLEXITY, DEFAULT_BENEFIT)
+            };
+            (score, idx, rule)
+        })
+        .collect();
 
     // Sort by score descending; break ties by original index
     // to preserve relative order of equally-scored rules.
@@ -352,9 +315,7 @@ mod tests {
     fn complexity_weight_ordering() {
         assert!(ComplexityClass::O1.weight() < ComplexityClass::On.weight());
         assert!(ComplexityClass::On.weight() < ComplexityClass::On2.weight());
-        assert!(
-            ComplexityClass::On2.weight() < ComplexityClass::Oexp.weight()
-        );
+        assert!(ComplexityClass::On2.weight() < ComplexityClass::Oexp.weight());
     }
 
     #[test]
@@ -372,27 +333,15 @@ mod tests {
 
     #[test]
     fn priority_higher_for_cheaper_rules() {
-        let cheap = compute_priority(
-            ComplexityClass::O1,
-            BenefitRange::new(0.5, 0.9),
-        );
-        let expensive = compute_priority(
-            ComplexityClass::On2,
-            BenefitRange::new(0.5, 0.9),
-        );
+        let cheap = compute_priority(ComplexityClass::O1, BenefitRange::new(0.5, 0.9));
+        let expensive = compute_priority(ComplexityClass::On2, BenefitRange::new(0.5, 0.9));
         assert!(cheap > expensive);
     }
 
     #[test]
     fn priority_higher_for_more_beneficial_rules() {
-        let high_benefit = compute_priority(
-            ComplexityClass::On,
-            BenefitRange::new(0.7, 1.0),
-        );
-        let low_benefit = compute_priority(
-            ComplexityClass::On,
-            BenefitRange::new(0.0, 0.2),
-        );
+        let high_benefit = compute_priority(ComplexityClass::On, BenefitRange::new(0.7, 1.0));
+        let low_benefit = compute_priority(ComplexityClass::On, BenefitRange::new(0.0, 0.2));
         assert!(high_benefit > low_benefit);
     }
 
@@ -452,8 +401,7 @@ mod tests {
     #[test]
     fn complexity_class_serde_roundtrip() {
         let json = serde_json::to_string(&ComplexityClass::On2).unwrap();
-        let back: ComplexityClass =
-            serde_json::from_str(&json).unwrap();
+        let back: ComplexityClass = serde_json::from_str(&json).unwrap();
         assert_eq!(back, ComplexityClass::On2);
     }
 }

@@ -52,10 +52,7 @@ impl RumQueryType {
     pub fn benefits_from_rum(self) -> bool {
         match self {
             Self::BooleanMatch => false,
-            Self::RankedRetrieval
-            | Self::PhraseSearch
-            | Self::TimestampOrdered
-            | Self::Knn => true,
+            Self::RankedRetrieval | Self::PhraseSearch | Self::TimestampOrdered | Self::Knn => true,
         }
     }
 
@@ -73,10 +70,7 @@ impl RumQueryType {
 }
 
 impl std::fmt::Display for RumQueryType {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.label())
     }
 }
@@ -112,9 +106,7 @@ impl RumOpclass {
             "rum_tsvector_addon_ops" => Some(Self::TsvectorAddonOps),
             "rum_tsquery_ops" => Some(Self::TsqueryOps),
             "rum_anyarray_ops" => Some(Self::AnyarrayOps),
-            s if s.starts_with("rum_") && s.ends_with("_ops") => {
-                Some(Self::ScalarOps)
-            }
+            s if s.starts_with("rum_") && s.ends_with("_ops") => Some(Self::ScalarOps),
             _ => None,
         }
     }
@@ -123,12 +115,8 @@ impl RumOpclass {
     #[must_use]
     pub fn supports_distance_ordering(self) -> bool {
         match self {
-            Self::TsvectorOps
-            | Self::TsvectorAddonOps
-            | Self::ScalarOps => true,
-            Self::TsvectorHashOps
-            | Self::TsqueryOps
-            | Self::AnyarrayOps => false,
+            Self::TsvectorOps | Self::TsvectorAddonOps | Self::ScalarOps => true,
+            Self::TsvectorHashOps | Self::TsqueryOps | Self::AnyarrayOps => false,
         }
     }
 
@@ -137,10 +125,7 @@ impl RumOpclass {
     pub fn supports_phrase_search(self) -> bool {
         match self {
             Self::TsvectorOps | Self::TsvectorAddonOps => true,
-            Self::TsvectorHashOps
-            | Self::TsqueryOps
-            | Self::AnyarrayOps
-            | Self::ScalarOps => false,
+            Self::TsvectorHashOps | Self::TsqueryOps | Self::AnyarrayOps | Self::ScalarOps => false,
         }
     }
 
@@ -152,10 +137,7 @@ impl RumOpclass {
 }
 
 impl std::fmt::Display for RumOpclass {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TsvectorOps => write!(f, "rum_tsvector_ops"),
             Self::TsvectorHashOps => {
@@ -230,15 +212,11 @@ pub fn rum_ranked_scan_cost(
             // Overfetch by 20% to account for posting list structure
             let visit = k * 1.2;
             params.term_lookup_cost
-                + visit
-                    * (params.distance_compute_cost
-                        + params.heap_fetch_cost)
+                + visit * (params.distance_compute_cost + params.heap_fetch_cost)
         }
         None => {
             params.term_lookup_cost
-                + matching
-                    * (params.distance_compute_cost
-                        + params.heap_fetch_cost)
+                + matching * (params.distance_compute_cost + params.heap_fetch_cost)
         }
     }
 }
@@ -279,8 +257,7 @@ pub fn rum_addon_scan_cost(
         Some(k) => (k as f64 * 1.2).min(matching),
         None => matching,
     };
-    params.term_lookup_cost
-        + effective * (params.distance_compute_cost + params.heap_fetch_cost)
+    params.term_lookup_cost + effective * (params.distance_compute_cost + params.heap_fetch_cost)
 }
 
 /// Estimate the cost of a RUM scan for boolean-only matching.
@@ -317,8 +294,7 @@ pub fn gin_equivalent_cost(
     let gin_heap_fetch = 1.5;
     let matching = (total_rows * selectivity).max(1.0);
 
-    let scan_cost =
-        gin_term_cost + matching * (gin_recheck_cost + gin_heap_fetch);
+    let scan_cost = gin_term_cost + matching * (gin_recheck_cost + gin_heap_fetch);
 
     match query_type {
         RumQueryType::BooleanMatch => scan_cost,
@@ -375,21 +351,15 @@ pub fn rum_scan_cost(
     params: &RumCostParams,
 ) -> f64 {
     match query_type {
-        RumQueryType::BooleanMatch => {
-            rum_boolean_scan_cost(total_rows, selectivity, 1, params)
-        }
+        RumQueryType::BooleanMatch => rum_boolean_scan_cost(total_rows, selectivity, 1, params),
         RumQueryType::RankedRetrieval => {
             rum_ranked_scan_cost(total_rows, selectivity, limit, params)
         }
-        RumQueryType::PhraseSearch => {
-            rum_phrase_scan_cost(total_rows, selectivity, 2, params)
-        }
+        RumQueryType::PhraseSearch => rum_phrase_scan_cost(total_rows, selectivity, 2, params),
         RumQueryType::TimestampOrdered => {
             rum_addon_scan_cost(total_rows, selectivity, limit, params)
         }
-        RumQueryType::Knn => {
-            rum_ranked_scan_cost(total_rows, selectivity, limit, params)
-        }
+        RumQueryType::Knn => rum_ranked_scan_cost(total_rows, selectivity, limit, params),
     }
 }
 
@@ -404,16 +374,8 @@ pub fn rum_vs_gin_ratio(
     limit: Option<u64>,
     params: &RumCostParams,
 ) -> f64 {
-    let rum = rum_scan_cost(
-        total_rows,
-        selectivity,
-        query_type,
-        limit,
-        params,
-    );
-    let gin = gin_equivalent_cost(
-        total_rows, selectivity, query_type, limit,
-    );
+    let rum = rum_scan_cost(total_rows, selectivity, query_type, limit, params);
+    let gin = gin_equivalent_cost(total_rows, selectivity, query_type, limit);
     if gin <= 0.0 {
         return 1.0;
     }
@@ -431,13 +393,7 @@ pub fn rum_vs_sequential_ratio(
     limit: Option<u64>,
     params: &RumCostParams,
 ) -> f64 {
-    let rum = rum_scan_cost(
-        total_rows,
-        selectivity,
-        query_type,
-        limit,
-        params,
-    );
+    let rum = rum_scan_cost(total_rows, selectivity, query_type, limit, params);
     let seq = sequential_scan_cost(total_rows);
     if seq <= 0.0 {
         return 1.0;
@@ -529,19 +485,11 @@ pub fn evaluate_rum_recommendation(
         }
 
         let limit = match qt {
-            RumQueryType::RankedRetrieval | RumQueryType::Knn => {
-                Some(10)
-            }
+            RumQueryType::RankedRetrieval | RumQueryType::Knn => Some(10),
             _ => None,
         };
 
-        let ratio = rum_vs_gin_ratio(
-            total_rows,
-            selectivity,
-            qt,
-            limit,
-            &params,
-        );
+        let ratio = rum_vs_gin_ratio(total_rows, selectivity, qt, limit, &params);
 
         if ratio < 1.0 {
             let improvement = 1.0 / ratio;
@@ -637,8 +585,7 @@ fn var(s: &str) -> Var {
 /// `to_tsvector`, etc.) or direct tsvector column references.
 fn is_text_search_filter(
     pred_var: Var,
-) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool
-{
+) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool {
     move |egraph, _id, subst| {
         let pred_id = subst[pred_var];
         contains_text_search_pattern(egraph, pred_id, 3)
@@ -668,37 +615,21 @@ fn contains_text_search_pattern(
             | RelLang::Le([l, r])
             | RelLang::Gt([l, r])
             | RelLang::Ge([l, r]) => {
-                if contains_text_search_pattern(
-                    egraph,
-                    *l,
-                    depth - 1,
-                ) || contains_text_search_pattern(
-                    egraph,
-                    *r,
-                    depth - 1,
-                ) {
+                if contains_text_search_pattern(egraph, *l, depth - 1)
+                    || contains_text_search_pattern(egraph, *r, depth - 1)
+                {
                     return true;
                 }
             }
             RelLang::And([l, r]) | RelLang::Or([l, r]) => {
-                if contains_text_search_pattern(
-                    egraph,
-                    *l,
-                    depth - 1,
-                ) || contains_text_search_pattern(
-                    egraph,
-                    *r,
-                    depth - 1,
-                ) {
+                if contains_text_search_pattern(egraph, *l, depth - 1)
+                    || contains_text_search_pattern(egraph, *r, depth - 1)
+                {
                     return true;
                 }
             }
             RelLang::Not([inner]) => {
-                if contains_text_search_pattern(
-                    egraph,
-                    *inner,
-                    depth - 1,
-                ) {
+                if contains_text_search_pattern(egraph, *inner, depth - 1) {
                     return true;
                 }
             }
@@ -742,9 +673,7 @@ pub fn rum_boolean_cost_factor_vs_gin() -> f64 {
 #[derive(Debug, thiserror::Error)]
 pub enum RumError {
     /// RUM extension is not installed.
-    #[error(
-        "RUM extension not installed; using GIN cost model instead"
-    )]
+    #[error("RUM extension not installed; using GIN cost model instead")]
     ExtensionNotInstalled,
 
     /// Unrecognized RUM operator class.
@@ -794,22 +723,10 @@ mod tests {
 
     #[test]
     fn query_type_labels() {
-        assert_eq!(
-            RumQueryType::BooleanMatch.label(),
-            "boolean_match"
-        );
-        assert_eq!(
-            RumQueryType::RankedRetrieval.label(),
-            "ranked_retrieval"
-        );
-        assert_eq!(
-            RumQueryType::PhraseSearch.label(),
-            "phrase_search"
-        );
-        assert_eq!(
-            RumQueryType::TimestampOrdered.label(),
-            "timestamp_ordered"
-        );
+        assert_eq!(RumQueryType::BooleanMatch.label(), "boolean_match");
+        assert_eq!(RumQueryType::RankedRetrieval.label(), "ranked_retrieval");
+        assert_eq!(RumQueryType::PhraseSearch.label(), "phrase_search");
+        assert_eq!(RumQueryType::TimestampOrdered.label(), "timestamp_ordered");
         assert_eq!(RumQueryType::Knn.label(), "knn");
     }
 
@@ -860,28 +777,18 @@ mod tests {
     #[test]
     fn opclass_distance_ordering_support() {
         assert!(RumOpclass::TsvectorOps.supports_distance_ordering());
-        assert!(
-            RumOpclass::TsvectorAddonOps.supports_distance_ordering()
-        );
+        assert!(RumOpclass::TsvectorAddonOps.supports_distance_ordering());
         assert!(RumOpclass::ScalarOps.supports_distance_ordering());
-        assert!(
-            !RumOpclass::TsvectorHashOps.supports_distance_ordering()
-        );
+        assert!(!RumOpclass::TsvectorHashOps.supports_distance_ordering());
         assert!(!RumOpclass::TsqueryOps.supports_distance_ordering());
-        assert!(
-            !RumOpclass::AnyarrayOps.supports_distance_ordering()
-        );
+        assert!(!RumOpclass::AnyarrayOps.supports_distance_ordering());
     }
 
     #[test]
     fn opclass_phrase_search_support() {
         assert!(RumOpclass::TsvectorOps.supports_phrase_search());
-        assert!(
-            RumOpclass::TsvectorAddonOps.supports_phrase_search()
-        );
-        assert!(
-            !RumOpclass::TsvectorHashOps.supports_phrase_search()
-        );
+        assert!(RumOpclass::TsvectorAddonOps.supports_phrase_search());
+        assert!(!RumOpclass::TsvectorHashOps.supports_phrase_search());
         assert!(!RumOpclass::ScalarOps.supports_phrase_search());
     }
 
@@ -894,10 +801,7 @@ mod tests {
 
     #[test]
     fn opclass_display() {
-        assert_eq!(
-            RumOpclass::TsvectorOps.to_string(),
-            "rum_tsvector_ops"
-        );
+        assert_eq!(RumOpclass::TsvectorOps.to_string(), "rum_tsvector_ops");
         assert_eq!(
             RumOpclass::TsvectorAddonOps.to_string(),
             "rum_tsvector_addon_ops"
@@ -909,15 +813,8 @@ mod tests {
     #[test]
     fn rum_ranked_much_cheaper_than_gin_with_limit() {
         let params = RumCostParams::default();
-        let rum = rum_ranked_scan_cost(
-            100_000.0, 0.1, Some(10), &params,
-        );
-        let gin = gin_equivalent_cost(
-            100_000.0,
-            0.1,
-            RumQueryType::RankedRetrieval,
-            Some(10),
-        );
+        let rum = rum_ranked_scan_cost(100_000.0, 0.1, Some(10), &params);
+        let gin = gin_equivalent_cost(100_000.0, 0.1, RumQueryType::RankedRetrieval, Some(10));
         assert!(
             rum < gin * 0.1,
             "RUM ranked (limit 10) should be much cheaper \
@@ -928,15 +825,8 @@ mod tests {
     #[test]
     fn rum_ranked_without_limit_still_cheaper() {
         let params = RumCostParams::default();
-        let rum = rum_ranked_scan_cost(
-            100_000.0, 0.01, None, &params,
-        );
-        let gin = gin_equivalent_cost(
-            100_000.0,
-            0.01,
-            RumQueryType::RankedRetrieval,
-            None,
-        );
+        let rum = rum_ranked_scan_cost(100_000.0, 0.01, None, &params);
+        let gin = gin_equivalent_cost(100_000.0, 0.01, RumQueryType::RankedRetrieval, None);
         // Without limit, RUM still avoids external sort
         assert!(
             rum < gin,
@@ -948,15 +838,8 @@ mod tests {
     #[test]
     fn rum_phrase_cheaper_than_gin() {
         let params = RumCostParams::default();
-        let rum = rum_phrase_scan_cost(
-            100_000.0, 0.05, 2, &params,
-        );
-        let gin = gin_equivalent_cost(
-            100_000.0,
-            0.05,
-            RumQueryType::PhraseSearch,
-            None,
-        );
+        let rum = rum_phrase_scan_cost(100_000.0, 0.05, 2, &params);
+        let gin = gin_equivalent_cost(100_000.0, 0.05, RumQueryType::PhraseSearch, None);
         assert!(
             rum < gin,
             "RUM phrase search should be cheaper than GIN: \
@@ -967,15 +850,8 @@ mod tests {
     #[test]
     fn rum_boolean_slightly_more_expensive_than_gin() {
         let params = RumCostParams::default();
-        let rum = rum_boolean_scan_cost(
-            100_000.0, 0.01, 1, &params,
-        );
-        let gin = gin_equivalent_cost(
-            100_000.0,
-            0.01,
-            RumQueryType::BooleanMatch,
-            None,
-        );
+        let rum = rum_boolean_scan_cost(100_000.0, 0.01, 1, &params);
+        let gin = gin_equivalent_cost(100_000.0, 0.01, RumQueryType::BooleanMatch, None);
         // RUM boolean should be comparable or slightly more expensive
         let ratio = rum / gin;
         assert!(
@@ -988,15 +864,8 @@ mod tests {
     #[test]
     fn rum_addon_cheaper_than_gin_for_timestamp_ordered() {
         let params = RumCostParams::default();
-        let rum = rum_addon_scan_cost(
-            100_000.0, 0.1, Some(20), &params,
-        );
-        let gin = gin_equivalent_cost(
-            100_000.0,
-            0.1,
-            RumQueryType::TimestampOrdered,
-            Some(20),
-        );
+        let rum = rum_addon_scan_cost(100_000.0, 0.1, Some(20), &params);
+        let gin = gin_equivalent_cost(100_000.0, 0.1, RumQueryType::TimestampOrdered, Some(20));
         assert!(
             rum < gin * 0.2,
             "RUM addon scan should be much cheaper for \
@@ -1024,13 +893,7 @@ mod tests {
     #[test]
     fn rum_vs_gin_ratio_boolean() {
         let params = RumCostParams::default();
-        let ratio = rum_vs_gin_ratio(
-            100_000.0,
-            0.01,
-            RumQueryType::BooleanMatch,
-            None,
-            &params,
-        );
+        let ratio = rum_vs_gin_ratio(100_000.0, 0.01, RumQueryType::BooleanMatch, None, &params);
         assert!(
             ratio >= 0.9,
             "RUM should not be significantly better for \
@@ -1058,13 +921,8 @@ mod tests {
     #[test]
     fn rum_vs_sequential_unselective_query() {
         let params = RumCostParams::default();
-        let ratio = rum_vs_sequential_ratio(
-            100_000.0,
-            0.9,
-            RumQueryType::BooleanMatch,
-            None,
-            &params,
-        );
+        let ratio =
+            rum_vs_sequential_ratio(100_000.0, 0.9, RumQueryType::BooleanMatch, None, &params);
         assert!(
             ratio > 1.0,
             "RUM should lose to seq scan for 90% selectivity: \
@@ -1122,23 +980,13 @@ mod tests {
             true,
             None,
         );
-        assert!(
-            rec.is_none(),
-            "should not recommend RUM for boolean-only"
-        );
+        assert!(rec.is_none(), "should not recommend RUM for boolean-only");
     }
 
     #[test]
     fn no_rum_recommendation_for_empty_query_types() {
-        let rec = evaluate_rum_recommendation(
-            "logs",
-            "message_tsv",
-            100_000.0,
-            0.01,
-            &[],
-            true,
-            None,
-        );
+        let rec =
+            evaluate_rum_recommendation("logs", "message_tsv", 100_000.0, 0.01, &[], true, None);
         assert!(rec.is_none());
     }
 
@@ -1149,9 +997,7 @@ mod tests {
             column: "body_tsv".to_string(),
             opclass: RumOpclass::TsvectorOps,
             addon_column: None,
-            beneficial_query_types: vec![
-                RumQueryType::RankedRetrieval,
-            ],
+            beneficial_query_types: vec![RumQueryType::RankedRetrieval],
             estimated_improvement: 50.0,
             replaces_gin: true,
         };
@@ -1169,9 +1015,7 @@ mod tests {
             column: "content_tsv".to_string(),
             opclass: RumOpclass::TsvectorAddonOps,
             addon_column: Some("created_at".to_string()),
-            beneficial_query_types: vec![
-                RumQueryType::TimestampOrdered,
-            ],
+            beneficial_query_types: vec![RumQueryType::TimestampOrdered],
             estimated_improvement: 10.0,
             replaces_gin: false,
         };
@@ -1222,11 +1066,8 @@ mod tests {
 
     // -- E-graph rewrite rule tests --
 
-    fn run_with_rum_rules(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_with_rum_rules(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         let rules = rum_rewrite_rules();
         Runner::default()
             .with_expr(&rec)
@@ -1250,9 +1091,7 @@ mod tests {
                 name: "ts_match".to_string(),
                 args: vec![
                     Expr::Column(ColumnRef::new("body_tsv")),
-                    Expr::Const(Const::String(
-                        "postgresql".to_string(),
-                    )),
+                    Expr::Const(Const::String("postgresql".to_string())),
                 ],
             },
             input: Box::new(joined),
@@ -1282,9 +1121,7 @@ mod tests {
                 name: "ts_match".to_string(),
                 args: vec![
                     Expr::Column(ColumnRef::new("body_tsv")),
-                    Expr::Const(Const::String(
-                        "optimization".to_string(),
-                    )),
+                    Expr::Const(Const::String("optimization".to_string())),
                 ],
             },
             input: Box::new(projected),
@@ -1307,18 +1144,14 @@ mod tests {
                 name: "ts_match".to_string(),
                 args: vec![
                     Expr::Column(ColumnRef::new("body_tsv")),
-                    Expr::Const(Const::String(
-                        "postgresql".to_string(),
-                    )),
+                    Expr::Const(Const::String("postgresql".to_string())),
                 ],
             }),
             right: Box::new(Expr::Function {
                 name: "ts_match".to_string(),
                 args: vec![
                     Expr::Column(ColumnRef::new("title_tsv")),
-                    Expr::Const(Const::String(
-                        "index".to_string(),
-                    )),
+                    Expr::Const(Const::String("index".to_string())),
                 ],
             }),
         };
@@ -1341,19 +1174,15 @@ mod tests {
         let filtered = RelExpr::Filter {
             predicate: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("id"))),
                 right: Box::new(Expr::Const(Const::Int(42))),
             },
             input: Box::new(scan),
         };
 
-        let rec = to_rec_expr(&filtered)
-            .expect("conversion should succeed");
+        let rec = to_rec_expr(&filtered).expect("conversion should succeed");
         let initial_classes = {
-            let mut eg =
-                egg::EGraph::<RelLang, RelAnalysis>::default();
+            let mut eg = egg::EGraph::<RelLang, RelAnalysis>::default();
             eg.add_expr(&rec);
             eg.number_of_classes()
         };
@@ -1373,9 +1202,7 @@ mod tests {
 
         let scan = RelExpr::scan("articles");
         let agg = RelExpr::Aggregate {
-            group_by: vec![Expr::Column(
-                ColumnRef::new("category"),
-            )],
+            group_by: vec![Expr::Column(ColumnRef::new("category"))],
             aggregates: vec![AggregateExpr {
                 function: AggregateFunction::Count,
                 arg: None,
@@ -1390,9 +1217,7 @@ mod tests {
                 name: "ts_match".to_string(),
                 args: vec![
                     Expr::Column(ColumnRef::new("body_tsv")),
-                    Expr::Const(Const::String(
-                        "postgresql".to_string(),
-                    )),
+                    Expr::Const(Const::String("postgresql".to_string())),
                 ],
             },
             input: Box::new(agg),
@@ -1410,13 +1235,7 @@ mod tests {
     #[test]
     fn unified_cost_boolean() {
         let params = RumCostParams::default();
-        let cost = rum_scan_cost(
-            100_000.0,
-            0.01,
-            RumQueryType::BooleanMatch,
-            None,
-            &params,
-        );
+        let cost = rum_scan_cost(100_000.0, 0.01, RumQueryType::BooleanMatch, None, &params);
         assert!(cost > 0.0);
     }
 
@@ -1437,26 +1256,14 @@ mod tests {
     #[test]
     fn unified_cost_phrase() {
         let params = RumCostParams::default();
-        let cost = rum_scan_cost(
-            100_000.0,
-            0.05,
-            RumQueryType::PhraseSearch,
-            None,
-            &params,
-        );
+        let cost = rum_scan_cost(100_000.0, 0.05, RumQueryType::PhraseSearch, None, &params);
         assert!(cost > 0.0);
     }
 
     #[test]
     fn unified_cost_knn() {
         let params = RumCostParams::default();
-        let cost = rum_scan_cost(
-            100_000.0,
-            0.01,
-            RumQueryType::Knn,
-            Some(5),
-            &params,
-        );
+        let cost = rum_scan_cost(100_000.0, 0.01, RumQueryType::Knn, Some(5), &params);
         assert!(cost < 50.0);
     }
 }

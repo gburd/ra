@@ -76,10 +76,7 @@ fn test_vectorized_simd_filter() {
 fn test_vectorized_simd_arithmetic() {
     // SIMD arithmetic operations
     let input = scan("calculations");
-    let filtered = input.filter(gt(
-        binop(BinOp::Add, col("a"), col("b")),
-        int(100),
-    ));
+    let filtered = input.filter(gt(binop(BinOp::Add, col("a"), col("b")), int(100)));
     assert_cost_calculated(filtered);
 }
 

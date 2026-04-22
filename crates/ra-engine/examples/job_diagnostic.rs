@@ -60,9 +60,7 @@ fn count_tables(expr: &ra_core::algebra::RelExpr) -> usize {
     use ra_core::algebra::RelExpr;
     match expr {
         RelExpr::Scan { .. } => 1,
-        RelExpr::Join { left, right, .. } => {
-            count_tables(left) + count_tables(right)
-        }
+        RelExpr::Join { left, right, .. } => count_tables(left) + count_tables(right),
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
@@ -74,9 +72,7 @@ fn count_tables(expr: &ra_core::algebra::RelExpr) -> usize {
     }
 }
 
-fn top_level_variant(
-    expr: &ra_core::algebra::RelExpr,
-) -> &'static str {
+fn top_level_variant(expr: &ra_core::algebra::RelExpr) -> &'static str {
     use ra_core::algebra::RelExpr;
     match expr {
         RelExpr::Scan { .. } => "Scan",
@@ -99,15 +95,9 @@ fn main() {
     let dir = queries_dir();
 
     let mut entries: Vec<_> = fs::read_dir(&dir)
-        .unwrap_or_else(|e| {
-            panic!("cannot read {}: {e}", dir.display())
-        })
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "sql")
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
         .collect();
     entries.sort_by_key(|e| e.file_name());
 
@@ -137,12 +127,7 @@ fn main() {
 
     for entry in &entries {
         let path = entry.path();
-        let query_id = path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned();
+        let query_id = path.file_stem().unwrap().to_str().unwrap().to_owned();
         let sql = fs::read_to_string(&path).unwrap();
 
         let relexpr = match sql_to_relexpr(&sql) {
@@ -152,8 +137,7 @@ fn main() {
 
         let tables = count_tables(&relexpr);
         let top = top_level_variant(&relexpr);
-        let eligible =
-            ra_engine::left_deep::can_use_left_deep(&relexpr);
+        let eligible = ra_engine::left_deep::can_use_left_deep(&relexpr);
 
         let path_name = if eligible {
             left_deep_count += 1;

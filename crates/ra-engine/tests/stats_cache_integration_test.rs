@@ -55,6 +55,7 @@ fn make_optimizer_with_stats(table_names: &[&str]) -> Optimizer {
         max_staleness_penalty: 10.0,
         use_lazy_rules: false,
         transaction_context: None,
+        ..OptimizerConfig::default()
     });
 
     // Add statistics for all tables
@@ -186,6 +187,7 @@ fn test_stats_cache_no_stats() {
         max_staleness_penalty: 10.0,
         use_lazy_rules: false,
         transaction_context: None,
+        ..OptimizerConfig::default()
     });
 
     let result = optimizer.optimize(&query);

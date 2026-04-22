@@ -5,22 +5,15 @@
 //! cache hit rates across representative workload patterns.
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, RelExpr, SortDirection,
-    SortKey, NullOrdering,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, RelExpr, SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_engine::genetic_fingerprint::QueryFingerprint;
-use ra_engine::plan_cache::{
-    CacheMatchType, PlanCache, PlanCacheConfig,
-};
+use ra_engine::plan_cache::{CacheMatchType, PlanCache, PlanCacheConfig};
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-fn eq_filter(
-    table: &str,
-    col: &str,
-    value: i64,
-) -> RelExpr {
+fn eq_filter(table: &str, col: &str, value: i64) -> RelExpr {
     RelExpr::scan(table).filter(Expr::BinOp {
         op: BinOp::Eq,
         left: Box::new(Expr::Column(ColumnRef::new(col))),
@@ -28,12 +21,7 @@ fn eq_filter(
     })
 }
 
-fn range_filter(
-    table: &str,
-    col: &str,
-    lo: i64,
-    hi: i64,
-) -> RelExpr {
+fn range_filter(table: &str, col: &str, lo: i64, hi: i64) -> RelExpr {
     RelExpr::scan(table).filter(Expr::BinOp {
         op: BinOp::And,
         left: Box::new(Expr::BinOp {
@@ -54,12 +42,8 @@ fn two_table_join(left_val: i64, right_val: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(ColumnRef::qualified(
-                "users", "id",
-            ))),
-            right: Box::new(Expr::Column(ColumnRef::qualified(
-                "orders", "user_id",
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(eq_filter("users", "age", left_val)),
         right: Box::new(eq_filter("orders", "total", right_val)),
@@ -92,11 +76,7 @@ fn agg_query(threshold: i64) -> RelExpr {
 #[test]
 fn point_lookups_with_different_ids_match() {
     let fps: Vec<QueryFingerprint> = (0..100)
-        .map(|i| {
-            QueryFingerprint::from_rel_expr(&eq_filter(
-                "users", "id", i,
-            ))
-        })
+        .map(|i| QueryFingerprint::from_rel_expr(&eq_filter("users", "id", i)))
         .collect();
 
     for fp in &fps[1..] {
@@ -109,27 +89,17 @@ fn point_lookups_with_different_ids_match() {
 
 #[test]
 fn range_queries_with_different_bounds_match() {
-    let fp1 = QueryFingerprint::from_rel_expr(&range_filter(
-        "sales", "amount", 100, 500,
-    ));
-    let fp2 = QueryFingerprint::from_rel_expr(&range_filter(
-        "sales", "amount", 1000, 9999,
-    ));
+    let fp1 = QueryFingerprint::from_rel_expr(&range_filter("sales", "amount", 100, 500));
+    let fp2 = QueryFingerprint::from_rel_expr(&range_filter("sales", "amount", 1000, 9999));
     assert!(fp1.is_exact_match(&fp2));
 }
 
 #[test]
 fn join_queries_with_different_params_match() {
-    let fp1 = QueryFingerprint::from_rel_expr(&two_table_join(
-        25, 100,
-    ));
-    let fp2 = QueryFingerprint::from_rel_expr(&two_table_join(
-        60, 5000,
-    ));
+    let fp1 = QueryFingerprint::from_rel_expr(&two_table_join(25, 100));
+    let fp2 = QueryFingerprint::from_rel_expr(&two_table_join(60, 5000));
     assert!(fp1.is_exact_match(&fp2));
-    assert!(
-        (fp1.similarity(&fp2) - 1.0).abs() < f64::EPSILON
-    );
+    assert!((fp1.similarity(&fp2) - 1.0).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -163,10 +133,8 @@ fn different_join_types_different_fingerprint() {
         left: Box::new(RelExpr::scan("t1")),
         right: Box::new(RelExpr::scan("t2")),
     };
-    let fp_inner =
-        QueryFingerprint::from_rel_expr(&inner);
-    let fp_left =
-        QueryFingerprint::from_rel_expr(&left_outer);
+    let fp_inner = QueryFingerprint::from_rel_expr(&inner);
+    let fp_left = QueryFingerprint::from_rel_expr(&left_outer);
     assert!(!fp_inner.is_exact_match(&fp_left));
 }
 
@@ -213,10 +181,7 @@ fn similarity_is_symmetric() {
     let q2 = agg_query(50000);
     let fp1 = QueryFingerprint::from_rel_expr(&q1);
     let fp2 = QueryFingerprint::from_rel_expr(&q2);
-    assert!(
-        (fp1.similarity(&fp2) - fp2.similarity(&fp1)).abs()
-            < f64::EPSILON
-    );
+    assert!((fp1.similarity(&fp2) - fp2.similarity(&fp1)).abs() < f64::EPSILON);
 }
 
 #[test]

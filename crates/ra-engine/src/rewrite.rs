@@ -19,6 +19,7 @@ use egg::{rewrite, Rewrite};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+use crate::query_features::QueryFeatureSet;
 
 /// Return all optimization rewrite rules sorted by priority.
 ///
@@ -72,9 +73,7 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(duckdb_inspired_rules());
     rules.extend(sqlite_inspired_rules());
     rules.extend(runtime_filter_rules());
-    rules.extend(
-        crate::join_transformations::join_transformation_rules(),
-    );
+    rules.extend(crate::join_transformations::join_transformation_rules());
 
     // File-format rules
     rules.extend(crate::parquet_pushdown::parquet_pushdown_rules());
@@ -89,44 +88,333 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(crate::covering_index::covering_index_rules());
 
     // MIN/MAX index optimization rules
-    rules.extend(
-        crate::shortcuts::min_max_index::min_max_index_rules(),
-    );
+    rules.extend(crate::shortcuts::min_max_index::min_max_index_rules());
 
     // DocumentDB / BSON query optimization rules (RFC 0062)
-    rules.extend(
-        crate::documentdb_optimizer::documentdb_rewrite_rules(),
-    );
+    rules.extend(crate::documentdb_optimizer::documentdb_rewrite_rules());
 
     // Oracle JSON Relational Duality view rules (RFC 0084)
-    rules.extend(
-        crate::oracle_json_duality::duality_rewrite_rules(),
-    );
+    rules.extend(crate::oracle_json_duality::duality_rewrite_rules());
 
     // XPath/XQuery optimization rules (RFC 0083)
-    rules.extend(
-        crate::xml_optimizer::xml_optimization_rules(),
-    );
+    rules.extend(crate::xml_optimizer::xml_optimization_rules());
 
     // Vector similarity search optimization rules (RFC 0064)
-    rules.extend(
-        crate::vector_rules::vector_rewrite_rules(),
-    );
+    rules.extend(crate::vector_rules::vector_rewrite_rules());
 
     // Full-text search optimization rules (RFC 0066)
-    rules.extend(
-        crate::fts_rules::fts_optimization_rules(),
-    );
+    rules.extend(crate::fts_rules::fts_optimization_rules());
 
     // Hybrid search optimization rules (RFC 0073)
-    rules.extend(
-        crate::hybrid_search::hybrid_search_rules(),
-    );
+    rules.extend(crate::hybrid_search::hybrid_search_rules());
 
     // Type cast optimization rules
     rules.extend(cast_optimization_rules());
 
     rules
+}
+
+/// Metadata declaring what a rule group requires to be applicable.
+///
+/// Used by the rule advisor to skip entire groups of rules when the
+/// environment context or query shape cannot match.
+#[derive(Debug, Clone)]
+pub struct RuleAnnotation {
+    /// Features the query must have for these rules to be useful.
+    /// Empty (or `UNIVERSAL`) means the rules apply to any query.
+    pub required_features: QueryFeatureSet,
+    /// Database engines these rules target. Empty means universal.
+    pub databases: Vec<&'static str>,
+}
+
+/// A group of rewrite rules with associated annotation metadata.
+#[derive(Debug)]
+pub struct AnnotatedRuleGroup {
+    /// Human-readable label for the rule group.
+    pub label: &'static str,
+    /// The annotation describing applicability.
+    pub annotation: RuleAnnotation,
+    /// The rewrite rules in this group.
+    pub rules: Vec<Rewrite<RelLang, RelAnalysis>>,
+}
+
+/// Return all rule groups with applicability annotations.
+///
+/// Each group carries a [`RuleAnnotation`] that declares the
+/// database scope and the structural/content features the rules
+/// require. The rule advisor uses these annotations to eliminate
+/// inapplicable groups before equality saturation.
+#[must_use]
+pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
+    vec![
+        // -- Universal baseline rules --
+        AnnotatedRuleGroup {
+            label: "null-simplification",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: crate::null_simplification::null_simplification_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "predicate-pushdown",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: predicate_pushdown_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "projection-pushdown",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: projection_pushdown_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "expression-simplification",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: expression_simplification_rules(),
+        },
+        // -- Join rules --
+        AnnotatedRuleGroup {
+            label: "join-reordering",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_JOIN,
+                databases: vec![],
+            },
+            rules: join_reordering_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "join-elimination",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_JOIN,
+                databases: vec![],
+            },
+            rules: join_elimination_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "join-transformations",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_JOIN,
+                databases: vec![],
+            },
+            rules: crate::join_transformations::join_transformation_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "semi-join-reduction",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_JOIN,
+                databases: vec![],
+            },
+            rules: crate::semi_join::semi_join_reduction_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "redundant-join-elimination",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_JOIN,
+                databases: vec![],
+            },
+            rules: crate::redundant_join::redundant_join_elimination_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "runtime-filters",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_JOIN,
+                databases: vec![],
+            },
+            rules: runtime_filter_rules(),
+        },
+        // -- Aggregate rules --
+        AnnotatedRuleGroup {
+            label: "aggregate-optimization",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_AGGREGATE,
+                databases: vec![],
+            },
+            rules: aggregate_optimization_rules(),
+        },
+        // -- Limit/Sort rules --
+        AnnotatedRuleGroup {
+            label: "limit-sort-optimization",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_LIMIT.union(QueryFeatureSet::HAS_SORT),
+                databases: vec![],
+            },
+            rules: limit_sort_optimization_rules(),
+        },
+        // -- Set operation rules --
+        AnnotatedRuleGroup {
+            label: "set-operations",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_SET_OPS,
+                databases: vec![],
+            },
+            rules: set_operation_rules(),
+        },
+        // -- Subquery rules --
+        AnnotatedRuleGroup {
+            label: "subquery-optimization",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_SUBQUERY.union(QueryFeatureSet::HAS_JOIN),
+                databases: vec![],
+            },
+            rules: subquery_optimization_rules(),
+        },
+        // -- Database-inspired universal rules --
+        AnnotatedRuleGroup {
+            label: "duckdb-inspired",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: duckdb_inspired_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "sqlite-inspired",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: sqlite_inspired_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "consensus-rules",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: crate::consensus_rules::consensus_rules(),
+        },
+        // -- Column pruning, functional deps --
+        AnnotatedRuleGroup {
+            label: "column-pruning",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: crate::column_pruning::column_pruning_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "functional-deps",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: crate::functional_deps::functional_dependency_rules(),
+        },
+        // -- File format --
+        AnnotatedRuleGroup {
+            label: "parquet-pushdown",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: crate::parquet_pushdown::parquet_pushdown_rules(),
+        },
+        // -- Metadata shortcuts --
+        AnnotatedRuleGroup {
+            label: "count-metadata",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_AGGREGATE,
+                databases: vec![],
+            },
+            rules: crate::count_metadata::count_metadata_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "index-selection",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: crate::index_selection::index_selection_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "covering-index",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::UNIVERSAL,
+                databases: vec![],
+            },
+            rules: crate::covering_index::covering_index_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "min-max-index",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_AGGREGATE,
+                databases: vec![],
+            },
+            rules: crate::shortcuts::min_max_index::min_max_index_rules(),
+        },
+        // -- Specialty: DocumentDB / BSON (RFC 0062) --
+        AnnotatedRuleGroup {
+            label: "documentdb-bson",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_BSON_FUNC
+                    .union(QueryFeatureSet::HAS_JSON_ACCESS),
+                databases: vec!["documentdb"],
+            },
+            rules: crate::documentdb_optimizer::documentdb_rewrite_rules(),
+        },
+        // -- Specialty: Oracle JSON Relational Duality (RFC 0084) --
+        AnnotatedRuleGroup {
+            label: "oracle-json-duality",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_JSON_ACCESS,
+                databases: vec!["oracle"],
+            },
+            rules: crate::oracle_json_duality::duality_rewrite_rules(),
+        },
+        // -- Specialty: XML optimization (RFC 0083) --
+        AnnotatedRuleGroup {
+            label: "xml-optimization",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_XML_FUNC,
+                databases: vec![],
+            },
+            rules: crate::xml_optimizer::xml_optimization_rules(),
+        },
+        // -- Specialty: Vector search (RFC 0064) --
+        AnnotatedRuleGroup {
+            label: "vector-search",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_VECTOR_DISTANCE,
+                databases: vec![],
+            },
+            rules: crate::vector_rules::vector_rewrite_rules(),
+        },
+        // -- Specialty: Full-text search (RFC 0066) --
+        AnnotatedRuleGroup {
+            label: "full-text-search",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_FTS_MATCH,
+                databases: vec![],
+            },
+            rules: crate::fts_rules::fts_optimization_rules(),
+        },
+        // -- Specialty: Hybrid search (RFC 0073) --
+        AnnotatedRuleGroup {
+            label: "hybrid-search",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_FTS_MATCH
+                    .union(QueryFeatureSet::HAS_VECTOR_DISTANCE),
+                databases: vec![],
+            },
+            rules: crate::hybrid_search::hybrid_search_rules(),
+        },
+        // -- Cast optimization --
+        AnnotatedRuleGroup {
+            label: "cast-optimization",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_CAST,
+                databases: vec![],
+            },
+            rules: cast_optimization_rules(),
+        },
+    ]
 }
 
 // ---------------------------------------------------------------
@@ -619,7 +907,6 @@ fn cast_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(cast (cast ?expr ?type1) ?type2)" =>
             "(cast ?expr ?type2)"
         ),
-
         // Remove identity cast on integer constants
         rewrite!("remove-cast-int-to-int";
             "(cast (const-int ?val) int)" =>
@@ -633,7 +920,6 @@ fn cast_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(cast (const-int ?val) bigint)" =>
             "(const-int ?val)"
         ),
-
         // Remove identity cast on string constants
         rewrite!("remove-cast-str-to-text";
             "(cast (const-str ?val) text)" =>
@@ -643,7 +929,6 @@ fn cast_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(cast (const-str ?val) varchar)" =>
             "(const-str ?val)"
         ),
-
         // TODO: Cast pushdown through arithmetic operations
         // These rules need more careful handling of operator arities
         // Disabled for now to avoid BadOp errors

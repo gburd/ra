@@ -151,11 +151,7 @@ pub trait ExprEvaluator {
     /// # Errors
     ///
     /// Returns an error if evaluation fails.
-    fn evaluate(
-        &self,
-        expr: &RelExpr,
-        ctx: &ExecutionContext,
-    ) -> Result<Vec<Row>, ExecutionError>;
+    fn evaluate(&self, expr: &RelExpr, ctx: &ExecutionContext) -> Result<Vec<Row>, ExecutionError>;
 }
 
 /// Configuration for the recursive CTE executor.
@@ -244,9 +240,7 @@ impl RecursiveCTEExecutor {
         let mut result = working_table.clone();
 
         // Validate schema compatibility on first iteration
-        let base_width = working_table
-            .first()
-            .map_or(0, Row::width);
+        let base_width = working_table.first().map_or(0, Row::width);
 
         let mut seen: Option<HashSet<Row>> = if self.config.cycle_detection {
             let mut set = HashSet::new();
@@ -353,17 +347,12 @@ mod tests {
                 RelExpr::Scan { table, .. } => {
                     let rows = ctx
                         .get_cte(table)
-                        .ok_or_else(|| {
-                            ExecutionError::UnboundCTE(table.clone())
-                        })?;
+                        .ok_or_else(|| ExecutionError::UnboundCTE(table.clone()))?;
                     let mut out = Vec::new();
                     for row in rows {
-                        if let Some(Const::Int(n)) = row.values.first()
-                        {
+                        if let Some(Const::Int(n)) = row.values.first() {
                             if *n < self.limit {
-                                out.push(Row::new(vec![
-                                    Const::Int(n + 1),
-                                ]));
+                                out.push(Row::new(vec![Const::Int(n + 1)]));
                             }
                         }
                     }

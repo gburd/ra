@@ -51,6 +51,22 @@ pub struct LazyQueryPattern {
     pub has_limits: bool,
     /// Query contains distinct operations
     pub has_distinct: bool,
+    /// Query accesses JSON fields (BinOp::JsonAccess or FieldAccess)
+    pub has_json_access: bool,
+    /// Query calls BSON-specific functions
+    pub has_bson_func: bool,
+    /// Query uses vector distance operators
+    pub has_vector_distance: bool,
+    /// Query uses full-text search matching
+    pub has_fts_match: bool,
+    /// Query calls XML/XPath/XQuery functions
+    pub has_xml_func: bool,
+    /// Query contains CTE definitions
+    pub has_cte: bool,
+    /// Query contains recursive CTEs
+    pub has_recursive_cte: bool,
+    /// Query uses type casts
+    pub has_cast: bool,
     /// Number of tables involved
     pub table_count: usize,
     /// Maximum join depth (nested joins)
@@ -71,12 +87,17 @@ impl LazyQueryPattern {
     fn analyze_recursive(expr: &RelExpr, pattern: &mut Self, depth: usize) {
         match expr {
             // Joins
-            RelExpr::Join { left, right, .. } => {
+            RelExpr::Join {
+                condition,
+                left,
+                right,
+                ..
+            } => {
                 pattern.has_joins = true;
                 pattern.join_depth = pattern.join_depth.max(depth + 1);
+                Self::scan_expr_features(condition, pattern);
                 Self::analyze_recursive(left, pattern, depth + 1);
                 Self::analyze_recursive(right, pattern, depth + 1);
-                // Note: table_count is incremented by Scan nodes, not joins
             }
 
             // Aggregates
@@ -86,9 +107,9 @@ impl LazyQueryPattern {
             }
 
             // Set operations
-            RelExpr::Union { left, right, .. } |
-            RelExpr::Intersect { left, right, .. } |
-            RelExpr::Except { left, right, .. } => {
+            RelExpr::Union { left, right, .. }
+            | RelExpr::Intersect { left, right, .. }
+            | RelExpr::Except { left, right, .. } => {
                 pattern.has_set_ops = true;
                 Self::analyze_recursive(left, pattern, depth);
                 Self::analyze_recursive(right, pattern, depth);
@@ -118,9 +139,17 @@ impl LazyQueryPattern {
                 Self::analyze_recursive(input, pattern, depth);
             }
 
-            // Recursive traversal for other operators
-            RelExpr::Project { input, .. } |
-            RelExpr::Filter { input, .. } => {
+            // Filter: scan predicate for content-type features
+            RelExpr::Filter { predicate, input } => {
+                Self::scan_expr_features(predicate, pattern);
+                Self::analyze_recursive(input, pattern, depth);
+            }
+
+            // Project: scan projection expressions
+            RelExpr::Project { columns, input } => {
+                for col in columns {
+                    Self::scan_expr_features(&col.expr, pattern);
+                }
                 Self::analyze_recursive(input, pattern, depth);
             }
 
@@ -129,30 +158,191 @@ impl LazyQueryPattern {
                 pattern.table_count += 1;
             }
 
-            // CTEs (may contain subqueries)
-            RelExpr::CTE { definition, body, .. } => {
+            // CTEs
+            RelExpr::CTE {
+                definition, body, ..
+            } => {
                 pattern.has_subqueries = true;
+                pattern.has_cte = true;
                 Self::analyze_recursive(definition, pattern, depth);
                 Self::analyze_recursive(body, pattern, depth);
             }
 
-            RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
+            RelExpr::RecursiveCTE {
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => {
                 pattern.has_subqueries = true;
+                pattern.has_cte = true;
+                pattern.has_recursive_cte = true;
                 Self::analyze_recursive(base_case, pattern, depth);
                 Self::analyze_recursive(recursive_case, pattern, depth);
                 Self::analyze_recursive(body, pattern, depth);
             }
 
-            // Terminal nodes
-            RelExpr::Values { .. } => {
-                // No further analysis needed
+            // Vector search operators
+            RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
+                pattern.has_vector_distance = true;
+                Self::analyze_recursive(input, pattern, depth);
             }
 
+            // Terminal nodes
+            RelExpr::Values { .. } => {}
+
             // Fallback for any other variants
-            _ => {
-                // For unknown variants, conservatively do nothing
-                // This is a catch-all to handle any RelExpr variants not explicitly matched
+            _ => {}
+        }
+    }
+
+    /// Scan an `Expr` subtree for content-type features.
+    fn scan_expr_features(expr: &ra_core::expr::Expr, pattern: &mut Self) {
+        use ra_core::expr::{BinOp, Expr};
+        match expr {
+            Expr::BinOp {
+                op: BinOp::JsonAccess,
+                left,
+                right,
+                ..
+            } => {
+                pattern.has_json_access = true;
+                Self::scan_expr_features(left, pattern);
+                Self::scan_expr_features(right, pattern);
             }
+            Expr::BinOp { left, right, .. } => {
+                Self::scan_expr_features(left, pattern);
+                Self::scan_expr_features(right, pattern);
+            }
+            Expr::UnaryOp { operand, .. } => {
+                Self::scan_expr_features(operand, pattern);
+            }
+            Expr::FieldAccess { expr: inner, .. } => {
+                pattern.has_json_access = true;
+                Self::scan_expr_features(inner, pattern);
+            }
+            Expr::Cast { expr: inner, .. } => {
+                pattern.has_cast = true;
+                Self::scan_expr_features(inner, pattern);
+            }
+            Expr::Function { name, args, .. } => {
+                Self::classify_function(name, pattern);
+                for arg in args {
+                    Self::scan_expr_features(arg, pattern);
+                }
+            }
+            Expr::FullTextMatch { .. } => {
+                pattern.has_fts_match = true;
+            }
+            Expr::VectorDistance { column, target, .. } => {
+                pattern.has_vector_distance = true;
+                Self::scan_expr_features(column, pattern);
+                Self::scan_expr_features(target, pattern);
+            }
+            Expr::Case {
+                operand,
+                when_clauses,
+                else_result,
+                ..
+            } => {
+                if let Some(op) = operand {
+                    Self::scan_expr_features(op, pattern);
+                }
+                for (cond, val) in when_clauses {
+                    Self::scan_expr_features(cond, pattern);
+                    Self::scan_expr_features(val, pattern);
+                }
+                if let Some(el) = else_result {
+                    Self::scan_expr_features(el, pattern);
+                }
+            }
+            Expr::SubQuery {
+                query, test_expr, ..
+            } => {
+                pattern.has_subqueries = true;
+                Self::analyze_recursive(query, pattern, 0);
+                if let Some(te) = test_expr {
+                    Self::scan_expr_features(te, pattern);
+                }
+            }
+            Expr::Array(items) => {
+                for item in items {
+                    Self::scan_expr_features(item, pattern);
+                }
+            }
+            Expr::ArrayIndex(arr, idx) => {
+                Self::scan_expr_features(arr, pattern);
+                Self::scan_expr_features(idx, pattern);
+            }
+            Expr::ArraySlice { array, start, end } => {
+                Self::scan_expr_features(array, pattern);
+                if let Some(s) = start {
+                    Self::scan_expr_features(s, pattern);
+                }
+                if let Some(e) = end {
+                    Self::scan_expr_features(e, pattern);
+                }
+            }
+            // Leaf nodes: Column, Const, PatternClassifier, etc.
+            _ => {}
+        }
+    }
+
+    /// Classify a function call by name to detect content-type features.
+    fn classify_function(name: &str, pattern: &mut Self) {
+        let lower = name.to_lowercase();
+
+        // BSON functions (DocumentDB)
+        if lower.starts_with("bson_")
+            || lower.starts_with("documentdb_")
+            || lower == "bsontype"
+            || lower == "bsonsize"
+        {
+            pattern.has_bson_func = true;
+            return;
+        }
+
+        // XML/XPath/XQuery functions
+        if lower.starts_with("xpath")
+            || lower.starts_with("xquery")
+            || lower.starts_with("xml")
+            || lower == "extractvalue"
+            || lower == "existsnode"
+            || lower == "xmlelement"
+            || lower == "xmlforest"
+            || lower == "xmlagg"
+            || lower == "xmlparse"
+            || lower == "xmlserialize"
+        {
+            pattern.has_xml_func = true;
+            return;
+        }
+
+        // JSON functions (beyond operator-based access)
+        if lower.starts_with("json_")
+            || lower.starts_with("jsonb_")
+            || lower == "json_value"
+            || lower == "json_query"
+            || lower == "json_exists"
+            || lower == "json_array"
+            || lower == "json_object"
+        {
+            pattern.has_json_access = true;
+            return;
+        }
+
+        // Full-text search functions
+        if lower == "to_tsvector"
+            || lower == "to_tsquery"
+            || lower == "plainto_tsquery"
+            || lower == "phraseto_tsquery"
+            || lower == "ts_rank"
+            || lower == "ts_rank_cd"
+            || lower == "match"
+            || lower == "contains"
+            || lower == "freetext"
+        {
+            pattern.has_fts_match = true;
         }
     }
 
@@ -182,6 +372,14 @@ impl Default for LazyQueryPattern {
             has_sorting: false,
             has_limits: false,
             has_distinct: false,
+            has_json_access: false,
+            has_bson_func: false,
+            has_vector_distance: false,
+            has_fts_match: false,
+            has_xml_func: false,
+            has_cte: false,
+            has_recursive_cte: false,
+            has_cast: false,
             table_count: 0,
             join_depth: 0,
         }
@@ -303,7 +501,11 @@ impl RuleCategory {
 /// for the current query pattern.
 pub struct LazyRuleCompiler {
     /// Cache of compiled rule sets by category
-    rule_cache: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<RuleCategory, Vec<Rewrite<RelLang, RelAnalysis>>>>>,
+    rule_cache: std::sync::Arc<
+        std::sync::RwLock<
+            std::collections::HashMap<RuleCategory, Vec<Rewrite<RelLang, RelAnalysis>>>,
+        >,
+    >,
 }
 
 impl LazyRuleCompiler {
@@ -311,7 +513,9 @@ impl LazyRuleCompiler {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            rule_cache: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            rule_cache: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
@@ -351,8 +555,12 @@ impl LazyRuleCompiler {
         match category {
             RuleCategory::FilterOptimization => crate::rewrite::predicate_pushdown_rules(),
             RuleCategory::ProjectionOptimization => crate::rewrite::projection_pushdown_rules(),
-            RuleCategory::ExpressionSimplification => crate::rewrite::expression_simplification_rules(),
-            RuleCategory::NullSimplification => crate::null_simplification::null_simplification_rules(),
+            RuleCategory::ExpressionSimplification => {
+                crate::rewrite::expression_simplification_rules()
+            }
+            RuleCategory::NullSimplification => {
+                crate::null_simplification::null_simplification_rules()
+            }
 
             RuleCategory::JoinReordering => crate::rewrite::join_reordering_rules(),
             RuleCategory::JoinElimination => {
@@ -360,7 +568,9 @@ impl LazyRuleCompiler {
                 rules.extend(crate::redundant_join::redundant_join_elimination_rules());
                 rules
             }
-            RuleCategory::JoinTransformation => crate::join_transformations::join_transformation_rules(),
+            RuleCategory::JoinTransformation => {
+                crate::join_transformations::join_transformation_rules()
+            }
             RuleCategory::SemiJoinOptimization => crate::semi_join::semi_join_reduction_rules(),
 
             RuleCategory::AggregateOptimization => crate::rewrite::aggregate_optimization_rules(),
@@ -368,7 +578,9 @@ impl LazyRuleCompiler {
             RuleCategory::SetOperationOptimization => crate::rewrite::set_operation_rules(),
             RuleCategory::SubqueryOptimization => crate::rewrite::subquery_optimization_rules(),
 
-            RuleCategory::FileFormatOptimization => crate::parquet_pushdown::parquet_pushdown_rules(),
+            RuleCategory::FileFormatOptimization => {
+                crate::parquet_pushdown::parquet_pushdown_rules()
+            }
             RuleCategory::MetadataShortcuts => {
                 let mut rules = crate::count_metadata::count_metadata_rules();
                 rules.extend(crate::shortcuts::min_max_index::min_max_index_rules());
@@ -489,7 +701,7 @@ mod tests {
             })],
             aggregates: vec![AggregateExpr {
                 function: AggregateFunction::Count,
-                arg: None,  // COUNT(*) has no specific argument
+                arg: None, // COUNT(*) has no specific argument
                 distinct: false,
                 alias: None,
             }],
@@ -636,6 +848,10 @@ mod tests {
 
         // Expected ~40% reduction: 206 → ~122 rules
         let reduction_pct = ((all.len() - lazy_rules.len()) as f64 / all.len() as f64) * 100.0;
-        assert!(reduction_pct > 30.0, "Expected >30% reduction, got {:.1}%", reduction_pct);
+        assert!(
+            reduction_pct > 30.0,
+            "Expected >30% reduction, got {:.1}%",
+            reduction_pct
+        );
     }
 }

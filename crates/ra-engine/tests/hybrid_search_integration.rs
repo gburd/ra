@@ -13,9 +13,9 @@
 mod test_data;
 
 use ra_engine::{
-    HybridStrategy, ScoreFusion, choose_hybrid_strategy, fuse_scores,
-    hybrid_fts_first_cost_factor, hybrid_parallel_cost_factor,
-    hybrid_scan_cost_factor, hybrid_search_rules, hybrid_vector_first_cost_factor,
+    choose_hybrid_strategy, fuse_scores, hybrid_fts_first_cost_factor, hybrid_parallel_cost_factor,
+    hybrid_scan_cost_factor, hybrid_search_rules, hybrid_vector_first_cost_factor, HybridStrategy,
+    ScoreFusion,
 };
 use test_data::*;
 
@@ -279,7 +279,10 @@ fn test_bm25_no_matches() {
     let doc = "unrelated content without query terms";
     let query = "machine learning";
     let score = simple_bm25_score(doc, query);
-    assert_eq!(score, 0.0, "BM25 should return 0 for non-matching documents");
+    assert_eq!(
+        score, 0.0,
+        "BM25 should return 0 for non-matching documents"
+    );
 }
 
 #[test]
@@ -299,7 +302,10 @@ fn test_bm25_term_frequency() {
     let score1 = simple_bm25_score(doc1, query);
     let score2 = simple_bm25_score(doc2, query);
 
-    assert!(score1 > score2, "Higher term frequency should increase score");
+    assert!(
+        score1 > score2,
+        "Higher term frequency should increase score"
+    );
 }
 
 // ------------------------------------------------------------------
@@ -482,19 +488,28 @@ fn test_score_fusion_overhead() {
 #[test]
 fn test_fts_first_cost_factor_reasonable() {
     let factor = hybrid_fts_first_cost_factor();
-    assert!(factor >= 1.0 && factor <= 2.0, "FTS-first cost factor should be 1-2x");
+    assert!(
+        factor >= 1.0 && factor <= 2.0,
+        "FTS-first cost factor should be 1-2x"
+    );
 }
 
 #[test]
 fn test_vector_first_cost_factor_reasonable() {
     let factor = hybrid_vector_first_cost_factor();
-    assert!(factor >= 1.0 && factor <= 2.0, "Vector-first cost factor should be 1-2x");
+    assert!(
+        factor >= 1.0 && factor <= 2.0,
+        "Vector-first cost factor should be 1-2x"
+    );
 }
 
 #[test]
 fn test_parallel_cost_factor_reasonable() {
     let factor = hybrid_parallel_cost_factor();
-    assert!(factor >= 1.0 && factor <= 3.0, "Parallel cost factor should be 1-3x");
+    assert!(
+        factor >= 1.0 && factor <= 3.0,
+        "Parallel cost factor should be 1-3x"
+    );
 }
 
 #[test]
@@ -610,7 +625,10 @@ fn test_varied_queries_use_different_strategies() {
 
     // Should have at least 2 different strategies
     let unique_strategies: std::collections::HashSet<_> = strategies.iter().collect();
-    assert!(unique_strategies.len() >= 2, "Varied queries should use different strategies");
+    assert!(
+        unique_strategies.len() >= 2,
+        "Varied queries should use different strategies"
+    );
 }
 
 #[test]

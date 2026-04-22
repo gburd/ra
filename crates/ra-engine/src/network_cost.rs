@@ -87,10 +87,7 @@ pub struct NetworkCostModel {
 impl NetworkCostModel {
     /// Create a new network cost model.
     #[must_use]
-    pub fn new(
-        topology: NetworkTopology,
-        node_assignment: HashMap<String, NodeId>,
-    ) -> Self {
+    pub fn new(topology: NetworkTopology, node_assignment: HashMap<String, NodeId>) -> Self {
         Self {
             topology,
             node_assignment,
@@ -110,11 +107,7 @@ impl NetworkCostModel {
     }
 
     /// Assign a table to a node.
-    pub fn assign_table(
-        &mut self,
-        table: impl Into<String>,
-        node: NodeId,
-    ) {
+    pub fn assign_table(&mut self, table: impl Into<String>, node: NodeId) {
         self.node_assignment.insert(table.into(), node);
     }
 
@@ -131,8 +124,7 @@ impl NetworkCostModel {
         rows: u64,
         row_width: usize,
     ) -> NetworkCostEstimate {
-        let Some(&source_node) = self.node_assignment.get(from_table)
-        else {
+        let Some(&source_node) = self.node_assignment.get(from_table) else {
             return NetworkCostEstimate::zero();
         };
 
@@ -141,20 +133,11 @@ impl NetworkCostModel {
         }
 
         let bytes = rows * row_width as u64;
-        let time = self
-            .topology
-            .transfer_time(source_node, to_node, bytes);
-        let billing = self
-            .topology
-            .transfer_cost(source_node, to_node, bytes);
+        let time = self.topology.transfer_time(source_node, to_node, bytes);
+        let billing = self.topology.transfer_cost(source_node, to_node, bytes);
 
         NetworkCostEstimate {
-            cost: Cost::new(
-                0.0,
-                0.0,
-                time.as_secs_f64() * 1000.0,
-                0,
-            ),
+            cost: Cost::new(0.0, 0.0, time.as_secs_f64() * 1000.0, 0),
             transfer_time: time,
             monetary_cost: billing,
             bytes_transferred: bytes,
@@ -180,12 +163,7 @@ impl NetworkCostModel {
         let billing = self.topology.transfer_cost(from, to, bytes);
 
         NetworkCostEstimate {
-            cost: Cost::new(
-                0.0,
-                0.0,
-                time.as_secs_f64() * 1000.0,
-                0,
-            ),
+            cost: Cost::new(0.0, 0.0, time.as_secs_f64() * 1000.0, 0),
             transfer_time: time,
             monetary_cost: billing,
             bytes_transferred: bytes,
@@ -212,9 +190,7 @@ impl NetworkCostModel {
             DistributionStrategy::Shuffle { source, targets } => {
                 self.shuffle_cost(*source, targets, input_rows, row_width)
             }
-            DistributionStrategy::CoLocated => {
-                NetworkCostEstimate::zero()
-            }
+            DistributionStrategy::CoLocated => NetworkCostEstimate::zero(),
         }
     }
 
@@ -254,12 +230,7 @@ impl NetworkCostModel {
         // Use max_time for the network cost since broadcasts can be
         // parallelized; the bottleneck is the slowest target.
         NetworkCostEstimate {
-            cost: Cost::new(
-                0.0,
-                0.0,
-                max_time.as_secs_f64() * 1000.0,
-                0,
-            ),
+            cost: Cost::new(0.0, 0.0, max_time.as_secs_f64() * 1000.0, 0),
             transfer_time: max_time,
             monetary_cost: total_billing,
             bytes_transferred: total_bytes,
@@ -305,12 +276,7 @@ impl NetworkCostModel {
         }
 
         NetworkCostEstimate {
-            cost: Cost::new(
-                0.0,
-                0.0,
-                max_time.as_secs_f64() * 1000.0,
-                0,
-            ),
+            cost: Cost::new(0.0, 0.0, max_time.as_secs_f64() * 1000.0, 0),
             transfer_time: max_time,
             monetary_cost: total_billing,
             bytes_transferred: total_bytes,
@@ -353,22 +319,17 @@ impl NetworkCostModel {
         }
 
         let left_bytes = sides.left_rows * sides.row_width as u64;
-        let right_bytes =
-            sides.right_rows * sides.row_width as u64;
+        let right_bytes = sides.right_rows * sides.row_width as u64;
 
         // Broadcast the smaller side if it fits under threshold
-        if left_bytes <= broadcast_threshold_bytes
-            && left_bytes <= right_bytes
-        {
+        if left_bytes <= broadcast_threshold_bytes && left_bytes <= right_bytes {
             return DistributionStrategy::Broadcast {
                 source: sides.left_node,
                 targets: targets.to_vec(),
             };
         }
 
-        if right_bytes <= broadcast_threshold_bytes
-            && right_bytes < left_bytes
-        {
+        if right_bytes <= broadcast_threshold_bytes && right_bytes < left_bytes {
             return DistributionStrategy::Broadcast {
                 source: sides.right_node,
                 targets: targets.to_vec(),
@@ -384,11 +345,7 @@ impl NetworkCostModel {
 
     /// Check if two tables are co-located on the same node.
     #[must_use]
-    pub fn tables_colocated(
-        &self,
-        table_a: &str,
-        table_b: &str,
-    ) -> bool {
+    pub fn tables_colocated(&self, table_a: &str, table_b: &str) -> bool {
         match (
             self.node_assignment.get(table_a),
             self.node_assignment.get(table_b),
@@ -400,18 +357,12 @@ impl NetworkCostModel {
 
     /// Check if two tables are in the same datacenter.
     #[must_use]
-    pub fn tables_same_datacenter(
-        &self,
-        table_a: &str,
-        table_b: &str,
-    ) -> bool {
+    pub fn tables_same_datacenter(&self, table_a: &str, table_b: &str) -> bool {
         match (
             self.node_assignment.get(table_a),
             self.node_assignment.get(table_b),
         ) {
-            (Some(&a), Some(&b)) => {
-                self.topology.same_datacenter(a, b)
-            }
+            (Some(&a), Some(&b)) => self.topology.same_datacenter(a, b),
             _ => false,
         }
     }
@@ -421,22 +372,14 @@ impl NetworkCostModel {
 #[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
-    use ra_hardware::network::{
-        LinkType, Location, NetworkLink, NetworkTopology,
-    };
+    use ra_hardware::network::{LinkType, Location, NetworkLink, NetworkTopology};
 
     fn simple_model() -> NetworkCostModel {
         let mut topo = NetworkTopology::new();
         let n0 = NodeId(0);
         let n1 = NodeId(1);
-        topo.add_node(
-            n0,
-            Location::new("us-east-1", "us-east-1a"),
-        );
-        topo.add_node(
-            n1,
-            Location::new("us-west-2", "us-west-2a"),
-        );
+        topo.add_node(n0, Location::new("us-east-1", "us-east-1a"));
+        topo.add_node(n1, Location::new("us-west-2", "us-west-2a"));
         topo.add_link(
             n0,
             n1,
@@ -459,10 +402,7 @@ mod tests {
     fn colocated_model() -> NetworkCostModel {
         let mut topo = NetworkTopology::new();
         let n0 = NodeId(0);
-        topo.add_node(
-            n0,
-            Location::new("us-east-1", "us-east-1a"),
-        );
+        topo.add_node(n0, Location::new("us-east-1", "us-east-1a"));
 
         let mut assignments = HashMap::new();
         assignments.insert("orders".into(), n0);
@@ -483,16 +423,14 @@ mod tests {
     #[test]
     fn transfer_cost_unknown_table_is_zero() {
         let model = simple_model();
-        let est =
-            model.transfer_cost("unknown_table", NodeId(0), 1000, 100);
+        let est = model.transfer_cost("unknown_table", NodeId(0), 1000, 100);
         assert_eq!(est.cost.network, 0.0);
     }
 
     #[test]
     fn transfer_cost_cross_region() {
         let model = simple_model();
-        let est =
-            model.transfer_cost("orders", NodeId(1), 1_000_000, 100);
+        let est = model.transfer_cost("orders", NodeId(1), 1_000_000, 100);
         assert!(est.cost.network > 0.0);
         assert!(est.monetary_cost > 0.0);
         assert_eq!(est.bytes_transferred, 100_000_000);
@@ -501,8 +439,7 @@ mod tests {
     #[test]
     fn transfer_cost_network_ms_is_positive() {
         let model = simple_model();
-        let est =
-            model.transfer_cost("orders", NodeId(1), 10_000, 100);
+        let est = model.transfer_cost("orders", NodeId(1), 10_000, 100);
         assert!(est.cost.network > 0.0);
         assert!(est.transfer_time > Duration::ZERO);
     }
@@ -510,27 +447,21 @@ mod tests {
     #[test]
     fn node_transfer_cost_same_node() {
         let model = simple_model();
-        let est =
-            model.node_transfer_cost(NodeId(0), NodeId(0), 1000, 100);
+        let est = model.node_transfer_cost(NodeId(0), NodeId(0), 1000, 100);
         assert_eq!(est.cost.network, 0.0);
     }
 
     #[test]
     fn node_transfer_cost_cross_region() {
         let model = simple_model();
-        let est =
-            model.node_transfer_cost(NodeId(0), NodeId(1), 1000, 100);
+        let est = model.node_transfer_cost(NodeId(0), NodeId(1), 1000, 100);
         assert!(est.cost.network > 0.0);
     }
 
     #[test]
     fn distribution_cost_colocated_is_zero() {
         let model = simple_model();
-        let est = model.distribution_cost(
-            &DistributionStrategy::CoLocated,
-            1_000_000,
-            100,
-        );
+        let est = model.distribution_cost(&DistributionStrategy::CoLocated, 1_000_000, 100);
         assert_eq!(est.cost.network, 0.0);
         assert_eq!(est.monetary_cost, 0.0);
     }
@@ -632,12 +563,7 @@ mod tests {
         };
         let colocated = DistributionStrategy::CoLocated;
 
-        let result = model.cheaper_strategy(
-            &broadcast,
-            &colocated,
-            1_000_000,
-            100,
-        );
+        let result = model.cheaper_strategy(&broadcast, &colocated, 1_000_000, 100);
         assert_eq!(*result, DistributionStrategy::CoLocated);
     }
 
@@ -651,11 +577,7 @@ mod tests {
             right_rows: 1_000_000,
             row_width: 100,
         };
-        let strategy = model.recommend_join_strategy(
-            &sides,
-            &[NodeId(0)],
-            100_000_000,
-        );
+        let strategy = model.recommend_join_strategy(&sides, &[NodeId(0)], 100_000_000);
         assert_eq!(strategy, DistributionStrategy::CoLocated);
     }
 
@@ -669,11 +591,7 @@ mod tests {
             right_rows: 1_000_000,
             row_width: 100,
         };
-        let strategy = model.recommend_join_strategy(
-            &sides,
-            &[NodeId(0), NodeId(1)],
-            1_000_000,
-        );
+        let strategy = model.recommend_join_strategy(&sides, &[NodeId(0), NodeId(1)], 1_000_000);
         match &strategy {
             DistributionStrategy::Broadcast { source, .. } => {
                 assert_eq!(*source, NodeId(0));
@@ -692,11 +610,7 @@ mod tests {
             right_rows: 100,
             row_width: 100,
         };
-        let strategy = model.recommend_join_strategy(
-            &sides,
-            &[NodeId(0), NodeId(1)],
-            1_000_000,
-        );
+        let strategy = model.recommend_join_strategy(&sides, &[NodeId(0), NodeId(1)], 1_000_000);
         match &strategy {
             DistributionStrategy::Broadcast { source, .. } => {
                 assert_eq!(*source, NodeId(1));
@@ -715,15 +629,8 @@ mod tests {
             right_rows: 10_000_000,
             row_width: 100,
         };
-        let strategy = model.recommend_join_strategy(
-            &sides,
-            &[NodeId(0), NodeId(1)],
-            1_000_000,
-        );
-        assert!(matches!(
-            strategy,
-            DistributionStrategy::Shuffle { .. }
-        ));
+        let strategy = model.recommend_join_strategy(&sides, &[NodeId(0), NodeId(1)], 1_000_000);
+        assert!(matches!(strategy, DistributionStrategy::Shuffle { .. }));
     }
 
     #[test]
@@ -747,25 +654,19 @@ mod tests {
     #[test]
     fn tables_same_datacenter_true() {
         let model = colocated_model();
-        assert!(
-            model.tables_same_datacenter("orders", "products")
-        );
+        assert!(model.tables_same_datacenter("orders", "products"));
     }
 
     #[test]
     fn tables_same_datacenter_false() {
         let model = simple_model();
-        assert!(
-            !model.tables_same_datacenter("orders", "customers")
-        );
+        assert!(!model.tables_same_datacenter("orders", "customers"));
     }
 
     #[test]
     fn tables_same_datacenter_unknown() {
         let model = simple_model();
-        assert!(
-            !model.tables_same_datacenter("orders", "unknown")
-        );
+        assert!(!model.tables_same_datacenter("orders", "unknown"));
     }
 
     #[test]
@@ -790,10 +691,7 @@ mod tests {
     fn assign_table_adds_mapping() {
         let mut model = simple_model();
         model.assign_table("inventory", NodeId(1));
-        assert_eq!(
-            model.node_for_table("inventory"),
-            Some(NodeId(1))
-        );
+        assert_eq!(model.node_for_table("inventory"), Some(NodeId(1)));
     }
 
     #[test]
@@ -807,8 +705,7 @@ mod tests {
     fn monetary_cost_scales_with_data_size() {
         let model = simple_model();
         let small = model.transfer_cost("orders", NodeId(1), 1_000, 100);
-        let large =
-            model.transfer_cost("orders", NodeId(1), 1_000_000, 100);
+        let large = model.transfer_cost("orders", NodeId(1), 1_000_000, 100);
         assert!(large.monetary_cost > small.monetary_cost);
     }
 
@@ -816,8 +713,7 @@ mod tests {
     fn transfer_time_scales_with_data_size() {
         let model = simple_model();
         let small = model.transfer_cost("orders", NodeId(1), 1_000, 100);
-        let large =
-            model.transfer_cost("orders", NodeId(1), 1_000_000, 100);
+        let large = model.transfer_cost("orders", NodeId(1), 1_000_000, 100);
         assert!(large.transfer_time > small.transfer_time);
     }
 
@@ -825,10 +721,7 @@ mod tests {
     fn distribution_cost_broadcast_to_multiple() {
         let mut topo = NetworkTopology::new();
         for i in 0..4_u32 {
-            topo.add_node(
-                NodeId(i),
-                Location::new("us-east-1", "us-east-1a"),
-            );
+            topo.add_node(NodeId(i), Location::new("us-east-1", "us-east-1a"));
         }
         for i in 1..4 {
             topo.add_link(
@@ -892,8 +785,7 @@ mod tests {
         assignments.insert("eu_data".into(), NodeId(4));
         let model = NetworkCostModel::new(topo, assignments);
 
-        let est =
-            model.transfer_cost("us_data", NodeId(4), 1_000_000, 100);
+        let est = model.transfer_cost("us_data", NodeId(4), 1_000_000, 100);
         assert!(est.cost.network > 0.0);
         assert!(est.monetary_cost > 0.0);
     }
@@ -906,8 +798,7 @@ mod tests {
         assignments.insert("gcp_table".into(), NodeId(2));
         let model = NetworkCostModel::new(topo, assignments);
 
-        let est =
-            model.transfer_cost("aws_table", NodeId(2), 100_000, 100);
+        let est = model.transfer_cost("aws_table", NodeId(2), 100_000, 100);
         assert!(est.cost.network > 0.0);
         // Cross-cloud has high monetary cost
         assert!(est.monetary_cost > 0.0);
@@ -926,10 +817,7 @@ mod tests {
         // Broadcast uses max_time (parallel), not total_time
         let mut topo = NetworkTopology::new();
         for i in 0..3_u32 {
-            topo.add_node(
-                NodeId(i),
-                Location::new("us-east-1", "us-east-1a"),
-            );
+            topo.add_node(NodeId(i), Location::new("us-east-1", "us-east-1a"));
         }
         // Link to node 1: fast
         topo.add_link(
@@ -963,13 +851,9 @@ mod tests {
         );
 
         // Transfer time should be the max (slow link), not the sum
-        let slow_est =
-            model.node_transfer_cost(NodeId(0), NodeId(2), 10_000, 100);
+        let slow_est = model.node_transfer_cost(NodeId(0), NodeId(2), 10_000, 100);
         assert!(
-            (est.transfer_time.as_secs_f64()
-                - slow_est.transfer_time.as_secs_f64())
-            .abs()
-                < 0.001
+            (est.transfer_time.as_secs_f64() - slow_est.transfer_time.as_secs_f64()).abs() < 0.001
         );
     }
 }

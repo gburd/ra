@@ -288,8 +288,8 @@ fn test_left_outer_join() {
 #[test]
 fn test_optimization_is_fast() {
     // Simple query should optimize quickly
-    use std::time::Instant;
     use ra_test_utils::TestProfile;
+    use std::time::Instant;
 
     let profile = TestProfile::current();
     let expected_ms = profile.scale_time_ms(1000.0);
@@ -313,8 +313,8 @@ fn test_optimization_is_fast() {
 #[test]
 fn test_complex_query_optimizes_reasonably() {
     // More complex query should still complete in reasonable time
-    use std::time::Instant;
     use ra_test_utils::TestProfile;
+    use std::time::Instant;
 
     let profile = TestProfile::current();
     let expected_ms = profile.scale_time_ms(5000.0);
@@ -355,8 +355,12 @@ fn test_optimization_is_idempotent() {
     let plan = two_table_join("orders", "customers", "customer_id", "id");
 
     let optimizer = create_test_optimizer();
-    let result1 = optimizer.optimize(&plan).expect("first optimization should succeed");
-    let result2 = optimizer.optimize(&result1).expect("second optimization should succeed");
+    let result1 = optimizer
+        .optimize(&plan)
+        .expect("first optimization should succeed");
+    let result2 = optimizer
+        .optimize(&result1)
+        .expect("second optimization should succeed");
 
     assert_eq!(result1, result2, "optimization should be idempotent");
 }

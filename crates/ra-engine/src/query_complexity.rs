@@ -3,7 +3,7 @@
 //! Classifies queries by table count, join complexity, and other factors
 //! to determine appropriate iteration limits and optimization strategies.
 
-use ra_core::algebra::{RelExpr, JoinType};
+use ra_core::algebra::{JoinType, RelExpr};
 
 /// Query complexity level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -89,10 +89,15 @@ fn count_tables(expr: &RelExpr) -> usize {
         RelExpr::Window { input, .. } => count_tables(input),
         RelExpr::Distinct { input } => count_tables(input),
         RelExpr::Values { .. } => 0, // Not a base table
-        RelExpr::CTE { definition, body, .. } => count_tables(definition) + count_tables(body),
-        RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
-            count_tables(base_case) + count_tables(recursive_case) + count_tables(body)
-        }
+        RelExpr::CTE {
+            definition, body, ..
+        } => count_tables(definition) + count_tables(body),
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => count_tables(base_case) + count_tables(recursive_case) + count_tables(body),
         // Other variants don't directly contain tables
         _ => 0,
     }
@@ -112,35 +117,38 @@ fn count_joins(expr: &RelExpr) -> usize {
         RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
         | RelExpr::Except { left, right, .. } => count_joins(left) + count_joins(right),
-        RelExpr::CTE { definition, body, .. } => count_joins(definition) + count_joins(body),
-        RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
-            count_joins(base_case) + count_joins(recursive_case) + count_joins(body)
-        }
+        RelExpr::CTE {
+            definition, body, ..
+        } => count_joins(definition) + count_joins(body),
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => count_joins(base_case) + count_joins(recursive_case) + count_joins(body),
         _ => 0,
     }
 }
 
 /// Check if query contains subqueries (CTEs).
 fn contains_subqueries(expr: &RelExpr) -> bool {
-    matches!(
-        expr,
-        RelExpr::CTE { .. } | RelExpr::RecursiveCTE { .. }
-    ) || match expr {
-        RelExpr::Filter { input, .. }
-        | RelExpr::Project { input, .. }
-        | RelExpr::Aggregate { input, .. }
-        | RelExpr::Sort { input, .. }
-        | RelExpr::Limit { input, .. }
-        | RelExpr::Window { input, .. }
-        | RelExpr::Distinct { input } => contains_subqueries(input),
-        RelExpr::Join { left, right, .. }
-        | RelExpr::Union { left, right, .. }
-        | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => {
-            contains_subqueries(left) || contains_subqueries(right)
+    matches!(expr, RelExpr::CTE { .. } | RelExpr::RecursiveCTE { .. })
+        || match expr {
+            RelExpr::Filter { input, .. }
+            | RelExpr::Project { input, .. }
+            | RelExpr::Aggregate { input, .. }
+            | RelExpr::Sort { input, .. }
+            | RelExpr::Limit { input, .. }
+            | RelExpr::Window { input, .. }
+            | RelExpr::Distinct { input } => contains_subqueries(input),
+            RelExpr::Join { left, right, .. }
+            | RelExpr::Union { left, right, .. }
+            | RelExpr::Intersect { left, right, .. }
+            | RelExpr::Except { left, right, .. } => {
+                contains_subqueries(left) || contains_subqueries(right)
+            }
+            _ => false,
         }
-        _ => false,
-    }
 }
 
 /// Count number of outer joins (more expensive than inner joins).
@@ -169,9 +177,18 @@ fn count_outer_joins(expr: &RelExpr) -> usize {
         RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
         | RelExpr::Except { left, right, .. } => count_outer_joins(left) + count_outer_joins(right),
-        RelExpr::CTE { definition, body, .. } => count_outer_joins(definition) + count_outer_joins(body),
-        RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
-            count_outer_joins(base_case) + count_outer_joins(recursive_case) + count_outer_joins(body)
+        RelExpr::CTE {
+            definition, body, ..
+        } => count_outer_joins(definition) + count_outer_joins(body),
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            count_outer_joins(base_case)
+                + count_outer_joins(recursive_case)
+                + count_outer_joins(body)
         }
         _ => 0,
     }
@@ -220,10 +237,7 @@ mod tests {
     fn test_medium_complexity() {
         // 5 tables -> Medium
         let expr = join(
-            join(
-                join(scan("users"), scan("orders")),
-                scan("products"),
-            ),
+            join(join(scan("users"), scan("orders")), scan("products")),
             join(scan("categories"), scan("tags")),
         );
         assert_eq!(QueryComplexity::from_expr(&expr), QueryComplexity::Medium);

@@ -10,8 +10,7 @@ use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::Statistics;
 use ra_engine::plan_stitch::{self, OperatorState};
 use ra_engine::progressive_reopt::{
-    self, JoinImplKind, ReoptConfig, ReoptError, ReoptimizeFn,
-    StitchPointKind, StitchTransferKind,
+    self, JoinImplKind, ReoptConfig, ReoptError, ReoptimizeFn, StitchPointKind, StitchTransferKind,
 };
 
 // ---------------------------------------------------------------
@@ -778,7 +777,9 @@ fn test_verify_equivalence_same_tables() {
 fn test_verify_equivalence_different_tables() {
     let plan_a = join(scan("a"), scan("b"), eq(col("a.id"), col("b.id")));
     let plan_b = join(scan("a"), scan("c"), eq(col("a.id"), col("c.id")));
-    assert!(!plan_stitch::verify_join_order_equivalence(&plan_a, &plan_b));
+    assert!(!plan_stitch::verify_join_order_equivalence(
+        &plan_a, &plan_b
+    ));
 }
 
 #[test]
@@ -804,7 +805,9 @@ fn test_verify_equivalence_extra_table() {
         scan("c"),
         eq(col("b.id"), col("c.id")),
     );
-    assert!(!plan_stitch::verify_join_order_equivalence(&plan_a, &plan_b));
+    assert!(!plan_stitch::verify_join_order_equivalence(
+        &plan_a, &plan_b
+    ));
 }
 
 #[test]
@@ -1299,7 +1302,9 @@ fn test_end_to_end_progressive_reopt() {
     assert_eq!(bg_plan, improved);
 
     // Verify table equivalence between original and improved.
-    assert!(plan_stitch::verify_join_order_equivalence(&original, &bg_plan));
+    assert!(plan_stitch::verify_join_order_equivalence(
+        &original, &bg_plan
+    ));
 
     // Stitch the improved plan with materialized left child.
     let materialized = scan("materialized_customers");
@@ -1423,16 +1428,14 @@ fn test_cost_decrease_across_multiple_scenarios() {
     assert!(d1.savings_fraction > 0.8);
 
     // Scenario 2: Moderate underestimate, moderate cost win.
-    let d2 = progressive_reopt::evaluate_reopt_decision(
-        1000, 5000, 10_000.0, 4_000.0, 1_000.0, &config,
-    );
+    let d2 =
+        progressive_reopt::evaluate_reopt_decision(1000, 5000, 10_000.0, 4_000.0, 1_000.0, &config);
     assert!(d2.should_switch);
     assert!(d2.savings_fraction > 0.4);
 
     // Scenario 3: High overhead negates the cost win.
-    let d3 = progressive_reopt::evaluate_reopt_decision(
-        100, 1000, 5_000.0, 1_000.0, 5_000.0, &config,
-    );
+    let d3 =
+        progressive_reopt::evaluate_reopt_decision(100, 1000, 5_000.0, 1_000.0, 5_000.0, &config);
     assert!(!d3.should_switch);
 }
 
@@ -1442,16 +1445,11 @@ fn test_cost_decrease_across_multiple_scenarios() {
 
 #[test]
 fn test_replace_subtree_at_leaf() {
-    let plan = join(
-        scan("orders"),
-        scan("customers"),
-        eq(col("cid"), col("id")),
-    );
+    let plan = join(scan("orders"), scan("customers"), eq(col("cid"), col("id")));
     let target = scan("orders");
     let replacement = scan("materialized_orders");
 
-    let (new_plan, replaced) =
-        plan_stitch::replace_subtree(&plan, &target, &replacement);
+    let (new_plan, replaced) = plan_stitch::replace_subtree(&plan, &target, &replacement);
     assert!(replaced);
 
     if let RelExpr::Join { left, .. } = &new_plan {
@@ -1467,27 +1465,18 @@ fn test_replace_subtree_at_leaf() {
 
 #[test]
 fn test_replace_subtree_no_match() {
-    let plan = join(
-        scan("orders"),
-        scan("customers"),
-        eq(col("cid"), col("id")),
-    );
+    let plan = join(scan("orders"), scan("customers"), eq(col("cid"), col("id")));
     let target = scan("nonexistent");
     let replacement = scan("replacement");
 
-    let (new_plan, replaced) =
-        plan_stitch::replace_subtree(&plan, &target, &replacement);
+    let (new_plan, replaced) = plan_stitch::replace_subtree(&plan, &target, &replacement);
     assert!(!replaced);
     assert_eq!(new_plan, plan);
 }
 
 #[test]
 fn test_replace_subtree_nested() {
-    let inner_join = join(
-        scan("a"),
-        scan("b"),
-        eq(col("a.id"), col("b.aid")),
-    );
+    let inner_join = join(scan("a"), scan("b"), eq(col("a.id"), col("b.aid")));
     let plan = sort(aggregate(join(
         inner_join.clone(),
         scan("c"),
@@ -1495,8 +1484,7 @@ fn test_replace_subtree_nested() {
     )));
 
     let replacement = scan("materialized_ab");
-    let (new_plan, replaced) =
-        plan_stitch::replace_subtree(&plan, &inner_join, &replacement);
+    let (new_plan, replaced) = plan_stitch::replace_subtree(&plan, &inner_join, &replacement);
     assert!(replaced);
 
     // The inner join should be replaced but the outer structure
@@ -1583,27 +1571,18 @@ fn test_differential_verify_after_stitch() {
         eq(col("customers.id"), col("orders.cid")),
     )));
 
-    let result =
-        plan_stitch::differential_verify(&original, &reoptimized);
+    let result = plan_stitch::differential_verify(&original, &reoptimized);
     assert!(result.tables_equivalent);
     assert_eq!(result.old_stitch_points, result.new_stitch_points);
 }
 
 #[test]
 fn test_differential_verify_stitch_preserves_tables() {
-    let original = join(
-        scan("orders"),
-        scan("customers"),
-        eq(col("cid"), col("id")),
-    );
+    let original = join(scan("orders"), scan("customers"), eq(col("cid"), col("id")));
 
     // Stitch: replace left child with materialized.
     let materialized = scan("orders");
-    let reoptimized = join(
-        scan("customers"),
-        scan("orders"),
-        eq(col("id"), col("cid")),
-    );
+    let reoptimized = join(scan("customers"), scan("orders"), eq(col("id"), col("cid")));
 
     let stitched = plan_stitch::stitch_plans(
         &materialized,
@@ -1622,8 +1601,7 @@ fn test_differential_verify_stitch_preserves_tables() {
     // Original references "orders" + "customers".
     // Table equivalence check is against original vs reoptimized
     // (before stitch), which should pass.
-    let pre_stitch_result =
-        plan_stitch::differential_verify(&original, &reoptimized);
+    let pre_stitch_result = plan_stitch::differential_verify(&original, &reoptimized);
     assert!(pre_stitch_result.tables_equivalent);
     assert_eq!(stitched.stitch_points_applied, 1);
 }
@@ -1667,8 +1645,7 @@ fn test_full_pipeline_quick_return_background_improve_stitch() {
 
     // Phase 2: Background completes within 500ms.
     let bg_start = Instant::now();
-    let bg_result =
-        handle.recv().expect("background should complete");
+    let bg_result = handle.recv().expect("background should complete");
     let bg_elapsed = bg_start.elapsed();
     assert!(
         bg_elapsed < std::time::Duration::from_millis(500),
@@ -1676,15 +1653,13 @@ fn test_full_pipeline_quick_return_background_improve_stitch() {
         bg_elapsed.as_millis(),
     );
     assert!(bg_result.completed);
-    let bg_plan =
-        bg_result.improved_plan.expect("should have improved plan");
+    let bg_plan = bg_result.improved_plan.expect("should have improved plan");
 
     // Phase 3: Verify table equivalence (same base tables).
     assert!(plan_stitch::verify_join_order_equivalence(
         &original, &bg_plan,
     ));
-    let diff =
-        plan_stitch::differential_verify(&original, &bg_plan);
+    let diff = plan_stitch::differential_verify(&original, &bg_plan);
     assert!(diff.tables_equivalent);
 
     // Phase 4: Stitch and verify cost decrease is possible.
@@ -1716,8 +1691,5 @@ fn test_full_pipeline_quick_return_background_improve_stitch() {
         decision.should_switch,
         "Decision should favor the improved plan"
     );
-    assert!(
-        decision.alternative_total_cost
-            < decision.remaining_current_cost,
-    );
+    assert!(decision.alternative_total_cost < decision.remaining_current_cost,);
 }

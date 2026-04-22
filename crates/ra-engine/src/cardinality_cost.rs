@@ -64,9 +64,7 @@ impl CardinalityAwareCostFn {
     ) -> Self {
         Self {
             estimator: Arc::new(HeuristicEstimator),
-            stats_provider: Arc::new(TableStatsProvider {
-                stats: table_stats,
-            }),
+            stats_provider: Arc::new(TableStatsProvider { stats: table_stats }),
             hardware,
             staleness_map,
         }
@@ -77,15 +75,13 @@ impl CardinalityAwareCostFn {
     /// cardinality scaling is implemented.
     #[allow(dead_code)]
     fn staleness_factor(&self, table: &str) -> f64 {
-        self.staleness_map
-            .get(table)
-            .map_or(1.0, |s| match s {
-                Staleness::Fresh => 1.0,
-                Staleness::SlightlyStale => 1.05,
-                Staleness::ModeratelyStale => 1.2,
-                Staleness::VeryStale => 1.5,
-                Staleness::Unknown => 2.0,
-            })
+        self.staleness_map.get(table).map_or(1.0, |s| match s {
+            Staleness::Fresh => 1.0,
+            Staleness::SlightlyStale => 1.05,
+            Staleness::ModeratelyStale => 1.2,
+            Staleness::VeryStale => 1.5,
+            Staleness::Unknown => 2.0,
+        })
     }
 }
 
@@ -164,17 +160,10 @@ mod tests {
     fn cost_function_basic() {
         let hardware = HardwareProfile::cpu_only();
         let mut table_stats = HashMap::new();
-        table_stats.insert(
-            "users".to_string(),
-            Statistics::new(1_000_000.0),
-        );
+        table_stats.insert("users".to_string(), Statistics::new(1_000_000.0));
         let staleness = HashMap::new();
 
-        let cost_fn = CardinalityAwareCostFn::new(
-            hardware,
-            table_stats,
-            staleness,
-        );
+        let cost_fn = CardinalityAwareCostFn::new(hardware, table_stats, staleness);
 
         let scan = RelExpr::scan("users");
         let filter = scan.filter(Expr::BinOp {
@@ -234,10 +223,7 @@ mod tests {
     #[test]
     fn cost_fn_with_zero_row_table() {
         let mut table_stats = HashMap::new();
-        table_stats.insert(
-            "empty_table".to_string(),
-            Statistics::new(0.0),
-        );
+        table_stats.insert("empty_table".to_string(), Statistics::new(0.0));
 
         let cost_fn = make_cost_fn(table_stats, HashMap::new());
 
@@ -252,11 +238,7 @@ mod tests {
         table_stats: HashMap<String, Statistics>,
         staleness: HashMap<String, Staleness>,
     ) -> CardinalityAwareCostFn {
-        CardinalityAwareCostFn::new(
-            HardwareProfile::cpu_only(),
-            table_stats,
-            staleness,
-        )
+        CardinalityAwareCostFn::new(HardwareProfile::cpu_only(), table_stats, staleness)
     }
 
     // ---- CostFunction<RelLang>::cost tests ----
@@ -271,10 +253,7 @@ mod tests {
 
     #[test]
     fn cost_fn_scan_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
         let node = RelLang::Scan([Id::from(0)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
@@ -285,12 +264,8 @@ mod tests {
 
     #[test]
     fn cost_fn_filter_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node =
-            RelLang::Filter([Id::from(0), Id::from(1)]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Filter([Id::from(0), Id::from(1)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         // 256-bit SIMD default: factor = 256/256 = 1.0
         // cost = 10.0 * 1.0 = 10.0
@@ -299,12 +274,8 @@ mod tests {
 
     #[test]
     fn cost_fn_project_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node =
-            RelLang::Project([Id::from(0), Id::from(1)]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Project([Id::from(0), Id::from(1)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
             (c - 5.0).abs() < f64::EPSILON,
@@ -314,76 +285,40 @@ mod tests {
 
     #[test]
     fn cost_fn_join_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::Join([
-            Id::from(0),
-            Id::from(1),
-            Id::from(2),
-            Id::from(3),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Join([Id::from(0), Id::from(1), Id::from(2), Id::from(3)]);
         let c = cost_fn.cost(&node, zero_child_cost);
-        assert!(
-            c > 0.0,
-            "Join cost should be positive, got {c}",
-        );
+        assert!(c > 0.0, "Join cost should be positive, got {c}",);
     }
 
     #[test]
     fn cost_fn_aggregate_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::Aggregate([
-            Id::from(0),
-            Id::from(1),
-            Id::from(2),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Aggregate([Id::from(0), Id::from(1), Id::from(2)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(c > 0.0);
     }
 
     #[test]
     fn cost_fn_sort_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node =
-            RelLang::Sort([Id::from(0), Id::from(1)]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Sort([Id::from(0), Id::from(1)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(c > 0.0);
     }
 
     #[test]
     fn cost_fn_incremental_sort_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::IncrementalSort([
-            Id::from(0),
-            Id::from(1),
-            Id::from(2),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::IncrementalSort([Id::from(0), Id::from(1), Id::from(2)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(c > 0.0);
     }
 
     #[test]
     fn cost_fn_limit_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::Limit([
-            Id::from(0),
-            Id::from(1),
-            Id::from(2),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Limit([Id::from(0), Id::from(1), Id::from(2)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
             (c - 0.5).abs() < f64::EPSILON,
@@ -393,15 +328,8 @@ mod tests {
 
     #[test]
     fn cost_fn_union_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::Union([
-            Id::from(0),
-            Id::from(1),
-            Id::from(2),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Union([Id::from(0), Id::from(1), Id::from(2)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
             (c - 50.0).abs() < f64::EPSILON,
@@ -411,40 +339,24 @@ mod tests {
 
     #[test]
     fn cost_fn_window_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node =
-            RelLang::Window([Id::from(0), Id::from(1)]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Window([Id::from(0), Id::from(1)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(c > 0.0);
     }
 
     #[test]
     fn cost_fn_distinct_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node =
-            RelLang::DistinctRel([Id::from(0)]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::DistinctRel([Id::from(0)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(c > 0.0);
     }
 
     #[test]
     fn cost_fn_index_only_scan_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::IndexOnlyScan([
-            Id::from(0),
-            Id::from(1),
-            Id::from(2),
-            Id::from(3),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::IndexOnlyScan([Id::from(0), Id::from(1), Id::from(2), Id::from(3)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
             (c - 5.0).abs() < f64::EPSILON,
@@ -454,15 +366,8 @@ mod tests {
 
     #[test]
     fn cost_fn_bitmap_index_scan_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::BitmapIndexScan([
-            Id::from(0),
-            Id::from(1),
-            Id::from(2),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::BitmapIndexScan([Id::from(0), Id::from(1), Id::from(2)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
             (c - 30.0).abs() < f64::EPSILON,
@@ -472,15 +377,8 @@ mod tests {
 
     #[test]
     fn cost_fn_bitmap_heap_scan_node() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::BitmapHeapScan([
-            Id::from(0),
-            Id::from(1),
-            Id::from(2),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::BitmapHeapScan([Id::from(0), Id::from(1), Id::from(2)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
             (c - 40.0).abs() < f64::EPSILON,
@@ -490,14 +388,8 @@ mod tests {
 
     #[test]
     fn cost_fn_metadata_lookup_returns_early() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node = RelLang::MetadataLookup([
-            Id::from(0),
-            Id::from(1),
-        ]);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::MetadataLookup([Id::from(0), Id::from(1)]);
         let c = cost_fn.cost(&node, |_| 999.0);
         // MetadataLookup returns 1.0 immediately,
         // ignoring child costs
@@ -509,21 +401,13 @@ mod tests {
 
     #[test]
     fn cost_fn_child_costs_are_summed() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let node =
-            RelLang::Filter([Id::from(0), Id::from(1)]);
-        let with_children =
-            cost_fn.cost(&node, |_| 100.0);
-        let without_children =
-            cost_fn.cost(&node, zero_child_cost);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let node = RelLang::Filter([Id::from(0), Id::from(1)]);
+        let with_children = cost_fn.cost(&node, |_| 100.0);
+        let without_children = cost_fn.cost(&node, zero_child_cost);
         // Two children at 100 each
         assert!(
-            (with_children - without_children - 200.0)
-                .abs()
-                < f64::EPSILON,
+            (with_children - without_children - 200.0).abs() < f64::EPSILON,
             "Child costs should sum to 200.0, \
              diff = {}",
             with_children - without_children,
@@ -532,18 +416,11 @@ mod tests {
 
     #[test]
     fn cost_fn_scan_alias_same_as_scan() {
-        let mut cost_fn = make_cost_fn(
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let scan_node =
-            RelLang::Scan([Id::from(0)]);
-        let alias_node =
-            RelLang::ScanAlias([Id::from(0), Id::from(1)]);
-        let scan_cost =
-            cost_fn.cost(&scan_node, zero_child_cost);
-        let alias_cost =
-            cost_fn.cost(&alias_node, zero_child_cost);
+        let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        let scan_node = RelLang::Scan([Id::from(0)]);
+        let alias_node = RelLang::ScanAlias([Id::from(0), Id::from(1)]);
+        let scan_cost = cost_fn.cost(&scan_node, zero_child_cost);
+        let alias_cost = cost_fn.cost(&alias_node, zero_child_cost);
         assert!(
             (scan_cost - alias_cost).abs() < f64::EPSILON,
             "ScanAlias cost should equal Scan cost",

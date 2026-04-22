@@ -38,9 +38,7 @@ const DEFAULT_ALPHA: f64 = 0.2;
 const DEFAULT_BIAS_THRESHOLD: f64 = 1.2;
 
 /// Operator categories for which we track separate calibration.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperatorKind {
     /// Sequential scan.
     Scan,
@@ -270,27 +268,17 @@ impl AdaptiveCalibrator {
     /// Returns 1.0 (no correction) until enough samples are
     /// collected and systematic bias is detected.
     #[must_use]
-    pub fn correction_factor(
-        &self,
-        operator: OperatorKind,
-    ) -> f64 {
+    pub fn correction_factor(&self, operator: OperatorKind) -> f64 {
         self.state
             .operators
             .get(&operator)
-            .filter(|cal| {
-                cal.sample_count >= self.state.config.min_samples
-                    && cal.bias_detected
-            })
+            .filter(|cal| cal.sample_count >= self.state.config.min_samples && cal.bias_detected)
             .map_or(1.0, |cal| cal.correction_factor)
     }
 
     /// Apply a cost estimate adjusted by the calibration factor.
     #[must_use]
-    pub fn adjust_cost(
-        &self,
-        operator: OperatorKind,
-        base_cost: f64,
-    ) -> f64 {
+    pub fn adjust_cost(&self, operator: OperatorKind, base_cost: f64) -> f64 {
         base_cost * self.correction_factor(operator)
     }
 
@@ -309,11 +297,7 @@ impl AdaptiveCalibrator {
         for fb in feedback {
             self.state.total_observations += 1;
 
-            let cal = self
-                .state
-                .operators
-                .entry(fb.operator)
-                .or_default();
+            let cal = self.state.operators.entry(fb.operator).or_default();
 
             let ratio = fb.cost_ratio();
             let q_err = fb.q_error();
@@ -322,22 +306,16 @@ impl AdaptiveCalibrator {
                 cal.correction_factor = ratio;
                 cal.mean_q_error = q_err;
             } else {
-                cal.correction_factor = alpha * ratio
-                    + (1.0 - alpha) * cal.correction_factor;
-                cal.mean_q_error = alpha * q_err
-                    + (1.0 - alpha) * cal.mean_q_error;
+                cal.correction_factor = alpha * ratio + (1.0 - alpha) * cal.correction_factor;
+                cal.mean_q_error = alpha * q_err + (1.0 - alpha) * cal.mean_q_error;
             }
 
-            cal.correction_factor =
-                cal.correction_factor.clamp(min_corr, max_corr);
+            cal.correction_factor = cal.correction_factor.clamp(min_corr, max_corr);
             cal.sample_count += 1;
 
             let was_biased = cal.bias_detected;
-            cal.bias_detected =
-                cal.sample_count >= self.state.config.min_samples
-                    && (cal.correction_factor > threshold
-                        || cal.correction_factor
-                            < 1.0 / threshold);
+            cal.bias_detected = cal.sample_count >= self.state.config.min_samples
+                && (cal.correction_factor > threshold || cal.correction_factor < 1.0 / threshold);
 
             if cal.bias_detected != was_biased {
                 bias_changes += 1;
@@ -356,9 +334,7 @@ impl AdaptiveCalibrator {
 
     /// Reset all calibration state.
     pub fn reset_all(&mut self) {
-        self.state = CalibrationState::with_config(
-            self.state.config.clone(),
-        );
+        self.state = CalibrationState::with_config(self.state.config.clone());
     }
 
     /// Total feedback observations processed.
@@ -400,10 +376,7 @@ pub fn classify_operator(description: &str) -> Option<OperatorKind> {
         Some(OperatorKind::NestedLoopJoin)
     } else if lower.contains("sort") {
         Some(OperatorKind::Sort)
-    } else if lower.contains("aggregate")
-        || lower.contains("group")
-        || lower.contains("hash agg")
-    {
+    } else if lower.contains("aggregate") || lower.contains("group") || lower.contains("hash agg") {
         Some(OperatorKind::Aggregate)
     } else if lower.contains("filter") {
         Some(OperatorKind::Filter)
@@ -424,10 +397,7 @@ pub fn feedback_from_timeline(
 ) -> Vec<CostFeedback> {
     let mut result = Vec::new();
     for entry in entries {
-        let operator = entry
-            .operator
-            .as_deref()
-            .and_then(classify_operator);
+        let operator = entry.operator.as_deref().and_then(classify_operator);
         let Some(operator) = operator else {
             continue;
         };
@@ -455,10 +425,7 @@ pub fn feedback_from_timeline(
 mod tests {
     use super::*;
 
-    fn scan_feedback(
-        estimated_cost: f64,
-        actual_cost: f64,
-    ) -> CostFeedback {
+    fn scan_feedback(estimated_cost: f64, actual_cost: f64) -> CostFeedback {
         CostFeedback {
             operator: OperatorKind::Scan,
             estimated_cost,
@@ -468,10 +435,7 @@ mod tests {
         }
     }
 
-    fn join_feedback(
-        estimated_cost: f64,
-        actual_cost: f64,
-    ) -> CostFeedback {
+    fn join_feedback(estimated_cost: f64, actual_cost: f64) -> CostFeedback {
         CostFeedback {
             operator: OperatorKind::HashJoin,
             estimated_cost,
@@ -575,10 +539,7 @@ mod tests {
     fn default_calibrator_no_correction() {
         let cal = AdaptiveCalibrator::default();
         for kind in OperatorKind::ALL {
-            assert!(
-                (cal.correction_factor(kind) - 1.0).abs()
-                    < f64::EPSILON
-            );
+            assert!((cal.correction_factor(kind) - 1.0).abs() < f64::EPSILON);
         }
     }
 
@@ -609,37 +570,29 @@ mod tests {
     fn ingest_below_min_samples_no_correction() {
         let mut cal = AdaptiveCalibrator::default();
         // 4 observations < min_samples(5)
-        let feedback: Vec<CostFeedback> =
-            (0..4).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..4).map(|_| scan_feedback(100.0, 300.0)).collect();
         cal.ingest(&feedback);
-        assert!(
-            (cal.correction_factor(OperatorKind::Scan) - 1.0).abs()
-                < f64::EPSILON
-        );
+        assert!((cal.correction_factor(OperatorKind::Scan) - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn ingest_enough_samples_detects_bias() {
         let mut cal = AdaptiveCalibrator::default();
         // cost ratio = 3.0 consistently, well above threshold 1.2
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
         cal.ingest(&feedback);
 
         let factor = cal.correction_factor(OperatorKind::Scan);
         assert!(factor > 1.0, "should detect underestimate bias");
 
         let biased = cal.biased_operators();
-        assert!(
-            biased.iter().any(|(k, _)| *k == OperatorKind::Scan)
-        );
+        assert!(biased.iter().any(|(k, _)| *k == OperatorKind::Scan));
     }
 
     #[test]
     fn ingest_perfect_estimates_no_bias() {
         let mut cal = AdaptiveCalibrator::default();
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 100.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 100.0)).collect();
         cal.ingest(&feedback);
 
         assert!(!cal
@@ -653,24 +606,18 @@ mod tests {
     fn ingest_overestimate_bias() {
         let mut cal = AdaptiveCalibrator::default();
         // actual << estimated => correction factor < 1.0
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(300.0, 100.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(300.0, 100.0)).collect();
         cal.ingest(&feedback);
 
         let factor = cal.correction_factor(OperatorKind::Scan);
-        assert!(
-            factor < 1.0,
-            "correction should be < 1 for overestimates"
-        );
+        assert!(factor < 1.0, "correction should be < 1 for overestimates");
     }
 
     #[test]
     fn correction_factor_clamped_high() {
         let mut cal = AdaptiveCalibrator::default();
         // extreme underestimate: actual = 10000x estimated
-        let feedback: Vec<CostFeedback> = (0..20)
-            .map(|_| scan_feedback(1.0, 100_000.0))
-            .collect();
+        let feedback: Vec<CostFeedback> = (0..20).map(|_| scan_feedback(1.0, 100_000.0)).collect();
         cal.ingest(&feedback);
 
         let factor = cal.correction_factor(OperatorKind::Scan);
@@ -680,9 +627,7 @@ mod tests {
     #[test]
     fn correction_factor_clamped_low() {
         let mut cal = AdaptiveCalibrator::default();
-        let feedback: Vec<CostFeedback> = (0..20)
-            .map(|_| scan_feedback(100_000.0, 1.0))
-            .collect();
+        let feedback: Vec<CostFeedback> = (0..20).map(|_| scan_feedback(100_000.0, 1.0)).collect();
         cal.ingest(&feedback);
 
         let factor = cal
@@ -690,10 +635,7 @@ mod tests {
             .operators
             .get(&OperatorKind::Scan)
             .map_or(1.0, |c| c.correction_factor);
-        assert!(
-            factor >= 0.1,
-            "should be clamped to min_correction"
-        );
+        assert!(factor >= 0.1, "should be clamped to min_correction");
     }
 
     // -- EWMA convergence --
@@ -722,18 +664,14 @@ mod tests {
     #[test]
     fn independent_operator_calibration() {
         let mut cal = AdaptiveCalibrator::default();
-        let scan_fb: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
-        let join_fb: Vec<CostFeedback> =
-            (0..10).map(|_| join_feedback(100.0, 100.0)).collect();
+        let scan_fb: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let join_fb: Vec<CostFeedback> = (0..10).map(|_| join_feedback(100.0, 100.0)).collect();
 
         cal.ingest(&scan_fb);
         cal.ingest(&join_fb);
 
-        let scan_factor =
-            cal.correction_factor(OperatorKind::Scan);
-        let join_factor =
-            cal.correction_factor(OperatorKind::HashJoin);
+        let scan_factor = cal.correction_factor(OperatorKind::Scan);
+        let join_factor = cal.correction_factor(OperatorKind::HashJoin);
 
         assert!(scan_factor > 1.0);
         assert!(
@@ -747,8 +685,7 @@ mod tests {
     #[test]
     fn reset_operator_clears_state() {
         let mut cal = AdaptiveCalibrator::default();
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
         cal.ingest(&feedback);
 
         cal.reset_operator(OperatorKind::Scan);
@@ -763,8 +700,7 @@ mod tests {
     #[test]
     fn reset_all_clears_everything() {
         let mut cal = AdaptiveCalibrator::default();
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
         cal.ingest(&feedback);
 
         cal.reset_all();
@@ -777,19 +713,13 @@ mod tests {
     #[test]
     fn roundtrip_toml_serialization() {
         let mut cal = AdaptiveCalibrator::default();
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 200.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 200.0)).collect();
         cal.ingest(&feedback);
 
-        let toml_str =
-            cal.state().to_toml().expect("serialization failed");
-        let restored = CalibrationState::from_toml(&toml_str)
-            .expect("deserialization failed");
+        let toml_str = cal.state().to_toml().expect("serialization failed");
+        let restored = CalibrationState::from_toml(&toml_str).expect("deserialization failed");
 
-        assert_eq!(
-            restored.total_observations,
-            cal.state().total_observations
-        );
+        assert_eq!(restored.total_observations, cal.state().total_observations);
         let orig = cal
             .state()
             .operators
@@ -799,27 +729,20 @@ mod tests {
             .operators
             .get(&OperatorKind::Scan)
             .expect("scan should exist");
-        assert!(
-            (orig.correction_factor - rest.correction_factor).abs()
-                < f64::EPSILON
-        );
+        assert!((orig.correction_factor - rest.correction_factor).abs() < f64::EPSILON);
         assert_eq!(orig.sample_count, rest.sample_count);
     }
 
     #[test]
     fn from_state_preserves_calibration() {
         let mut cal = AdaptiveCalibrator::default();
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
         cal.ingest(&feedback);
 
         let state = cal.state().clone();
         let restored = AdaptiveCalibrator::from_state(state);
 
-        assert_eq!(
-            restored.total_observations(),
-            cal.total_observations()
-        );
+        assert_eq!(restored.total_observations(), cal.total_observations());
         assert!(
             (restored.correction_factor(OperatorKind::Scan)
                 - cal.correction_factor(OperatorKind::Scan))
@@ -848,10 +771,7 @@ mod tests {
 
     #[test]
     fn classify_hash_join() {
-        assert_eq!(
-            classify_operator("Hash Join"),
-            Some(OperatorKind::HashJoin)
-        );
+        assert_eq!(classify_operator("Hash Join"), Some(OperatorKind::HashJoin));
     }
 
     #[test]
@@ -872,10 +792,7 @@ mod tests {
 
     #[test]
     fn classify_sort() {
-        assert_eq!(
-            classify_operator("Sort"),
-            Some(OperatorKind::Sort)
-        );
+        assert_eq!(classify_operator("Sort"), Some(OperatorKind::Sort));
     }
 
     #[test]
@@ -940,12 +857,8 @@ mod tests {
         let result = feedback_from_timeline(&entries);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].operator, OperatorKind::Scan);
-        assert!(
-            (result[0].estimated_cost - 100.0).abs() < f64::EPSILON
-        );
-        assert!(
-            (result[0].actual_cost - 200.0).abs() < f64::EPSILON
-        );
+        assert!((result[0].estimated_cost - 100.0).abs() < f64::EPSILON);
+        assert!((result[0].actual_cost - 200.0).abs() < f64::EPSILON);
     }
 
     // -- adjust_cost with bias --
@@ -953,15 +866,11 @@ mod tests {
     #[test]
     fn adjust_cost_with_detected_bias() {
         let mut cal = AdaptiveCalibrator::default();
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
         cal.ingest(&feedback);
 
         let adjusted = cal.adjust_cost(OperatorKind::Scan, 100.0);
-        assert!(
-            adjusted > 100.0,
-            "adjusted cost should be higher than base"
-        );
+        assert!(adjusted > 100.0, "adjusted cost should be higher than base");
     }
 
     // -- biased_operators --
@@ -975,8 +884,7 @@ mod tests {
     #[test]
     fn biased_operators_returns_only_biased() {
         let mut cal = AdaptiveCalibrator::default();
-        let feedback: Vec<CostFeedback> =
-            (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..10).map(|_| scan_feedback(100.0, 300.0)).collect();
         cal.ingest(&feedback);
 
         let biased = cal.biased_operators();
@@ -1003,8 +911,7 @@ mod tests {
             ..CalibrationConfig::default()
         };
         let mut cal = AdaptiveCalibrator::with_config(config);
-        let feedback: Vec<CostFeedback> =
-            (0..5).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let feedback: Vec<CostFeedback> = (0..5).map(|_| scan_feedback(100.0, 300.0)).collect();
         cal.ingest(&feedback);
 
         // Higher alpha => converges faster toward 3.0
@@ -1022,8 +929,7 @@ mod tests {
     fn ingest_returns_bias_changes() {
         let mut cal = AdaptiveCalibrator::default();
         // First 4 samples: no bias detected (below min_samples)
-        let fb4: Vec<CostFeedback> =
-            (0..4).map(|_| scan_feedback(100.0, 300.0)).collect();
+        let fb4: Vec<CostFeedback> = (0..4).map(|_| scan_feedback(100.0, 300.0)).collect();
         let changes = cal.ingest(&fb4);
         assert_eq!(changes, 0);
 

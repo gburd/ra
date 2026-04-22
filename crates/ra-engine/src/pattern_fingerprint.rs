@@ -425,10 +425,7 @@ mod tests {
 
     #[test]
     fn expr_complexity_column() {
-        assert_eq!(
-            expr_complexity(&Expr::Column(ColumnRef::new("a"))),
-            1
-        );
+        assert_eq!(expr_complexity(&Expr::Column(ColumnRef::new("a"))), 1);
     }
 
     #[test]
@@ -459,10 +456,7 @@ mod tests {
     fn expr_complexity_case() {
         let e = Expr::Case {
             operand: None,
-            when_clauses: vec![(
-                Expr::Const(Const::Bool(true)),
-                Expr::Const(Const::Int(1)),
-            )],
+            when_clauses: vec![(Expr::Const(Const::Bool(true)), Expr::Const(Const::Int(1)))],
             else_result: Some(Box::new(Expr::Const(Const::Int(0)))),
         };
         // 1 (case) + 1 + 1 (when clause) + 1 (else) = 4
@@ -480,10 +474,7 @@ mod tests {
 
     #[test]
     fn expr_complexity_array() {
-        let e = Expr::Array(vec![
-            Expr::Const(Const::Int(1)),
-            Expr::Const(Const::Int(2)),
-        ]);
+        let e = Expr::Array(vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(2))]);
         assert_eq!(expr_complexity(&e), 3);
     }
 
@@ -568,19 +559,13 @@ mod tests {
 
     #[test]
     fn has_agg_below_join_yes() {
-        let plan = make_inner_join(
-            make_aggregate(RelExpr::scan("a")),
-            RelExpr::scan("b"),
-        );
+        let plan = make_inner_join(make_aggregate(RelExpr::scan("a")), RelExpr::scan("b"));
         assert!(has_agg_below_join(&plan));
     }
 
     #[test]
     fn has_agg_below_join_no_agg_above_join() {
-        let plan = make_aggregate(make_inner_join(
-            RelExpr::scan("a"),
-            RelExpr::scan("b"),
-        ));
+        let plan = make_aggregate(make_inner_join(RelExpr::scan("a"), RelExpr::scan("b")));
         assert!(!has_agg_below_join(&plan));
     }
 
@@ -634,10 +619,7 @@ mod tests {
 
     #[test]
     fn fingerprint_with_early_aggregation() {
-        let plan = make_inner_join(
-            make_aggregate(RelExpr::scan("a")),
-            RelExpr::scan("b"),
-        );
+        let plan = make_inner_join(make_aggregate(RelExpr::scan("a")), RelExpr::scan("b"));
         let fp = PlanFingerprint::from_plan(&plan);
         assert!(fp.has_early_aggregation);
     }

@@ -50,16 +50,8 @@ fn make_optimizer_with_stats(table_names: &[&str]) -> Optimizer {
 fn test_cost_pruning_enabled() {
     // Create a query that benefits from cost pruning
     let query = join(
-        join(
-            scan("t1"),
-            scan("t2"),
-            eq(col("t1.id"), col("t2.id")),
-        ),
-        join(
-            scan("t3"),
-            scan("t4"),
-            eq(col("t3.id"), col("t4.id")),
-        ),
+        join(scan("t1"), scan("t2"), eq(col("t1.id"), col("t2.id"))),
+        join(scan("t3"), scan("t4"), eq(col("t3.id"), col("t4.id"))),
         eq(col("t2.id"), col("t3.id")),
     );
 
@@ -95,11 +87,7 @@ fn test_cost_pruning_disabled() {
 fn test_cost_pruning_threshold_validation() {
     // Test different pruning thresholds
     let query = join(
-        join(
-            scan("a"),
-            scan("b"),
-            eq(col("a.id"), col("b.id")),
-        ),
+        join(scan("a"), scan("b"), eq(col("a.id"), col("b.id"))),
         scan("c"),
         eq(col("b.id"), col("c.id")),
     );

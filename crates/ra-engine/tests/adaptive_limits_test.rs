@@ -159,11 +159,7 @@ fn test_adaptive_limits_vs_fixed() {
 
     // Should see at least 1.5x speedup
     let speedup = elapsed_fixed.as_secs_f64() / elapsed_adaptive.as_secs_f64();
-    assert!(
-        speedup > 1.5,
-        "Expected >1.5x speedup, got {:.2}x",
-        speedup
-    );
+    assert!(speedup > 1.5, "Expected >1.5x speedup, got {:.2}x", speedup);
 }
 
 #[test]
@@ -172,10 +168,7 @@ fn test_query_complexity_classification() {
 
     // Trivial (1 table)
     let query = scan("users");
-    assert_eq!(
-        QueryComplexity::from_expr(&query),
-        QueryComplexity::Trivial
-    );
+    assert_eq!(QueryComplexity::from_expr(&query), QueryComplexity::Trivial);
 
     // Simple (2 tables)
     let query = join(scan("users"), scan("orders"), eq(col("a"), col("b")));
@@ -193,8 +186,5 @@ fn test_query_complexity_classification() {
     for i in 3..=8 {
         query = join(query, scan(&format!("t{}", i)), eq(col("a"), col("b")));
     }
-    assert_eq!(
-        QueryComplexity::from_expr(&query),
-        QueryComplexity::Complex
-    );
+    assert_eq!(QueryComplexity::from_expr(&query), QueryComplexity::Complex);
 }

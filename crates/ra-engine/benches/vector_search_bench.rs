@@ -10,12 +10,11 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_engine::vector_cost::{
-    QueryFrequency, VectorIndexType, VectorMetric, hnsw_search_cost, ivfflat_search_cost,
-    select_vector_index_type, vector_distance_cost, vector_sequential_scan_cost,
+    hnsw_search_cost, ivfflat_search_cost, select_vector_index_type, vector_distance_cost,
+    vector_sequential_scan_cost, QueryFrequency, VectorIndexType, VectorMetric,
 };
 use ra_engine::vector_rules::{
-    VectorIndexParams, estimate_vector_query_cost,
-    optimize_vector_filter_order,
+    estimate_vector_query_cost, optimize_vector_filter_order, VectorIndexParams,
 };
 
 fn bench_distance_costs(c: &mut Criterion) {
@@ -26,9 +25,7 @@ fn bench_distance_costs(c: &mut Criterion) {
             BenchmarkId::new("l2", dimensions),
             &dimensions,
             |b, &dims| {
-                b.iter(|| {
-                    black_box(vector_distance_cost(dims, VectorMetric::L2))
-                });
+                b.iter(|| black_box(vector_distance_cost(dims, VectorMetric::L2)));
             },
         );
 
@@ -36,9 +33,7 @@ fn bench_distance_costs(c: &mut Criterion) {
             BenchmarkId::new("cosine", dimensions),
             &dimensions,
             |b, &dims| {
-                b.iter(|| {
-                    black_box(vector_distance_cost(dims, VectorMetric::Cosine))
-                });
+                b.iter(|| black_box(vector_distance_cost(dims, VectorMetric::Cosine)));
             },
         );
     }
@@ -142,19 +137,8 @@ fn bench_sequential_vs_hnsw(c: &mut Criterion) {
     group.finish();
 
     // Verify speedup target
-    let seq_cost = vector_sequential_scan_cost(
-        dimensions,
-        total_vectors,
-        VectorMetric::L2,
-    );
-    let hnsw_cost = hnsw_search_cost(
-        dimensions,
-        m,
-        ef_search,
-        total_vectors,
-        k,
-        VectorMetric::L2,
-    );
+    let seq_cost = vector_sequential_scan_cost(dimensions, total_vectors, VectorMetric::L2);
+    let hnsw_cost = hnsw_search_cost(dimensions, m, ef_search, total_vectors, k, VectorMetric::L2);
     let speedup = seq_cost.total() / hnsw_cost.total();
 
     println!("HNSW speedup: {:.1}x (target: 10-100x)", speedup);
@@ -200,11 +184,7 @@ fn bench_sequential_vs_ivfflat(c: &mut Criterion) {
     group.finish();
 
     // Verify speedup target
-    let seq_cost = vector_sequential_scan_cost(
-        dimensions,
-        total_vectors,
-        VectorMetric::L2,
-    );
+    let seq_cost = vector_sequential_scan_cost(dimensions, total_vectors, VectorMetric::L2);
     let ivfflat_cost = ivfflat_search_cost(
         dimensions,
         lists,
@@ -256,11 +236,11 @@ fn bench_filter_optimization(c: &mut Criterion) {
     group.bench_function("optimize_filter_order", |b| {
         b.iter(|| {
             black_box(optimize_vector_filter_order(
-                0.8,                       // non-vector selectivity
-                0.01,                      // non-vector cost
-                0.1,                       // vector selectivity
+                0.8,  // non-vector selectivity
+                0.01, // non-vector cost
+                0.1,  // vector selectivity
                 VectorIndexType::HNSW,
-                100_000,                   // total rows
+                100_000, // total rows
             ))
         });
     });
@@ -272,8 +252,8 @@ fn bench_filter_optimization(c: &mut Criterion) {
                 128,
                 100_000,
                 VectorMetric::L2,
-                0.01,   // vector selectivity
-                0.90,   // non-vector selectivity (high)
+                0.01, // vector selectivity
+                0.90, // non-vector selectivity (high)
                 0.001,
                 VectorIndexType::HNSW,
                 params,
@@ -288,8 +268,8 @@ fn bench_filter_optimization(c: &mut Criterion) {
                 128,
                 100_000,
                 VectorMetric::L2,
-                0.01,   // vector selectivity
-                0.05,   // non-vector selectivity (low)
+                0.01, // vector selectivity
+                0.05, // non-vector selectivity (low)
                 0.01,
                 VectorIndexType::HNSW,
                 params,
@@ -353,29 +333,29 @@ fn bench_metric_comparison(c: &mut Criterion) {
     let ef_search = 40;
     let k = 10;
 
-    for metric in [VectorMetric::L2, VectorMetric::InnerProduct, VectorMetric::Cosine] {
+    for metric in [
+        VectorMetric::L2,
+        VectorMetric::InnerProduct,
+        VectorMetric::Cosine,
+    ] {
         let metric_name = match metric {
             VectorMetric::L2 => "l2",
             VectorMetric::InnerProduct => "inner_product",
             VectorMetric::Cosine => "cosine",
         };
 
-        group.bench_with_input(
-            BenchmarkId::new("hnsw", metric_name),
-            &metric,
-            |b, &m| {
-                b.iter(|| {
-                    black_box(hnsw_search_cost(
-                        dimensions,
-                        16,
-                        ef_search,
-                        total_vectors,
-                        k,
-                        m,
-                    ))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("hnsw", metric_name), &metric, |b, &m| {
+            b.iter(|| {
+                black_box(hnsw_search_cost(
+                    dimensions,
+                    16,
+                    ef_search,
+                    total_vectors,
+                    k,
+                    m,
+                ))
+            });
+        });
     }
 
     group.finish();

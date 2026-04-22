@@ -47,14 +47,22 @@ fn eq_pred(left: &str, right: &str) -> Expr {
 #[test]
 fn test_greenplum_motion_broadcast() {
     let optimizer = create_optimizer();
-    let plan = join(scan("large_fact"), scan("small_dim"), eq_pred("dim_id", "id"));
+    let plan = join(
+        scan("large_fact"),
+        scan("small_dim"),
+        eq_pred("dim_id", "id"),
+    );
     assert!(optimizer.optimize(&plan).is_ok());
 }
 
 #[test]
 fn test_greenplum_motion_redistribute() {
     let optimizer = create_optimizer();
-    let plan = join(scan("distributed_a"), scan("distributed_b"), eq_pred("key", "key"));
+    let plan = join(
+        scan("distributed_a"),
+        scan("distributed_b"),
+        eq_pred("key", "key"),
+    );
     assert!(optimizer.optimize(&plan).is_ok());
 }
 
@@ -86,6 +94,10 @@ fn test_greenplum_external_table_projection_pushdown() {
 #[test]
 fn test_greenplum_external_table_join() {
     let optimizer = create_optimizer();
-    let plan = join(scan("internal_table"), scan("external_source"), eq_pred("id", "id"));
+    let plan = join(
+        scan("internal_table"),
+        scan("external_source"),
+        eq_pred("id", "id"),
+    );
     assert!(optimizer.optimize(&plan).is_ok());
 }

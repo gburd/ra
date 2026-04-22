@@ -7,8 +7,8 @@
 //! This reduces extraction time by 30-50% on complex queries while maintaining
 //! plan quality within acceptable bounds.
 
-use std::collections::HashMap;
 use egg::Id;
+use std::collections::HashMap;
 
 /// Tracks best plan costs and determines which equivalence classes to prune.
 #[derive(Debug, Clone)]
@@ -267,9 +267,7 @@ mod tests {
     #[test]
     fn test_threshold_validation() {
         // Should panic with threshold < 1.0
-        let result = std::panic::catch_unwind(|| {
-            CostPruner::new(0.5)
-        });
+        let result = std::panic::catch_unwind(|| CostPruner::new(0.5));
         assert!(result.is_err());
     }
 

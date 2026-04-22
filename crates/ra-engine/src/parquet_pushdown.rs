@@ -24,9 +24,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use ra_core::formats::{
-    FileColumnStats, FileMetadata, RowGroupMeta, ScalarValue,
-};
+use ra_core::formats::{FileColumnStats, FileMetadata, RowGroupMeta, ScalarValue};
 
 /// Result of evaluating a predicate against row group statistics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,10 +82,7 @@ impl std::fmt::Display for CompareOp {
 /// Returns `Pruned` when the statistics prove no rows can match,
 /// `MayMatch` otherwise (including when stats are absent).
 #[must_use]
-pub fn evaluate_predicate(
-    pred: &PushdownPredicate,
-    rg: &RowGroupMeta,
-) -> RowGroupMatch {
+pub fn evaluate_predicate(pred: &PushdownPredicate, rg: &RowGroupMeta) -> RowGroupMatch {
     let Some(stats) = rg.column_stats.get(&pred.column) else {
         return RowGroupMatch::MayMatch;
     };
@@ -104,10 +99,7 @@ pub fn evaluate_predicate(
 /// - `col = val`:  prune if `val < min` or `val > max`
 /// - `col != val`: prune if `min == max == val` (all rows equal)
 #[must_use]
-fn evaluate_against_stats(
-    pred: &PushdownPredicate,
-    stats: &FileColumnStats,
-) -> RowGroupMatch {
+fn evaluate_against_stats(pred: &PushdownPredicate, stats: &FileColumnStats) -> RowGroupMatch {
     let val = &pred.value;
 
     match pred.op {
@@ -137,9 +129,7 @@ fn evaluate_against_stats(
             // col < val: prune when min >= val
             if let Some(min) = &stats.min {
                 match min.partial_cmp_value(val) {
-                    Some(
-                        Ordering::Greater | Ordering::Equal,
-                    ) => {
+                    Some(Ordering::Greater | Ordering::Equal) => {
                         return RowGroupMatch::Pruned;
                     }
                     _ => {}
@@ -160,29 +150,21 @@ fn evaluate_against_stats(
         CompareOp::Eq => {
             // col = val: prune when val < min or val > max
             if let Some(min) = &stats.min {
-                if let Some(Ordering::Less) =
-                    val.partial_cmp_value(min)
-                {
+                if let Some(Ordering::Less) = val.partial_cmp_value(min) {
                     return RowGroupMatch::Pruned;
                 }
             }
             if let Some(max) = &stats.max {
-                if let Some(Ordering::Greater) =
-                    val.partial_cmp_value(max)
-                {
+                if let Some(Ordering::Greater) = val.partial_cmp_value(max) {
                     return RowGroupMatch::Pruned;
                 }
             }
         }
         CompareOp::Ne => {
             // col != val: prune only when min == max == val
-            if let (Some(min), Some(max)) =
-                (&stats.min, &stats.max)
-            {
-                let min_eq = min.partial_cmp_value(val)
-                    == Some(Ordering::Equal);
-                let max_eq = max.partial_cmp_value(val)
-                    == Some(Ordering::Equal);
+            if let (Some(min), Some(max)) = (&stats.min, &stats.max) {
+                let min_eq = min.partial_cmp_value(val) == Some(Ordering::Equal);
+                let max_eq = max.partial_cmp_value(val) == Some(Ordering::Equal);
                 if min_eq && max_eq {
                     return RowGroupMatch::Pruned;
                 }
@@ -200,19 +182,16 @@ fn evaluate_against_stats(
 /// cannot match. If any predicate cannot be evaluated (missing
 /// stats), the group is conservatively included.
 #[must_use]
-pub fn filter_row_groups(
-    predicates: &[PushdownPredicate],
-    metadata: &FileMetadata,
-) -> Vec<usize> {
+pub fn filter_row_groups(predicates: &[PushdownPredicate], metadata: &FileMetadata) -> Vec<usize> {
     if predicates.is_empty() {
         return (0..metadata.row_groups.len()).collect();
     }
 
     let mut surviving = Vec::new();
     for rg in &metadata.row_groups {
-        let pruned = predicates.iter().any(|pred| {
-            evaluate_predicate(pred, rg) == RowGroupMatch::Pruned
-        });
+        let pruned = predicates
+            .iter()
+            .any(|pred| evaluate_predicate(pred, rg) == RowGroupMatch::Pruned);
         if !pruned {
             surviving.push(rg.index);
         }
@@ -226,10 +205,7 @@ pub fn filter_row_groups(
 /// pruned, 1.0 = nothing pruned). The cost model uses this to
 /// discount scan costs.
 #[must_use]
-pub fn pruning_selectivity(
-    total_row_groups: usize,
-    surviving_row_groups: usize,
-) -> f64 {
+pub fn pruning_selectivity(total_row_groups: usize, surviving_row_groups: usize) -> f64 {
     if total_row_groups == 0 {
         return 1.0;
     }
@@ -253,11 +229,7 @@ impl ParquetMetadataRegistry {
     }
 
     /// Register file metadata for a table/file name.
-    pub fn register(
-        &mut self,
-        name: impl Into<String>,
-        metadata: FileMetadata,
-    ) {
+    pub fn register(&mut self, name: impl Into<String>, metadata: FileMetadata) {
         self.files.insert(name.into(), metadata);
     }
 
@@ -287,19 +259,12 @@ impl ParquetMetadataRegistry {
 
     /// Estimate the scan selectivity after pushdown for a table.
     #[must_use]
-    pub fn estimate_selectivity(
-        &self,
-        table: &str,
-        predicates: &[PushdownPredicate],
-    ) -> f64 {
+    pub fn estimate_selectivity(&self, table: &str, predicates: &[PushdownPredicate]) -> f64 {
         let Some(meta) = self.files.get(table) else {
             return 1.0;
         };
         let surviving = filter_row_groups(predicates, meta);
-        pruning_selectivity(
-            meta.row_groups.len(),
-            surviving.len(),
-        )
+        pruning_selectivity(meta.row_groups.len(), surviving.len())
     }
 }
 
@@ -316,10 +281,7 @@ impl ParquetMetadataRegistry {
 /// - `false` for all other formats (RowBased, Columnar, Orc, ArrowIpc, etc.)
 ///
 /// If the table cannot be found in the schema, returns `true` (conservative).
-pub fn is_parquet_storage(
-    table_name: &str,
-    facts: &dyn ra_core::facts::FactsProvider,
-) -> bool {
+pub fn is_parquet_storage(table_name: &str, facts: &dyn ra_core::facts::FactsProvider) -> bool {
     if let Some(table_info) = facts.get_schema(table_name) {
         use ra_core::facts::StorageFormat;
         matches!(
@@ -357,9 +319,8 @@ pub fn is_parquet_storage(
 /// [`is_parquet_storage`] to check each table before applying these
 /// rules.
 #[must_use]
-pub fn parquet_pushdown_rules()
--> Vec<egg::Rewrite<crate::egraph::RelLang, crate::analysis::RelAnalysis>>
-{
+pub fn parquet_pushdown_rules(
+) -> Vec<egg::Rewrite<crate::egraph::RelLang, crate::analysis::RelAnalysis>> {
     use egg::rewrite;
     vec![
         // When a filter sits on top of a scan, the cost model can
@@ -392,10 +353,7 @@ mod tests {
     use super::*;
     use ra_core::formats::{FileColumnStats, ScalarValue};
 
-    fn make_row_group(
-        index: usize,
-        stats: HashMap<String, FileColumnStats>,
-    ) -> RowGroupMeta {
+    fn make_row_group(index: usize, stats: HashMap<String, FileColumnStats>) -> RowGroupMeta {
         RowGroupMeta {
             index,
             offset: 0,
@@ -407,10 +365,7 @@ mod tests {
         }
     }
 
-    fn make_stats(
-        min: i64,
-        max: i64,
-    ) -> FileColumnStats {
+    fn make_stats(min: i64, max: i64) -> FileColumnStats {
         FileColumnStats {
             min: Some(ScalarValue::Int64(min)),
             max: Some(ScalarValue::Int64(max)),
@@ -419,11 +374,8 @@ mod tests {
         }
     }
 
-    fn make_metadata(
-        row_groups: Vec<RowGroupMeta>,
-    ) -> FileMetadata {
-        let total_rows =
-            row_groups.iter().map(|rg| rg.num_rows).sum();
+    fn make_metadata(row_groups: Vec<RowGroupMeta>) -> FileMetadata {
+        let total_rows = row_groups.iter().map(|rg| rg.num_rows).sum();
         FileMetadata {
             schema: ra_core::formats::Schema::default(),
             num_rows: total_rows,
@@ -437,10 +389,7 @@ mod tests {
 
     #[test]
     fn gt_prunes_when_max_le_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(1, 100))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(1, 100))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Gt,
@@ -451,27 +400,18 @@ mod tests {
 
     #[test]
     fn gt_keeps_when_max_gt_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(1, 200))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(1, 200))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Gt,
             value: ScalarValue::Int64(100),
         };
-        assert_eq!(
-            evaluate_predicate(&pred, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred, &rg), RowGroupMatch::MayMatch,);
     }
 
     #[test]
     fn ge_prunes_when_max_lt_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(1, 99))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(1, 99))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Ge,
@@ -482,27 +422,18 @@ mod tests {
 
     #[test]
     fn ge_keeps_when_max_eq_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(1, 100))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(1, 100))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Ge,
             value: ScalarValue::Int64(100),
         };
-        assert_eq!(
-            evaluate_predicate(&pred, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred, &rg), RowGroupMatch::MayMatch,);
     }
 
     #[test]
     fn lt_prunes_when_min_ge_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(100, 200))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(100, 200))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Lt,
@@ -513,27 +444,18 @@ mod tests {
 
     #[test]
     fn lt_keeps_when_min_lt_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(50, 200))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(50, 200))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Lt,
             value: ScalarValue::Int64(100),
         };
-        assert_eq!(
-            evaluate_predicate(&pred, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred, &rg), RowGroupMatch::MayMatch,);
     }
 
     #[test]
     fn le_prunes_when_min_gt_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(101, 200))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(101, 200))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Le,
@@ -544,27 +466,18 @@ mod tests {
 
     #[test]
     fn le_keeps_when_min_eq_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(100, 200))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(100, 200))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Le,
             value: ScalarValue::Int64(100),
         };
-        assert_eq!(
-            evaluate_predicate(&pred, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred, &rg), RowGroupMatch::MayMatch,);
     }
 
     #[test]
     fn eq_prunes_when_val_below_min() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(50, 100))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(50, 100))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Eq,
@@ -575,10 +488,7 @@ mod tests {
 
     #[test]
     fn eq_prunes_when_val_above_max() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(50, 100))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(50, 100))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Eq,
@@ -589,27 +499,18 @@ mod tests {
 
     #[test]
     fn eq_keeps_when_val_in_range() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(50, 100))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(50, 100))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Eq,
             value: ScalarValue::Int64(75),
         };
-        assert_eq!(
-            evaluate_predicate(&pred, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred, &rg), RowGroupMatch::MayMatch,);
     }
 
     #[test]
     fn ne_prunes_when_all_equal_to_val() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(42, 42))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(42, 42))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Ne,
@@ -620,19 +521,13 @@ mod tests {
 
     #[test]
     fn ne_keeps_when_range_wider() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("a".into(), make_stats(40, 50))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("a".into(), make_stats(40, 50))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Ne,
             value: ScalarValue::Int64(42),
         };
-        assert_eq!(
-            evaluate_predicate(&pred, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred, &rg), RowGroupMatch::MayMatch,);
     }
 
     #[test]
@@ -643,27 +538,18 @@ mod tests {
             op: CompareOp::Gt,
             value: ScalarValue::Int64(100),
         };
-        assert_eq!(
-            evaluate_predicate(&pred, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred, &rg), RowGroupMatch::MayMatch,);
     }
 
     #[test]
     fn missing_column_returns_may_match() {
-        let rg = make_row_group(
-            0,
-            HashMap::from([("b".into(), make_stats(1, 100))]),
-        );
+        let rg = make_row_group(0, HashMap::from([("b".into(), make_stats(1, 100))]));
         let pred = PushdownPredicate {
             column: "a".into(),
             op: CompareOp::Gt,
             value: ScalarValue::Int64(50),
         };
-        assert_eq!(
-            evaluate_predicate(&pred, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred, &rg), RowGroupMatch::MayMatch,);
     }
 
     // -- filter_row_groups tests --
@@ -671,22 +557,9 @@ mod tests {
     #[test]
     fn filter_partial_scan() {
         let metadata = make_metadata(vec![
-            make_row_group(
-                0,
-                HashMap::from([("a".into(), make_stats(1, 100))]),
-            ),
-            make_row_group(
-                1,
-                HashMap::from([
-                    ("a".into(), make_stats(101, 200)),
-                ]),
-            ),
-            make_row_group(
-                2,
-                HashMap::from([
-                    ("a".into(), make_stats(201, 300)),
-                ]),
-            ),
+            make_row_group(0, HashMap::from([("a".into(), make_stats(1, 100))])),
+            make_row_group(1, HashMap::from([("a".into(), make_stats(101, 200))])),
+            make_row_group(2, HashMap::from([("a".into(), make_stats(201, 300))])),
         ]);
 
         // a > 150: should keep groups 1 (max=200>150) and 2
@@ -703,16 +576,8 @@ mod tests {
     #[test]
     fn filter_no_match() {
         let metadata = make_metadata(vec![
-            make_row_group(
-                0,
-                HashMap::from([("a".into(), make_stats(1, 100))]),
-            ),
-            make_row_group(
-                1,
-                HashMap::from([
-                    ("a".into(), make_stats(101, 200)),
-                ]),
-            ),
+            make_row_group(0, HashMap::from([("a".into(), make_stats(1, 100))])),
+            make_row_group(1, HashMap::from([("a".into(), make_stats(101, 200))])),
         ]);
 
         // a > 300: all groups pruned
@@ -729,16 +594,8 @@ mod tests {
     #[test]
     fn filter_all_match() {
         let metadata = make_metadata(vec![
-            make_row_group(
-                0,
-                HashMap::from([("a".into(), make_stats(1, 100))]),
-            ),
-            make_row_group(
-                1,
-                HashMap::from([
-                    ("a".into(), make_stats(101, 200)),
-                ]),
-            ),
+            make_row_group(0, HashMap::from([("a".into(), make_stats(1, 100))])),
+            make_row_group(1, HashMap::from([("a".into(), make_stats(101, 200))])),
         ]);
 
         // a > 0: all groups match
@@ -755,16 +612,8 @@ mod tests {
     #[test]
     fn filter_empty_predicates_returns_all() {
         let metadata = make_metadata(vec![
-            make_row_group(
-                0,
-                HashMap::from([("a".into(), make_stats(1, 100))]),
-            ),
-            make_row_group(
-                1,
-                HashMap::from([
-                    ("a".into(), make_stats(101, 200)),
-                ]),
-            ),
+            make_row_group(0, HashMap::from([("a".into(), make_stats(1, 100))])),
+            make_row_group(1, HashMap::from([("a".into(), make_stats(101, 200))])),
         ]);
 
         let surviving = filter_row_groups(&[], &metadata);
@@ -856,18 +705,8 @@ mod tests {
         reg.register(
             "events",
             make_metadata(vec![
-                make_row_group(
-                    0,
-                    HashMap::from([
-                        ("ts".into(), make_stats(1, 100)),
-                    ]),
-                ),
-                make_row_group(
-                    1,
-                    HashMap::from([
-                        ("ts".into(), make_stats(101, 200)),
-                    ]),
-                ),
+                make_row_group(0, HashMap::from([("ts".into(), make_stats(1, 100))])),
+                make_row_group(1, HashMap::from([("ts".into(), make_stats(101, 200))])),
             ]),
         );
 
@@ -889,24 +728,9 @@ mod tests {
         reg.register(
             "events",
             make_metadata(vec![
-                make_row_group(
-                    0,
-                    HashMap::from([
-                        ("ts".into(), make_stats(1, 100)),
-                    ]),
-                ),
-                make_row_group(
-                    1,
-                    HashMap::from([
-                        ("ts".into(), make_stats(101, 200)),
-                    ]),
-                ),
-                make_row_group(
-                    2,
-                    HashMap::from([
-                        ("ts".into(), make_stats(201, 300)),
-                    ]),
-                ),
+                make_row_group(0, HashMap::from([("ts".into(), make_stats(1, 100))])),
+                make_row_group(1, HashMap::from([("ts".into(), make_stats(101, 200))])),
+                make_row_group(2, HashMap::from([("ts".into(), make_stats(201, 300))])),
             ]),
         );
 
@@ -929,10 +753,7 @@ mod tests {
             op: CompareOp::Gt,
             value: ScalarValue::Int64(0),
         }];
-        assert!(
-            (reg.estimate_selectivity("missing", &preds) - 1.0).abs()
-                < f64::EPSILON
-        );
+        assert!((reg.estimate_selectivity("missing", &preds) - 1.0).abs() < f64::EPSILON);
     }
 
     // -- String predicate tests --
@@ -966,10 +787,7 @@ mod tests {
             op: CompareOp::Gt,
             value: ScalarValue::Utf8("bob".into()),
         };
-        assert_eq!(
-            evaluate_predicate(&pred2, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred2, &rg), RowGroupMatch::MayMatch,);
     }
 
     #[test]
@@ -1001,10 +819,7 @@ mod tests {
             op: CompareOp::Eq,
             value: ScalarValue::Float64(25.0),
         };
-        assert_eq!(
-            evaluate_predicate(&pred2, &rg),
-            RowGroupMatch::MayMatch,
-        );
+        assert_eq!(evaluate_predicate(&pred2, &rg), RowGroupMatch::MayMatch,);
     }
 
     // -- Rewrite rule integration test --

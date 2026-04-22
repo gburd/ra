@@ -12,14 +12,9 @@
 
 use std::time::Instant;
 
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, RelExpr,
-};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{
-    CacheMatchType, Optimizer, PlanCache, PlanCacheConfig,
-    QueryFingerprint,
-};
+use ra_engine::{CacheMatchType, Optimizer, PlanCache, PlanCacheConfig, QueryFingerprint};
 
 // ── Query template helpers ──────────────────────────────────────
 
@@ -40,19 +35,13 @@ fn range_scan(threshold: i64, status: &str) -> RelExpr {
         op: BinOp::And,
         left: Box::new(Expr::BinOp {
             op: BinOp::Gt,
-            left: Box::new(Expr::Column(
-                ColumnRef::new("amount"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::new("amount"))),
             right: Box::new(Expr::Const(Const::Int(threshold))),
         }),
         right: Box::new(Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::new("status"),
-            )),
-            right: Box::new(Expr::Const(Const::String(
-                status.to_owned(),
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::new("status"))),
+            right: Box::new(Expr::Const(Const::String(status.to_owned()))),
         }),
     })
 }
@@ -65,12 +54,8 @@ fn join_with_filter(age: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
             op: BinOp::Gt,
@@ -101,17 +86,11 @@ fn aggregation(salary_threshold: i64) -> RelExpr {
                 alias: None,
             },
         ],
-        input: Box::new(
-            RelExpr::scan("employees").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("salary"),
-                )),
-                right: Box::new(Expr::Const(Const::Int(
-                    salary_threshold,
-                ))),
-            }),
-        ),
+        input: Box::new(RelExpr::scan("employees").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("salary"))),
+            right: Box::new(Expr::Const(Const::Int(salary_threshold))),
+        })),
     }
 }
 
@@ -125,12 +104,8 @@ fn three_table_join(price: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users")),
         right: Box::new(RelExpr::scan("orders")),
@@ -139,23 +114,15 @@ fn three_table_join(price: i64) -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "product_id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("products", "id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("orders", "product_id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("products", "id"))),
         },
         left: Box::new(user_orders),
-        right: Box::new(
-            RelExpr::scan("products").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("price"),
-                )),
-                right: Box::new(Expr::Const(Const::Int(price))),
-            }),
-        ),
+        right: Box::new(RelExpr::scan("products").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("price"))),
+            right: Box::new(Expr::Const(Const::Int(price))),
+        })),
     }
 }
 
@@ -459,21 +426,19 @@ fn fuzzy_matching_disabled_only_exact_hits() {
 #[test]
 fn fuzzy_threshold_affects_hit_rate() {
     // With a very high threshold (0.99), fewer fuzzy matches
-    let opt_strict =
-        Optimizer::new().with_plan_cache(PlanCacheConfig {
-            max_entries: 1024,
-            similarity_threshold: 0.99,
-            enable_fuzzy_matching: true,
-            ..PlanCacheConfig::default()
-        });
+    let opt_strict = Optimizer::new().with_plan_cache(PlanCacheConfig {
+        max_entries: 1024,
+        similarity_threshold: 0.99,
+        enable_fuzzy_matching: true,
+        ..PlanCacheConfig::default()
+    });
     // With a lower threshold (0.5), more fuzzy matches
-    let opt_loose =
-        Optimizer::new().with_plan_cache(PlanCacheConfig {
-            max_entries: 1024,
-            similarity_threshold: 0.5,
-            enable_fuzzy_matching: true,
-            ..PlanCacheConfig::default()
-        });
+    let opt_loose = Optimizer::new().with_plan_cache(PlanCacheConfig {
+        max_entries: 1024,
+        similarity_threshold: 0.5,
+        enable_fuzzy_matching: true,
+        ..PlanCacheConfig::default()
+    });
 
     let workload = oltp_workload();
     for q in &workload {
@@ -481,19 +446,15 @@ fn fuzzy_threshold_affects_hit_rate() {
         let _ = opt_loose.optimize(q);
     }
 
-    let strict_stats =
-        opt_strict.cache_stats().expect("cache enabled");
-    let loose_stats =
-        opt_loose.cache_stats().expect("cache enabled");
+    let strict_stats = opt_strict.cache_stats().expect("cache enabled");
+    let loose_stats = opt_loose.cache_stats().expect("cache enabled");
 
     // With same-template variations, both should get high exact
     // hit rates. The fuzzy threshold matters for cross-template
     // matching. The loose threshold should get at least as many
     // total hits as strict.
-    let strict_total =
-        strict_stats.exact_hits + strict_stats.fuzzy_hits;
-    let loose_total =
-        loose_stats.exact_hits + loose_stats.fuzzy_hits;
+    let strict_total = strict_stats.exact_hits + strict_stats.fuzzy_hits;
+    let loose_total = loose_stats.exact_hits + loose_stats.fuzzy_hits;
     assert!(
         loose_total >= strict_total,
         "Looser threshold should get >= hits: \
@@ -556,9 +517,7 @@ fn plan_cache_exact_matches_for_param_variations() {
     for i in 0..50 {
         let q = point_lookup(i);
         let fp = QueryFingerprint::from_rel_expr(&q);
-        let result = cache
-            .lookup(&fp)
-            .expect("parameter variation should hit");
+        let result = cache.lookup(&fp).expect("parameter variation should hit");
         assert_eq!(
             result.match_type,
             CacheMatchType::Exact,
@@ -610,16 +569,11 @@ fn fingerprints_stable_across_param_values() {
 
 #[test]
 fn different_templates_produce_different_fingerprints() {
-    let fp_point =
-        QueryFingerprint::from_rel_expr(&point_lookup(1));
-    let fp_range =
-        QueryFingerprint::from_rel_expr(&range_scan(100, "a"));
-    let fp_join =
-        QueryFingerprint::from_rel_expr(&join_with_filter(25));
-    let fp_agg =
-        QueryFingerprint::from_rel_expr(&aggregation(50000));
-    let fp_three =
-        QueryFingerprint::from_rel_expr(&three_table_join(50));
+    let fp_point = QueryFingerprint::from_rel_expr(&point_lookup(1));
+    let fp_range = QueryFingerprint::from_rel_expr(&range_scan(100, "a"));
+    let fp_join = QueryFingerprint::from_rel_expr(&join_with_filter(25));
+    let fp_agg = QueryFingerprint::from_rel_expr(&aggregation(50000));
+    let fp_three = QueryFingerprint::from_rel_expr(&three_table_join(50));
 
     let all = [&fp_point, &fp_range, &fp_join, &fp_agg, &fp_three];
     for i in 0..all.len() {
@@ -635,9 +589,7 @@ fn different_templates_produce_different_fingerprints() {
 
 #[test]
 fn join_query_fingerprint_captures_topology() {
-    let fp = QueryFingerprint::from_rel_expr(
-        &three_table_join(100),
-    );
+    let fp = QueryFingerprint::from_rel_expr(&three_table_join(100));
     assert_eq!(fp.table_count, 3);
     assert_eq!(fp.join_count, 2);
     assert!(!fp.has_aggregation);
@@ -666,8 +618,7 @@ fn stats_accurately_reflect_workload() {
 
     // Total lookups = total queries (each optimize does one lookup)
     assert_eq!(
-        stats.lookups,
-        200,
+        stats.lookups, 200,
         "Should have 200 lookups for 200 queries",
     );
 
@@ -818,8 +769,5 @@ fn mixed_oltp_and_analytical_workload() {
         "Mixed workload hit rate {:.1}% should be >90%",
         stats.hit_rate() * 100.0,
     );
-    assert_eq!(
-        stats.current_entries, 2,
-        "Should have 2 cached templates",
-    );
+    assert_eq!(stats.current_entries, 2, "Should have 2 cached templates",);
 }

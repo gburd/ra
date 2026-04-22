@@ -246,6 +246,7 @@ impl WasmOptimizer {
             plan_cache_config: ra_engine::plan_cache::PlanCacheConfig::default(),
             max_staleness_penalty: 10.0,
             use_lazy_rules: false,
+            ..ra_engine::OptimizerConfig::default()
         };
         let mut optimizer =
             ra_engine::Optimizer::with_config(engine_config);

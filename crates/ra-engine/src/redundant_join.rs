@@ -20,8 +20,7 @@ use crate::egraph::RelLang;
 /// meaningful data or filtering to the query result.
 /// Only unconditional (always-valid) rules are included.
 #[must_use]
-pub fn redundant_join_elimination_rules(
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn redundant_join_elimination_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Cross join with single-row right side (limit pattern)
         rewrite!("eliminate-cross-join-single-row-right";
@@ -60,11 +59,8 @@ mod tests {
     use ra_core::algebra::{JoinType, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 
-    fn run_redundant_join_elimination(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_redundant_join_elimination(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(10_000)
@@ -128,17 +124,14 @@ mod tests {
 
     #[test]
     fn anti_join_with_empty_right_eliminated() {
-        let empty_right = RelExpr::scan("t2")
-            .filter(Expr::Const(Const::Bool(false)));
+        let empty_right = RelExpr::scan("t2").filter(Expr::Const(Const::Bool(false)));
 
         let expr = RelExpr::Join {
             join_type: JoinType::Anti,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(Expr::Column(ColumnRef::new("id"))),
-                right: Box::new(Expr::Column(
-                    ColumnRef::new("id"),
-                )),
+                right: Box::new(Expr::Column(ColumnRef::new("id"))),
             },
             left: Box::new(RelExpr::scan("t1")),
             right: Box::new(empty_right),

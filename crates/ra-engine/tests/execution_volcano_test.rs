@@ -178,14 +178,12 @@ fn test_volcano_stateful_aggregation() {
     let input = scan("metrics");
     let agg = RelExpr::Aggregate {
         group_by: vec![col("metric_name")],
-        aggregates: vec![
-            AggregateExpr {
-                function: AggregateFunction::Avg,
-                arg: Some(col("value")),
-                distinct: false,
-                alias: None,
-            },
-        ],
+        aggregates: vec![AggregateExpr {
+            function: AggregateFunction::Avg,
+            arg: Some(col("value")),
+            distinct: false,
+            alias: None,
+        }],
         input: Box::new(input),
     };
     assert_optimization_improves(agg);

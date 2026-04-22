@@ -163,7 +163,10 @@ fn test_convergence_can_be_disabled() {
 fn test_convergence_with_filters() {
     // Test that convergence works with predicate pushdown opportunities
     let query = RelExpr::Filter {
-        predicate: eq(col("orders.status"), Expr::Const(ra_core::expr::Const::String("completed".to_string()))),
+        predicate: eq(
+            col("orders.status"),
+            Expr::Const(ra_core::expr::Const::String("completed".to_string())),
+        ),
         input: Box::new(join(
             scan("users"),
             scan("orders"),

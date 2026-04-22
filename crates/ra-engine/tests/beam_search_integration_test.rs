@@ -55,6 +55,7 @@ fn make_optimizer_with_beam_search(beam_config: BeamSearchConfig) -> Optimizer {
         max_staleness_penalty: 10.0,
         use_lazy_rules: false,
         transaction_context: None,
+        ..OptimizerConfig::default()
     });
 
     // Add realistic statistics

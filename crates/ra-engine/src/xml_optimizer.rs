@@ -72,8 +72,7 @@ impl XPathAxis {
             Self::Descendant | Self::DescendantOrSelf => 10.0,
             Self::Ancestor | Self::AncestorOrSelf => 8.0,
             Self::Following | Self::Preceding => 20.0,
-            Self::FollowingSibling
-            | Self::PrecedingSibling => 5.0,
+            Self::FollowingSibling | Self::PrecedingSibling => 5.0,
         }
     }
 
@@ -325,19 +324,14 @@ impl XPathStep {
     #[must_use]
     pub fn estimated_cost(&self) -> f64 {
         let nav = self.axis.navigation_cost();
-        let pred_cost: f64 = self
-            .predicates
-            .iter()
-            .map(predicate_eval_cost)
-            .sum();
+        let pred_cost: f64 = self.predicates.iter().map(predicate_eval_cost).sum();
         nav + pred_cost
     }
 
     /// Whether this step can use a structural (path) index.
     #[must_use]
     pub fn can_use_path_index(&self) -> bool {
-        self.axis.supports_structural_index()
-            && matches!(self.node_test, NodeTest::Name(_))
+        self.axis.supports_structural_index() && matches!(self.node_test, NodeTest::Name(_))
     }
 }
 
@@ -346,14 +340,12 @@ fn predicate_eval_cost(pred: &XPathPredicate) -> f64 {
     match pred {
         XPathPredicate::Comparison { .. } => 1.0,
         XPathPredicate::Position(_) => 0.5,
-        XPathPredicate::Function { name, .. } => {
-            match name.as_str() {
-                "contains" | "starts-with" | "ends-with" => 3.0,
-                "matches" => 8.0,
-                "not" | "boolean" | "number" | "string" => 0.5,
-                _ => 5.0,
-            }
-        }
+        XPathPredicate::Function { name, .. } => match name.as_str() {
+            "contains" | "starts-with" | "ends-with" => 3.0,
+            "matches" => 8.0,
+            "not" | "boolean" | "number" | "string" => 0.5,
+            _ => 5.0,
+        },
         XPathPredicate::Existence(_) => 0.2,
     }
 }
@@ -379,10 +371,7 @@ impl XPathExpr {
     #[must_use]
     pub fn is_index_coverable(&self) -> bool {
         self.steps.iter().all(|step| {
-            step.can_use_path_index()
-                && step.predicates.iter().all(|p| {
-                    p.supports_value_index()
-                })
+            step.can_use_path_index() && step.predicates.iter().all(|p| p.supports_value_index())
         })
     }
 
@@ -415,10 +404,7 @@ impl XPathExpr {
     /// Collect all predicates across all steps.
     #[must_use]
     pub fn all_predicates(&self) -> Vec<&XPathPredicate> {
-        self.steps
-            .iter()
-            .flat_map(|s| &s.predicates)
-            .collect()
+        self.steps.iter().flat_map(|s| &s.predicates).collect()
     }
 
     /// Combined selectivity of all predicates.
@@ -500,12 +486,11 @@ pub fn parse_xpath(input: &str) -> Option<XPathExpr> {
     };
 
     // Handle leading // (descendant-or-self::node()/)
-    let (has_leading_double_slash, rest) =
-        if let Some(stripped) = rest.strip_prefix('/') {
-            (true, stripped)
-        } else {
-            (false, rest)
-        };
+    let (has_leading_double_slash, rest) = if let Some(stripped) = rest.strip_prefix('/') {
+        (true, stripped)
+    } else {
+        (false, rest)
+    };
 
     if rest.is_empty() {
         return None;
@@ -651,31 +636,23 @@ fn parse_predicate(s: &str) -> Option<XPathPredicate> {
 
     // Positional: pure number
     if let Ok(n) = trimmed.parse::<u64>() {
-        return Some(XPathPredicate::Position(
-            PositionPredicate::Index(n),
-        ));
+        return Some(XPathPredicate::Position(PositionPredicate::Index(n)));
     }
 
     // last()
     if trimmed == "last()" {
-        return Some(XPathPredicate::Position(
-            PositionPredicate::Last,
-        ));
+        return Some(XPathPredicate::Position(PositionPredicate::Last));
     }
 
     // position() based
     if trimmed.starts_with("position()") {
-        return Some(XPathPredicate::Position(
-            PositionPredicate::Computed,
-        ));
+        return Some(XPathPredicate::Position(PositionPredicate::Computed));
     }
 
     // Existence check: @attr (bare attribute reference)
     if let Some(attr) = trimmed.strip_prefix('@') {
         if !attr.contains(' ') && !attr.contains('=') {
-            return Some(XPathPredicate::Existence(
-                attr.to_string(),
-            ));
+            return Some(XPathPredicate::Existence(attr.to_string()));
         }
     }
 
@@ -686,10 +663,7 @@ fn parse_predicate(s: &str) -> Option<XPathPredicate> {
             let args_str = &trimmed[paren_idx + 1..trimmed.len() - 1];
             // Only treat as function if name is a known function
             if is_xpath_function(name) {
-                let args: Vec<String> = args_str
-                    .split(',')
-                    .map(|a| a.trim().to_string())
-                    .collect();
+                let args: Vec<String> = args_str.split(',').map(|a| a.trim().to_string()).collect();
                 return Some(XPathPredicate::Function {
                     name: name.to_string(),
                     args,
@@ -709,8 +683,7 @@ fn parse_predicate(s: &str) -> Option<XPathPredicate> {
     ] {
         if let Some(idx) = trimmed.find(op_str) {
             let left = trimmed[..idx].trim().to_string();
-            let right =
-                trimmed[idx + op_str.len()..].trim().to_string();
+            let right = trimmed[idx + op_str.len()..].trim().to_string();
             return Some(XPathPredicate::Comparison {
                 left,
                 op: *op,
@@ -791,9 +764,7 @@ fn parse_node_test(s: &str) -> NodeTest {
         "node()" => NodeTest::AnyNode,
         "text()" => NodeTest::Text,
         "comment()" => NodeTest::Comment,
-        "processing-instruction()" => {
-            NodeTest::ProcessingInstruction
-        }
+        "processing-instruction()" => NodeTest::ProcessingInstruction,
         name => NodeTest::Name(name.to_string()),
     }
 }
@@ -870,12 +841,10 @@ impl XmlIndexInfo {
         };
 
         match self.index_type {
-            XmlIndexType::Path | XmlIndexType::Presence => {
-                self.paths.iter().any(|p| {
-                    simple.starts_with(p.as_str())
-                        || p.starts_with(simple.as_str())
-                })
-            }
+            XmlIndexType::Path | XmlIndexType::Presence => self
+                .paths
+                .iter()
+                .any(|p| simple.starts_with(p.as_str()) || p.starts_with(simple.as_str())),
             XmlIndexType::Value | XmlIndexType::Property => {
                 self.paths.iter().any(|p| simple == *p)
                     && xpath
@@ -884,9 +853,7 @@ impl XmlIndexInfo {
                         .all(|pred| pred.supports_value_index())
             }
             XmlIndexType::FullText => {
-                self.paths
-                    .iter()
-                    .any(|p| simple.starts_with(p.as_str()))
+                self.paths.iter().any(|p| simple.starts_with(p.as_str()))
                     && xpath.all_predicates().iter().any(|pred| {
                         matches!(
                             pred,
@@ -944,12 +911,10 @@ pub fn estimate_xpath_cost(
     indexes: &[XmlIndexInfo],
     params: &XmlCostParams,
 ) -> f64 {
-    let has_path_index =
-        indexes.iter().any(|idx| idx.covers_xpath(xpath));
-    let has_value_index = indexes.iter().any(|idx| {
-        idx.index_type == XmlIndexType::Value
-            && idx.covers_xpath(xpath)
-    });
+    let has_path_index = indexes.iter().any(|idx| idx.covers_xpath(xpath));
+    let has_value_index = indexes
+        .iter()
+        .any(|idx| idx.index_type == XmlIndexType::Value && idx.covers_xpath(xpath));
 
     let parse_cost = if has_path_index {
         0.0
@@ -1000,16 +965,12 @@ pub fn combine_selectivities(selectivities: &[f64]) -> f64 {
     }
 
     let mut sorted: Vec<f64> = selectivities.to_vec();
-    sorted.sort_by(|a, b| {
-        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let damping: f64 = 0.85;
     let mut combined = 1.0_f64;
     for (i, &sel) in sorted.iter().enumerate() {
-        let exponent = damping.powi(
-            i32::try_from(i).unwrap_or(0),
-        );
+        let exponent = damping.powi(i32::try_from(i).unwrap_or(0));
         combined *= sel.powf(exponent);
     }
 
@@ -1061,9 +1022,7 @@ pub fn simplify_xpath(expr: &XPathExpr) -> XPathExpr {
         // Rule 2 continued: skip the child step if previous was
         // descendant-or-self and we already merged
         if step.axis == XPathAxis::Child {
-            if let Some(prev_orig) =
-                (i > 0).then(|| &expr.steps[i - 1])
-            {
+            if let Some(prev_orig) = (i > 0).then(|| &expr.steps[i - 1]) {
                 if prev_orig.axis == XPathAxis::DescendantOrSelf
                     && prev_orig.node_test == NodeTest::AnyNode
                     && prev_orig.predicates.is_empty()
@@ -1127,43 +1086,21 @@ pub struct XmlFunctionCall {
 
 /// Recognize an XML function name and classify it.
 #[must_use]
-pub fn classify_xml_function(
-    name: &str,
-) -> Option<(XmlPlatform, XmlFunctionKind)> {
+pub fn classify_xml_function(name: &str) -> Option<(XmlPlatform, XmlFunctionKind)> {
     match name.to_lowercase().as_str() {
         // PostgreSQL
-        "xpath" => {
-            Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Query))
-        }
-        "xmlexists" => {
-            Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Exists))
-        }
-        "xmltable" => {
-            Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Table))
-        }
+        "xpath" => Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Query)),
+        "xmlexists" => Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Exists)),
+        "xmltable" => Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Table)),
         // Oracle
-        "xmlquery" => {
-            Some((XmlPlatform::Oracle, XmlFunctionKind::Query))
-        }
-        "xml_table" => {
-            Some((XmlPlatform::Oracle, XmlFunctionKind::Table))
-        }
-        "existsnode" => {
-            Some((XmlPlatform::Oracle, XmlFunctionKind::Exists))
-        }
+        "xmlquery" => Some((XmlPlatform::Oracle, XmlFunctionKind::Query)),
+        "xml_table" => Some((XmlPlatform::Oracle, XmlFunctionKind::Table)),
+        "existsnode" => Some((XmlPlatform::Oracle, XmlFunctionKind::Exists)),
         // SQL Server methods (appear as functions in translated SQL)
-        "xml_value" | "xmlvalue" => {
-            Some((XmlPlatform::SqlServer, XmlFunctionKind::Value))
-        }
-        "xml_query" | "xmlquery_ss" => {
-            Some((XmlPlatform::SqlServer, XmlFunctionKind::Query))
-        }
-        "xml_exist" | "xmlexist" => {
-            Some((XmlPlatform::SqlServer, XmlFunctionKind::Exists))
-        }
-        "xml_nodes" | "xmlnodes" => {
-            Some((XmlPlatform::SqlServer, XmlFunctionKind::Table))
-        }
+        "xml_value" | "xmlvalue" => Some((XmlPlatform::SqlServer, XmlFunctionKind::Value)),
+        "xml_query" | "xmlquery_ss" => Some((XmlPlatform::SqlServer, XmlFunctionKind::Query)),
+        "xml_exist" | "xmlexist" => Some((XmlPlatform::SqlServer, XmlFunctionKind::Exists)),
+        "xml_nodes" | "xmlnodes" => Some((XmlPlatform::SqlServer, XmlFunctionKind::Table)),
         _ => None,
     }
 }
@@ -1264,8 +1201,7 @@ fn var(s: &str) -> Var {
 /// etc.) in the predicate's e-class, up to a limited depth.
 fn is_xml_function_filter(
     pred_var: Var,
-) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool
-{
+) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool {
     move |egraph, _id, subst| {
         let pred_id = subst[pred_var];
         contains_xml_function(egraph, pred_id, 4)
@@ -1273,11 +1209,7 @@ fn is_xml_function_filter(
 }
 
 /// Recursively check if an e-class contains XML function patterns.
-fn contains_xml_function(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    id: Id,
-    depth: u32,
-) -> bool {
+fn contains_xml_function(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
     if depth == 0 {
         return false;
     }
@@ -1289,14 +1221,10 @@ fn contains_xml_function(
                 // Check if first child is an XML function name
                 if let Some(&name_id) = children.first() {
                     let name_canonical = egraph.find(name_id);
-                    for name_node in
-                        &egraph[name_canonical].nodes
-                    {
+                    for name_node in &egraph[name_canonical].nodes {
                         if let RelLang::Symbol(sym) = name_node {
                             let name_str = sym.as_str();
-                            if classify_xml_function(name_str)
-                                .is_some()
-                            {
+                            if classify_xml_function(name_str).is_some() {
                                 return true;
                             }
                         }
@@ -1310,32 +1238,20 @@ fn contains_xml_function(
             | RelLang::Gt([l, r])
             | RelLang::Ge([l, r]) => {
                 if contains_xml_function(egraph, *l, depth - 1)
-                    || contains_xml_function(
-                        egraph,
-                        *r,
-                        depth - 1,
-                    )
+                    || contains_xml_function(egraph, *r, depth - 1)
                 {
                     return true;
                 }
             }
             RelLang::And([l, r]) | RelLang::Or([l, r]) => {
                 if contains_xml_function(egraph, *l, depth - 1)
-                    || contains_xml_function(
-                        egraph,
-                        *r,
-                        depth - 1,
-                    )
+                    || contains_xml_function(egraph, *r, depth - 1)
                 {
                     return true;
                 }
             }
             RelLang::Not([inner]) | RelLang::IsNull([inner]) | RelLang::IsNotNull([inner]) => {
-                if contains_xml_function(
-                    egraph,
-                    *inner,
-                    depth - 1,
-                ) {
+                if contains_xml_function(egraph, *inner, depth - 1) {
                     return true;
                 }
             }
@@ -1401,18 +1317,9 @@ mod tests {
         let expr = parse_xpath("/doc/items/item").unwrap();
         assert!(expr.absolute);
         assert_eq!(expr.steps.len(), 3);
-        assert_eq!(
-            expr.steps[0].node_test,
-            NodeTest::Name("doc".to_string())
-        );
-        assert_eq!(
-            expr.steps[1].node_test,
-            NodeTest::Name("items".to_string())
-        );
-        assert_eq!(
-            expr.steps[2].node_test,
-            NodeTest::Name("item".to_string())
-        );
+        assert_eq!(expr.steps[0].node_test, NodeTest::Name("doc".to_string()));
+        assert_eq!(expr.steps[1].node_test, NodeTest::Name("items".to_string()));
+        assert_eq!(expr.steps[2].node_test, NodeTest::Name("item".to_string()));
     }
 
     #[test]
@@ -1427,10 +1334,7 @@ mod tests {
         let expr = parse_xpath("/doc/item/@price").unwrap();
         assert_eq!(expr.steps.len(), 3);
         assert_eq!(expr.steps[2].axis, XPathAxis::Attribute);
-        assert_eq!(
-            expr.steps[2].node_test,
-            NodeTest::Name("price".to_string())
-        );
+        assert_eq!(expr.steps[2].node_test, NodeTest::Name("price".to_string()));
     }
 
     #[test]
@@ -1438,20 +1342,13 @@ mod tests {
         let expr = parse_xpath("//item").unwrap();
         assert!(expr.absolute);
         assert_eq!(expr.steps.len(), 2);
-        assert_eq!(
-            expr.steps[0].axis,
-            XPathAxis::DescendantOrSelf
-        );
-        assert_eq!(
-            expr.steps[1].axis,
-            XPathAxis::Child
-        );
+        assert_eq!(expr.steps[0].axis, XPathAxis::DescendantOrSelf);
+        assert_eq!(expr.steps[1].axis, XPathAxis::Child);
     }
 
     #[test]
     fn parse_predicate_comparison() {
-        let expr =
-            parse_xpath("/doc/item[@price > 100]").unwrap();
+        let expr = parse_xpath("/doc/item[@price > 100]").unwrap();
         assert_eq!(expr.steps.len(), 2);
         assert_eq!(expr.steps[1].predicates.len(), 1);
         match &expr.steps[1].predicates[0] {
@@ -1466,8 +1363,7 @@ mod tests {
 
     #[test]
     fn parse_predicate_equality() {
-        let expr =
-            parse_xpath("/doc/status[. = 'active']").unwrap();
+        let expr = parse_xpath("/doc/status[. = 'active']").unwrap();
         assert_eq!(expr.steps[1].predicates.len(), 1);
         match &expr.steps[1].predicates[0] {
             XPathPredicate::Comparison { op, .. } => {
@@ -1489,8 +1385,7 @@ mod tests {
 
     #[test]
     fn parse_predicate_last() {
-        let expr =
-            parse_xpath("/doc/items/item[last()]").unwrap();
+        let expr = parse_xpath("/doc/items/item[last()]").unwrap();
         assert_eq!(
             expr.steps[2].predicates[0],
             XPathPredicate::Position(PositionPredicate::Last)
@@ -1499,8 +1394,7 @@ mod tests {
 
     #[test]
     fn parse_predicate_function() {
-        let expr =
-            parse_xpath("/doc/name[contains(., 'Corp')]").unwrap();
+        let expr = parse_xpath("/doc/name[contains(., 'Corp')]").unwrap();
         assert_eq!(expr.steps[1].predicates.len(), 1);
         match &expr.steps[1].predicates[0] {
             XPathPredicate::Function { name, args } => {
@@ -1523,17 +1417,13 @@ mod tests {
 
     #[test]
     fn parse_multiple_predicates() {
-        let expr = parse_xpath(
-            "/doc/item[@price > 100][@status = 'active']",
-        )
-        .unwrap();
+        let expr = parse_xpath("/doc/item[@price > 100][@status = 'active']").unwrap();
         assert_eq!(expr.steps[1].predicates.len(), 2);
     }
 
     #[test]
     fn parse_explicit_axis() {
-        let expr =
-            parse_xpath("/doc/descendant::item").unwrap();
+        let expr = parse_xpath("/doc/descendant::item").unwrap();
         assert_eq!(expr.steps[1].axis, XPathAxis::Descendant);
     }
 
@@ -1548,10 +1438,7 @@ mod tests {
     #[test]
     fn parse_wildcard() {
         let expr = parse_xpath("/doc/*/name").unwrap();
-        assert_eq!(
-            expr.steps[1].node_test,
-            NodeTest::Wildcard
-        );
+        assert_eq!(expr.steps[1].node_test, NodeTest::Wildcard);
     }
 
     #[test]
@@ -1568,8 +1455,7 @@ mod tests {
 
     #[test]
     fn parse_ne_predicate() {
-        let expr =
-            parse_xpath("/doc/item[@type != 'sample']").unwrap();
+        let expr = parse_xpath("/doc/item[@type != 'sample']").unwrap();
         match &expr.steps[1].predicates[0] {
             XPathPredicate::Comparison { op, .. } => {
                 assert_eq!(*op, XPathCompareOp::Ne);
@@ -1593,10 +1479,7 @@ mod tests {
         let expr = parse_xpath("//item").unwrap();
         let simplified = simplify_xpath(&expr);
         assert_eq!(simplified.steps.len(), 1);
-        assert_eq!(
-            simplified.steps[0].axis,
-            XPathAxis::Descendant
-        );
+        assert_eq!(simplified.steps[0].axis, XPathAxis::Descendant);
         assert_eq!(
             simplified.steps[0].node_test,
             NodeTest::Name("item".to_string())
@@ -1624,8 +1507,7 @@ mod tests {
         let xpath = parse_xpath("/doc/items/item").unwrap();
         let params = XmlCostParams::default();
 
-        let cost_no_index =
-            estimate_xpath_cost(&xpath, 10000.0, &[], &params);
+        let cost_no_index = estimate_xpath_cost(&xpath, 10000.0, &[], &params);
 
         let index = XmlIndexInfo {
             index_type: XmlIndexType::Path,
@@ -1634,20 +1516,14 @@ mod tests {
             estimated_entries: Some(1000),
             avg_entry_bytes: Some(50),
         };
-        let cost_with_index = estimate_xpath_cost(
-            &xpath,
-            10000.0,
-            &[index],
-            &params,
-        );
+        let cost_with_index = estimate_xpath_cost(&xpath, 10000.0, &[index], &params);
 
         assert!(cost_with_index < cost_no_index);
     }
 
     #[test]
     fn cost_value_index_cheapest() {
-        let xpath =
-            parse_xpath("/doc/item[@price = 100]").unwrap();
+        let xpath = parse_xpath("/doc/item[@price = 100]").unwrap();
         let params = XmlCostParams::default();
 
         let path_index = XmlIndexInfo {
@@ -1667,18 +1543,8 @@ mod tests {
             avg_entry_bytes: Some(8),
         };
 
-        let cost_path = estimate_xpath_cost(
-            &xpath,
-            10000.0,
-            &[path_index],
-            &params,
-        );
-        let cost_value = estimate_xpath_cost(
-            &xpath,
-            10000.0,
-            &[value_index],
-            &params,
-        );
+        let cost_path = estimate_xpath_cost(&xpath, 10000.0, &[path_index], &params);
+        let cost_value = estimate_xpath_cost(&xpath, 10000.0, &[value_index], &params);
 
         // Value index should be cheaper due to predicate discount
         assert!(cost_value < cost_path);
@@ -1715,8 +1581,7 @@ mod tests {
     #[test]
     fn fulltext_index_requires_text_function() {
         let xpath_no_fn = parse_xpath("/doc/name").unwrap();
-        let xpath_with_fn =
-            parse_xpath("/doc/name[contains(., 'x')]").unwrap();
+        let xpath_with_fn = parse_xpath("/doc/name[contains(., 'x')]").unwrap();
         let index = XmlIndexInfo {
             index_type: XmlIndexType::FullText,
             paths: vec!["/doc/name".to_string()],
@@ -1768,19 +1633,13 @@ mod tests {
     #[test]
     fn simple_path_extraction() {
         let expr = parse_xpath("/doc/items/item").unwrap();
-        assert_eq!(
-            expr.simple_path(),
-            Some("/doc/items/item".to_string())
-        );
+        assert_eq!(expr.simple_path(), Some("/doc/items/item".to_string()));
     }
 
     #[test]
     fn simple_path_with_attribute() {
         let expr = parse_xpath("/doc/item/@price").unwrap();
-        assert_eq!(
-            expr.simple_path(),
-            Some("/doc/item/@price".to_string())
-        );
+        assert_eq!(expr.simple_path(), Some("/doc/item/@price".to_string()));
     }
 
     #[test]
@@ -1811,10 +1670,7 @@ mod tests {
         );
         assert_eq!(
             classify_xml_function("xmlexists"),
-            Some((
-                XmlPlatform::PostgreSQL,
-                XmlFunctionKind::Exists
-            ))
+            Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Exists))
         );
     }
 
@@ -1830,17 +1686,11 @@ mod tests {
     fn classify_sqlserver_functions() {
         assert_eq!(
             classify_xml_function("xml_exist"),
-            Some((
-                XmlPlatform::SqlServer,
-                XmlFunctionKind::Exists
-            ))
+            Some((XmlPlatform::SqlServer, XmlFunctionKind::Exists))
         );
         assert_eq!(
             classify_xml_function("xml_value"),
-            Some((
-                XmlPlatform::SqlServer,
-                XmlFunctionKind::Value
-            ))
+            Some((XmlPlatform::SqlServer, XmlFunctionKind::Value))
         );
     }
 
@@ -1865,8 +1715,7 @@ mod tests {
 
     #[test]
     fn display_with_predicate() {
-        let expr =
-            parse_xpath("/doc/item[@price > 100]").unwrap();
+        let expr = parse_xpath("/doc/item[@price > 100]").unwrap();
         let displayed = format!("{expr}");
         assert!(displayed.contains("@price > 100"));
     }
@@ -1879,26 +1728,14 @@ mod tests {
         assert!(XPathAxis::Descendant.supports_structural_index());
         assert!(XPathAxis::Attribute.supports_structural_index());
         assert!(!XPathAxis::Following.supports_structural_index());
-        assert!(
-            !XPathAxis::PrecedingSibling
-                .supports_structural_index()
-        );
+        assert!(!XPathAxis::PrecedingSibling.supports_structural_index());
     }
 
     #[test]
     fn axis_cost_ordering() {
-        assert!(
-            XPathAxis::Attribute.navigation_cost()
-                < XPathAxis::Child.navigation_cost()
-        );
-        assert!(
-            XPathAxis::Child.navigation_cost()
-                < XPathAxis::Descendant.navigation_cost()
-        );
-        assert!(
-            XPathAxis::Descendant.navigation_cost()
-                < XPathAxis::Following.navigation_cost()
-        );
+        assert!(XPathAxis::Attribute.navigation_cost() < XPathAxis::Child.navigation_cost());
+        assert!(XPathAxis::Child.navigation_cost() < XPathAxis::Descendant.navigation_cost());
+        assert!(XPathAxis::Descendant.navigation_cost() < XPathAxis::Following.navigation_cost());
     }
 
     // -- E-graph integration test --
@@ -1923,24 +1760,16 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("doc_id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::new("user_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("doc_id"))),
+                right: Box::new(Expr::Column(ColumnRef::new("user_id"))),
             },
             left: Box::new(left),
             right: Box::new(right),
         };
         let filtered = join.filter(Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::new("status"),
-            )),
-            right: Box::new(Expr::Const(Const::String(
-                "active".to_string(),
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::new("status"))),
+            right: Box::new(Expr::Const(Const::String("active".to_string()))),
         });
 
         let rec = to_rec_expr(&filtered).expect("conversion ok");
@@ -1972,35 +1801,25 @@ mod tests {
         // NE still needs scan but can use value index
         assert!(!ne.supports_value_index());
 
-        let pos = XPathPredicate::Position(
-            PositionPredicate::Index(1),
-        );
+        let pos = XPathPredicate::Position(PositionPredicate::Index(1));
         assert!(!pos.supports_value_index());
 
-        let exists =
-            XPathPredicate::Existence("attr".to_string());
+        let exists = XPathPredicate::Existence("attr".to_string());
         assert!(exists.supports_value_index());
     }
 
     #[test]
     fn xpath_all_predicates() {
-        let expr = parse_xpath(
-            "/doc/item[@id][. = 'x']",
-        )
-        .unwrap();
+        let expr = parse_xpath("/doc/item[@id][. = 'x']").unwrap();
         assert_eq!(expr.all_predicates().len(), 2);
     }
 
     #[test]
     fn xpath_combined_selectivity() {
-        let expr = parse_xpath(
-            "/doc/item[@price > 100][@status = 'active']",
-        )
-        .unwrap();
+        let expr = parse_xpath("/doc/item[@price > 100][@status = 'active']").unwrap();
         let sel = expr.combined_selectivity();
         // Two predicates should produce lower selectivity than either
-        let sel1 = expr.steps[1].predicates[0]
-            .estimated_selectivity();
+        let sel1 = expr.steps[1].predicates[0].estimated_selectivity();
         assert!(sel < sel1);
     }
 
@@ -2060,8 +1879,7 @@ mod tests {
 
     #[test]
     fn parse_position_based_predicate() {
-        let expr =
-            parse_xpath("/doc/items[position() > 3]").unwrap();
+        let expr = parse_xpath("/doc/items[position() > 3]").unwrap();
         assert_eq!(expr.steps[1].predicates.len(), 1);
         assert_eq!(
             expr.steps[1].predicates[0],
@@ -2071,13 +1889,10 @@ mod tests {
 
     #[test]
     fn position_predicate_not_value_indexable() {
-        let pred = XPathPredicate::Position(
-            PositionPredicate::Computed,
-        );
+        let pred = XPathPredicate::Position(PositionPredicate::Computed);
         assert!(!pred.supports_value_index());
 
-        let pred =
-            XPathPredicate::Position(PositionPredicate::Last);
+        let pred = XPathPredicate::Position(PositionPredicate::Last);
         assert!(!pred.supports_value_index());
     }
 
@@ -2116,18 +1931,9 @@ mod tests {
     fn xml_index_type_display() {
         assert_eq!(format!("{}", XmlIndexType::Path), "PATH");
         assert_eq!(format!("{}", XmlIndexType::Value), "VALUE");
-        assert_eq!(
-            format!("{}", XmlIndexType::Presence),
-            "PRESENCE"
-        );
-        assert_eq!(
-            format!("{}", XmlIndexType::FullText),
-            "FULLTEXT"
-        );
-        assert_eq!(
-            format!("{}", XmlIndexType::Property),
-            "PROPERTY"
-        );
+        assert_eq!(format!("{}", XmlIndexType::Presence), "PRESENCE");
+        assert_eq!(format!("{}", XmlIndexType::FullText), "FULLTEXT");
+        assert_eq!(format!("{}", XmlIndexType::Property), "PROPERTY");
     }
 
     // -- Presence index coverage test --
@@ -2163,8 +1969,7 @@ mod tests {
 
     #[test]
     fn property_index_needs_exact_match() {
-        let xpath =
-            parse_xpath("/doc/item[@price = 100]").unwrap();
+        let xpath = parse_xpath("/doc/item[@price = 100]").unwrap();
         let index = XmlIndexInfo {
             index_type: XmlIndexType::Property,
             paths: vec!["/doc/item".to_string()],
@@ -2214,8 +2019,7 @@ mod tests {
 
     #[test]
     fn xpath_cost_with_fulltext_index() {
-        let xpath =
-            parse_xpath("/doc/name[contains(., 'Corp')]").unwrap();
+        let xpath = parse_xpath("/doc/name[contains(., 'Corp')]").unwrap();
         let params = XmlCostParams::default();
 
         let ft_index = XmlIndexInfo {
@@ -2226,14 +2030,8 @@ mod tests {
             avg_entry_bytes: Some(200),
         };
 
-        let cost_no_index =
-            estimate_xpath_cost(&xpath, 5000.0, &[], &params);
-        let cost_with_ft = estimate_xpath_cost(
-            &xpath,
-            5000.0,
-            &[ft_index],
-            &params,
-        );
+        let cost_no_index = estimate_xpath_cost(&xpath, 5000.0, &[], &params);
+        let cost_with_ft = estimate_xpath_cost(&xpath, 5000.0, &[ft_index], &params);
         // Full-text index doesn't affect path navigation cost,
         // but the function is covered as a code path
         assert!(cost_with_ft > 0.0);
@@ -2258,38 +2056,23 @@ mod tests {
     fn classify_all_sqlserver_functions() {
         assert_eq!(
             classify_xml_function("xmlvalue"),
-            Some((
-                XmlPlatform::SqlServer,
-                XmlFunctionKind::Value
-            ))
+            Some((XmlPlatform::SqlServer, XmlFunctionKind::Value))
         );
         assert_eq!(
             classify_xml_function("xmlquery_ss"),
-            Some((
-                XmlPlatform::SqlServer,
-                XmlFunctionKind::Query
-            ))
+            Some((XmlPlatform::SqlServer, XmlFunctionKind::Query))
         );
         assert_eq!(
             classify_xml_function("xmlexist"),
-            Some((
-                XmlPlatform::SqlServer,
-                XmlFunctionKind::Exists
-            ))
+            Some((XmlPlatform::SqlServer, XmlFunctionKind::Exists))
         );
         assert_eq!(
             classify_xml_function("xml_nodes"),
-            Some((
-                XmlPlatform::SqlServer,
-                XmlFunctionKind::Table
-            ))
+            Some((XmlPlatform::SqlServer, XmlFunctionKind::Table))
         );
         assert_eq!(
             classify_xml_function("xmlnodes"),
-            Some((
-                XmlPlatform::SqlServer,
-                XmlFunctionKind::Table
-            ))
+            Some((XmlPlatform::SqlServer, XmlFunctionKind::Table))
         );
     }
 
@@ -2297,10 +2080,7 @@ mod tests {
     fn classify_postgresql_xmltable() {
         assert_eq!(
             classify_xml_function("xmltable"),
-            Some((
-                XmlPlatform::PostgreSQL,
-                XmlFunctionKind::Table
-            ))
+            Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Table))
         );
     }
 
@@ -2314,10 +2094,7 @@ mod tests {
         );
         assert_eq!(
             classify_xml_function("XmlExists"),
-            Some((
-                XmlPlatform::PostgreSQL,
-                XmlFunctionKind::Exists
-            ))
+            Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Exists))
         );
     }
 
@@ -2331,18 +2108,13 @@ mod tests {
 
     #[test]
     fn index_coverable_with_contains_function() {
-        let expr =
-            parse_xpath("/doc/name[contains(., 'x')]").unwrap();
-        assert!(
-            expr.is_index_coverable(),
-            "contains() supports value index"
-        );
+        let expr = parse_xpath("/doc/name[contains(., 'x')]").unwrap();
+        assert!(expr.is_index_coverable(), "contains() supports value index");
     }
 
     #[test]
     fn not_index_coverable_with_computed_position() {
-        let expr =
-            parse_xpath("/doc/item[position() > 2]").unwrap();
+        let expr = parse_xpath("/doc/item[position() > 2]").unwrap();
         assert!(!expr.is_index_coverable());
     }
 
@@ -2353,14 +2125,8 @@ mod tests {
         let params = XmlCostParams::default();
         assert!(params.parse_cost_per_byte > 0.0);
         assert!(params.function_call_overhead > 0.0);
-        assert!(
-            params.path_index_discount > 0.0
-                && params.path_index_discount < 1.0
-        );
-        assert!(
-            params.value_index_discount > 0.0
-                && params.value_index_discount < 1.0
-        );
+        assert!(params.path_index_discount > 0.0 && params.path_index_discount < 1.0);
+        assert!(params.value_index_discount > 0.0 && params.value_index_discount < 1.0);
     }
 
     // -- XmlOptimizerError additional test --
@@ -2394,10 +2160,7 @@ mod tests {
         let expr = parse_xpath("/doc/item/name").unwrap();
         let simplified = simplify_xpath(&expr);
         assert_eq!(simplified.steps.len(), expr.steps.len());
-        assert_eq!(
-            simplified.steps[0].node_test,
-            expr.steps[0].node_test
-        );
+        assert_eq!(simplified.steps[0].node_test, expr.steps[0].node_test);
     }
 
     // -- XPath Display with relative path --
@@ -2414,8 +2177,7 @@ mod tests {
 
     #[test]
     fn parse_le_and_ge_predicates() {
-        let expr =
-            parse_xpath("/doc/item[@price <= 100]").unwrap();
+        let expr = parse_xpath("/doc/item[@price <= 100]").unwrap();
         match &expr.steps[1].predicates[0] {
             XPathPredicate::Comparison { op, .. } => {
                 assert_eq!(*op, XPathCompareOp::Le);
@@ -2423,8 +2185,7 @@ mod tests {
             other => panic!("expected Comparison, got {other:?}"),
         }
 
-        let expr =
-            parse_xpath("/doc/item[@price >= 50]").unwrap();
+        let expr = parse_xpath("/doc/item[@price >= 50]").unwrap();
         match &expr.steps[1].predicates[0] {
             XPathPredicate::Comparison { op, .. } => {
                 assert_eq!(*op, XPathCompareOp::Ge);
@@ -2437,21 +2198,14 @@ mod tests {
 
     #[test]
     fn parse_comment_node_test() {
-        let expr =
-            parse_xpath("/doc/comment()").unwrap();
+        let expr = parse_xpath("/doc/comment()").unwrap();
         assert_eq!(expr.steps[1].node_test, NodeTest::Comment);
     }
 
     #[test]
     fn parse_processing_instruction_node_test() {
-        let expr = parse_xpath(
-            "/doc/processing-instruction()",
-        )
-        .unwrap();
-        assert_eq!(
-            expr.steps[1].node_test,
-            NodeTest::ProcessingInstruction
-        );
+        let expr = parse_xpath("/doc/processing-instruction()").unwrap();
+        assert_eq!(expr.steps[1].node_test, NodeTest::ProcessingInstruction);
     }
 
     #[test]

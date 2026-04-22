@@ -11,7 +11,7 @@ use egg::{rewrite, Rewrite};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
-use crate::fts_cost::{BooleanOperator, FtsIndexType, rum_scan_cost, gin_scan_cost};
+use crate::fts_cost::{gin_scan_cost, rum_scan_cost, BooleanOperator, FtsIndexType};
 
 /// Rule 1: FTS index scan introduction.
 ///
@@ -21,13 +21,11 @@ use crate::fts_cost::{BooleanOperator, FtsIndexType, rum_scan_cost, gin_scan_cos
 /// This rule recognizes full-text match patterns that can be
 /// accelerated with inverted indexes.
 pub fn fts_index_scan_introduction() -> Vec<Rewrite<RelLang, RelAnalysis>> {
-    vec![
-        rewrite!(
-            "fts-match-to-gin-scan";
-            "(filter (fts-match ?vendor ?cols ?query ?mode) (scan ?table))" =>
-            "(fts-index-scan ?table gin (fts-match ?vendor ?cols ?query ?mode))"
-        ),
-    ]
+    vec![rewrite!(
+        "fts-match-to-gin-scan";
+        "(filter (fts-match ?vendor ?cols ?query ?mode) (scan ?table))" =>
+        "(fts-index-scan ?table gin (fts-match ?vendor ?cols ?query ?mode))"
+    )]
 }
 
 /// Rule 2: Multi-column FTS index usage (placeholder for future work).
@@ -42,19 +40,17 @@ pub fn fts_multi_column_index() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 ///
 /// Applies skip-list acceleration for intersection of multiple FTS predicates.
 pub fn boolean_query_to_skip_list() -> Vec<Rewrite<RelLang, RelAnalysis>> {
-    vec![
-        rewrite!(
-            "fts-and-to-skip-list";
-            "(filter
+    vec![rewrite!(
+        "fts-and-to-skip-list";
+        "(filter
                (and
                  (fts-match ?vendor ?cols1 ?query1 ?mode1)
                  (fts-match ?vendor ?cols2 ?query2 ?mode2))
                (scan ?table))" =>
-            "(fts-skip-list-and ?table
+        "(fts-skip-list-and ?table
                (fts-match ?vendor ?cols1 ?query1 ?mode1)
                (fts-match ?vendor ?cols2 ?query2 ?mode2))"
-        ),
-    ]
+    )]
 }
 
 /// Rule 4: Rank-aware top-K optimization.
@@ -65,16 +61,14 @@ pub fn boolean_query_to_skip_list() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 /// When sorting by FTS rank with a limit, use RUM index for direct
 /// ranked retrieval instead of sorting all matches.
 pub fn rank_aware_top_k() -> Vec<Rewrite<RelLang, RelAnalysis>> {
-    vec![
-        rewrite!(
-            "fts-limit-sort-rank-to-rum";
-            "(limit ?k ?offset
+    vec![rewrite!(
+        "fts-limit-sort-rank-to-rum";
+        "(limit ?k ?offset
                (sort (list (sort-key (fts-rank ?col ?query ?algo) ?order ?nulls))
                  (filter (fts-match ?vendor ?cols ?query ?mode)
                    (scan ?table))))" =>
-            "(fts-ranked-scan ?table rum ?query ?k ?algo)"
-        ),
-    ]
+        "(fts-ranked-scan ?table rum ?query ?k ?algo)"
+    )]
 }
 
 /// Rule 5: Filter pushdown with FTS (bitmap AND).
@@ -153,9 +147,7 @@ pub fn optimize_top_k_fts(
                 requires_ranking,
                 limit,
             );
-            OptimizationDecision::UseGinWithSort {
-                cost: gin_cost.cpu,
-            }
+            OptimizationDecision::UseGinWithSort { cost: gin_cost.cpu }
         }
         _ => OptimizationDecision::NoOptimization,
     }
@@ -207,27 +199,13 @@ mod tests {
 
     #[test]
     fn optimize_top_k_no_index() {
-        let decision = optimize_top_k_fts(
-            false,
-            false,
-            Some(10),
-            &["rust"],
-            100_000,
-            &[1000],
-        );
+        let decision = optimize_top_k_fts(false, false, Some(10), &["rust"], 100_000, &[1000]);
         assert_eq!(decision, OptimizationDecision::NoOptimization);
     }
 
     #[test]
     fn optimize_top_k_rum_available() {
-        let decision = optimize_top_k_fts(
-            true,
-            false,
-            Some(10),
-            &["rust"],
-            100_000,
-            &[1000],
-        );
+        let decision = optimize_top_k_fts(true, false, Some(10), &["rust"], 100_000, &[1000]);
         match decision {
             OptimizationDecision::UseRumRankedScan { limit, .. } => {
                 assert_eq!(limit, 10);
@@ -238,14 +216,7 @@ mod tests {
 
     #[test]
     fn optimize_top_k_gin_fallback() {
-        let decision = optimize_top_k_fts(
-            false,
-            true,
-            Some(10),
-            &["rust"],
-            100_000,
-            &[1000],
-        );
+        let decision = optimize_top_k_fts(false, true, Some(10), &["rust"], 100_000, &[1000]);
         match decision {
             OptimizationDecision::UseGinWithSort { .. } => {}
             _ => panic!("Expected GIN with sort"),
@@ -254,23 +225,9 @@ mod tests {
 
     #[test]
     fn optimize_top_k_rum_cost_lower_with_limit() {
-        let rum_decision = optimize_top_k_fts(
-            true,
-            false,
-            Some(10),
-            &["rust"],
-            100_000,
-            &[10_000],
-        );
+        let rum_decision = optimize_top_k_fts(true, false, Some(10), &["rust"], 100_000, &[10_000]);
 
-        let gin_decision = optimize_top_k_fts(
-            false,
-            true,
-            Some(10),
-            &["rust"],
-            100_000,
-            &[10_000],
-        );
+        let gin_decision = optimize_top_k_fts(false, true, Some(10), &["rust"], 100_000, &[10_000]);
 
         let rum_cost = match rum_decision {
             OptimizationDecision::UseRumRankedScan { cost, .. } => cost,
@@ -289,14 +246,7 @@ mod tests {
 
     #[test]
     fn optimize_top_k_empty_terms() {
-        let decision = optimize_top_k_fts(
-            true,
-            true,
-            Some(10),
-            &[],
-            100_000,
-            &[],
-        );
+        let decision = optimize_top_k_fts(true, true, Some(10), &[], 100_000, &[]);
         assert_eq!(decision, OptimizationDecision::NoOptimization);
     }
 
@@ -321,14 +271,7 @@ mod tests {
 
     #[test]
     fn optimize_top_k_no_limit_gin() {
-        let decision = optimize_top_k_fts(
-            false,
-            true,
-            None,
-            &["search"],
-            100_000,
-            &[1000],
-        );
+        let decision = optimize_top_k_fts(false, true, None, &["search"], 100_000, &[1000]);
         match decision {
             OptimizationDecision::UseGinWithSort { .. } => {}
             _ => panic!("Expected GIN with sort"),

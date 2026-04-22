@@ -96,10 +96,7 @@ impl ResourceBudget {
 
     /// Set the overflow strategy.
     #[must_use]
-    pub fn with_overflow_strategy(
-        mut self,
-        strategy: OverflowStrategy,
-    ) -> Self {
+    pub fn with_overflow_strategy(mut self, strategy: OverflowStrategy) -> Self {
         self.overflow_strategy = strategy;
         self
     }
@@ -171,41 +168,31 @@ impl ResourceTracker {
 
         if let Some(limit) = self.budget.max_time {
             if elapsed >= limit {
-                return ResourceCheckResult::Exceeded(
-                    ExceededResource::Time,
-                );
+                return ResourceCheckResult::Exceeded(ExceededResource::Time);
             }
         }
 
         if let Some(limit) = self.budget.max_cpu_time {
             if elapsed >= limit {
-                return ResourceCheckResult::Exceeded(
-                    ExceededResource::CpuTime,
-                );
+                return ResourceCheckResult::Exceeded(ExceededResource::CpuTime);
             }
         }
 
         if let Some(limit) = self.budget.max_memory {
             if self.peak_memory_estimate >= limit {
-                return ResourceCheckResult::Exceeded(
-                    ExceededResource::Memory,
-                );
+                return ResourceCheckResult::Exceeded(ExceededResource::Memory);
             }
         }
 
         if let Some(limit) = self.budget.max_egraph_nodes {
             if self.peak_egraph_nodes >= limit {
-                return ResourceCheckResult::Exceeded(
-                    ExceededResource::EGraphNodes,
-                );
+                return ResourceCheckResult::Exceeded(ExceededResource::EGraphNodes);
             }
         }
 
         if let Some(limit) = self.budget.max_iterations {
             if self.iterations_used >= limit {
-                return ResourceCheckResult::Exceeded(
-                    ExceededResource::Iterations,
-                );
+                return ResourceCheckResult::Exceeded(ExceededResource::Iterations);
             }
         }
 
@@ -351,40 +338,35 @@ mod tests {
 
     #[test]
     fn with_time_limit_sets_constraint() {
-        let budget = ResourceBudget::unlimited()
-            .with_time_limit(Duration::from_millis(100));
+        let budget = ResourceBudget::unlimited().with_time_limit(Duration::from_millis(100));
         assert!(!budget.is_unlimited());
         assert_eq!(budget.max_time, Some(Duration::from_millis(100)));
     }
 
     #[test]
     fn with_cpu_time_limit_sets_constraint() {
-        let budget = ResourceBudget::unlimited()
-            .with_cpu_time_limit(Duration::from_secs(1));
+        let budget = ResourceBudget::unlimited().with_cpu_time_limit(Duration::from_secs(1));
         assert!(!budget.is_unlimited());
         assert_eq!(budget.max_cpu_time, Some(Duration::from_secs(1)));
     }
 
     #[test]
     fn with_memory_limit_sets_constraint() {
-        let budget = ResourceBudget::unlimited()
-            .with_memory_limit(50 * 1024 * 1024);
+        let budget = ResourceBudget::unlimited().with_memory_limit(50 * 1024 * 1024);
         assert!(!budget.is_unlimited());
         assert_eq!(budget.max_memory, Some(50 * 1024 * 1024));
     }
 
     #[test]
     fn with_egraph_node_limit_sets_constraint() {
-        let budget = ResourceBudget::unlimited()
-            .with_egraph_node_limit(10_000);
+        let budget = ResourceBudget::unlimited().with_egraph_node_limit(10_000);
         assert!(!budget.is_unlimited());
         assert_eq!(budget.max_egraph_nodes, Some(10_000));
     }
 
     #[test]
     fn with_iteration_limit_sets_constraint() {
-        let budget = ResourceBudget::unlimited()
-            .with_iteration_limit(5);
+        let budget = ResourceBudget::unlimited().with_iteration_limit(5);
         // is_unlimited() ignores max_iterations (safety mechanism only)
         assert!(budget.is_unlimited());
         assert_eq!(budget.max_iterations, Some(5));
@@ -392,8 +374,7 @@ mod tests {
 
     #[test]
     fn with_overflow_strategy_sets_strategy() {
-        let budget = ResourceBudget::unlimited()
-            .with_overflow_strategy(OverflowStrategy::Fail);
+        let budget = ResourceBudget::unlimited().with_overflow_strategy(OverflowStrategy::Fail);
         assert_eq!(budget.overflow_strategy, OverflowStrategy::Fail);
     }
 
@@ -408,19 +389,13 @@ mod tests {
         assert_eq!(budget.max_time, Some(Duration::from_secs(1)));
         assert_eq!(budget.max_memory, Some(100 * 1024 * 1024));
         assert_eq!(budget.max_iterations, Some(10));
-        assert_eq!(
-            budget.overflow_strategy,
-            OverflowStrategy::ReturnOriginal
-        );
+        assert_eq!(budget.overflow_strategy, OverflowStrategy::ReturnOriginal);
     }
 
     #[test]
     fn default_overflow_strategy_is_return_best_so_far() {
         let budget = ResourceBudget::unlimited();
-        assert_eq!(
-            budget.overflow_strategy,
-            OverflowStrategy::ReturnBestSoFar
-        );
+        assert_eq!(budget.overflow_strategy, OverflowStrategy::ReturnBestSoFar);
     }
 
     // ---- OverflowStrategy equality ----
@@ -431,23 +406,15 @@ mod tests {
             OverflowStrategy::ReturnBestSoFar,
             OverflowStrategy::ReturnOriginal
         );
-        assert_ne!(
-            OverflowStrategy::ReturnBestSoFar,
-            OverflowStrategy::Fail
-        );
-        assert_ne!(
-            OverflowStrategy::ReturnOriginal,
-            OverflowStrategy::Fail
-        );
+        assert_ne!(OverflowStrategy::ReturnBestSoFar, OverflowStrategy::Fail);
+        assert_ne!(OverflowStrategy::ReturnOriginal, OverflowStrategy::Fail);
     }
 
     // ---- ResourceTracker creation and basic tracking ----
 
     #[test]
     fn tracker_starts_at_zero() {
-        let tracker = ResourceTracker::start(
-            ResourceBudget::unlimited(),
-        );
+        let tracker = ResourceTracker::start(ResourceBudget::unlimited());
         assert_eq!(tracker.iterations_used(), 0);
         assert_eq!(tracker.peak_egraph_nodes(), 0);
         assert_eq!(tracker.peak_memory_estimate(), 0);
@@ -455,9 +422,7 @@ mod tests {
 
     #[test]
     fn tracker_records_iterations() {
-        let mut tracker = ResourceTracker::start(
-            ResourceBudget::unlimited(),
-        );
+        let mut tracker = ResourceTracker::start(ResourceBudget::unlimited());
         tracker.record_iteration();
         tracker.record_iteration();
         tracker.record_iteration();
@@ -466,9 +431,7 @@ mod tests {
 
     #[test]
     fn tracker_records_peak_egraph_nodes() {
-        let mut tracker = ResourceTracker::start(
-            ResourceBudget::unlimited(),
-        );
+        let mut tracker = ResourceTracker::start(ResourceBudget::unlimited());
         tracker.record_egraph_nodes(100);
         tracker.record_egraph_nodes(500);
         tracker.record_egraph_nodes(200);
@@ -477,9 +440,7 @@ mod tests {
 
     #[test]
     fn tracker_records_peak_memory() {
-        let mut tracker = ResourceTracker::start(
-            ResourceBudget::unlimited(),
-        );
+        let mut tracker = ResourceTracker::start(ResourceBudget::unlimited());
         tracker.record_memory_estimate(1000);
         tracker.record_memory_estimate(5000);
         tracker.record_memory_estimate(2000);
@@ -488,9 +449,7 @@ mod tests {
 
     #[test]
     fn tracker_elapsed_returns_valid_duration() {
-        let tracker = ResourceTracker::start(
-            ResourceBudget::unlimited(),
-        );
+        let tracker = ResourceTracker::start(ResourceBudget::unlimited());
         // Duration is always non-negative by construction;
         // verify we get a finite duration back.
         let _elapsed = tracker.elapsed();
@@ -500,17 +459,14 @@ mod tests {
 
     #[test]
     fn unlimited_budget_always_within_budget() {
-        let tracker = ResourceTracker::start(
-            ResourceBudget::unlimited(),
-        );
+        let tracker = ResourceTracker::start(ResourceBudget::unlimited());
         assert_eq!(tracker.check(), ResourceCheckResult::WithinBudget);
         assert!(tracker.check().is_within_budget());
     }
 
     #[test]
     fn iteration_limit_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_iteration_limit(2);
+        let budget = ResourceBudget::unlimited().with_iteration_limit(2);
         let mut tracker = ResourceTracker::start(budget);
         tracker.record_iteration();
         assert!(tracker.check().is_within_budget());
@@ -523,24 +479,20 @@ mod tests {
 
     #[test]
     fn egraph_node_limit_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_egraph_node_limit(1000);
+        let budget = ResourceBudget::unlimited().with_egraph_node_limit(1000);
         let mut tracker = ResourceTracker::start(budget);
         tracker.record_egraph_nodes(500);
         assert!(tracker.check().is_within_budget());
         tracker.record_egraph_nodes(1000);
         assert_eq!(
             tracker.check(),
-            ResourceCheckResult::Exceeded(
-                ExceededResource::EGraphNodes
-            )
+            ResourceCheckResult::Exceeded(ExceededResource::EGraphNodes)
         );
     }
 
     #[test]
     fn memory_limit_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_memory_limit(1024);
+        let budget = ResourceBudget::unlimited().with_memory_limit(1024);
         let mut tracker = ResourceTracker::start(budget);
         tracker.record_memory_estimate(512);
         assert!(tracker.check().is_within_budget());
@@ -553,8 +505,7 @@ mod tests {
 
     #[test]
     fn time_limit_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_time_limit(Duration::from_millis(0));
+        let budget = ResourceBudget::unlimited().with_time_limit(Duration::from_millis(0));
         let tracker = ResourceTracker::start(budget);
         // Even a zero-duration limit should be exceeded immediately
         // (or nearly so). We spin briefly to ensure time passes.
@@ -567,8 +518,7 @@ mod tests {
 
     #[test]
     fn cpu_time_limit_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_cpu_time_limit(Duration::from_millis(0));
+        let budget = ResourceBudget::unlimited().with_cpu_time_limit(Duration::from_millis(0));
         let tracker = ResourceTracker::start(budget);
         std::thread::sleep(Duration::from_millis(1));
         assert_eq!(
@@ -584,9 +534,7 @@ mod tests {
 
     #[test]
     fn check_result_is_within_budget_false() {
-        let exceeded = ResourceCheckResult::Exceeded(
-            ExceededResource::Time,
-        );
+        let exceeded = ResourceCheckResult::Exceeded(ExceededResource::Time);
         assert!(!exceeded.is_within_budget());
     }
 
@@ -609,40 +557,28 @@ mod tests {
 
     #[test]
     fn exceeded_resource_display_egraph_nodes() {
-        assert_eq!(
-            ExceededResource::EGraphNodes.to_string(),
-            "e-graph nodes"
-        );
+        assert_eq!(ExceededResource::EGraphNodes.to_string(), "e-graph nodes");
     }
 
     #[test]
     fn exceeded_resource_display_iterations() {
-        assert_eq!(
-            ExceededResource::Iterations.to_string(),
-            "iterations"
-        );
+        assert_eq!(ExceededResource::Iterations.to_string(), "iterations");
     }
 
     // ---- ResourceTracker overflow_strategy ----
 
     #[test]
     fn tracker_returns_budget_overflow_strategy() {
-        let budget = ResourceBudget::unlimited()
-            .with_overflow_strategy(OverflowStrategy::Fail);
+        let budget = ResourceBudget::unlimited().with_overflow_strategy(OverflowStrategy::Fail);
         let tracker = ResourceTracker::start(budget);
-        assert_eq!(
-            tracker.overflow_strategy(),
-            OverflowStrategy::Fail
-        );
+        assert_eq!(tracker.overflow_strategy(), OverflowStrategy::Fail);
     }
 
     // ---- ResourceUsageReport ----
 
     #[test]
     fn report_within_budget() {
-        let tracker = ResourceTracker::start(
-            ResourceBudget::unlimited(),
-        );
+        let tracker = ResourceTracker::start(ResourceBudget::unlimited());
         let report = tracker.report();
         assert!(report.completed_within_budget());
         assert!(report.budget_exceeded.is_none());
@@ -653,22 +589,17 @@ mod tests {
 
     #[test]
     fn report_exceeded_budget() {
-        let budget = ResourceBudget::unlimited()
-            .with_iteration_limit(1);
+        let budget = ResourceBudget::unlimited().with_iteration_limit(1);
         let mut tracker = ResourceTracker::start(budget);
         tracker.record_iteration();
         let report = tracker.report();
         assert!(!report.completed_within_budget());
-        assert_eq!(
-            report.budget_exceeded,
-            Some(ExceededResource::Iterations)
-        );
+        assert_eq!(report.budget_exceeded, Some(ExceededResource::Iterations));
     }
 
     #[test]
     fn report_captures_all_metrics() {
-        let budget = ResourceBudget::unlimited()
-            .with_iteration_limit(100);
+        let budget = ResourceBudget::unlimited().with_iteration_limit(100);
         let mut tracker = ResourceTracker::start(budget);
         tracker.record_iteration();
         tracker.record_iteration();
@@ -686,34 +617,27 @@ mod tests {
 
     #[test]
     fn zero_iteration_limit_immediately_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_iteration_limit(0);
+        let budget = ResourceBudget::unlimited().with_iteration_limit(0);
         let tracker = ResourceTracker::start(budget);
         assert_eq!(
             tracker.check(),
-            ResourceCheckResult::Exceeded(
-                ExceededResource::Iterations
-            )
+            ResourceCheckResult::Exceeded(ExceededResource::Iterations)
         );
     }
 
     #[test]
     fn zero_egraph_node_limit_immediately_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_egraph_node_limit(0);
+        let budget = ResourceBudget::unlimited().with_egraph_node_limit(0);
         let tracker = ResourceTracker::start(budget);
         assert_eq!(
             tracker.check(),
-            ResourceCheckResult::Exceeded(
-                ExceededResource::EGraphNodes
-            )
+            ResourceCheckResult::Exceeded(ExceededResource::EGraphNodes)
         );
     }
 
     #[test]
     fn zero_memory_limit_immediately_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_memory_limit(0);
+        let budget = ResourceBudget::unlimited().with_memory_limit(0);
         let tracker = ResourceTracker::start(budget);
         assert_eq!(
             tracker.check(),
@@ -732,17 +656,13 @@ mod tests {
         // E-graph check comes before iteration check in order
         assert_eq!(
             tracker.check(),
-            ResourceCheckResult::Exceeded(
-                ExceededResource::EGraphNodes
-            )
+            ResourceCheckResult::Exceeded(ExceededResource::EGraphNodes)
         );
     }
 
     #[test]
     fn peak_tracking_never_decreases() {
-        let mut tracker = ResourceTracker::start(
-            ResourceBudget::unlimited(),
-        );
+        let mut tracker = ResourceTracker::start(ResourceBudget::unlimited());
         tracker.record_egraph_nodes(1000);
         tracker.record_egraph_nodes(500);
         assert_eq!(tracker.peak_egraph_nodes(), 1000);

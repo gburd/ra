@@ -60,11 +60,7 @@ pub enum BooleanOperator {
 ///
 /// Returns CPU cost in arbitrary units.
 #[must_use]
-pub fn inverted_index_lookup_cost(
-    term: &str,
-    total_docs: usize,
-    term_frequency: usize,
-) -> f64 {
+pub fn inverted_index_lookup_cost(term: &str, total_docs: usize, term_frequency: usize) -> f64 {
     const BASE_LOOKUP_COST: f64 = 1.0;
     const DECODE_COST_PER_DOC: f64 = 0.5;
 
@@ -150,10 +146,7 @@ pub fn boolean_query_cost(
         match operator {
             BooleanOperator::And => {
                 for i in 0..freqs_sorted.len() - 1 {
-                    let cost = skip_list_intersection_cost(
-                        freqs_sorted[i],
-                        freqs_sorted[i + 1],
-                    );
+                    let cost = skip_list_intersection_cost(freqs_sorted[i], freqs_sorted[i + 1]);
                     total_cpu += cost;
                     freqs_sorted[i + 1] =
                         (freqs_sorted[i] as f64 * 0.3).min(freqs_sorted[i] as f64) as usize;
@@ -250,9 +243,7 @@ pub fn select_fts_index_type(
     }
 
     match (query_type, requires_ranking) {
-        (BooleanOperator::Phrase, true) => {
-            FtsIndexType::Rum
-        }
+        (BooleanOperator::Phrase, true) => FtsIndexType::Rum,
         (BooleanOperator::Phrase, false) => {
             if table_size > LARGE_TABLE_THRESHOLD {
                 FtsIndexType::Rum
@@ -340,11 +331,7 @@ pub fn gin_scan_cost(
 
     if requires_ranking {
         let final_freq = term_frequencies.iter().min().copied().unwrap_or(0);
-        let rank_cost = top_k_ranking_cost(
-            final_freq,
-            RankingAlgorithm::TfIdf,
-            limit,
-        );
+        let rank_cost = top_k_ranking_cost(final_freq, RankingAlgorithm::TfIdf, limit);
         cost.cpu += rank_cost;
     }
 
@@ -367,19 +354,11 @@ pub fn rum_scan_cost(
 
     if requires_ranking && limit.is_some() {
         let final_freq = term_frequencies.iter().min().copied().unwrap_or(0);
-        let rank_cost = top_k_ranking_cost(
-            final_freq,
-            RankingAlgorithm::Bm25,
-            limit,
-        );
+        let rank_cost = top_k_ranking_cost(final_freq, RankingAlgorithm::Bm25, limit);
         cost.cpu += rank_cost * 0.5;
     } else if requires_ranking {
         let final_freq = term_frequencies.iter().min().copied().unwrap_or(0);
-        let rank_cost = top_k_ranking_cost(
-            final_freq,
-            RankingAlgorithm::Bm25,
-            limit,
-        );
+        let rank_cost = top_k_ranking_cost(final_freq, RankingAlgorithm::Bm25, limit);
         cost.cpu += rank_cost;
     }
 
@@ -398,11 +377,7 @@ pub fn fulltext_scan_cost(
     let mut cost = boolean_query_cost(terms, operator, total_docs, term_frequencies);
 
     let final_freq = term_frequencies.iter().min().copied().unwrap_or(0);
-    let rank_cost = top_k_ranking_cost(
-        final_freq,
-        RankingAlgorithm::TfIdf,
-        limit,
-    );
+    let rank_cost = top_k_ranking_cost(final_freq, RankingAlgorithm::TfIdf, limit);
     cost.cpu += rank_cost * 0.7;
 
     cost
@@ -448,12 +423,7 @@ mod tests {
     fn boolean_query_and_operator() {
         let terms = vec!["rust", "language"];
         let freqs = vec![10_000, 20_000];
-        let cost = boolean_query_cost(
-            &terms,
-            BooleanOperator::And,
-            100_000,
-            &freqs,
-        );
+        let cost = boolean_query_cost(&terms, BooleanOperator::And, 100_000, &freqs);
         assert!(cost.cpu > 0.0);
         assert!(cost.io > 0.0);
     }
@@ -463,18 +433,8 @@ mod tests {
         let terms = vec!["rust", "language"];
         let freqs = vec![10_000, 20_000];
 
-        let and_cost = boolean_query_cost(
-            &terms,
-            BooleanOperator::And,
-            100_000,
-            &freqs,
-        );
-        let phrase_cost = boolean_query_cost(
-            &terms,
-            BooleanOperator::Phrase,
-            100_000,
-            &freqs,
-        );
+        let and_cost = boolean_query_cost(&terms, BooleanOperator::And, 100_000, &freqs);
+        let phrase_cost = boolean_query_cost(&terms, BooleanOperator::Phrase, 100_000, &freqs);
 
         assert!(phrase_cost.cpu > and_cost.cpu);
     }
@@ -561,22 +521,10 @@ mod tests {
     fn gin_scan_with_ranking() {
         let terms = vec!["rust"];
         let freqs = vec![1000];
-        let cost_no_rank = gin_scan_cost(
-            &terms,
-            BooleanOperator::And,
-            100_000,
-            &freqs,
-            false,
-            None,
-        );
-        let cost_with_rank = gin_scan_cost(
-            &terms,
-            BooleanOperator::And,
-            100_000,
-            &freqs,
-            true,
-            None,
-        );
+        let cost_no_rank =
+            gin_scan_cost(&terms, BooleanOperator::And, 100_000, &freqs, false, None);
+        let cost_with_rank =
+            gin_scan_cost(&terms, BooleanOperator::And, 100_000, &freqs, true, None);
         assert!(cost_with_rank.cpu > cost_no_rank.cpu);
     }
 
@@ -584,14 +532,8 @@ mod tests {
     fn rum_scan_with_limit() {
         let terms = vec!["rust"];
         let freqs = vec![10_000];
-        let cost_no_limit = rum_scan_cost(
-            &terms,
-            BooleanOperator::And,
-            100_000,
-            &freqs,
-            true,
-            None,
-        );
+        let cost_no_limit =
+            rum_scan_cost(&terms, BooleanOperator::And, 100_000, &freqs, true, None);
         let cost_with_limit = rum_scan_cost(
             &terms,
             BooleanOperator::And,
@@ -607,13 +549,7 @@ mod tests {
     fn fulltext_scan_includes_ranking() {
         let terms = vec!["search"];
         let freqs = vec![1000];
-        let cost = fulltext_scan_cost(
-            &terms,
-            BooleanOperator::And,
-            100_000,
-            &freqs,
-            Some(20),
-        );
+        let cost = fulltext_scan_cost(&terms, BooleanOperator::And, 100_000, &freqs, Some(20));
         assert!(cost.cpu > 0.0);
     }
 }

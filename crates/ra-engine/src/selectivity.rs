@@ -41,7 +41,6 @@ const DEFAULT_RANGE_SELECTIVITY: f64 = 0.33;
 /// Default selectivity for LIKE predicates.
 const DEFAULT_LIKE_SELECTIVITY: f64 = 0.15;
 
-
 /// Estimate the selectivity of a predicate given column statistics.
 ///
 /// Returns a value in `[0.0, 1.0]` representing the fraction of rows
@@ -59,35 +58,20 @@ const DEFAULT_LIKE_SELECTIVITY: f64 = 0.15;
 #[must_use]
 pub fn estimate_selectivity(predicate: &Expr, stats: &ColumnStats) -> f64 {
     match predicate {
-        Expr::BinOp { op, left, right } => {
-            estimate_binop_selectivity(*op, left, right, stats)
-        }
-        Expr::UnaryOp { op, operand } => {
-            estimate_unary_selectivity(*op, operand, stats)
-        }
-        Expr::Function { name, args } => {
-            estimate_function_selectivity(name, args, stats)
-        }
+        Expr::BinOp { op, left, right } => estimate_binop_selectivity(*op, left, right, stats),
+        Expr::UnaryOp { op, operand } => estimate_unary_selectivity(*op, operand, stats),
+        Expr::Function { name, args } => estimate_function_selectivity(name, args, stats),
         _ => DEFAULT_SELECTIVITY,
     }
 }
 
 /// Estimate selectivity for binary operations.
-fn estimate_binop_selectivity(
-    op: BinOp,
-    left: &Expr,
-    right: &Expr,
-    stats: &ColumnStats,
-) -> f64 {
+fn estimate_binop_selectivity(op: BinOp, left: &Expr, right: &Expr, stats: &ColumnStats) -> f64 {
     match op {
         BinOp::Eq => estimate_equality_selectivity(left, right, stats),
         BinOp::Ne => 1.0 - estimate_equality_selectivity(left, right, stats),
-        BinOp::Lt | BinOp::Le => {
-            estimate_range_selectivity(left, right, stats, true)
-        }
-        BinOp::Gt | BinOp::Ge => {
-            estimate_range_selectivity(left, right, stats, false)
-        }
+        BinOp::Lt | BinOp::Le => estimate_range_selectivity(left, right, stats, true),
+        BinOp::Gt | BinOp::Ge => estimate_range_selectivity(left, right, stats, false),
         BinOp::And => {
             let left_sel = estimate_selectivity(left, stats);
             let right_sel = estimate_selectivity(right, stats);
@@ -103,11 +87,7 @@ fn estimate_binop_selectivity(
 }
 
 /// Estimate selectivity for unary operations.
-fn estimate_unary_selectivity(
-    op: UnaryOp,
-    operand: &Expr,
-    stats: &ColumnStats,
-) -> f64 {
+fn estimate_unary_selectivity(op: UnaryOp, operand: &Expr, stats: &ColumnStats) -> f64 {
     match op {
         UnaryOp::Not => 1.0 - estimate_selectivity(operand, stats),
         UnaryOp::IsNull => stats.null_fraction,
@@ -117,11 +97,7 @@ fn estimate_unary_selectivity(
 }
 
 /// Estimate selectivity for function calls (LIKE, IN, BETWEEN, etc.).
-fn estimate_function_selectivity(
-    name: &str,
-    args: &[Expr],
-    stats: &ColumnStats,
-) -> f64 {
+fn estimate_function_selectivity(name: &str, args: &[Expr], stats: &ColumnStats) -> f64 {
     match name.to_uppercase().as_str() {
         "LIKE" | "ILIKE" => estimate_like_selectivity(args, stats),
         "IN" => estimate_in_selectivity(args, stats),
@@ -136,11 +112,7 @@ fn estimate_function_selectivity(
 /// 1. Check if the value is in the MCV list
 /// 2. If yes, return the MCV frequency
 /// 3. Otherwise, use `1 / distinct_count`
-fn estimate_equality_selectivity(
-    left: &Expr,
-    right: &Expr,
-    stats: &ColumnStats,
-) -> f64 {
+fn estimate_equality_selectivity(left: &Expr, right: &Expr, stats: &ColumnStats) -> f64 {
     let value = match (left, right) {
         (Expr::Column(_), Expr::Const(c)) => Some(c),
         (Expr::Const(c), Expr::Column(_)) => Some(c),
@@ -277,11 +249,7 @@ fn estimate_between_selectivity(args: &[Expr], stats: &ColumnStats) -> f64 {
     };
 
     if let Some(histogram) = &stats.histogram {
-        return histogram_range_selectivity(
-            histogram,
-            lower.as_deref(),
-            upper.as_deref(),
-        );
+        return histogram_range_selectivity(histogram, lower.as_deref(), upper.as_deref());
     }
 
     DEFAULT_SELECTIVITY
@@ -330,12 +298,7 @@ fn histogram_range_selectivity(
         };
         let bucket_upper = Some(bucket.upper_bound.as_str());
 
-        let overlap = bucket_overlap_fraction(
-            bucket_lower,
-            bucket_upper,
-            lower,
-            upper,
-        );
+        let overlap = bucket_overlap_fraction(bucket_lower, bucket_upper, lower, upper);
 
         selected_rows += bucket.row_count * overlap;
     }
@@ -393,9 +356,11 @@ fn bucket_overlap_fraction(
         }
     }
 
-    let bucket_inside_range = (range_lower.is_none() || bucket_lower.is_none()
+    let bucket_inside_range = (range_lower.is_none()
+        || bucket_lower.is_none()
         || matches!(cmp(bucket_lower, range_lower), Greater | Equal))
-        && (range_upper.is_none() || bucket_upper.is_none()
+        && (range_upper.is_none()
+            || bucket_upper.is_none()
             || matches!(cmp(bucket_upper, range_upper), Less | Equal));
 
     if bucket_inside_range {
@@ -639,8 +604,7 @@ mod tests {
     #[test]
     fn in_predicate_with_mcv() {
         let mut stats = ColumnStats::new(1000.0);
-        stats.most_common_values =
-            Some(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        stats.most_common_values = Some(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
         stats.most_common_freqs = Some(vec![0.1, 0.08, 0.05]);
 
         let args = vec![
@@ -738,41 +702,25 @@ mod tests {
             rows_per_bucket: 100.0,
         });
 
-        let selectivity =
-            histogram_range_selectivity(&histogram, Some("50"), Some("150"));
+        let selectivity = histogram_range_selectivity(&histogram, Some("50"), Some("150"));
         assert!(selectivity > 0.0 && selectivity <= 1.0);
     }
 
     #[test]
     fn bucket_no_overlap() {
-        let overlap = bucket_overlap_fraction(
-            Some("100"),
-            Some("200"),
-            Some("300"),
-            Some("400"),
-        );
+        let overlap = bucket_overlap_fraction(Some("100"), Some("200"), Some("300"), Some("400"));
         assert!((overlap - 0.0).abs() < 1e-6);
     }
 
     #[test]
     fn bucket_full_overlap() {
-        let overlap = bucket_overlap_fraction(
-            Some("100"),
-            Some("200"),
-            Some("50"),
-            Some("250"),
-        );
+        let overlap = bucket_overlap_fraction(Some("100"), Some("200"), Some("50"), Some("250"));
         assert!((overlap - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn bucket_partial_overlap() {
-        let overlap = bucket_overlap_fraction(
-            Some("100"),
-            Some("200"),
-            Some("150"),
-            Some("250"),
-        );
+        let overlap = bucket_overlap_fraction(Some("100"), Some("200"), Some("150"), Some("250"));
         assert!((overlap - 0.5).abs() < 1e-6);
     }
 }

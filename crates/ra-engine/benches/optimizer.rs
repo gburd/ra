@@ -11,7 +11,9 @@ use ra_core::algebra::{
     SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{rec_expr_to_rel_expr, to_rec_expr, Optimizer, OptimizerConfig, egraph::ParallelConfig};
+use ra_engine::{
+    egraph::ParallelConfig, rec_expr_to_rel_expr, to_rec_expr, Optimizer, OptimizerConfig,
+};
 use ra_parser::sql_to_relexpr;
 use std::path::PathBuf;
 
@@ -265,15 +267,19 @@ fn tpch_queries_dir() -> PathBuf {
 
 fn load_tpch_query(name: &str) -> RelExpr {
     let path = tpch_queries_dir().join(name);
-    let sql = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    sql_to_relexpr(&sql)
-        .unwrap_or_else(|e| panic!("parse {name}: {e}"))
+    let sql = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    sql_to_relexpr(&sql).unwrap_or_else(|e| panic!("parse {name}: {e}"))
 }
 
-fn tpch_q1() -> RelExpr { load_tpch_query("q1.sql") }
-fn tpch_q3() -> RelExpr { load_tpch_query("q3.sql") }
-fn tpch_q6() -> RelExpr { load_tpch_query("q6.sql") }
+fn tpch_q1() -> RelExpr {
+    load_tpch_query("q1.sql")
+}
+fn tpch_q3() -> RelExpr {
+    load_tpch_query("q3.sql")
+}
+fn tpch_q6() -> RelExpr {
+    load_tpch_query("q6.sql")
+}
 
 // ── Hardware-specific benchmarks ────────────────────────────────────
 

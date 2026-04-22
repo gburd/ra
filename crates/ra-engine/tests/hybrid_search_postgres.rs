@@ -12,10 +12,9 @@
 //! Run with: `cargo test -p ra-engine --test hybrid_search_postgres`
 
 use ra_engine::{
-    HybridStrategy, ScoreFusion, choose_hybrid_strategy, fuse_scores,
-    hybrid_fts_first_cost_factor, hybrid_parallel_cost_factor,
-    hybrid_scan_cost_factor, hybrid_search_rules,
-    hybrid_vector_first_cost_factor,
+    choose_hybrid_strategy, fuse_scores, hybrid_fts_first_cost_factor, hybrid_parallel_cost_factor,
+    hybrid_scan_cost_factor, hybrid_search_rules, hybrid_vector_first_cost_factor, HybridStrategy,
+    ScoreFusion,
 };
 
 #[test]
@@ -114,9 +113,7 @@ fn test_score_fusion_methods() {
     let weighted_scores: Vec<f64> = bm25_scores
         .iter()
         .zip(&vector_scores)
-        .map(|(&bm25, &vec)| {
-            fuse_scores(bm25, vec, ScoreFusion::WeightedAverage, alpha, k)
-        })
+        .map(|(&bm25, &vec)| fuse_scores(bm25, vec, ScoreFusion::WeightedAverage, alpha, k))
         .collect();
 
     // Verify weighted scores are in [0, 1] range
@@ -141,9 +138,7 @@ fn test_score_fusion_methods() {
     let rrf_scores: Vec<f64> = bm25_scores
         .iter()
         .zip(&vector_scores)
-        .map(|(&bm25, &vec)| {
-            fuse_scores(bm25, vec, ScoreFusion::ReciprocalRankFusion, alpha, k)
-        })
+        .map(|(&bm25, &vec)| fuse_scores(bm25, vec, ScoreFusion::ReciprocalRankFusion, alpha, k))
         .collect();
 
     // RRF scores should be positive
@@ -155,9 +150,7 @@ fn test_score_fusion_methods() {
     let learned_scores: Vec<f64> = bm25_scores
         .iter()
         .zip(&vector_scores)
-        .map(|(&bm25, &vec)| {
-            fuse_scores(bm25, vec, ScoreFusion::Learned, alpha, k)
-        })
+        .map(|(&bm25, &vec)| fuse_scores(bm25, vec, ScoreFusion::Learned, alpha, k))
         .collect();
 
     // Learned should match RRF when model unavailable
@@ -226,9 +219,7 @@ fn test_extreme_selectivity_values() {
     assert!(
         matches!(
             high_sel,
-            HybridStrategy::FTSFirst
-                | HybridStrategy::VectorFirst
-                | HybridStrategy::Parallel
+            HybridStrategy::FTSFirst | HybridStrategy::VectorFirst | HybridStrategy::Parallel
         ),
         "High selectivity should choose valid strategy"
     );
@@ -249,7 +240,10 @@ fn test_score_fusion_boundary_conditions() {
 
     // Zero scores
     let zero_score = fuse_scores(0.0, 0.0, ScoreFusion::WeightedAverage, alpha, k);
-    assert!(zero_score >= 0.0, "Zero scores should produce non-negative result");
+    assert!(
+        zero_score >= 0.0,
+        "Zero scores should produce non-negative result"
+    );
 
     // Very high BM25 score
     let high_bm25 = fuse_scores(100.0, 0.1, ScoreFusion::WeightedAverage, alpha, k);

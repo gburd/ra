@@ -6,14 +6,11 @@
 use std::collections::HashMap;
 
 use ra_core::algebra::{JoinType, RelExpr};
-use ra_core::distribution::{
-    DataDistribution, DistributionStrategy, NodeId,
-};
+use ra_core::distribution::{DataDistribution, DistributionStrategy, NodeId};
 use ra_core::expr::{ColumnRef, Expr};
 use ra_core::statistics::Statistics;
 use ra_engine::distributed_optimizer::{
-    ClusterTopology, DistributedOptimizer,
-    DistributedOptimizerConfig,
+    ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig,
 };
 use ra_engine::network_cost::NetworkCostModel;
 use ra_hardware::network::NetworkTopology;
@@ -91,11 +88,7 @@ fn single_dc_topology() -> ClusterTopology {
             partition_count: 4,
         },
     );
-    topo.register_table(
-        "countries",
-        NodeId(0),
-        DataDistribution::Replicated,
-    );
+    topo.register_table("countries", NodeId(0), DataDistribution::Replicated);
     topo.register_table(
         "customers",
         NodeId(2),
@@ -142,11 +135,7 @@ fn multi_dc_topology() -> ClusterTopology {
             partition_count: 6,
         },
     );
-    topo.register_table(
-        "countries",
-        NodeId(4),
-        DataDistribution::Replicated,
-    );
+    topo.register_table("countries", NodeId(4), DataDistribution::Replicated);
     topo
 }
 
@@ -195,12 +184,7 @@ fn cloud_topology() -> ClusterTopology {
     topo
 }
 
-fn register_stats(
-    opt: &mut DistributedOptimizer,
-    table: &str,
-    rows: f64,
-    avg_row_size: u64,
-) {
+fn register_stats(opt: &mut DistributedOptimizer, table: &str, rows: f64, avg_row_size: u64) {
     let mut stats = Statistics::new(rows);
     stats.avg_row_size = avg_row_size;
     stats.total_size = (rows as u64) * avg_row_size;
@@ -214,8 +198,7 @@ fn single_dc_network_cost_attached() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
     assert!(opt.network_cost().is_some());
 }
 
@@ -224,14 +207,9 @@ fn single_dc_colocated_zero_cost() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
-    let cost = opt.cost_strategy(
-        &DistributionStrategy::CoLocated,
-        1_000_000,
-        1_000_000,
-    );
+    let cost = opt.cost_strategy(&DistributionStrategy::CoLocated, 1_000_000, 1_000_000);
     assert_eq!(cost.total(), 0.0);
 }
 
@@ -240,8 +218,7 @@ fn single_dc_broadcast_uses_network_model() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config.clone(), topo.clone())
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config.clone(), topo.clone()).with_network_cost(ncm);
 
     let strategy = DistributionStrategy::Broadcast {
         source: NodeId(0),
@@ -249,16 +226,11 @@ fn single_dc_broadcast_uses_network_model() {
     };
 
     let cost_with = opt.cost_strategy(&strategy, 10_000_000, 1_000);
-    assert!(
-        cost_with.network > 0.0,
-        "network cost should be positive"
-    );
+    assert!(cost_with.network > 0.0, "network cost should be positive");
 
     // Compare with heuristic-only optimizer
-    let opt_without =
-        DistributedOptimizer::new(config, topo);
-    let cost_without =
-        opt_without.cost_strategy(&strategy, 10_000_000, 1_000);
+    let opt_without = DistributedOptimizer::new(config, topo);
+    let cost_without = opt_without.cost_strategy(&strategy, 10_000_000, 1_000);
 
     // Both should produce nonzero network costs, but values differ
     assert!(cost_without.network > 0.0);
@@ -269,8 +241,7 @@ fn single_dc_shuffle_uses_network_model() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     let strategy = DistributionStrategy::Shuffle {
         source: NodeId(0),
@@ -291,8 +262,7 @@ fn single_dc_fast_network_prefers_shuffle() {
         broadcast_threshold: 1_000_000, // 1 MB, below both table sizes
         ..DistributedOptimizerConfig::default()
     };
-    let mut opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     register_stats(&mut opt, "orders", 6_000_000.0, 128);
     register_stats(&mut opt, "customers", 1_000_000.0, 128);
@@ -306,14 +276,10 @@ fn single_dc_fast_network_prefers_shuffle() {
     let result = opt.optimize_distribution(&plan);
     assert!(result.is_ok());
     let dre = result.expect("should succeed");
-    let strategy =
-        dre.input_strategy.as_ref().expect("should have strategy");
+    let strategy = dre.input_strategy.as_ref().expect("should have strategy");
     // With fast single-DC network and no small table, shuffle is likely
     assert!(
-        !matches!(
-            strategy,
-            DistributionStrategy::RangePartition { .. }
-        ),
+        !matches!(strategy, DistributionStrategy::RangePartition { .. }),
         "should not pick range partition for equi-join"
     );
 }
@@ -323,8 +289,7 @@ fn single_dc_replicated_table_colocated() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let mut opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     register_stats(&mut opt, "orders", 6_000_000.0, 128);
     register_stats(&mut opt, "countries", 200.0, 64);
@@ -335,17 +300,13 @@ fn single_dc_replicated_table_colocated() {
         left: Box::new(RelExpr::scan("orders")),
         right: Box::new(RelExpr::scan("countries")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
-    let strategy =
-        dre.input_strategy.as_ref().expect("should have strategy");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
+    let strategy = dre.input_strategy.as_ref().expect("should have strategy");
     // Countries is replicated -> co-located or partition-wise
     assert!(
         matches!(
             strategy,
-            DistributionStrategy::CoLocated
-                | DistributionStrategy::PartitionWise { .. }
+            DistributionStrategy::CoLocated | DistributionStrategy::PartitionWise { .. }
         ),
         "replicated join should be co-located, got {strategy:?}"
     );
@@ -358,8 +319,7 @@ fn multi_dc_network_cost_increases_with_distance() {
     let ncm = multi_dc_model();
     let topo = multi_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     // Same-DC broadcast (node 0 -> node 1)
     let same_dc = DistributionStrategy::Broadcast {
@@ -388,8 +348,7 @@ fn multi_dc_strategy_selection_avoids_cross_dc() {
     let ncm = multi_dc_model();
     let topo = multi_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let mut opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     register_stats(&mut opt, "orders", 6_000_000.0, 128);
     register_stats(&mut opt, "customers", 1_000_000.0, 128);
@@ -400,13 +359,8 @@ fn multi_dc_strategy_selection_avoids_cross_dc() {
         left: Box::new(RelExpr::scan("orders")),
         right: Box::new(RelExpr::scan("customers")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
-    assert!(
-        dre.input_strategy.is_some(),
-        "should select a strategy"
-    );
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
+    assert!(dre.input_strategy.is_some(), "should select a strategy");
 }
 
 #[test]
@@ -414,19 +368,12 @@ fn multi_dc_small_broadcast_cheaper_than_shuffle() {
     let ncm = multi_dc_model();
     let topo = multi_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     // Small broadcast: 1 KB to 5 targets
     let broadcast = DistributionStrategy::Broadcast {
         source: NodeId(0),
-        targets: vec![
-            NodeId(1),
-            NodeId(2),
-            NodeId(3),
-            NodeId(4),
-            NodeId(5),
-        ],
+        targets: vec![NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(5)],
     };
     // Shuffle 10 GB
     let shuffle = DistributionStrategy::Shuffle {
@@ -442,10 +389,8 @@ fn multi_dc_small_broadcast_cheaper_than_shuffle() {
         partition_keys: vec![col("id")],
     };
 
-    let cost_broadcast =
-        opt.cost_strategy(&broadcast, 10_000_000_000, 1_000);
-    let cost_shuffle =
-        opt.cost_strategy(&shuffle, 10_000_000_000, 10_000_000_000);
+    let cost_broadcast = opt.cost_strategy(&broadcast, 10_000_000_000, 1_000);
+    let cost_shuffle = opt.cost_strategy(&shuffle, 10_000_000_000, 10_000_000_000);
 
     assert!(
         cost_broadcast.total() < cost_shuffle.total(),
@@ -461,8 +406,7 @@ fn multi_dc_monetary_cost_nonzero_cross_dc() {
         monetary_weight: 10.0,
         ..DistributedOptimizerConfig::default()
     };
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     let strategy = DistributionStrategy::Broadcast {
         source: NodeId(0),
@@ -485,8 +429,7 @@ fn cloud_federation_cross_cloud_expensive() {
     let ncm = cloud_federation_model();
     let topo = cloud_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     // AWS -> GCP broadcast
     let cross_cloud = DistributionStrategy::Broadcast {
@@ -499,10 +442,8 @@ fn cloud_federation_cross_cloud_expensive() {
         targets: vec![NodeId(1)],
     };
 
-    let cost_cross =
-        opt.cost_strategy(&cross_cloud, 100_000_000, 1_000);
-    let cost_intra =
-        opt.cost_strategy(&intra_cloud, 100_000_000, 1_000);
+    let cost_cross = opt.cost_strategy(&cross_cloud, 100_000_000, 1_000);
+    let cost_intra = opt.cost_strategy(&intra_cloud, 100_000_000, 1_000);
 
     assert!(
         cost_cross.total() > cost_intra.total(),
@@ -515,8 +456,7 @@ fn cloud_federation_shuffle_expensive() {
     let ncm = cloud_federation_model();
     let topo = cloud_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     let shuffle = DistributionStrategy::Shuffle {
         source: NodeId(0),
@@ -531,8 +471,7 @@ fn cloud_federation_shuffle_expensive() {
         partition_keys: vec![col("id")],
     };
 
-    let cost =
-        opt.cost_strategy(&shuffle, 1_000_000_000, 1_000_000_000);
+    let cost = opt.cost_strategy(&shuffle, 1_000_000_000, 1_000_000_000);
     // Shuffling 2 GB across 3 clouds should be very expensive
     assert!(cost.network > 0.0);
     assert!(cost.cpu > 0.0);
@@ -546,8 +485,7 @@ fn cloud_federation_strategy_avoids_cross_cloud_broadcast() {
         broadcast_threshold: 10_000_000, // 10 MB
         ..DistributedOptimizerConfig::default()
     };
-    let mut opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     register_stats(&mut opt, "orders", 10_000_000.0, 128);
     register_stats(&mut opt, "inventory", 5_000_000.0, 128);
@@ -558,9 +496,7 @@ fn cloud_federation_strategy_avoids_cross_cloud_broadcast() {
         left: Box::new(RelExpr::scan("orders")),
         right: Box::new(RelExpr::scan("inventory")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.input_strategy.is_some());
     // Both tables are too large for broadcast (over 10 MB)
     // so it should not broadcast.
@@ -573,8 +509,7 @@ fn enumerate_includes_network_recommendation() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt_with = DistributedOptimizer::new(config.clone(), topo.clone())
-        .with_network_cost(ncm);
+    let opt_with = DistributedOptimizer::new(config.clone(), topo.clone()).with_network_cost(ncm);
     let opt_without = DistributedOptimizer::new(config, topo);
 
     let args = (
@@ -587,12 +522,10 @@ fn enumerate_includes_network_recommendation() {
         JoinType::Inner,
     );
 
-    let with_model = opt_with.enumerate_strategies(
-        args.0, args.1, args.2, args.3, args.4, args.5, args.6,
-    );
-    let without_model = opt_without.enumerate_strategies(
-        args.0, args.1, args.2, args.3, args.4, args.5, args.6,
-    );
+    let with_model =
+        opt_with.enumerate_strategies(args.0, args.1, args.2, args.3, args.4, args.5, args.6);
+    let without_model =
+        opt_without.enumerate_strategies(args.0, args.1, args.2, args.3, args.4, args.5, args.6);
 
     // With a network model, there should be at least as many
     // strategies as without (the network recommendation is added).
@@ -636,8 +569,7 @@ fn cost_with_model_differs_from_heuristic() {
     let ncm = multi_dc_model();
     let topo = multi_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt_with = DistributedOptimizer::new(config.clone(), topo.clone())
-        .with_network_cost(ncm);
+    let opt_with = DistributedOptimizer::new(config.clone(), topo.clone()).with_network_cost(ncm);
     let opt_without = DistributedOptimizer::new(config, topo);
 
     let strategy = DistributionStrategy::Broadcast {
@@ -645,10 +577,8 @@ fn cost_with_model_differs_from_heuristic() {
         targets: vec![NodeId(2), NodeId(4)],
     };
 
-    let cost_with =
-        opt_with.cost_strategy(&strategy, 10_000_000, 1_000);
-    let cost_without =
-        opt_without.cost_strategy(&strategy, 10_000_000, 1_000);
+    let cost_with = opt_with.cost_strategy(&strategy, 10_000_000, 1_000);
+    let cost_without = opt_without.cost_strategy(&strategy, 10_000_000, 1_000);
 
     // Both produce positive costs, but typically differ because
     // the network model considers actual topology vs simple
@@ -662,8 +592,7 @@ fn partition_wise_zero_cost_with_model() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     let cost = opt.cost_strategy(
         &DistributionStrategy::PartitionWise {
@@ -680,22 +609,16 @@ fn range_partition_falls_back_to_heuristic() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config.clone(), topo.clone())
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config.clone(), topo.clone()).with_network_cost(ncm);
     let opt_heuristic = DistributedOptimizer::new(config, topo);
 
     let strategy = DistributionStrategy::RangePartition {
         partition_key: col("ts"),
-        ranges: vec![
-            ("0".into(), "100".into()),
-            ("100".into(), "200".into()),
-        ],
+        ranges: vec![("0".into(), "100".into()), ("100".into(), "200".into())],
     };
 
-    let cost_with =
-        opt.cost_strategy(&strategy, 1_000_000, 1_000_000);
-    let cost_without =
-        opt_heuristic.cost_strategy(&strategy, 1_000_000, 1_000_000);
+    let cost_with = opt.cost_strategy(&strategy, 1_000_000, 1_000_000);
+    let cost_without = opt_heuristic.cost_strategy(&strategy, 1_000_000, 1_000_000);
 
     // RangePartition has no mapping in NetworkCostModel, so both
     // should use the heuristic path and produce identical costs.
@@ -712,8 +635,7 @@ fn full_plan_single_dc_with_model() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let mut opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     register_stats(&mut opt, "orders", 6_000_000.0, 128);
     register_stats(&mut opt, "lineitem", 24_000_000.0, 100);
@@ -725,9 +647,7 @@ fn full_plan_single_dc_with_model() {
         right: Box::new(RelExpr::scan("lineitem")),
     };
 
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.input_strategy.is_some());
 }
 
@@ -736,8 +656,7 @@ fn full_plan_multi_dc_with_model() {
     let ncm = multi_dc_model();
     let topo = multi_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let mut opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     register_stats(&mut opt, "orders", 6_000_000.0, 128);
     register_stats(&mut opt, "customers", 1_000_000.0, 128);
@@ -745,20 +664,14 @@ fn full_plan_multi_dc_with_model() {
     let plan = RelExpr::Join {
         join_type: JoinType::Inner,
         condition: eq(col("customer_id"), col("customer_id")),
-        left: Box::new(
-            RelExpr::scan("orders").filter(eq(
-                col("status"),
-                Expr::Const(ra_core::expr::Const::String(
-                    "active".into(),
-                )),
-            )),
-        ),
+        left: Box::new(RelExpr::scan("orders").filter(eq(
+            col("status"),
+            Expr::Const(ra_core::expr::Const::String("active".into())),
+        ))),
         right: Box::new(RelExpr::scan("customers")),
     };
 
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.input_strategy.is_some());
 }
 
@@ -767,8 +680,7 @@ fn full_plan_cloud_federation_with_model() {
     let ncm = cloud_federation_model();
     let topo = cloud_topology();
     let config = DistributedOptimizerConfig::default();
-    let mut opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     register_stats(&mut opt, "orders", 10_000_000.0, 128);
     register_stats(&mut opt, "inventory", 5_000_000.0, 128);
@@ -780,9 +692,7 @@ fn full_plan_cloud_federation_with_model() {
         right: Box::new(RelExpr::scan("inventory")),
     };
 
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.input_strategy.is_some());
 }
 
@@ -794,8 +704,7 @@ fn empty_cluster_with_model_returns_error() {
     let ncm = NetworkCostModel::new(topo, HashMap::new());
     let cluster = ClusterTopology::uniform(0);
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, cluster)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, cluster).with_network_cost(ncm);
 
     let plan = RelExpr::scan("t");
     assert!(opt.optimize_distribution(&plan).is_err());
@@ -806,8 +715,7 @@ fn model_with_unknown_table_graceful() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     // Unknown table -> network model returns zero cost for
     // unrecognized tables.
@@ -821,8 +729,7 @@ fn partial_broadcast_maps_to_broadcast() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     let strategy = DistributionStrategy::PartialBroadcast {
         source: NodeId(0),
@@ -842,16 +749,14 @@ fn single_dc_all_same_dc_low_cost() {
     let ncm = single_dc_model();
     let topo = single_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     // Broadcast within single DC should be cheap
     let strategy = DistributionStrategy::Broadcast {
         source: NodeId(0),
         targets: vec![NodeId(1), NodeId(2), NodeId(3)],
     };
-    let cost =
-        opt.cost_strategy(&strategy, 1_000_000, 1_000);
+    let cost = opt.cost_strategy(&strategy, 1_000_000, 1_000);
     // Intra-datacenter: very fast, zero billing
     assert!(cost.network > 0.0);
     // Memory should reflect bytes transferred
@@ -863,8 +768,7 @@ fn multi_dc_us_to_eu_more_expensive_than_us_to_us() {
     let ncm = multi_dc_model();
     let topo = multi_dc_topology();
     let config = DistributedOptimizerConfig::default();
-    let opt = DistributedOptimizer::new(config, topo)
-        .with_network_cost(ncm);
+    let opt = DistributedOptimizer::new(config, topo).with_network_cost(ncm);
 
     // US-East -> US-West (60ms latency)
     let us_us = DistributionStrategy::Broadcast {
@@ -877,10 +781,8 @@ fn multi_dc_us_to_eu_more_expensive_than_us_to_us() {
         targets: vec![NodeId(4)],
     };
 
-    let cost_us_us =
-        opt.cost_strategy(&us_us, 100_000_000, 1_000);
-    let cost_us_eu =
-        opt.cost_strategy(&us_eu, 100_000_000, 1_000);
+    let cost_us_us = opt.cost_strategy(&us_us, 100_000_000, 1_000);
+    let cost_us_eu = opt.cost_strategy(&us_eu, 100_000_000, 1_000);
 
     assert!(
         cost_us_eu.total() > cost_us_us.total(),

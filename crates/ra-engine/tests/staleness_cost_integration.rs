@@ -16,11 +16,7 @@ fn create_test_profile() -> StatisticsProfile {
     StatisticsProfile::standard()
 }
 
-fn create_managed_stats(
-    row_count: u64,
-    modifications: u64,
-    age_days: i64,
-) -> ManagedTableStats {
+fn create_managed_stats(row_count: u64, modifications: u64, age_days: i64) -> ManagedTableStats {
     let mut state = StatisticsState::new(StatisticsSource::ExactCount, row_count);
     state.modifications_since = modifications;
     // Adjust gathered_at to simulate age
@@ -198,7 +194,10 @@ fn should_refresh_detects_stale_stats() {
     let stale_stats = create_managed_stats(100_000, 30_000, 60);
     model.add_table("users".to_string(), stale_stats);
 
-    assert!(model.should_refresh("users"), "Should detect need for refresh");
+    assert!(
+        model.should_refresh("users"),
+        "Should detect need for refresh"
+    );
 }
 
 #[test]
@@ -254,7 +253,7 @@ fn robust_plans_favored_when_stale() {
     let fresh = create_managed_stats(100_000, 0, 0);
     model_fresh.add_table("t".to_string(), fresh);
     let fresh_seq = model_fresh.scan_cost("t");
-    let fresh_idx = model_fresh.index_scan_cost("t", 0.01);  // 1% selectivity
+    let fresh_idx = model_fresh.index_scan_cost("t", 0.01); // 1% selectivity
 
     // With stale stats, seq scan becomes relatively cheaper
     let mut model_stale = IntegratedCostModel::new(profile, hardware);

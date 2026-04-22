@@ -23,8 +23,7 @@ use crate::egraph::RelLang;
 /// These rules optimize semi-join and anti-join patterns.
 /// Only unconditional (always-valid) rules are included.
 #[must_use]
-pub fn semi_join_reduction_rules(
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn semi_join_reduction_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Semi-join already produces distinct results on the left side
         rewrite!("semi-join-distinct-elimination";
@@ -59,11 +58,8 @@ mod tests {
     use ra_core::algebra::{JoinType, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 
-    fn run_semi_join_reduction(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_semi_join_reduction(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(10_000)
@@ -78,9 +74,7 @@ mod tests {
             condition: Expr::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(Expr::Column(ColumnRef::new("id"))),
-                right: Box::new(Expr::Column(
-                    ColumnRef::new("id"),
-                )),
+                right: Box::new(Expr::Column(ColumnRef::new("id"))),
             },
             left: Box::new(RelExpr::scan("t1")),
             right: Box::new(RelExpr::scan("t2")),
@@ -98,9 +92,7 @@ mod tests {
             condition: Expr::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(Expr::Column(ColumnRef::new("id"))),
-                right: Box::new(Expr::Column(
-                    ColumnRef::new("id"),
-                )),
+                right: Box::new(Expr::Column(ColumnRef::new("id"))),
             },
             left: Box::new(RelExpr::scan("t1")),
             right: Box::new(RelExpr::scan("t2")),
@@ -123,15 +115,10 @@ mod tests {
             condition: Expr::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(Expr::Column(ColumnRef::new("id"))),
-                right: Box::new(Expr::Column(
-                    ColumnRef::new("id"),
-                )),
+                right: Box::new(Expr::Column(ColumnRef::new("id"))),
             },
             left: Box::new(RelExpr::scan("t1")),
-            right: Box::new(
-                RelExpr::scan("t2")
-                    .filter(Expr::Const(Const::Bool(false))),
-            ),
+            right: Box::new(RelExpr::scan("t2").filter(Expr::Const(Const::Bool(false)))),
         };
 
         let runner = run_semi_join_reduction(&expr);

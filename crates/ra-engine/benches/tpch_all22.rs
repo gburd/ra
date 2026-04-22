@@ -10,9 +10,7 @@
 
 #![allow(clippy::expect_used)]
 
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::RelExpr;
 use ra_core::statistics::Statistics;
 use ra_core::EmptyFactsProvider;
@@ -62,9 +60,8 @@ fn load_queries() -> Vec<(String, RelExpr)> {
     for i in 1..=22 {
         let filename = format!("q{i}.sql");
         let path = dir.join(&filename);
-        let sql = fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("cannot read {}: {e}", path.display())
-        });
+        let sql = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         let label = format!("Q{i:02}");
         match sql_to_relexpr(&sql) {
             Ok(relexpr) => queries.push((label, relexpr)),
@@ -83,17 +80,11 @@ fn bench_tpch_optimize_all(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpch_optimize");
 
     for (name, plan) in &queries {
-        group.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     group.finish();
 }
@@ -105,44 +96,32 @@ fn bench_tpch_by_category(c: &mut Criterion) {
 
     let simple_ids = ["Q01", "Q06"];
     let medium_ids = ["Q03", "Q04", "Q12", "Q14", "Q15", "Q17", "Q19"];
-    let complex_ids = [
-        "Q02", "Q05", "Q07", "Q08", "Q09", "Q10", "Q11",
-    ];
+    let complex_ids = ["Q02", "Q05", "Q07", "Q08", "Q09", "Q10", "Q11"];
     let advanced_ids = ["Q13", "Q16", "Q18", "Q20", "Q21", "Q22"];
 
     let mut grp = c.benchmark_group("tpch_simple");
-    for (name, plan) in
-        queries.iter().filter(|(n, _)| simple_ids.contains(&n.as_str()))
+    for (name, plan) in queries
+        .iter()
+        .filter(|(n, _)| simple_ids.contains(&n.as_str()))
     {
-        grp.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        grp.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     grp.finish();
 
     let mut grp = c.benchmark_group("tpch_medium_joins");
-    for (name, plan) in
-        queries.iter().filter(|(n, _)| medium_ids.contains(&n.as_str()))
+    for (name, plan) in queries
+        .iter()
+        .filter(|(n, _)| medium_ids.contains(&n.as_str()))
     {
-        grp.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        grp.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     grp.finish();
 
@@ -151,17 +130,11 @@ fn bench_tpch_by_category(c: &mut Criterion) {
         .iter()
         .filter(|(n, _)| complex_ids.contains(&n.as_str()))
     {
-        grp.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        grp.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     grp.finish();
 
@@ -170,24 +143,14 @@ fn bench_tpch_by_category(c: &mut Criterion) {
         .iter()
         .filter(|(n, _)| advanced_ids.contains(&n.as_str()))
     {
-        grp.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        grp.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     grp.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_tpch_optimize_all,
-    bench_tpch_by_category,
-);
+criterion_group!(benches, bench_tpch_optimize_all, bench_tpch_by_category,);
 criterion_main!(benches);

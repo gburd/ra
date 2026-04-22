@@ -7,8 +7,8 @@
 //!
 //! Inspired by ORCA's approach to managing large search spaces.
 
-use std::collections::HashMap;
 use egg::Id;
+use std::collections::HashMap;
 
 /// Configuration for beam search optimization.
 #[derive(Debug, Clone)]
@@ -125,7 +125,9 @@ impl BeamSearchTracker {
         // Sort plans by cost
         let mut plans: Vec<_> = self.plan_costs.iter().collect();
         plans.sort_by(|a, b| {
-            a.1.0.partial_cmp(&b.1.0).unwrap_or(std::cmp::Ordering::Equal)
+            a.1 .0
+                .partial_cmp(&b.1 .0)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Keep top-K plans
@@ -133,7 +135,8 @@ impl BeamSearchTracker {
         let prune_count = plans.len().saturating_sub(keep_count);
 
         // Collect eclasses to keep
-        let to_keep: Vec<Id> = plans.iter()
+        let to_keep: Vec<Id> = plans
+            .iter()
             .take(keep_count)
             .map(|(eclass, _)| **eclass)
             .collect();

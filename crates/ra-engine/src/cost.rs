@@ -61,10 +61,7 @@ pub struct IntegratedCostModel {
 impl IntegratedCostModel {
     /// Create a new integrated cost model.
     #[must_use]
-    pub fn new(
-        profile: StatisticsProfile,
-        hardware: HardwareProfile,
-    ) -> Self {
+    pub fn new(profile: StatisticsProfile, hardware: HardwareProfile) -> Self {
         let calibration = CalibratedCostModel::from_profile(&hardware);
         Self {
             adapter: StatisticsAdapter::new(profile),
@@ -94,11 +91,7 @@ impl IntegratedCostModel {
     }
 
     /// Register managed statistics for a table.
-    pub fn add_table(
-        &mut self,
-        name: String,
-        stats: ManagedTableStats,
-    ) {
+    pub fn add_table(&mut self, name: String, stats: ManagedTableStats) {
         self.adapter.add_table(name, stats);
     }
 
@@ -130,10 +123,7 @@ impl IntegratedCostModel {
 
     /// Get quality metrics for a table's statistics.
     #[must_use]
-    pub fn quality_metrics(
-        &self,
-        table: &str,
-    ) -> Option<QualityMetrics> {
+    pub fn quality_metrics(&self, table: &str) -> Option<QualityMetrics> {
         self.adapter
             .get_table_stats(table)
             .map(|m| QualityMetrics::from_state(&m.state))
@@ -142,10 +132,7 @@ impl IntegratedCostModel {
     /// Convert managed stats to core Statistics with staleness
     /// adjustments, or return defaults if the table is unknown.
     #[must_use]
-    pub fn effective_statistics(
-        &self,
-        table: &str,
-    ) -> Statistics {
+    pub fn effective_statistics(&self, table: &str) -> Statistics {
         if let Some(managed) = self.adapter.get_table_stats(table) {
             self.adapter.to_core_statistics(managed)
         } else {
@@ -171,7 +158,7 @@ impl IntegratedCostModel {
             base_adjusted,
             table,
             OperationType::SeqScan,
-            10.0,  // max penalty
+            10.0, // max penalty
         );
 
         if should_warn {
@@ -187,11 +174,7 @@ impl IntegratedCostModel {
 
     /// Estimate cost for an index scan operator (RFC 0068).
     #[must_use]
-    pub fn index_scan_cost(
-        &self,
-        table: &str,
-        selectivity: f64,
-    ) -> f64 {
+    pub fn index_scan_cost(&self, table: &str, selectivity: f64) -> f64 {
         let stats = self.effective_statistics(table);
         let selected = stats.row_count * selectivity.clamp(0.0, 1.0);
         let random_io = selected * self.calibration.rand_page_cost();
@@ -199,12 +182,8 @@ impl IntegratedCostModel {
         let disc = self.confidence_for_table(table);
         let base_cost = (random_io + cpu) * disc;
 
-        let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
-            base_cost,
-            table,
-            OperationType::IndexScan,
-            10.0,
-        );
+        let (final_cost, penalty, should_warn) =
+            self.apply_staleness_penalty(base_cost, table, OperationType::IndexScan, 10.0);
 
         if should_warn {
             tracing::warn!(
@@ -221,11 +200,8 @@ impl IntegratedCostModel {
     #[must_use]
     pub fn filter_cost(&self, table: &str) -> f64 {
         let stats = self.effective_statistics(table);
-        let simd_factor =
-            256.0 / f64::from(self.hardware.simd_width_bits);
-        let cost = stats.row_count * 0.001
-            * simd_factor
-            * self.calibration.tuple_cost();
+        let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
+        let cost = stats.row_count * 0.001 * simd_factor * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         cost * disc
@@ -233,11 +209,7 @@ impl IntegratedCostModel {
 
     /// Estimate cost for a join operator (calibrated, RFC 0068).
     #[must_use]
-    pub fn join_cost(
-        &self,
-        left_table: &str,
-        right_table: &str,
-    ) -> f64 {
+    pub fn join_cost(&self, left_table: &str, right_table: &str) -> f64 {
         let left_stats = self.effective_statistics(left_table);
         let right_stats = self.effective_statistics(right_table);
 
@@ -245,12 +217,10 @@ impl IntegratedCostModel {
         let probe_rows = left_stats.row_count.max(right_stats.row_count);
 
         let ht_bytes = (build_rows * 200.0) as u64;
-        let spill_factor = self.calibration.hash_table_cache_factor(
-            ht_bytes,
-            self.hardware.l3_cache_bytes,
-        );
-        let cache_mb =
-            self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
+        let spill_factor = self
+            .calibration
+            .hash_table_cache_factor(ht_bytes, self.hardware.l3_cache_bytes);
+        let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
         let cache_size_factor = 16.0 / cache_mb.max(1.0);
 
         let cost = (build_rows * 100e-6 + probe_rows * 50e-6)
@@ -265,11 +235,12 @@ impl IntegratedCostModel {
         // Use max staleness from both tables
         let left_staleness = self.staleness(left_table);
         let right_staleness = self.staleness(right_table);
-        let max_staleness_table = if staleness_factor(left_staleness) > staleness_factor(right_staleness) {
-            left_table
-        } else {
-            right_table
-        };
+        let max_staleness_table =
+            if staleness_factor(left_staleness) > staleness_factor(right_staleness) {
+                left_table
+            } else {
+                right_table
+            };
 
         let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
             base_cost,
@@ -310,23 +281,18 @@ impl IntegratedCostModel {
         let probe_rows = probe_stats.row_count;
 
         let ht_bytes = (build_rows * 200.0) as u64;
-        let spill_factor = self.calibration.hash_table_cache_factor(
-            ht_bytes,
-            self.hardware.l3_cache_bytes,
-        );
-        let cache_mb =
-            self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
+        let spill_factor = self
+            .calibration
+            .hash_table_cache_factor(ht_bytes, self.hardware.l3_cache_bytes);
+        let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
         let cache_size_factor = 16.0 / cache_mb.max(1.0);
 
-        let filter_build_cost =
-            build_rows * 10e-9 * self.calibration.tuple_cost();
-        let filter_apply_cost =
-            probe_rows * 20e-9 * self.calibration.tuple_cost();
+        let filter_build_cost = build_rows * 10e-9 * self.calibration.tuple_cost();
+        let filter_apply_cost = probe_rows * 20e-9 * self.calibration.tuple_cost();
         let sel = filter_selectivity.clamp(0.0, 1.0);
         let effective_probe = probe_rows * sel;
 
-        let join_cost = (build_rows * 100e-6
-            + effective_probe * 50e-6)
+        let join_cost = (build_rows * 100e-6 + effective_probe * 50e-6)
             * spill_factor
             * cache_size_factor
             * self.calibration.tuple_cost();
@@ -345,21 +311,14 @@ impl IntegratedCostModel {
         let n = stats.row_count;
         let n_log_n = if n > 1.0 { n * n.log2() } else { n };
 
-        let par_factor =
-            8.0 / f64::from(self.hardware.cpu_cores).max(1.0);
-        let cost = n_log_n * 200e-9
-            * par_factor.max(0.5)
-            * self.calibration.tuple_cost();
+        let par_factor = 8.0 / f64::from(self.hardware.cpu_cores).max(1.0);
+        let cost = n_log_n * 200e-9 * par_factor.max(0.5) * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         let base_cost = cost * disc;
 
-        let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
-            base_cost,
-            table,
-            OperationType::Sort,
-            10.0,
-        );
+        let (final_cost, penalty, should_warn) =
+            self.apply_staleness_penalty(base_cost, table, OperationType::Sort, 10.0);
 
         if should_warn {
             tracing::warn!(
@@ -405,11 +364,7 @@ impl IntegratedCostModel {
     /// Compared to full scan cost, index-only scan is roughly 0.2-0.3x
     /// when the index is well-cached, and 0.5x in cold-cache scenarios.
     #[must_use]
-    pub fn index_only_scan_cost(
-        &self,
-        table: &str,
-        selectivity: f64,
-    ) -> f64 {
+    pub fn index_only_scan_cost(&self, table: &str, selectivity: f64) -> f64 {
         let stats = self.effective_statistics(table);
         let row_count = stats.row_count;
         let avg_size = stats.avg_row_size.max(1) as f64;
@@ -432,21 +387,15 @@ impl IntegratedCostModel {
         let cache_factor = 0.5;
         let overall_factor = size_factor * cache_factor;
 
-        let base_cost = heap_size_mb
-            * self.calibration.seq_page_cost()
-            * overall_factor;
+        let base_cost = heap_size_mb * self.calibration.seq_page_cost() * overall_factor;
 
         // B-tree descent (negligible for most queries)
         let pages = (heap_size_mb * size_factor * 128.0).max(1.0);
-        let btree_cost = pages.log2().max(1.0)
-            * self.calibration.rand_page_cost()
-            * 0.001;
+        let btree_cost = pages.log2().max(1.0) * self.calibration.rand_page_cost() * 0.001;
 
         // Filter evaluation (very cheap, CPU only)
         let sel = selectivity.clamp(0.0, 1.0);
-        let filter_cost = row_count * sel
-            * self.calibration.tuple_cost()
-            * 0.0001;
+        let filter_cost = row_count * sel * self.calibration.tuple_cost() * 0.0001;
 
         let total = base_cost + btree_cost + filter_cost;
 
@@ -463,25 +412,17 @@ impl IntegratedCostModel {
     ///
     /// Cost = groups * (group_size * log(group_size)) * per_row_factor.
     #[must_use]
-    pub fn incremental_sort_cost(
-        &self,
-        table: &str,
-        prefix_ndv: f64,
-    ) -> f64 {
+    pub fn incremental_sort_cost(&self, table: &str, prefix_ndv: f64) -> f64 {
         let stats = self.effective_statistics(table);
         let n = stats.row_count.max(1.0);
         let groups = prefix_ndv.max(1.0).min(n);
         let avg_group_size = n / groups;
 
-        let group_sort = avg_group_size
-            * avg_group_size.log2().max(1.0);
+        let group_sort = avg_group_size * avg_group_size.log2().max(1.0);
         let total = groups * group_sort;
 
-        let par_factor =
-            8.0 / f64::from(self.hardware.cpu_cores).max(1.0);
-        let cost = total * 200e-9
-            * par_factor.max(0.5)
-            * self.calibration.tuple_cost();
+        let par_factor = 8.0 / f64::from(self.hardware.cpu_cores).max(1.0);
+        let cost = total * 200e-9 * par_factor.max(0.5) * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         cost * disc
@@ -489,24 +430,17 @@ impl IntegratedCostModel {
 
     /// Estimate cost for an aggregate operator.
     #[must_use]
-    pub fn aggregate_cost(
-        &self,
-        table: &str,
-        group_count: f64,
-    ) -> f64 {
+    pub fn aggregate_cost(&self, table: &str, group_count: f64) -> f64 {
         let stats = self.effective_statistics(table);
 
         let ht_bytes = (group_count * 64.0) as u64;
-        let spill_factor = self.calibration.hash_table_cache_factor(
-            ht_bytes,
-            self.hardware.l3_cache_bytes,
-        );
-        let cache_mb =
-            self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
+        let spill_factor = self
+            .calibration
+            .hash_table_cache_factor(ht_bytes, self.hardware.l3_cache_bytes);
+        let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
         let cache_size_factor = 16.0 / cache_mb.max(1.0);
 
-        let cost = (stats.row_count * 80e-9
-            + group_count * 64.0 * spill_factor * 1e-9)
+        let cost = (stats.row_count * 80e-9 + group_count * 64.0 * spill_factor * 1e-9)
             * spill_factor
             * cache_size_factor
             * self.calibration.tuple_cost();
@@ -514,12 +448,8 @@ impl IntegratedCostModel {
         let disc = self.confidence_for_table(table);
         let base_cost = cost * disc;
 
-        let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
-            base_cost,
-            table,
-            OperationType::Aggregate,
-            10.0,
-        );
+        let (final_cost, penalty, should_warn) =
+            self.apply_staleness_penalty(base_cost, table, OperationType::Aggregate, 10.0);
 
         if should_warn {
             tracing::warn!(
@@ -547,19 +477,13 @@ impl IntegratedCostModel {
     /// 1. Index scan to build bitmap (random I/O)
     /// 2. Bitmap construction overhead
     #[must_use]
-    pub fn bitmap_index_scan_cost(
-        &self,
-        table: &str,
-        selectivity: f64,
-    ) -> f64 {
+    pub fn bitmap_index_scan_cost(&self, table: &str, selectivity: f64) -> f64 {
         let stats = self.effective_statistics(table);
 
         let index_pages = (stats.row_count * selectivity / 100.0).max(1.0);
-        let index_cost =
-            index_pages * self.calibration.rand_page_cost() * 0.3;
+        let index_cost = index_pages * self.calibration.rand_page_cost() * 0.3;
 
-        let bitmap_cost =
-            stats.row_count / 64.0 * 1e-9 * self.calibration.tuple_cost();
+        let bitmap_cost = stats.row_count / 64.0 * 1e-9 * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         (index_cost + bitmap_cost) * disc
@@ -569,11 +493,7 @@ impl IntegratedCostModel {
     ///
     /// Bitwise operations run at memory bandwidth speed.
     #[must_use]
-    pub fn bitmap_combine_cost(
-        &self,
-        table: &str,
-        num_bitmaps: usize,
-    ) -> f64 {
+    pub fn bitmap_combine_cost(&self, table: &str, num_bitmaps: usize) -> f64 {
         let stats = self.effective_statistics(table);
         // Bitmap size in 64-bit words
         let bitmap_words = (stats.row_count / 64.0).max(1.0);
@@ -587,20 +507,14 @@ impl IntegratedCostModel {
     /// After combining bitmaps, heap pages are accessed in physical
     /// order, which is much cheaper than random access.
     #[must_use]
-    pub fn bitmap_heap_scan_cost(
-        &self,
-        table: &str,
-        combined_selectivity: f64,
-    ) -> f64 {
+    pub fn bitmap_heap_scan_cost(&self, table: &str, combined_selectivity: f64) -> f64 {
         let stats = self.effective_statistics(table);
 
         let pages_accessed = (stats.row_count * combined_selectivity / 100.0).max(1.0);
-        let heap_cost =
-            pages_accessed * self.calibration.seq_page_cost() * 0.25;
+        let heap_cost = pages_accessed * self.calibration.seq_page_cost() * 0.25;
 
-        let recheck_cost = stats.row_count * combined_selectivity
-            * 5e-9
-            * self.calibration.tuple_cost();
+        let recheck_cost =
+            stats.row_count * combined_selectivity * 5e-9 * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         (heap_cost + recheck_cost) * disc
@@ -612,11 +526,7 @@ impl IntegratedCostModel {
     /// scan cost. Returns the total cost and whether bitmap scan is
     /// cheaper than alternatives.
     #[must_use]
-    pub fn full_bitmap_scan_cost(
-        &self,
-        table: &str,
-        selectivities: &[f64],
-    ) -> f64 {
+    pub fn full_bitmap_scan_cost(&self, table: &str, selectivities: &[f64]) -> f64 {
         if selectivities.is_empty() {
             return self.scan_cost(table);
         }
@@ -645,11 +555,7 @@ impl IntegratedCostModel {
     /// survive predicate pushdown (0.0 = all pruned, 1.0 = full
     /// scan). This discounts the base scan cost proportionally.
     #[must_use]
-    pub fn parquet_scan_cost(
-        &self,
-        table: &str,
-        pruning_selectivity: f64,
-    ) -> f64 {
+    pub fn parquet_scan_cost(&self, table: &str, pruning_selectivity: f64) -> f64 {
         let base = self.scan_cost(table);
         let sel = pruning_selectivity.clamp(0.0, 1.0);
         // Even with full pruning there's a small metadata cost
@@ -680,8 +586,7 @@ impl IntegratedCostModel {
         if estimated_total_rows <= 0.0 || limit_rows <= 0.0 {
             return total_cost;
         }
-        let fraction =
-            (limit_rows / estimated_total_rows).clamp(0.0, 1.0);
+        let fraction = (limit_rows / estimated_total_rows).clamp(0.0, 1.0);
         // Even with a tiny LIMIT, there is a minimum startup cost
         // of ~10% of the total (hash table build, sort init, etc.)
         let startup_floor = 0.1;
@@ -760,11 +665,8 @@ impl IntegratedCostModel {
         let stats = self.effective_statistics(table);
         let total_vectors = stats.row_count as usize;
 
-        let cost = crate::vector_cost::vector_sequential_scan_cost(
-            dimensions,
-            total_vectors,
-            metric,
-        );
+        let cost =
+            crate::vector_cost::vector_sequential_scan_cost(dimensions, total_vectors, metric);
 
         let disc = self.confidence_for_table(table);
         cost.total() * disc
@@ -796,10 +698,9 @@ impl IntegratedCostModel {
     fn confidence_for_table(&self, table: &str) -> f64 {
         self.adapter
             .get_table_stats(table)
-            .map_or(
-                confidence_discount(0.3),
-                |m| confidence_discount(m.state.confidence),
-            )
+            .map_or(confidence_discount(0.3), |m| {
+                confidence_discount(m.state.confidence)
+            })
     }
 
     /// Get staleness classification for a table.
@@ -825,12 +726,12 @@ impl IntegratedCostModel {
         let base_factor = staleness_factor(staleness);
 
         let operation_multiplier = match operation_type {
-            OperationType::IndexScan => 2.0,    // Most sensitive to bad selectivity
-            OperationType::NestedLoop => 2.0,   // Cardinality errors compound
-            OperationType::HashJoin => 1.5,     // Hash table sizing matters
-            OperationType::SeqScan => 1.0,      // Most robust
-            OperationType::Aggregate => 1.3,    // Group count estimation
-            OperationType::Sort => 1.2,         // Memory allocation
+            OperationType::IndexScan => 2.0, // Most sensitive to bad selectivity
+            OperationType::NestedLoop => 2.0, // Cardinality errors compound
+            OperationType::HashJoin => 1.5,  // Hash table sizing matters
+            OperationType::SeqScan => 1.0,   // Most robust
+            OperationType::Aggregate => 1.3, // Group count estimation
+            OperationType::Sort => 1.2,      // Memory allocation
         };
 
         let staleness_penalty = (base_factor * operation_multiplier).min(max_penalty);
@@ -869,8 +770,7 @@ impl IntegratedCostModel {
         &mut self,
         feedback: &[ra_stats::timeline::ExecutionFeedback],
     ) -> usize {
-        let mut adjusted_tables =
-            std::collections::HashSet::<String>::new();
+        let mut adjusted_tables = std::collections::HashSet::<String>::new();
 
         for fb in feedback {
             let q_err = fb.q_error();
@@ -897,11 +797,8 @@ impl IntegratedCostModel {
                 .or_else(|| extract_table_from_query(&fb.query));
 
             if let Some(name) = table_name {
-                if let Some(managed) =
-                    self.adapter.get_table_stats_mut(&name)
-                {
-                    managed.state.confidence =
-                        (managed.state.confidence - reduction).max(0.0);
+                if let Some(managed) = self.adapter.get_table_stats_mut(&name) {
+                    managed.state.confidence = (managed.state.confidence - reduction).max(0.0);
                     adjusted_tables.insert(name);
                 }
             }
@@ -944,15 +841,15 @@ impl IntegratedCostModel {
 
         // Amdahl's law: speedup = 1 / (s + p/n)
         // where s = serial fraction, p = parallel fraction, n = workers
-        let serial_fraction = 0.05;  // 5% of work is inherently serial
+        let serial_fraction = 0.05; // 5% of work is inherently serial
         let parallel_fraction = 1.0 - serial_fraction;
 
         // Theoretical speedup from Amdahl's law
         let amdahl_speedup = 1.0 / (serial_fraction + parallel_fraction / workers_f);
 
         // Additional efficiency losses
-        let coordination_factor = 0.95_f64.powf(workers_f - 1.0);  // 5% loss per worker
-        let contention_factor = (1.0 - 0.1 * (workers_f - 1.0).min(5.0)).max(0.5);  // Up to 50% loss
+        let coordination_factor = 0.95_f64.powf(workers_f - 1.0); // 5% loss per worker
+        let contention_factor = (1.0 - 0.1 * (workers_f - 1.0).min(5.0)).max(0.5); // Up to 50% loss
 
         // Combined efficiency
         amdahl_speedup * coordination_factor * contention_factor
@@ -1025,12 +922,7 @@ impl IntegratedCostModel {
     /// 1. Partial aggregation in each worker
     /// 2. Final aggregation to combine partial results
     #[must_use]
-    pub fn parallel_aggregate_cost(
-        &self,
-        table: &str,
-        group_count: f64,
-        workers: usize,
-    ) -> f64 {
+    pub fn parallel_aggregate_cost(&self, table: &str, group_count: f64, workers: usize) -> f64 {
         let stats = self.effective_statistics(table);
         let input_rows = stats.row_count;
 
@@ -1062,11 +954,7 @@ impl IntegratedCostModel {
     ///
     /// Balances speedup against coordination overhead.
     #[must_use]
-    pub fn optimal_worker_count(
-        &self,
-        estimated_rows: f64,
-        max_workers: usize,
-    ) -> usize {
+    pub fn optimal_worker_count(&self, estimated_rows: f64, max_workers: usize) -> usize {
         // No parallelism for small inputs
         if estimated_rows < 10_000.0 {
             return 1;
@@ -1088,7 +976,7 @@ impl IntegratedCostModel {
 enum OperationType {
     SeqScan,
     IndexScan,
-    #[allow(dead_code)]  // Reserved for future nested loop join cost model
+    #[allow(dead_code)] // Reserved for future nested loop join cost model
     NestedLoop,
     HashJoin,
     Aggregate,
@@ -1144,10 +1032,7 @@ pub fn from_core_statistics<S: BuildHasher>(
     use ra_stats::accuracy::StatisticsSource;
     use ra_stats::types::TableStats;
 
-    let mut model = IntegratedCostModel::new(
-        profile,
-        hardware.clone(),
-    );
+    let mut model = IntegratedCostModel::new(profile, hardware.clone());
 
     for (name, stats) in table_stats {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -1164,10 +1049,7 @@ pub fn from_core_statistics<S: BuildHasher>(
                 last_analyzed: None,
             },
             columns: HashMap::new(),
-            state: StatisticsState::new(
-                StatisticsSource::ExactCount,
-                row_count,
-            ),
+            state: StatisticsState::new(StatisticsSource::ExactCount, row_count),
         };
         model.add_table(name.clone(), managed);
     }
@@ -1213,8 +1095,7 @@ impl CostCalibration {
 
         let storage_bw = hw.storage_bandwidth_gbps.max(0.01);
         let simd_bits = f64::from(hw.simd_width_bits).max(1.0);
-        let cache_mb =
-            (hw.l3_cache_bytes as f64 / (1024.0 * 1024.0)).max(1.0);
+        let cache_mb = (hw.l3_cache_bytes as f64 / (1024.0 * 1024.0)).max(1.0);
         let cores = f64::from(hw.cpu_cores).max(1.0);
 
         Self {
@@ -1230,10 +1111,7 @@ impl CostCalibration {
 
     /// Create from a `CalibratedCostModel` (benchmark-based, RFC 0068).
     #[must_use]
-    pub fn from_calibrated(
-        cal: &CalibratedCostModel,
-        hw: &HardwareProfile,
-    ) -> Self {
+    pub fn from_calibrated(cal: &CalibratedCostModel, hw: &HardwareProfile) -> Self {
         let ref_simd_bits = 256.0;
         let ref_cores = 8.0;
         let simd_bits = f64::from(hw.simd_width_bits).max(1.0);
@@ -1310,22 +1188,13 @@ impl IntegratedCostFn {
 
     /// Create from an `IntegratedCostModel`, extracting necessary data.
     #[must_use]
-    pub fn from_model(
-        model: &IntegratedCostModel,
-        table_names: &[String],
-    ) -> Self {
+    pub fn from_model(model: &IntegratedCostModel, table_names: &[String]) -> Self {
         let mut table_stats = HashMap::new();
         let mut staleness_map = HashMap::new();
 
         for name in table_names {
-            table_stats.insert(
-                name.clone(),
-                model.effective_statistics(name),
-            );
-            staleness_map.insert(
-                name.clone(),
-                model.staleness(name),
-            );
+            table_stats.insert(name.clone(), model.effective_statistics(name));
+            staleness_map.insert(name.clone(), model.staleness(name));
         }
 
         Self {
@@ -1352,10 +1221,7 @@ impl IntegratedCostFn {
             .staleness_map
             .get(table_name)
             .copied()
-            .map_or(
-                staleness_factor(Staleness::Unknown),
-                staleness_factor,
-            );
+            .map_or(staleness_factor(Staleness::Unknown), staleness_factor);
 
         base * factor
     }
@@ -1364,11 +1230,7 @@ impl IntegratedCostFn {
 impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
     type Cost = f64;
 
-    fn cost<C>(
-        &mut self,
-        enode: &crate::egraph::RelLang,
-        mut costs: C,
-    ) -> Self::Cost
+    fn cost<C>(&mut self, enode: &crate::egraph::RelLang, mut costs: C) -> Self::Cost
     where
         C: FnMut(egg::Id) -> Self::Cost,
     {
@@ -1382,32 +1244,21 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
                 let seq_cost = 100.0 * self.calibration.seq_page_cost();
-                return costs(*table_id)
-                    + costs(*alias_id)
-                    + seq_cost;
+                return costs(*table_id) + costs(*alias_id) + seq_cost;
             }
             RelLang::Filter(_) | RelLang::Project(_) => {
-                let simd_factor = 256.0
-                    / f64::from(self.hardware.simd_width_bits);
+                let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
                 1.0 * simd_factor * self.calibration.tuple_cost()
             }
-            RelLang::Join(_) => {
-                500.0 * self.calibration.tuple_cost()
-            }
-            RelLang::Aggregate(_) => {
-                200.0 * self.calibration.tuple_cost()
-            }
+            RelLang::Join(_) => 500.0 * self.calibration.tuple_cost(),
+            RelLang::Aggregate(_) => 200.0 * self.calibration.tuple_cost(),
             RelLang::Sort(_) => {
-                let par_factor =
-                    8.0 / f64::from(self.hardware.cpu_cores);
-                150.0 * par_factor.max(0.5)
-                    * self.calibration.tuple_cost()
+                let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
+                150.0 * par_factor.max(0.5) * self.calibration.tuple_cost()
             }
             RelLang::IncrementalSort(_) => {
-                let par_factor =
-                    8.0 / f64::from(self.hardware.cpu_cores);
-                60.0 * par_factor.max(0.5)
-                    * self.calibration.tuple_cost()
+                let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
+                60.0 * par_factor.max(0.5) * self.calibration.tuple_cost()
             }
             RelLang::Limit([n_id, _off_id, child_id]) => {
                 // Startup cost optimization: when LIMIT is present
@@ -1426,21 +1277,11 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let startup_fraction = 0.3;
                 return 0.5 + n_cost + child_cost * startup_fraction;
             }
-            RelLang::Union(_)
-            | RelLang::Intersect(_)
-            | RelLang::Except(_) => 50.0,
-            RelLang::RecursiveCTE(_) => {
-                1000.0 * self.calibration.tuple_cost()
-            }
-            RelLang::BitmapIndexScan(_) => {
-                10.0 * self.calibration.rand_page_cost()
-            }
-            RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => {
-                0.1
-            }
-            RelLang::BitmapHeapScan(_) => {
-                5.0 * self.calibration.seq_page_cost()
-            }
+            RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => 50.0,
+            RelLang::RecursiveCTE(_) => 1000.0 * self.calibration.tuple_cost(),
+            RelLang::BitmapIndexScan(_) => 10.0 * self.calibration.rand_page_cost(),
+            RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => 0.1,
+            RelLang::BitmapHeapScan(_) => 5.0 * self.calibration.seq_page_cost(),
             RelLang::MetadataLookup(_) => {
                 // O(1) metadata lookup, cheaper than any scan
                 return 1.0;
@@ -1468,11 +1309,7 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             _ => 0.1,
         };
 
-        let child_cost: f64 = enode
-            .children()
-            .iter()
-            .map(|child| costs(*child))
-            .sum();
+        let child_cost: f64 = enode.children().iter().map(|child| costs(*child)).sum();
 
         base_cost + child_cost
     }
@@ -1487,10 +1324,7 @@ mod tests {
     use ra_stats::profiles::StatisticsProfile;
     use ra_stats::types::TableStats;
 
-    fn make_managed(
-        row_count: u64,
-        source: StatisticsSource,
-    ) -> ManagedTableStats {
+    fn make_managed(row_count: u64, source: StatisticsSource) -> ManagedTableStats {
         ManagedTableStats {
             table: TableStats {
                 row_count,
@@ -1506,14 +1340,8 @@ mod tests {
         }
     }
 
-    fn make_stale_managed(
-        row_count: u64,
-        modifications: u64,
-    ) -> ManagedTableStats {
-        let mut m = make_managed(
-            row_count,
-            StatisticsSource::ExactCount,
-        );
+    fn make_stale_managed(row_count: u64, modifications: u64) -> ManagedTableStats {
+        let mut m = make_managed(row_count, StatisticsSource::ExactCount);
         m.state.record_modifications(modifications);
         m
     }
@@ -1522,20 +1350,16 @@ mod tests {
 
     #[test]
     fn model_creation() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         assert_eq!(model.table_count(), 0);
         assert_eq!(model.profile().name, "Standard");
     }
 
     #[test]
     fn model_add_table() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "users".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1545,10 +1369,8 @@ mod tests {
 
     #[test]
     fn model_hardware_accessor() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::gpu_server(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::gpu_server());
         assert!(model.hardware().gpu_available);
     }
 
@@ -1610,10 +1432,8 @@ mod tests {
 
     #[test]
     fn effective_stats_known_table() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "users".into(),
             make_managed(50_000, StatisticsSource::ExactCount),
@@ -1624,24 +1444,17 @@ mod tests {
 
     #[test]
     fn effective_stats_unknown_table() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         let stats = model.effective_statistics("nonexistent");
         assert!((stats.row_count - 1000.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn effective_stats_stale_inflated() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "orders".into(),
-            make_stale_managed(10_000, 5_000),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
+        model.add_table("orders".into(), make_stale_managed(10_000, 5_000));
         let stats = model.effective_statistics("orders");
         // 5_000 / 10_000 = 50% change => VeryStale => factor 1.5
         assert!(stats.row_count > 10_000.0);
@@ -1651,10 +1464,8 @@ mod tests {
 
     #[test]
     fn staleness_fresh_table() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1664,23 +1475,16 @@ mod tests {
 
     #[test]
     fn staleness_stale_table() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "t".into(),
-            make_stale_managed(10_000, 3_000),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
+        model.add_table("t".into(), make_stale_managed(10_000, 3_000));
         assert_eq!(model.staleness("t"), Staleness::VeryStale);
     }
 
     #[test]
     fn staleness_unknown_table() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         assert_eq!(model.staleness("missing"), Staleness::Unknown);
     }
 
@@ -1688,10 +1492,8 @@ mod tests {
 
     #[test]
     fn should_refresh_fresh() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1701,10 +1503,8 @@ mod tests {
 
     #[test]
     fn should_refresh_unknown() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         assert!(model.should_refresh("missing"));
     }
 
@@ -1712,10 +1512,8 @@ mod tests {
 
     #[test]
     fn quality_metrics_exact_fresh() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1726,10 +1524,8 @@ mod tests {
 
     #[test]
     fn quality_metrics_none_for_missing() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         assert!(model.quality_metrics("missing").is_none());
     }
 
@@ -1737,10 +1533,8 @@ mod tests {
 
     #[test]
     fn scan_cost_known_table() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1752,29 +1546,21 @@ mod tests {
 
     #[test]
     fn scan_cost_unknown_table() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         let cost = model.scan_cost("missing");
         assert!(cost > 0.0);
     }
 
     #[test]
     fn scan_cost_faster_with_better_storage() {
-        let mut model_slow = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model_slow =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         let mut hw_fast = HardwareProfile::cpu_only();
         hw_fast.storage_bandwidth_gbps = 14.0;
-        let mut model_fast = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw_fast,
-        );
+        let mut model_fast = IntegratedCostModel::new(StatisticsProfile::standard(), hw_fast);
 
-        let managed =
-            make_managed(1_000_000, StatisticsSource::ExactCount);
+        let managed = make_managed(1_000_000, StatisticsSource::ExactCount);
         model_slow.add_table("t".into(), managed.clone());
         model_fast.add_table("t".into(), managed);
 
@@ -1785,10 +1571,8 @@ mod tests {
 
     #[test]
     fn filter_cost_positive() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1803,17 +1587,10 @@ mod tests {
         let mut hw_wide = HardwareProfile::cpu_only();
         hw_wide.simd_width_bits = 512;
 
-        let mut model_narrow = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw_narrow,
-        );
-        let mut model_wide = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw_wide,
-        );
+        let mut model_narrow = IntegratedCostModel::new(StatisticsProfile::standard(), hw_narrow);
+        let mut model_wide = IntegratedCostModel::new(StatisticsProfile::standard(), hw_wide);
 
-        let managed =
-            make_managed(100_000, StatisticsSource::ExactCount);
+        let managed = make_managed(100_000, StatisticsSource::ExactCount);
         model_narrow.add_table("t".into(), managed.clone());
         model_wide.add_table("t".into(), managed);
 
@@ -1824,10 +1601,8 @@ mod tests {
 
     #[test]
     fn join_cost_positive() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "a".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1846,14 +1621,9 @@ mod tests {
         let mut hw_big_cache = HardwareProfile::cpu_only();
         hw_big_cache.l3_cache_bytes = 128 * 1024 * 1024;
 
-        let mut model_small = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw_small_cache,
-        );
-        let mut model_big = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw_big_cache,
-        );
+        let mut model_small =
+            IntegratedCostModel::new(StatisticsProfile::standard(), hw_small_cache);
+        let mut model_big = IntegratedCostModel::new(StatisticsProfile::standard(), hw_big_cache);
 
         let a = make_managed(100_000, StatisticsSource::ExactCount);
         let b = make_managed(10_000, StatisticsSource::ExactCount);
@@ -1862,20 +1632,15 @@ mod tests {
         model_big.add_table("a".into(), a);
         model_big.add_table("b".into(), b);
 
-        assert!(
-            model_big.join_cost("a", "b")
-                < model_small.join_cost("a", "b")
-        );
+        assert!(model_big.join_cost("a", "b") < model_small.join_cost("a", "b"));
     }
 
     // ---- sort_cost ----
 
     #[test]
     fn sort_cost_positive() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1890,17 +1655,10 @@ mod tests {
         let mut hw_many = HardwareProfile::cpu_only();
         hw_many.cpu_cores = 64;
 
-        let mut model_few = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw_few,
-        );
-        let mut model_many = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw_many,
-        );
+        let mut model_few = IntegratedCostModel::new(StatisticsProfile::standard(), hw_few);
+        let mut model_many = IntegratedCostModel::new(StatisticsProfile::standard(), hw_many);
 
-        let managed =
-            make_managed(1_000_000, StatisticsSource::ExactCount);
+        let managed = make_managed(1_000_000, StatisticsSource::ExactCount);
         model_few.add_table("t".into(), managed.clone());
         model_many.add_table("t".into(), managed);
 
@@ -1911,10 +1669,8 @@ mod tests {
 
     #[test]
     fn aggregate_cost_positive() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -1927,14 +1683,8 @@ mod tests {
     #[test]
     fn from_core_statistics_creates_model() {
         let mut stats = HashMap::new();
-        stats.insert(
-            "users".into(),
-            Statistics::new(50_000.0),
-        );
-        stats.insert(
-            "orders".into(),
-            Statistics::new(500_000.0),
-        );
+        stats.insert("users".into(), Statistics::new(50_000.0));
+        stats.insert("orders".into(), Statistics::new(500_000.0));
 
         let model = from_core_statistics(
             &stats,
@@ -1955,11 +1705,7 @@ mod tests {
         stats.insert("t".into(), Statistics::new(5000.0));
         let staleness_map = HashMap::new();
 
-        let cfn = IntegratedCostFn::new(
-            HardwareProfile::cpu_only(),
-            stats,
-            staleness_map,
-        );
+        let cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), stats, staleness_map);
         let rows = cfn.row_count_for("t");
         // No staleness entry => Unknown => 2.0x
         assert!((rows - 10_000.0).abs() < f64::EPSILON);
@@ -1972,22 +1718,15 @@ mod tests {
         let mut staleness_map = HashMap::new();
         staleness_map.insert("t".into(), Staleness::Fresh);
 
-        let cfn = IntegratedCostFn::new(
-            HardwareProfile::cpu_only(),
-            stats,
-            staleness_map,
-        );
+        let cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), stats, staleness_map);
         let rows = cfn.row_count_for("t");
         assert!((rows - 5000.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn integrated_cost_fn_unknown_table() {
-        let cfn = IntegratedCostFn::new(
-            HardwareProfile::cpu_only(),
-            HashMap::new(),
-            HashMap::new(),
-        );
+        let cfn =
+            IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
         let rows = cfn.row_count_for("missing");
         // default 1000 * Unknown 2.0
         assert!((rows - 2000.0).abs() < f64::EPSILON);
@@ -1995,19 +1734,11 @@ mod tests {
 
     #[test]
     fn integrated_cost_fn_from_model() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "t".into(),
-            make_managed(5000, StatisticsSource::ExactCount),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
+        model.add_table("t".into(), make_managed(5000, StatisticsSource::ExactCount));
 
-        let cfn = IntegratedCostFn::from_model(
-            &model,
-            &["t".to_string()],
-        );
+        let cfn = IntegratedCostFn::from_model(&model, &["t".to_string()]);
         let rows = cfn.row_count_for("t");
         assert!((rows - 5000.0).abs() < f64::EPSILON);
     }
@@ -2016,49 +1747,32 @@ mod tests {
 
     #[test]
     fn realtime_profile_low_refresh_threshold() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::real_time(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "t".into(),
-            make_stale_managed(10_000, 2_000),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::real_time(), HardwareProfile::cpu_only());
+        model.add_table("t".into(), make_stale_managed(10_000, 2_000));
         assert!(model.should_refresh("t"));
     }
 
     #[test]
     fn lazy_profile_high_refresh_threshold() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::lazy(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "t".into(),
-            make_stale_managed(10_000, 2_000),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::lazy(), HardwareProfile::cpu_only());
+        model.add_table("t".into(), make_stale_managed(10_000, 2_000));
         assert!(!model.should_refresh("t"));
     }
 
     #[test]
     fn stale_profile_very_high_threshold() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::stale(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "t".into(),
-            make_stale_managed(10_000, 5_000),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::stale(), HardwareProfile::cpu_only());
+        model.add_table("t".into(), make_stale_managed(10_000, 5_000));
         assert!(!model.should_refresh("t"));
     }
 
     #[test]
     fn analytical_profile_characteristics() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::analytical(),
-            HardwareProfile::cpu_only(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::analytical(), HardwareProfile::cpu_only());
         assert_eq!(model.profile().name, "Analytical");
         assert!(model.profile().multi_column_stats);
         assert!(model.profile().correlation_stats);
@@ -2066,10 +1780,8 @@ mod tests {
 
     #[test]
     fn streaming_profile_characteristics() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::streaming(),
-            HardwareProfile::cpu_only(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::streaming(), HardwareProfile::cpu_only());
         assert_eq!(model.profile().name, "Streaming");
         assert!(model.profile().use_sketches);
     }
@@ -2078,10 +1790,8 @@ mod tests {
 
     #[test]
     fn gpu_server_profile_in_model() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::gpu_server(),
-        );
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::gpu_server());
         assert!(model.hardware().gpu_available);
     }
 
@@ -2100,23 +1810,14 @@ mod tests {
     fn stale_stats_increase_scan_cost() {
         let hw = HardwareProfile::cpu_only();
 
-        let mut model_fresh = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut model_fresh = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         model_fresh.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
 
-        let mut model_stale = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        model_stale.add_table(
-            "t".into(),
-            make_stale_managed(100_000, 50_000),
-        );
+        let mut model_stale = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        model_stale.add_table("t".into(), make_stale_managed(100_000, 50_000));
 
         assert!(model_stale.scan_cost("t") > model_fresh.scan_cost("t"));
     }
@@ -2125,10 +1826,7 @@ mod tests {
     fn stale_stats_increase_join_cost() {
         let hw = HardwareProfile::cpu_only();
 
-        let mut model_fresh = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut model_fresh = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         model_fresh.add_table(
             "a".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
@@ -2138,23 +1836,11 @@ mod tests {
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
-        let mut model_stale = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        model_stale.add_table(
-            "a".into(),
-            make_stale_managed(100_000, 50_000),
-        );
-        model_stale.add_table(
-            "b".into(),
-            make_stale_managed(10_000, 5_000),
-        );
+        let mut model_stale = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        model_stale.add_table("a".into(), make_stale_managed(100_000, 50_000));
+        model_stale.add_table("b".into(), make_stale_managed(10_000, 5_000));
 
-        assert!(
-            model_stale.join_cost("a", "b")
-                > model_fresh.join_cost("a", "b")
-        );
+        assert!(model_stale.join_cost("a", "b") > model_fresh.join_cost("a", "b"));
     }
 
     // ---- Low confidence increases costs ----
@@ -2163,43 +1849,27 @@ mod tests {
     fn low_confidence_increases_scan_cost() {
         let hw = HardwareProfile::cpu_only();
 
-        let mut model_high = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut model_high = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         model_high.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
 
-        let mut model_low = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        model_low.add_table(
-            "t".into(),
-            make_managed(100_000, StatisticsSource::Default),
-        );
+        let mut model_low = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        model_low.add_table("t".into(), make_managed(100_000, StatisticsSource::Default));
 
-        assert!(
-            model_low.scan_cost("t") > model_high.scan_cost("t")
-        );
+        assert!(model_low.scan_cost("t") > model_high.scan_cost("t"));
     }
 
     // ---- Sampled statistics ----
 
     #[test]
     fn sampled_stats_moderate_confidence() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
-            make_managed(
-                100_000,
-                StatisticsSource::Sampled { sample_rate: 10 },
-            ),
+            make_managed(100_000, StatisticsSource::Sampled { sample_rate: 10 }),
         );
         let qm = model.quality_metrics("t").expect("exists");
         assert!(qm.confidence < 1.0);
@@ -2210,18 +1880,13 @@ mod tests {
 
     #[test]
     fn multiple_tables_independent_staleness() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "fresh".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
-        model.add_table(
-            "stale".into(),
-            make_stale_managed(10_000, 5_000),
-        );
+        model.add_table("stale".into(), make_stale_managed(10_000, 5_000));
 
         assert_eq!(model.staleness("fresh"), Staleness::Fresh);
         assert_eq!(model.staleness("stale"), Staleness::VeryStale);
@@ -2229,20 +1894,12 @@ mod tests {
 
     #[test]
     fn table_count_tracks_additions() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         assert_eq!(model.table_count(), 0);
-        model.add_table(
-            "a".into(),
-            make_managed(1000, StatisticsSource::ExactCount),
-        );
+        model.add_table("a".into(), make_managed(1000, StatisticsSource::ExactCount));
         assert_eq!(model.table_count(), 1);
-        model.add_table(
-            "b".into(),
-            make_managed(2000, StatisticsSource::ExactCount),
-        );
+        model.add_table("b".into(), make_managed(2000, StatisticsSource::ExactCount));
         assert_eq!(model.table_count(), 2);
     }
 
@@ -2250,10 +1907,8 @@ mod tests {
 
     #[test]
     fn zero_row_table_cost() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "empty".into(),
             make_managed(0, StatisticsSource::ExactCount),
@@ -2265,10 +1920,8 @@ mod tests {
 
     #[test]
     fn very_large_table_cost() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "huge".into(),
             make_managed(1_000_000_000, StatisticsSource::ExactCount),
@@ -2280,14 +1933,9 @@ mod tests {
 
     #[test]
     fn sort_cost_single_row() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "one".into(),
-            make_managed(1, StatisticsSource::ExactCount),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
+        model.add_table("one".into(), make_managed(1, StatisticsSource::ExactCount));
         let cost = model.sort_cost("one");
         assert!(cost >= 0.0);
         assert!(cost.is_finite());
@@ -2295,10 +1943,8 @@ mod tests {
 
     #[test]
     fn aggregate_cost_zero_groups() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -2345,9 +1991,7 @@ mod tests {
 
     #[test]
     fn calibration_cpu_only() {
-        let cal = CostCalibration::from_hardware(
-            &HardwareProfile::cpu_only(),
-        );
+        let cal = CostCalibration::from_hardware(&HardwareProfile::cpu_only());
         assert!(cal.scan_factor > 0.0);
         assert!(cal.filter_factor > 0.0);
         assert!(cal.join_factor > 0.0);
@@ -2358,17 +2002,13 @@ mod tests {
 
     #[test]
     fn calibration_gpu_server_has_gpu() {
-        let cal = CostCalibration::from_hardware(
-            &HardwareProfile::gpu_server(),
-        );
+        let cal = CostCalibration::from_hardware(&HardwareProfile::gpu_server());
         assert!(cal.gpu_available);
     }
 
     #[test]
     fn calibration_fpga_has_fpga() {
-        let cal = CostCalibration::from_hardware(
-            &HardwareProfile::fpga_appliance(),
-        );
+        let cal = CostCalibration::from_hardware(&HardwareProfile::fpga_appliance());
         assert!(cal.fpga_available);
     }
 
@@ -2475,11 +2115,7 @@ mod tests {
         let mut staleness = HashMap::new();
         staleness.insert("t".into(), Staleness::SlightlyStale);
 
-        let cfn = IntegratedCostFn::new(
-            HardwareProfile::cpu_only(),
-            stats,
-            staleness,
-        );
+        let cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), stats, staleness);
         let rows = cfn.row_count_for("t");
         assert!((rows - 10_500.0).abs() < f64::EPSILON);
     }
@@ -2491,11 +2127,7 @@ mod tests {
         let mut staleness = HashMap::new();
         staleness.insert("t".into(), Staleness::ModeratelyStale);
 
-        let cfn = IntegratedCostFn::new(
-            HardwareProfile::cpu_only(),
-            stats,
-            staleness,
-        );
+        let cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), stats, staleness);
         let rows = cfn.row_count_for("t");
         assert!((rows - 12_000.0).abs() < f64::EPSILON);
     }
@@ -2507,11 +2139,7 @@ mod tests {
         let mut staleness = HashMap::new();
         staleness.insert("t".into(), Staleness::VeryStale);
 
-        let cfn = IntegratedCostFn::new(
-            HardwareProfile::cpu_only(),
-            stats,
-            staleness,
-        );
+        let cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), stats, staleness);
         let rows = cfn.row_count_for("t");
         assert!((rows - 15_000.0).abs() < f64::EPSILON);
     }
@@ -2521,11 +2149,7 @@ mod tests {
         let mut stats = HashMap::new();
         stats.insert("t".into(), Statistics::new(10_000.0));
 
-        let cfn = IntegratedCostFn::new(
-            HardwareProfile::cpu_only(),
-            stats,
-            HashMap::new(),
-        );
+        let cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), stats, HashMap::new());
         let rows = cfn.row_count_for("t");
         assert!((rows - 20_000.0).abs() < f64::EPSILON);
     }
@@ -2535,19 +2159,13 @@ mod tests {
     #[test]
     fn scan_cost_scales_with_row_count() {
         let hw = HardwareProfile::cpu_only();
-        let mut small = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut small = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         small.add_table(
             "t".into(),
             make_managed(1_000, StatisticsSource::ExactCount),
         );
 
-        let mut large = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
+        let mut large = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
         large.add_table(
             "t".into(),
             make_managed(1_000_000, StatisticsSource::ExactCount),
@@ -2559,19 +2177,13 @@ mod tests {
     #[test]
     fn filter_cost_scales_with_row_count() {
         let hw = HardwareProfile::cpu_only();
-        let mut small = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut small = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         small.add_table(
             "t".into(),
             make_managed(1_000, StatisticsSource::ExactCount),
         );
 
-        let mut large = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
+        let mut large = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
         large.add_table(
             "t".into(),
             make_managed(1_000_000, StatisticsSource::ExactCount),
@@ -2583,19 +2195,13 @@ mod tests {
     #[test]
     fn sort_cost_scales_with_row_count() {
         let hw = HardwareProfile::cpu_only();
-        let mut small = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut small = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         small.add_table(
             "t".into(),
             make_managed(1_000, StatisticsSource::ExactCount),
         );
 
-        let mut large = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
+        let mut large = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
         large.add_table(
             "t".into(),
             make_managed(1_000_000, StatisticsSource::ExactCount),
@@ -2617,16 +2223,10 @@ mod tests {
             StatisticsProfile::streaming(),
         ];
         for profile in profiles {
-            let mut model = IntegratedCostModel::new(
-                profile,
-                HardwareProfile::cpu_only(),
-            );
+            let mut model = IntegratedCostModel::new(profile, HardwareProfile::cpu_only());
             model.add_table(
                 "t".into(),
-                make_managed(
-                    50_000,
-                    StatisticsSource::ExactCount,
-                ),
+                make_managed(50_000, StatisticsSource::ExactCount),
             );
             let cost = model.scan_cost("t");
             assert!(cost > 0.0, "scan cost must be positive");
@@ -2645,23 +2245,14 @@ mod tests {
             StatisticsProfile::streaming(),
         ];
         for profile in profiles {
-            let mut model = IntegratedCostModel::new(
-                profile,
-                HardwareProfile::cpu_only(),
-            );
+            let mut model = IntegratedCostModel::new(profile, HardwareProfile::cpu_only());
             model.add_table(
                 "a".into(),
-                make_managed(
-                    10_000,
-                    StatisticsSource::ExactCount,
-                ),
+                make_managed(10_000, StatisticsSource::ExactCount),
             );
             model.add_table(
                 "b".into(),
-                make_managed(
-                    5_000,
-                    StatisticsSource::ExactCount,
-                ),
+                make_managed(5_000, StatisticsSource::ExactCount),
             );
             let cost = model.join_cost("a", "b");
             assert!(cost > 0.0);
@@ -2679,16 +2270,10 @@ mod tests {
             HardwareProfile::fpga_appliance(),
         ];
         for hw in profiles {
-            let mut model = IntegratedCostModel::new(
-                StatisticsProfile::standard(),
-                hw,
-            );
+            let mut model = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
             model.add_table(
                 "t".into(),
-                make_managed(
-                    10_000,
-                    StatisticsSource::ExactCount,
-                ),
+                make_managed(10_000, StatisticsSource::ExactCount),
             );
             assert!(model.scan_cost("t") > 0.0);
             assert!(model.filter_cost("t") > 0.0);
@@ -2713,10 +2298,7 @@ mod tests {
     #[test]
     fn from_core_statistics_preserves_row_count() {
         let mut stats = HashMap::new();
-        stats.insert(
-            "t".into(),
-            Statistics::new(42_000.0),
-        );
+        stats.insert("t".into(), Statistics::new(42_000.0));
         let model = from_core_statistics(
             &stats,
             &HardwareProfile::cpu_only(),
@@ -2760,23 +2342,14 @@ mod tests {
     #[test]
     fn stale_stats_increase_filter_cost() {
         let hw = HardwareProfile::cpu_only();
-        let mut fresh = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut fresh = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         fresh.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
 
-        let mut stale = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        stale.add_table(
-            "t".into(),
-            make_stale_managed(100_000, 50_000),
-        );
+        let mut stale = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        stale.add_table("t".into(), make_stale_managed(100_000, 50_000));
 
         assert!(stale.filter_cost("t") > fresh.filter_cost("t"));
     }
@@ -2784,23 +2357,14 @@ mod tests {
     #[test]
     fn stale_stats_increase_sort_cost() {
         let hw = HardwareProfile::cpu_only();
-        let mut fresh = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut fresh = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         fresh.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
 
-        let mut stale = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        stale.add_table(
-            "t".into(),
-            make_stale_managed(100_000, 50_000),
-        );
+        let mut stale = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        stale.add_table("t".into(), make_stale_managed(100_000, 50_000));
 
         assert!(stale.sort_cost("t") > fresh.sort_cost("t"));
     }
@@ -2808,28 +2372,16 @@ mod tests {
     #[test]
     fn stale_stats_increase_aggregate_cost() {
         let hw = HardwareProfile::cpu_only();
-        let mut fresh = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut fresh = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         fresh.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
 
-        let mut stale = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        stale.add_table(
-            "t".into(),
-            make_stale_managed(100_000, 50_000),
-        );
+        let mut stale = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        stale.add_table("t".into(), make_stale_managed(100_000, 50_000));
 
-        assert!(
-            stale.aggregate_cost("t", 100.0)
-                > fresh.aggregate_cost("t", 100.0)
-        );
+        assert!(stale.aggregate_cost("t", 100.0) > fresh.aggregate_cost("t", 100.0));
     }
 
     // ---- Low confidence affects all operator types ----
@@ -2837,23 +2389,14 @@ mod tests {
     #[test]
     fn low_confidence_increases_filter_cost() {
         let hw = HardwareProfile::cpu_only();
-        let mut high = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut high = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         high.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
 
-        let mut low = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        low.add_table(
-            "t".into(),
-            make_managed(100_000, StatisticsSource::Default),
-        );
+        let mut low = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        low.add_table("t".into(), make_managed(100_000, StatisticsSource::Default));
 
         assert!(low.filter_cost("t") > high.filter_cost("t"));
     }
@@ -2861,23 +2404,14 @@ mod tests {
     #[test]
     fn low_confidence_increases_sort_cost() {
         let hw = HardwareProfile::cpu_only();
-        let mut high = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut high = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         high.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
 
-        let mut low = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        low.add_table(
-            "t".into(),
-            make_managed(100_000, StatisticsSource::Default),
-        );
+        let mut low = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        low.add_table("t".into(), make_managed(100_000, StatisticsSource::Default));
 
         assert!(low.sort_cost("t") > high.sort_cost("t"));
     }
@@ -2885,10 +2419,7 @@ mod tests {
     #[test]
     fn low_confidence_increases_join_cost() {
         let hw = HardwareProfile::cpu_only();
-        let mut high = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut high = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         high.add_table(
             "a".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
@@ -2898,59 +2429,34 @@ mod tests {
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
-        let mut low = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        low.add_table(
-            "a".into(),
-            make_managed(100_000, StatisticsSource::Default),
-        );
-        low.add_table(
-            "b".into(),
-            make_managed(10_000, StatisticsSource::Default),
-        );
+        let mut low = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        low.add_table("a".into(), make_managed(100_000, StatisticsSource::Default));
+        low.add_table("b".into(), make_managed(10_000, StatisticsSource::Default));
 
-        assert!(
-            low.join_cost("a", "b") > high.join_cost("a", "b")
-        );
+        assert!(low.join_cost("a", "b") > high.join_cost("a", "b"));
     }
 
     // ---- IntegratedCostFn from_model round-trip ----
 
     #[test]
     fn cost_fn_from_model_preserves_staleness() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "fresh".into(),
             make_managed(5000, StatisticsSource::ExactCount),
         );
-        model.add_table(
-            "stale".into(),
-            make_stale_managed(5000, 3000),
-        );
+        model.add_table("stale".into(), make_stale_managed(5000, 3000));
 
-        let cfn = IntegratedCostFn::from_model(
-            &model,
-            &["fresh".into(), "stale".into()],
-        );
-        assert!(
-            cfn.row_count_for("stale")
-                > cfn.row_count_for("fresh")
-        );
+        let cfn = IntegratedCostFn::from_model(&model, &["fresh".into(), "stale".into()]);
+        assert!(cfn.row_count_for("stale") > cfn.row_count_for("fresh"));
     }
 
     #[test]
     fn cost_fn_from_model_empty_tables() {
-        let model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
-        let cfn =
-            IntegratedCostFn::from_model(&model, &[]);
+        let model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
+        let cfn = IntegratedCostFn::from_model(&model, &[]);
         let rows = cfn.row_count_for("missing");
         assert!((rows - 2000.0).abs() < f64::EPSILON);
     }
@@ -2967,13 +2473,9 @@ mod tests {
 
     #[test]
     fn confidence_discount_is_monotonically_decreasing() {
-        let values: Vec<f64> =
-            (0..=10).map(|i| f64::from(i) / 10.0).collect();
+        let values: Vec<f64> = (0..=10).map(|i| f64::from(i) / 10.0).collect();
         for window in values.windows(2) {
-            assert!(
-                confidence_discount(window[0])
-                    >= confidence_discount(window[1])
-            );
+            assert!(confidence_discount(window[0]) >= confidence_discount(window[1]));
         }
     }
 
@@ -3004,26 +2506,19 @@ mod tests {
 
     #[test]
     fn aggregate_cost_more_groups_costs_more() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
-        assert!(
-            model.aggregate_cost("t", 10_000.0)
-                > model.aggregate_cost("t", 10.0)
-        );
+        assert!(model.aggregate_cost("t", 10_000.0) > model.aggregate_cost("t", 10.0));
     }
 
     #[test]
     fn join_cost_symmetric_for_same_size() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "a".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -3039,10 +2534,8 @@ mod tests {
 
     #[test]
     fn add_table_replaces_existing() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(1_000, StatisticsSource::ExactCount),
@@ -3051,10 +2544,7 @@ mod tests {
 
         model.add_table(
             "t".into(),
-            make_managed(
-                1_000_000,
-                StatisticsSource::ExactCount,
-            ),
+            make_managed(1_000_000, StatisticsSource::ExactCount),
         );
         let cost_after = model.scan_cost("t");
 
@@ -3084,114 +2574,84 @@ mod tests {
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_good_estimate_no_adjustment() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
-        let confidence_before = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence_before = model.quality_metrics("t").expect("exists").confidence;
 
         let feedback = [make_feedback(1000.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
 
         assert_eq!(adjusted, 0);
-        let confidence_after = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
-        assert!(
-            (confidence_after - confidence_before).abs() < f64::EPSILON
-        );
+        let confidence_after = model.quality_metrics("t").expect("exists").confidence;
+        assert!((confidence_after - confidence_before).abs() < f64::EPSILON);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_moderate_error_reduces_confidence() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 2.0, in the (1.5, 3.0] range => 10% reduction
-        let feedback =
-            [make_feedback(2000.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(2000.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
 
         assert_eq!(adjusted, 1);
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!((confidence - 0.9).abs() < f64::EPSILON);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_large_error_reduces_confidence_more() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 5.0, in the (3.0, 10.0] range => 25% reduction
-        let feedback =
-            [make_feedback(5000.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(5000.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
 
         assert_eq!(adjusted, 1);
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!((confidence - 0.75).abs() < f64::EPSILON);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_extreme_error_halves_confidence() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 20.0 => 50% reduction
-        let feedback =
-            [make_feedback(20_000.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(20_000.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
 
         assert_eq!(adjusted, 1);
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!((confidence - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_multiple_entries_accumulate() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -3205,51 +2665,36 @@ mod tests {
         let adjusted = model.apply_execution_feedback(&feedback);
 
         assert_eq!(adjusted, 1);
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!((confidence - 0.8).abs() < f64::EPSILON);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_confidence_never_negative() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "t".into(),
-            make_managed(10_000, StatisticsSource::Default),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
+        model.add_table("t".into(), make_managed(10_000, StatisticsSource::Default));
 
         // Default confidence = 0.3; extreme error reduces by 0.5
-        let feedback =
-            [make_feedback(100_000.0, 1.0, "SeqScan on t")];
+        let feedback = [make_feedback(100_000.0, 1.0, "SeqScan on t")];
         model.apply_execution_feedback(&feedback);
 
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!(confidence >= 0.0);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_unknown_table_ignored() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
-        let feedback =
-            [make_feedback(20_000.0, 1000.0, "SeqScan on unknown")];
+        let feedback = [make_feedback(20_000.0, 1000.0, "SeqScan on unknown")];
         let adjusted = model.apply_execution_feedback(&feedback);
 
         assert_eq!(adjusted, 0);
@@ -3258,10 +2703,8 @@ mod tests {
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_empty_input() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         let adjusted = model.apply_execution_feedback(&[]);
         assert_eq!(adjusted, 0);
     }
@@ -3269,10 +2712,8 @@ mod tests {
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_extracts_table_from_query_when_no_operator() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "orders".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -3295,10 +2736,8 @@ mod tests {
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_multiple_tables() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "a".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -3320,18 +2759,15 @@ mod tests {
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_increases_costs() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
         );
         let cost_before = model.scan_cost("t");
 
-        let feedback =
-            [make_feedback(100_000.0, 10_000.0, "SeqScan on t")];
+        let feedback = [make_feedback(100_000.0, 10_000.0, "SeqScan on t")];
         model.apply_execution_feedback(&feedback);
 
         let cost_after = model.scan_cost("t");
@@ -3341,18 +2777,15 @@ mod tests {
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_1_5() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 1.5 exactly => no adjustment
-        let feedback =
-            [make_feedback(1500.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(1500.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
         assert_eq!(adjusted, 0);
     }
@@ -3360,18 +2793,15 @@ mod tests {
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_1_5() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 1.6 => 10% reduction
-        let feedback =
-            [make_feedback(1600.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(1600.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
         assert_eq!(adjusted, 1);
     }
@@ -3379,96 +2809,72 @@ mod tests {
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_3_0() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 3.0 exactly => 10% reduction
-        let feedback =
-            [make_feedback(3000.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(3000.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
         assert_eq!(adjusted, 1);
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!((confidence - 0.9).abs() < f64::EPSILON);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_3_0() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 3.1 => 25% reduction
-        let feedback =
-            [make_feedback(3100.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(3100.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
         assert_eq!(adjusted, 1);
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!((confidence - 0.75).abs() < f64::EPSILON);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_10_0() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 10.0 exactly => 25% reduction
-        let feedback =
-            [make_feedback(10_000.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(10_000.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
         assert_eq!(adjusted, 1);
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!((confidence - 0.75).abs() < f64::EPSILON);
     }
 
     #[test]
     #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_10_0() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
         // Q-error = 11.0 => 50% reduction
-        let feedback =
-            [make_feedback(11_000.0, 1000.0, "SeqScan on t")];
+        let feedback = [make_feedback(11_000.0, 1000.0, "SeqScan on t")];
         let adjusted = model.apply_execution_feedback(&feedback);
         assert_eq!(adjusted, 1);
-        let confidence = model
-            .quality_metrics("t")
-            .expect("exists")
-            .confidence;
+        let confidence = model.quality_metrics("t").expect("exists").confidence;
         assert!((confidence - 0.5).abs() < f64::EPSILON);
     }
 
@@ -3493,27 +2899,19 @@ mod tests {
     #[test]
     fn extract_table_with_parenthetical() {
         assert_eq!(
-            extract_table_from_operator(
-                "Bitmap Heap Scan on users (cost=100)"
-            ),
+            extract_table_from_operator("Bitmap Heap Scan on users (cost=100)"),
             Some("users".to_string())
         );
     }
 
     #[test]
     fn extract_table_no_on_clause() {
-        assert_eq!(
-            extract_table_from_operator("Hash Join"),
-            None
-        );
+        assert_eq!(extract_table_from_operator("Hash Join"), None);
     }
 
     #[test]
     fn extract_table_empty_after_on() {
-        assert_eq!(
-            extract_table_from_operator("Scan on "),
-            None
-        );
+        assert_eq!(extract_table_from_operator("Scan on "), None);
     }
 
     // ---- extract_table_from_query ----
@@ -3521,9 +2919,7 @@ mod tests {
     #[test]
     fn extract_table_from_select() {
         assert_eq!(
-            extract_table_from_query(
-                "SELECT * FROM orders WHERE id > 10"
-            ),
+            extract_table_from_query("SELECT * FROM orders WHERE id > 10"),
             Some("orders".to_string())
         );
     }
@@ -3531,29 +2927,22 @@ mod tests {
     #[test]
     fn extract_table_from_select_with_join() {
         assert_eq!(
-            extract_table_from_query(
-                "SELECT * FROM lineitem,orders WHERE l_orderkey = o_orderkey"
-            ),
+            extract_table_from_query("SELECT * FROM lineitem,orders WHERE l_orderkey = o_orderkey"),
             Some("lineitem".to_string())
         );
     }
 
     #[test]
     fn extract_table_no_from() {
-        assert_eq!(
-            extract_table_from_query("SELECT 1 + 1"),
-            None
-        );
+        assert_eq!(extract_table_from_query("SELECT 1 + 1"), None);
     }
 
     // ---- Index-only scan cost tests ----
 
     #[test]
     fn index_only_scan_cost_cheaper_than_full_scan() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "orders".into(),
             make_managed(100_000, StatisticsSource::ExactCount),
@@ -3578,10 +2967,8 @@ mod tests {
 
     #[test]
     fn index_only_scan_cost_with_selectivity() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
         model.add_table(
             "users".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
@@ -3600,19 +2987,13 @@ mod tests {
     #[test]
     fn index_only_scan_cost_scales_with_table_size() {
         let hw = HardwareProfile::cpu_only();
-        let mut small = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut small = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         small.add_table(
             "t".into(),
             make_managed(1_000, StatisticsSource::ExactCount),
         );
 
-        let mut large = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
+        let mut large = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
         large.add_table(
             "t".into(),
             make_managed(1_000_000, StatisticsSource::ExactCount),
@@ -3630,23 +3011,14 @@ mod tests {
     #[test]
     fn index_only_scan_cost_respects_confidence() {
         let hw = HardwareProfile::cpu_only();
-        let mut high_conf = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw.clone(),
-        );
+        let mut high_conf = IntegratedCostModel::new(StatisticsProfile::standard(), hw.clone());
         high_conf.add_table(
             "t".into(),
             make_managed(10_000, StatisticsSource::ExactCount),
         );
 
-        let mut low_conf = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            hw,
-        );
-        low_conf.add_table(
-            "t".into(),
-            make_managed(10_000, StatisticsSource::Default),
-        );
+        let mut low_conf = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
+        low_conf.add_table("t".into(), make_managed(10_000, StatisticsSource::Default));
 
         let high_cost = high_conf.index_only_scan_cost("t", 1.0);
         let low_cost = low_conf.index_only_scan_cost("t", 1.0);
@@ -3660,14 +3032,9 @@ mod tests {
 
     #[test]
     fn index_only_scan_cost_minimum_values() {
-        let mut model = IntegratedCostModel::new(
-            StatisticsProfile::standard(),
-            HardwareProfile::cpu_only(),
-        );
-        model.add_table(
-            "tiny".into(),
-            make_managed(1, StatisticsSource::ExactCount),
-        );
+        let mut model =
+            IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::cpu_only());
+        model.add_table("tiny".into(), make_managed(1, StatisticsSource::ExactCount));
 
         // Should handle tiny tables without panic or negative cost
         let cost = model.index_only_scan_cost("tiny", 0.0);

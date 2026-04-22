@@ -31,10 +31,7 @@ fn managed(row_count: u64) -> ManagedTableStats {
             last_analyzed: None,
         },
         columns: HashMap::new(),
-        state: StatisticsState::new(
-            StatisticsSource::ExactCount,
-            row_count,
-        ),
+        state: StatisticsState::new(StatisticsSource::ExactCount, row_count),
     }
 }
 
@@ -102,11 +99,7 @@ fn detect_hardware_returns_valid_profile() {
     assert!(hw.cpu_cores <= 256);
     assert!(hw.l2_cache_bytes >= 128 * 1024);
     assert!(hw.l3_cache_bytes >= 1024 * 1024);
-    assert!(
-        hw.simd_width_bits == 128
-            || hw.simd_width_bits == 256
-            || hw.simd_width_bits == 512
-    );
+    assert!(hw.simd_width_bits == 128 || hw.simd_width_bits == 256 || hw.simd_width_bits == 512);
 }
 
 #[test]
@@ -209,10 +202,7 @@ fn bigger_cache_reduces_join_cost() {
     let m_small = populated_model(hw_small);
     let m_big = populated_model(hw_big);
 
-    assert!(
-        m_big.join_cost("users", "orders")
-            < m_small.join_cost("users", "orders")
-    );
+    assert!(m_big.join_cost("users", "orders") < m_small.join_cost("users", "orders"));
 }
 
 #[test]
@@ -225,10 +215,7 @@ fn cache_size_proportional_effect() {
     let m8 = populated_model(hw8);
     let m32 = populated_model(hw32);
 
-    assert!(
-        m32.join_cost("users", "orders")
-            < m8.join_cost("users", "orders")
-    );
+    assert!(m32.join_cost("users", "orders") < m8.join_cost("users", "orders"));
 }
 
 // ── CPU Cores Impact on Sort Cost ────────────────────────────────
@@ -268,10 +255,7 @@ fn bigger_cache_reduces_aggregate_cost() {
     let m_small = populated_model(hw_small);
     let m_big = populated_model(hw_big);
 
-    assert!(
-        m_big.aggregate_cost("events", 1000.0)
-            < m_small.aggregate_cost("events", 1000.0)
-    );
+    assert!(m_big.aggregate_cost("events", 1000.0) < m_small.aggregate_cost("events", 1000.0));
 }
 
 // ── GPU Profile in Cost Model ────────────────────────────────────
@@ -411,10 +395,7 @@ fn stale_stats_with_fast_hardware() {
     hw.simd_width_bits = 512;
     hw.l3_cache_bytes = 256 * 1024 * 1024;
 
-    let mut m = IntegratedCostModel::new(
-        StatisticsProfile::standard(),
-        hw,
-    );
+    let mut m = IntegratedCostModel::new(StatisticsProfile::standard(), hw);
     let mut stale = managed(100_000);
     stale.state.record_modifications(30_000);
     m.add_table("t".into(), stale);
@@ -441,11 +422,7 @@ fn fresh_stats_with_slow_hardware() {
 fn integrated_cost_fn_cpu_only() {
     let stats = HashMap::new();
     let smap = HashMap::new();
-    let _cfn = IntegratedCostFn::new(
-        HardwareProfile::cpu_only(),
-        stats,
-        smap,
-    );
+    let _cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), stats, smap);
 }
 
 #[test]
@@ -454,25 +431,16 @@ fn integrated_cost_fn_gpu_server() {
     stats.insert("t".into(), Statistics::new(10_000.0));
     let mut smap = HashMap::new();
     smap.insert("t".into(), Staleness::Fresh);
-    let _cfn = IntegratedCostFn::new(
-        HardwareProfile::gpu_server(),
-        stats,
-        smap,
-    );
+    let _cfn = IntegratedCostFn::new(HardwareProfile::gpu_server(), stats, smap);
 }
 
 #[test]
 fn integrated_cost_fn_from_model_gpu() {
-    let mut model = IntegratedCostModel::new(
-        StatisticsProfile::standard(),
-        HardwareProfile::gpu_server(),
-    );
+    let mut model =
+        IntegratedCostModel::new(StatisticsProfile::standard(), HardwareProfile::gpu_server());
     model.add_table("t".into(), managed(10_000));
 
-    let _cfn = IntegratedCostFn::from_model(
-        &model,
-        &["t".to_string()],
-    );
+    let _cfn = IntegratedCostFn::from_model(&model, &["t".to_string()]);
 }
 
 // ── NUMA Topology ────────────────────────────────────────────────
@@ -532,12 +500,7 @@ fn hardware_cost_model_hash_join_gpu() {
     use ra_hardware::device::Device;
 
     let model = HardwareCostModel::new(HardwareProfile::gpu_server());
-    let cost = model.hash_join_cost(
-        1_000_000.0,
-        10_000_000.0,
-        100,
-        Device::Gpu,
-    );
+    let cost = model.hash_join_cost(1_000_000.0, 10_000_000.0, 100, Device::Gpu);
     assert!(cost.cpu > 0.0);
 }
 
@@ -546,8 +509,7 @@ fn hardware_cost_model_sort_fpga_unsupported() {
     use ra_hardware::cost::HardwareCostModel;
     use ra_hardware::device::Device;
 
-    let model =
-        HardwareCostModel::new(HardwareProfile::fpga_appliance());
+    let model = HardwareCostModel::new(HardwareProfile::fpga_appliance());
     let cost = model.sort_cost(1_000_000.0, 100, Device::Fpga);
     assert!(cost.cpu.is_infinite());
 }
@@ -557,20 +519,16 @@ fn hardware_cost_model_sort_fpga_unsupported() {
 #[test]
 fn hardware_profile_serialize_roundtrip() {
     let profile = HardwareProfile::gpu_server();
-    let json = serde_json::to_string(&profile)
-        .expect("should serialize");
-    let deser: HardwareProfile = serde_json::from_str(&json)
-        .expect("should deserialize");
+    let json = serde_json::to_string(&profile).expect("should serialize");
+    let deser: HardwareProfile = serde_json::from_str(&json).expect("should deserialize");
     assert_eq!(profile, deser);
 }
 
 #[test]
 fn statistics_profile_serialize_roundtrip() {
     let profile = StatisticsProfile::standard();
-    let json = serde_json::to_string(&profile)
-        .expect("should serialize");
-    let deser: StatisticsProfile = serde_json::from_str(&json)
-        .expect("should deserialize");
+    let json = serde_json::to_string(&profile).expect("should serialize");
+    let deser: StatisticsProfile = serde_json::from_str(&json).expect("should deserialize");
     assert_eq!(profile, deser);
 }
 
@@ -578,9 +536,7 @@ fn statistics_profile_serialize_roundtrip() {
 
 #[test]
 fn calibration_cpu_only_profile() {
-    let cal = CostCalibration::from_hardware(
-        &HardwareProfile::cpu_only(),
-    );
+    let cal = CostCalibration::from_hardware(&HardwareProfile::cpu_only());
     assert!(cal.overall_factor() > 0.0);
     assert!(cal.overall_factor().is_finite());
     assert!(!cal.gpu_available);
@@ -589,18 +545,14 @@ fn calibration_cpu_only_profile() {
 
 #[test]
 fn calibration_gpu_server_profile() {
-    let cal = CostCalibration::from_hardware(
-        &HardwareProfile::gpu_server(),
-    );
+    let cal = CostCalibration::from_hardware(&HardwareProfile::gpu_server());
     assert!(cal.gpu_available);
     assert!(cal.overall_factor() > 0.0);
 }
 
 #[test]
 fn calibration_fpga_profile() {
-    let cal = CostCalibration::from_hardware(
-        &HardwareProfile::fpga_appliance(),
-    );
+    let cal = CostCalibration::from_hardware(&HardwareProfile::fpga_appliance());
     assert!(cal.fpga_available);
 }
 
@@ -817,10 +769,7 @@ fn calibration_ordering_matches_join_cost() {
     let m_small = populated_model(hw_small);
 
     assert!(cal_big.join_factor < cal_small.join_factor);
-    assert!(
-        m_big.join_cost("users", "orders")
-            < m_small.join_cost("users", "orders")
-    );
+    assert!(m_big.join_cost("users", "orders") < m_small.join_cost("users", "orders"));
 }
 
 #[test]
@@ -856,10 +805,7 @@ fn optimizer_with_fast_nvme() {
 
     let plan = scan("users").filter(eq(col("active"), col("true")));
     let result = opt.optimize(&plan).expect("should optimize");
-    assert!(
-        matches!(result, RelExpr::Filter { .. })
-            || matches!(result, RelExpr::Scan { .. })
-    );
+    assert!(matches!(result, RelExpr::Filter { .. }) || matches!(result, RelExpr::Scan { .. }));
 }
 
 #[test]

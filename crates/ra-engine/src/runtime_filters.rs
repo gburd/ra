@@ -60,17 +60,16 @@ impl BloomFilterState {
 
     /// Create a bloom filter with a specific false-positive rate.
     #[must_use]
-    pub fn with_fpr(
-        expected_elements: usize,
-        fpr: f64,
-    ) -> Self {
+    pub fn with_fpr(expected_elements: usize, fpr: f64) -> Self {
         let expected = expected_elements.max(1);
         let fpr = fpr.clamp(1e-10, 0.5);
         // m = -n * ln(p) / (ln(2))^2
-        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let num_bits = (-(expected as f64) * fpr.ln()
-            / (2.0_f64.ln().powi(2)))
-        .ceil() as usize;
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let num_bits = (-(expected as f64) * fpr.ln() / (2.0_f64.ln().powi(2))).ceil() as usize;
         let num_bits = num_bits.max(64);
         let words = (num_bits + 63) / 64;
         Self {
@@ -138,9 +137,7 @@ impl BloomFilterState {
         // h(i) = h1 + i*h2 + i^2, which provides better
         // independence between hash functions.
         let h1 = Self::mix(hash) as usize;
-        let h2 = Self::mix(hash.wrapping_mul(0x9E37_79B9_7F4A_7C15))
-            as usize
-            | 1;
+        let h2 = Self::mix(hash.wrapping_mul(0x9E37_79B9_7F4A_7C15)) as usize | 1;
         let i_usize = i as usize;
         h1.wrapping_add(h2.wrapping_mul(i_usize))
             .wrapping_add(i_usize.wrapping_mul(i_usize))
@@ -278,12 +275,8 @@ impl RuntimeFilter {
     pub fn might_contain_hash(&self, hash: u64) -> bool {
         match self {
             RuntimeFilter::BloomFilter(bf) => bf.might_contain(hash),
-            RuntimeFilter::MinMaxFilter(mm) => {
-                mm.might_contain(hash as i64)
-            }
-            RuntimeFilter::InListFilter(il) => {
-                il.contains(hash as i64)
-            }
+            RuntimeFilter::MinMaxFilter(mm) => mm.might_contain(hash as i64),
+            RuntimeFilter::InListFilter(il) => il.contains(hash as i64),
         }
     }
 
@@ -353,10 +346,7 @@ impl FilterBuilder {
     /// Create a new filter builder with the given configuration.
     #[must_use]
     pub fn new(config: FilterConfig) -> Self {
-        let bloom = BloomFilterState::with_fpr(
-            config.expected_distinct,
-            config.target_fpr,
-        );
+        let bloom = BloomFilterState::with_fpr(config.expected_distinct, config.target_fpr);
         Self {
             config,
             bloom,
@@ -386,16 +376,10 @@ impl FilterBuilder {
     #[must_use]
     pub fn build(self) -> RuntimeFilter {
         match self.config.strategy {
-            FilterStrategy::BloomOnly => {
-                RuntimeFilter::BloomFilter(self.bloom)
-            }
-            FilterStrategy::MinMax => {
-                RuntimeFilter::MinMaxFilter(self.min_max)
-            }
+            FilterStrategy::BloomOnly => RuntimeFilter::BloomFilter(self.bloom),
+            FilterStrategy::MinMax => RuntimeFilter::MinMaxFilter(self.min_max),
             FilterStrategy::Auto => {
-                if !self.switched_to_bloom
-                    && !self.in_list.is_empty()
-                {
+                if !self.switched_to_bloom && !self.in_list.is_empty() {
                     RuntimeFilter::InListFilter(self.in_list)
                 } else {
                     RuntimeFilter::BloomFilter(self.bloom)
@@ -512,10 +496,8 @@ pub fn estimate_filter_cost(
         1.0
     };
 
-    let rows_saved =
-        probe_side_rows * (1.0 - selectivity);
-    let total_apply_cost =
-        probe_side_rows * apply_cost_per_row;
+    let rows_saved = probe_side_rows * (1.0 - selectivity);
+    let total_apply_cost = probe_side_rows * apply_cost_per_row;
     let savings = rows_saved * scan_cost_per_row;
     let net_benefit = savings - build_cost - total_apply_cost;
 
@@ -533,12 +515,8 @@ pub fn estimate_filter_cost(
 /// Returns true if the estimated net benefit is positive and
 /// the estimated selectivity is below the threshold.
 #[must_use]
-pub fn should_apply_filter(
-    cost: &RuntimeFilterCost,
-    selectivity_threshold: f64,
-) -> bool {
-    cost.net_benefit > 0.0
-        && cost.estimated_selectivity < selectivity_threshold
+pub fn should_apply_filter(cost: &RuntimeFilterCost, selectivity_threshold: f64) -> bool {
+    cost.net_benefit > 0.0 && cost.estimated_selectivity < selectivity_threshold
 }
 
 // ---------------------------------------------------------------
@@ -571,16 +549,7 @@ pub struct FilterOpportunity {
 /// `scan_cost_per_row`: base cost of reading one probe-side row
 #[must_use]
 pub fn identify_filter_opportunities(
-    join_pairs: &[(
-        String,
-        String,
-        String,
-        String,
-        f64,
-        f64,
-        f64,
-        f64,
-    )],
+    join_pairs: &[(String, String, String, String, f64, f64, f64, f64)],
     scan_cost_per_row: f64,
 ) -> Vec<FilterOpportunity> {
     let mut opportunities = Vec::new();
@@ -674,13 +643,9 @@ mod tests {
                 false_positives += 1;
             }
         }
-        let observed_fpr =
-            false_positives as f64 / test_count as f64;
+        let observed_fpr = false_positives as f64 / test_count as f64;
         // Should be close to 1%, allow up to 5%
-        assert!(
-            observed_fpr < 0.05,
-            "FPR too high: {observed_fpr}"
-        );
+        assert!(observed_fpr < 0.05, "FPR too high: {observed_fpr}");
     }
 
     #[test]
@@ -1025,33 +990,19 @@ mod tests {
 
     #[test]
     fn estimate_filter_cost_zero_probe_ndv() {
-        let cost = estimate_filter_cost(
-            1_000.0, 1_000_000.0, 1_000.0, 0.0, 1e-6,
-        );
+        let cost = estimate_filter_cost(1_000.0, 1_000_000.0, 1_000.0, 0.0, 1e-6);
         assert_eq!(cost.estimated_selectivity, 1.0);
     }
 
     #[test]
     fn should_apply_filter_beneficial() {
-        let cost = estimate_filter_cost(
-            1_000.0,
-            1_000_000.0,
-            1_000.0,
-            100_000.0,
-            1e-6,
-        );
+        let cost = estimate_filter_cost(1_000.0, 1_000_000.0, 1_000.0, 100_000.0, 1e-6);
         assert!(should_apply_filter(&cost, 0.5));
     }
 
     #[test]
     fn should_apply_filter_not_beneficial() {
-        let cost = estimate_filter_cost(
-            100_000.0,
-            100_000.0,
-            100_000.0,
-            100_000.0,
-            1e-6,
-        );
+        let cost = estimate_filter_cost(100_000.0, 100_000.0, 100_000.0, 100_000.0, 1e-6);
         assert!(!should_apply_filter(&cost, 0.5));
     }
 
@@ -1068,21 +1019,15 @@ mod tests {
             10_000_000.0,
             1_000.0,
             1_000_000.0,
-            ),
-        ];
-        let opportunities =
-            identify_filter_opportunities(&pairs, 1e-6);
+        )];
+        let opportunities = identify_filter_opportunities(&pairs, 1e-6);
         assert_eq!(
             opportunities.len(),
             1,
             "star schema join should produce opportunity"
         );
-        assert_eq!(
-            opportunities[0].build_table, "dim_product"
-        );
-        assert_eq!(
-            opportunities[0].probe_table, "fact_sales"
-        );
+        assert_eq!(opportunities[0].build_table, "dim_product");
+        assert_eq!(opportunities[0].probe_table, "fact_sales");
     }
 
     #[test]
@@ -1097,8 +1042,7 @@ mod tests {
             100_000.0,
             100_000.0,
         )];
-        let opportunities =
-            identify_filter_opportunities(&pairs, 1e-6);
+        let opportunities = identify_filter_opportunities(&pairs, 1e-6);
         assert!(
             opportunities.is_empty(),
             "equal-sized join should not produce opportunity"
@@ -1139,8 +1083,7 @@ mod tests {
                 500_000.0,
             ),
         ];
-        let opportunities =
-            identify_filter_opportunities(&pairs, 1e-6);
+        let opportunities = identify_filter_opportunities(&pairs, 1e-6);
         // First two star schema joins should produce
         // opportunities; third should not.
         assert_eq!(opportunities.len(), 2);
@@ -1148,8 +1091,7 @@ mod tests {
 
     #[test]
     fn identify_opportunities_empty_input() {
-        let opportunities =
-            identify_filter_opportunities(&[], 1e-6);
+        let opportunities = identify_filter_opportunities(&[], 1e-6);
         assert!(opportunities.is_empty());
     }
 
@@ -1171,8 +1113,7 @@ mod tests {
         let filter = builder.build();
 
         // Probe side: test keys
-        let mut effectiveness =
-            FilterEffectiveness::new("id".to_string());
+        let mut effectiveness = FilterEffectiveness::new("id".to_string());
         for i in 0..200_u64 {
             let passed = filter.might_contain_hash(i);
             effectiveness.record(passed);

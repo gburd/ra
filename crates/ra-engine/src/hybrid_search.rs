@@ -50,7 +50,7 @@
 //!
 //! See: RFC 0073 Hybrid Search Optimization
 
-use egg::Rewrite;
+use egg::{rewrite, Rewrite};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
@@ -194,7 +194,9 @@ pub fn choose_hybrid_strategy(
     // Estimate cost for each strategy
     let fts_first_cost = fts_cost + vector_cost * fts_selectivity;
     let vector_first_cost = vector_cost + fts_cost * vector_selectivity;
-    let parallel_cost = fts_cost + vector_cost + estimate_merge_cost(fts_selectivity, vector_selectivity, total_rows);
+    let parallel_cost = fts_cost
+        + vector_cost
+        + estimate_merge_cost(fts_selectivity, vector_selectivity, total_rows);
 
     // Choose strategy with minimum cost
     if fts_first_cost <= vector_first_cost && fts_first_cost <= parallel_cost {
@@ -353,12 +355,89 @@ fn normalize_vector_distance(distance: f64) -> f64 {
 /// `hybrid_search_scan` with strategy determined by selectivity estimates.
 #[must_use]
 pub fn hybrid_search_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
-    // Hybrid search rules are currently disabled due to complexity.
-    // These rules require sophisticated pattern matching across FTS and vector operators
-    // that needs careful coordination with the selectivity analyzer.
-    //
-    // TODO: Re-enable when we have proper cost modeling for hybrid strategies.
-    vec![]
+    vec![
+        // Rule 1: FTS-first hybrid scan.
+        //
+        // Pattern: An FTS match filter applied to a vector-distance
+        // ordered scan with a LIMIT.  The FTS predicate is highly
+        // selective, so execute FTS first, then rank remaining rows
+        // by vector distance.
+        //
+        // Before:
+        //   LIMIT k (SORT vector-distance
+        //     (FILTER fts-match (SCAN table)))
+        //
+        // After:
+        //   hybrid-scan(table, fts_match, vector_distance,
+        //               strategy=fts_first, k, limit)
+        rewrite!("hybrid-fts-first";
+            "(limit ?k ?offset
+               (sort (list (sort-key
+                   (vector-distance ?metric ?vcol ?target)
+                   ?order ?nulls))
+                 (filter (fts-match ?vendor ?fcols ?fquery ?mode)
+                   (scan ?table))))" =>
+            "(hybrid-scan ?table
+               (fts-match ?vendor ?fcols ?fquery ?mode)
+               (vector-distance ?metric ?vcol ?target)
+               fts_first ?k ?k)"
+        ),
+        // Rule 2: Vector-first hybrid scan.
+        //
+        // Pattern: An FTS match filter on top of a vector KNN scan.
+        // The vector search is highly selective (small k), so run
+        // vector KNN first, then filter by FTS match.
+        //
+        // Before:
+        //   FILTER fts-match (LIMIT k (vector-knn ...))
+        //
+        // After:
+        //   hybrid-scan(table, fts_match, vector_knn,
+        //               strategy=vector_first, k, k)
+        rewrite!("hybrid-vector-first";
+            "(filter (fts-match ?vendor ?fcols ?fquery ?mode)
+               (limit ?k ?offset
+                 (vector-knn ?table ?vcol ?target ?vk)))" =>
+            "(hybrid-scan ?table
+               (fts-match ?vendor ?fcols ?fquery ?mode)
+               (vector-distance l2 ?vcol ?target)
+               vector_first ?k ?k)"
+        ),
+        // Rule 3: Parallel hybrid scan.
+        //
+        // Pattern: A conjunctive filter combining an FTS match and
+        // a vector distance threshold, sorted by hybrid-score.
+        // Both modalities have comparable selectivity, so run them
+        // in parallel and merge results.
+        //
+        // Before:
+        //   LIMIT k (SORT hybrid-score
+        //     (FILTER (fts-match AND vector-distance < thresh)
+        //       (SCAN table)))
+        //
+        // After:
+        //   hybrid-scan(table, fts_match, vector_distance,
+        //               strategy=parallel, k, limit)
+        rewrite!("hybrid-parallel";
+            "(limit ?k ?offset
+               (sort (list (sort-key
+                   (hybrid-score
+                     (fts-rank ?fcol ?fquery ?algo)
+                     (vector-distance ?metric ?vcol ?target)
+                     ?alpha ?beta ?method)
+                   ?order ?nulls))
+                 (filter
+                   (and
+                     (fts-match ?vendor ?fcols ?fquery ?mode)
+                     (lt (vector-distance ?metric2 ?vcol2 ?target2)
+                         ?threshold))
+                   (scan ?table))))" =>
+            "(hybrid-scan ?table
+               (fts-match ?vendor ?fcols ?fquery ?mode)
+               (vector-distance ?metric ?vcol ?target)
+               parallel ?k ?k)"
+        ),
+    ]
 }
 
 // ------------------------------------------------------------------
@@ -528,16 +607,8 @@ mod tests {
 
     #[test]
     fn test_hybrid_scan_cost_factor_scales() {
-        let low_sel = hybrid_scan_cost_factor(
-            HybridStrategy::FTSFirst,
-            0.01,
-            0.01,
-        );
-        let high_sel = hybrid_scan_cost_factor(
-            HybridStrategy::FTSFirst,
-            0.1,
-            0.1,
-        );
+        let low_sel = hybrid_scan_cost_factor(HybridStrategy::FTSFirst, 0.01, 0.01);
+        let high_sel = hybrid_scan_cost_factor(HybridStrategy::FTSFirst, 0.1, 0.1);
         assert!(high_sel > low_sel);
     }
 
@@ -551,12 +622,14 @@ mod tests {
     #[test]
     fn test_fusion_labels() {
         assert_eq!(ScoreFusion::WeightedAverage.label(), "weighted_average");
-        assert_eq!(ScoreFusion::ReciprocalRankFusion.label(), "reciprocal_rank_fusion");
+        assert_eq!(
+            ScoreFusion::ReciprocalRankFusion.label(),
+            "reciprocal_rank_fusion"
+        );
         assert_eq!(ScoreFusion::Learned.label(), "learned");
     }
 
     #[test]
-    #[ignore] // Requires full e-graph integration with FTS and vector operators
     fn test_hybrid_rules_exist() {
         let rules = hybrid_search_rules();
         assert!(!rules.is_empty());

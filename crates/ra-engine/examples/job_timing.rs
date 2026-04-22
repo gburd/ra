@@ -63,11 +63,7 @@ fn main() {
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "sql")
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
         .collect();
     entries.sort_by_key(|e| e.file_name());
 
@@ -83,12 +79,7 @@ fn main() {
 
     for entry in &entries {
         let path = entry.path();
-        let query_id = path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned();
+        let query_id = path.file_stem().unwrap().to_str().unwrap().to_owned();
         let sql = fs::read_to_string(&path).unwrap();
 
         let parse_start = Instant::now();
@@ -97,11 +88,11 @@ fn main() {
             Err(e) => {
                 println!(
                     "{:<8} {:>10} {:>10} {:<10} {}",
-                    query_id, "-", "-", "PARSE_ERR",
-                    format!("{e}")
-                        .chars()
-                        .take(40)
-                        .collect::<String>()
+                    query_id,
+                    "-",
+                    "-",
+                    "PARSE_ERR",
+                    format!("{e}").chars().take(40).collect::<String>()
                 );
                 parse_failures += 1;
                 continue;
@@ -117,12 +108,7 @@ fn main() {
                     "{:<8} {:>10} {:>10} {:<10}",
                     query_id, parse_us, opt_us, "OK"
                 );
-                results.push((
-                    query_id,
-                    opt_us as f64,
-                    true,
-                    String::new(),
-                ));
+                results.push((query_id, opt_us as f64, true, String::new()));
             }
             Err(e) => {
                 let opt_us = opt_start.elapsed().as_micros();
@@ -132,18 +118,10 @@ fn main() {
                     parse_us,
                     opt_us,
                     "OPT_ERR",
-                    format!("{e}")
-                        .chars()
-                        .take(40)
-                        .collect::<String>()
+                    format!("{e}").chars().take(40).collect::<String>()
                 );
                 optimize_failures += 1;
-                results.push((
-                    query_id,
-                    opt_us as f64,
-                    false,
-                    format!("{e}"),
-                ));
+                results.push((query_id, opt_us as f64, false, format!("{e}")));
             }
         }
     }
@@ -154,55 +132,44 @@ fn main() {
     println!("Parse failures:   {parse_failures}");
     println!("Optimize failures:{optimize_failures}");
 
-    let successful: Vec<_> =
-        results.iter().filter(|r| r.2).collect();
+    let successful: Vec<_> = results.iter().filter(|r| r.2).collect();
     if !successful.is_empty() {
-        let total_us: f64 =
-            successful.iter().map(|r| r.1).sum();
+        let total_us: f64 = successful.iter().map(|r| r.1).sum();
         let avg_us = total_us / successful.len() as f64;
         let max = successful
             .iter()
-            .max_by(|a, b| {
-                a.1.partial_cmp(&b.1).unwrap()
-            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
             .unwrap();
         let min = successful
             .iter()
-            .min_by(|a, b| {
-                a.1.partial_cmp(&b.1).unwrap()
-            })
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
             .unwrap();
 
+        println!("Successful:       {} / {}", successful.len(), results.len());
         println!(
-            "Successful:       {} / {}",
-            successful.len(),
-            results.len()
-        );
-        println!("Total opt time:   {:.0} us ({:.1} ms)", total_us, total_us / 1000.0);
-        println!("Avg opt time:     {:.0} us ({:.1} ms)", avg_us, avg_us / 1000.0);
-        println!(
-            "Min opt time:     {:.0} us ({})",
-            min.1, min.0
+            "Total opt time:   {:.0} us ({:.1} ms)",
+            total_us,
+            total_us / 1000.0
         );
         println!(
-            "Max opt time:     {:.0} us ({})",
-            max.1, max.0
+            "Avg opt time:     {:.0} us ({:.1} ms)",
+            avg_us,
+            avg_us / 1000.0
         );
+        println!("Min opt time:     {:.0} us ({})", min.1, min.0);
+        println!("Max opt time:     {:.0} us ({})", max.1, max.0);
 
         // Breakdown by query complexity
         let mut by_template: std::collections::BTreeMap<u32, Vec<f64>> =
             std::collections::BTreeMap::new();
         for r in &successful {
-            let num: u32 = r.0
-                .chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .parse()
-                .unwrap_or(0);
-            by_template
-                .entry(num)
-                .or_default()
-                .push(r.1);
+            let num: u32 =
+                r.0.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0);
+            by_template.entry(num).or_default().push(r.1);
         }
 
         println!();
@@ -212,12 +179,8 @@ fn main() {
         );
         println!("{}", "-".repeat(50));
         for (template, times) in &by_template {
-            let avg =
-                times.iter().sum::<f64>() / times.len() as f64;
-            let max = times
-                .iter()
-                .copied()
-                .fold(0.0_f64, f64::max);
+            let avg = times.iter().sum::<f64>() / times.len() as f64;
+            let max = times.iter().copied().fold(0.0_f64, f64::max);
             println!(
                 "{:<12} {:>8} {:>12.0} {:>12.0}",
                 template,
@@ -228,16 +191,11 @@ fn main() {
         }
 
         // Queries over 1ms, 10ms, 100ms, 1s
-        let over_1ms =
-            successful.iter().filter(|r| r.1 > 1000.0).count();
-        let over_10ms =
-            successful.iter().filter(|r| r.1 > 10_000.0).count();
-        let over_100ms =
-            successful.iter().filter(|r| r.1 > 100_000.0).count();
-        let over_1s =
-            successful.iter().filter(|r| r.1 > 1_000_000.0).count();
-        let over_5s =
-            successful.iter().filter(|r| r.1 > 5_000_000.0).count();
+        let over_1ms = successful.iter().filter(|r| r.1 > 1000.0).count();
+        let over_10ms = successful.iter().filter(|r| r.1 > 10_000.0).count();
+        let over_100ms = successful.iter().filter(|r| r.1 > 100_000.0).count();
+        let over_1s = successful.iter().filter(|r| r.1 > 1_000_000.0).count();
+        let over_5s = successful.iter().filter(|r| r.1 > 5_000_000.0).count();
 
         println!();
         println!("Queries >1ms:   {over_1ms}");

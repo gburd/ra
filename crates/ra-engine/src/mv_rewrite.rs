@@ -18,9 +18,7 @@ use crate::mv_matching::MvCatalog;
 /// as an alternative representation for aggregate-over-scan/join
 /// patterns. The cost model picks the winner.
 #[must_use]
-pub fn mv_rewrite_rules(
-    _catalog: &MvCatalog,
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn mv_rewrite_rules(_catalog: &MvCatalog) -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         rewrite!("agg-scan-to-mv-scan";
             "(aggregate ?g ?a (scan ?table))" =>
@@ -57,9 +55,7 @@ mod tests {
     use crate::analysis::RelAnalysis;
     use crate::egraph::{to_rec_expr, RelLang};
     use egg::Runner;
-    use ra_core::algebra::{
-        AggregateExpr, AggregateFunction, RelExpr,
-    };
+    use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
     use ra_core::expr::{ColumnRef, Expr};
 
     fn col(name: &str) -> Expr {
@@ -83,24 +79,17 @@ mod tests {
         let catalog = MvCatalog::new();
         let rules = mv_rewrite_rules(&catalog);
 
-        let runner: Runner<RelLang, RelAnalysis> =
-            Runner::default()
-                .with_expr(&rec)
-                .with_node_limit(50_000)
-                .with_iter_limit(10)
-                .run(&rules);
+        let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+            .with_expr(&rec)
+            .with_node_limit(50_000)
+            .with_iter_limit(10)
+            .run(&rules);
 
         let egraph = &runner.egraph;
-        let has_mv_scan = egraph.classes().any(|class| {
-            class
-                .nodes
-                .iter()
-                .any(|n| matches!(n, RelLang::MvScan(_)))
-        });
-        assert!(
-            has_mv_scan,
-            "e-graph should contain an mv-scan alternative"
-        );
+        let has_mv_scan = egraph
+            .classes()
+            .any(|class| class.nodes.iter().any(|n| matches!(n, RelLang::MvScan(_))));
+        assert!(has_mv_scan, "e-graph should contain an mv-scan alternative");
     }
 
     #[test]

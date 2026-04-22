@@ -260,11 +260,7 @@ pub fn select_vector_index_type(
 
     // Medium datasets with moderate recall -> IVFFlat
     if total_vectors > 10_000 && recall_requirement > 0.85 {
-        let speedup = if total_vectors > 50_000 {
-            30.0
-        } else {
-            20.0
-        };
+        let speedup = if total_vectors > 50_000 { 30.0 } else { 20.0 };
 
         return VectorIndexRecommendation {
             index_type: VectorIndexType::IVFFlat,
@@ -325,12 +321,8 @@ mod tests {
 
     #[test]
     fn hnsw_logarithmic_scaling() {
-        let cost_10k = hnsw_search_cost(
-            128, 16, 40, 10_000, 10, VectorMetric::L2,
-        );
-        let cost_100k = hnsw_search_cost(
-            128, 16, 40, 100_000, 10, VectorMetric::L2,
-        );
+        let cost_10k = hnsw_search_cost(128, 16, 40, 10_000, 10, VectorMetric::L2);
+        let cost_100k = hnsw_search_cost(128, 16, 40, 100_000, 10, VectorMetric::L2);
 
         // Cost should scale roughly logarithmically
         // log2(100k) / log2(10k) ≈ 1.26
@@ -340,29 +332,17 @@ mod tests {
 
     #[test]
     fn hnsw_faster_than_sequential_large_dataset() {
-        let seq_cost = vector_sequential_scan_cost(
-            128, 100_000, VectorMetric::L2,
-        );
-        let hnsw_cost = hnsw_search_cost(
-            128, 16, 40, 100_000, 10, VectorMetric::L2,
-        );
+        let seq_cost = vector_sequential_scan_cost(128, 100_000, VectorMetric::L2);
+        let hnsw_cost = hnsw_search_cost(128, 16, 40, 100_000, 10, VectorMetric::L2);
 
         let speedup = seq_cost.total() / hnsw_cost.total();
-        assert!(
-            speedup >= 10.0,
-            "HNSW speedup {} below target 10x",
-            speedup
-        );
+        assert!(speedup >= 10.0, "HNSW speedup {} below target 10x", speedup);
     }
 
     #[test]
     fn ivfflat_linear_with_probes() {
-        let cost_1_probe = ivfflat_search_cost(
-            128, 100, 1, 10_000, 10, VectorMetric::L2,
-        );
-        let cost_10_probes = ivfflat_search_cost(
-            128, 100, 10, 10_000, 10, VectorMetric::L2,
-        );
+        let cost_1_probe = ivfflat_search_cost(128, 100, 1, 10_000, 10, VectorMetric::L2);
+        let cost_10_probes = ivfflat_search_cost(128, 100, 10, 10_000, 10, VectorMetric::L2);
 
         // Cost should scale roughly linearly with probes
         let ratio = cost_10_probes.cpu / cost_1_probe.cpu;
@@ -371,12 +351,8 @@ mod tests {
 
     #[test]
     fn ivfflat_faster_than_sequential_medium_dataset() {
-        let seq_cost = vector_sequential_scan_cost(
-            128, 50_000, VectorMetric::L2,
-        );
-        let ivfflat_cost = ivfflat_search_cost(
-            128, 200, 10, 50_000, 10, VectorMetric::L2,
-        );
+        let seq_cost = vector_sequential_scan_cost(128, 50_000, VectorMetric::L2);
+        let ivfflat_cost = ivfflat_search_cost(128, 200, 10, 50_000, 10, VectorMetric::L2);
 
         let speedup = seq_cost.total() / ivfflat_cost.total();
         assert!(
@@ -388,47 +364,27 @@ mod tests {
 
     #[test]
     fn select_index_small_dataset_prefers_sequential() {
-        let rec = select_vector_index_type(
-            500,
-            128,
-            QueryFrequency::High,
-            0.99,
-        );
+        let rec = select_vector_index_type(500, 128, QueryFrequency::High, 0.99);
         assert_eq!(rec.index_type, VectorIndexType::Sequential);
     }
 
     #[test]
     fn select_index_large_dataset_high_recall_prefers_hnsw() {
-        let rec = select_vector_index_type(
-            200_000,
-            128,
-            QueryFrequency::High,
-            0.98,
-        );
+        let rec = select_vector_index_type(200_000, 128, QueryFrequency::High, 0.98);
         assert_eq!(rec.index_type, VectorIndexType::HNSW);
         assert!(rec.speedup_factor >= 10.0);
     }
 
     #[test]
     fn select_index_medium_dataset_moderate_recall_prefers_ivfflat() {
-        let rec = select_vector_index_type(
-            30_000,
-            64,
-            QueryFrequency::Medium,
-            0.90,
-        );
+        let rec = select_vector_index_type(30_000, 64, QueryFrequency::Medium, 0.90);
         assert_eq!(rec.index_type, VectorIndexType::IVFFlat);
         assert!(rec.speedup_factor >= 5.0);
     }
 
     #[test]
     fn select_index_high_dimensions_favors_hnsw() {
-        let rec = select_vector_index_type(
-            50_000,
-            256,
-            QueryFrequency::Medium,
-            0.92,
-        );
+        let rec = select_vector_index_type(50_000, 256, QueryFrequency::Medium, 0.92);
         assert_eq!(rec.index_type, VectorIndexType::HNSW);
     }
 
@@ -444,9 +400,7 @@ mod tests {
         let ef_search = 40;
         let k = 10;
         let dimensions = 128;
-        let cost = hnsw_search_cost(
-            dimensions, 16, ef_search, 10_000, k, VectorMetric::L2,
-        );
+        let cost = hnsw_search_cost(dimensions, 16, ef_search, 10_000, k, VectorMetric::L2);
 
         let expected_memory = (ef_search + k) * dimensions * 4;
         assert_eq!(cost.memory, expected_memory as u64);
@@ -457,9 +411,7 @@ mod tests {
         let lists = 100;
         let k = 10;
         let dimensions = 128;
-        let cost = ivfflat_search_cost(
-            dimensions, lists, 5, 10_000, k, VectorMetric::L2,
-        );
+        let cost = ivfflat_search_cost(dimensions, lists, 5, 10_000, k, VectorMetric::L2);
 
         let expected = (lists * dimensions * 4) + (k * dimensions * 4);
         assert_eq!(cost.memory, expected as u64);

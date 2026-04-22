@@ -61,9 +61,7 @@ pub fn detect_prefix_match(
 /// Check whether two sort keys are equivalent (same expression,
 /// direction, and null ordering).
 fn sort_keys_match(a: &SortKey, b: &SortKey) -> bool {
-    a.expr == b.expr
-        && a.direction == b.direction
-        && a.nulls == b.nulls
+    a.expr == b.expr && a.direction == b.direction && a.nulls == b.nulls
 }
 
 /// Estimate the cost of an incremental sort vs a full sort.
@@ -79,10 +77,7 @@ fn sort_keys_match(a: &SortKey, b: &SortKey) -> bool {
 /// The model assumes uniform group sizes: each group has approximately
 /// `row_count / prefix_ndv` rows.
 #[must_use]
-pub fn estimate_costs(
-    row_count: f64,
-    prefix_ndv: f64,
-) -> IncrementalSortCost {
+pub fn estimate_costs(row_count: f64, prefix_ndv: f64) -> IncrementalSortCost {
     let n = row_count.max(1.0);
     let groups = prefix_ndv.max(1.0).min(n);
     let avg_group_size = n / groups;
@@ -340,21 +335,14 @@ mod tests {
 
     #[test]
     fn try_incremental_sort_produces_node() {
-        let sort_keys =
-            vec![col_key("a"), col_key("b"), col_key("c")];
+        let sort_keys = vec![col_key("a"), col_key("b"), col_key("c")];
         let input_keys = vec![col_key("a")];
         let input = RelExpr::Scan {
             table: "t".to_string(),
             alias: None,
         };
 
-        let result = try_incremental_sort(
-            &sort_keys,
-            &input_keys,
-            input,
-            100_000.0,
-            10_000.0,
-        );
+        let result = try_incremental_sort(&sort_keys, &input_keys, input, 100_000.0, 10_000.0);
         assert!(result.is_some());
 
         let expr = result.unwrap();
@@ -367,9 +355,7 @@ mod tests {
                 assert_eq!(prefix_keys.len(), 1);
                 assert_eq!(suffix_keys.len(), 2);
             }
-            other => panic!(
-                "expected IncrementalSort, got {other:?}"
-            ),
+            other => panic!("expected IncrementalSort, got {other:?}"),
         }
     }
 
@@ -382,14 +368,9 @@ mod tests {
             alias: None,
         };
 
-        assert!(try_incremental_sort(
-            &sort_keys,
-            &input_keys,
-            input,
-            100_000.0,
-            10_000.0,
-        )
-        .is_none());
+        assert!(
+            try_incremental_sort(&sort_keys, &input_keys, input, 100_000.0, 10_000.0,).is_none()
+        );
     }
 
     #[test]
@@ -402,14 +383,7 @@ mod tests {
         };
 
         // 1 group: incremental sort won't be cheaper
-        assert!(try_incremental_sort(
-            &sort_keys,
-            &input_keys,
-            input,
-            100_000.0,
-            1.0,
-        )
-        .is_none());
+        assert!(try_incremental_sort(&sort_keys, &input_keys, input, 100_000.0, 1.0,).is_none());
     }
 
     // ---- IncrementalSortCost methods ----

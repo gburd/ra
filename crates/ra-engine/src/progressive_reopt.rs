@@ -552,9 +552,7 @@ fn background_worker(
                 }
             }
             Err(e) => {
-                warn!(
-                    "background reopt attempt {attempts} failed: {e}"
-                );
+                warn!("background reopt attempt {attempts} failed: {e}");
                 break;
             }
         }
@@ -581,12 +579,7 @@ pub fn progressive_optimize(
     config: ReoptConfig,
 ) -> (RelExpr, BackgroundReoptimizer) {
     let quick_plan = plan.clone();
-    let handle = BackgroundReoptimizer::spawn(
-        plan,
-        corrected_stats,
-        optimizer_fn,
-        config,
-    );
+    let handle = BackgroundReoptimizer::spawn(plan, corrected_stats, optimizer_fn, config);
     (quick_plan, handle)
 }
 
@@ -785,22 +778,15 @@ mod tests {
     #[test]
     fn reopt_config_default() {
         let cfg = ReoptConfig::default();
-        assert!(
-            (cfg.divergence_threshold - DIVERGENCE_THRESHOLD).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (cfg.switch_threshold - SWITCH_THRESHOLD).abs()
-                < f64::EPSILON
-        );
+        assert!((cfg.divergence_threshold - DIVERGENCE_THRESHOLD).abs() < f64::EPSILON);
+        assert!((cfg.switch_threshold - SWITCH_THRESHOLD).abs() < f64::EPSILON);
         assert_eq!(cfg.max_reoptimizations, 3);
     }
 
     #[test]
     fn evaluate_reopt_decision_no_divergence() {
         let cfg = ReoptConfig::default();
-        let decision =
-            evaluate_reopt_decision(100, 150, 50.0, 30.0, 5.0, &cfg);
+        let decision = evaluate_reopt_decision(100, 150, 50.0, 30.0, 5.0, &cfg);
         assert!(!decision.should_switch);
         assert!(decision.savings_fraction.abs() < f64::EPSILON);
     }
@@ -808,8 +794,7 @@ mod tests {
     #[test]
     fn evaluate_reopt_decision_divergence_and_switch() {
         let cfg = ReoptConfig::default();
-        let decision =
-            evaluate_reopt_decision(100, 500, 100.0, 30.0, 5.0, &cfg);
+        let decision = evaluate_reopt_decision(100, 500, 100.0, 30.0, 5.0, &cfg);
         assert!(decision.should_switch);
         assert!(decision.savings_fraction > 0.0);
     }
@@ -817,16 +802,14 @@ mod tests {
     #[test]
     fn evaluate_reopt_decision_divergence_but_no_savings() {
         let cfg = ReoptConfig::default();
-        let decision =
-            evaluate_reopt_decision(100, 500, 100.0, 95.0, 10.0, &cfg);
+        let decision = evaluate_reopt_decision(100, 500, 100.0, 95.0, 10.0, &cfg);
         assert!(!decision.should_switch);
     }
 
     #[test]
     fn evaluate_reopt_decision_zero_remaining_cost() {
         let cfg = ReoptConfig::default();
-        let decision =
-            evaluate_reopt_decision(100, 500, 0.0, 10.0, 5.0, &cfg);
+        let decision = evaluate_reopt_decision(100, 500, 0.0, 10.0, 5.0, &cfg);
         assert!(!decision.should_switch);
         assert!(decision.savings_fraction.abs() < f64::EPSILON);
     }

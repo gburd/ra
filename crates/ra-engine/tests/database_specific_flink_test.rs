@@ -91,7 +91,10 @@ fn test_flink_temporal_join_multiple_versions() {
     let plan = join(stream, versioned, eq_pred("product_id", "id"));
 
     let result = optimizer.optimize(&plan);
-    assert!(result.is_ok(), "multi-version temporal join should optimize");
+    assert!(
+        result.is_ok(),
+        "multi-version temporal join should optimize"
+    );
 }
 
 // ── Rule 2: Watermark Propagation ───────────────────────────
@@ -179,7 +182,10 @@ fn test_flink_minibatch_latency_sensitive() {
     };
 
     let result = optimizer.optimize(&agg);
-    assert!(result.is_ok(), "latency-sensitive mini-batch should optimize");
+    assert!(
+        result.is_ok(),
+        "latency-sensitive mini-batch should optimize"
+    );
 }
 
 // ── Rule 4: Stream Deduplication ────────────────────────────

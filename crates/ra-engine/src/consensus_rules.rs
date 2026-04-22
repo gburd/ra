@@ -38,8 +38,7 @@ pub fn consensus_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 ///
 /// - DataFusion: `extract_equijoin_predicate.rs`
 /// - Calcite: `JoinExtractFilterRule`
-fn extract_equijoin_predicate_rules(
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+fn extract_equijoin_predicate_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Equality on left of AND: (and (eq ?lk ?rk) ?rest)
         rewrite!("extract-equijoin-from-and-left";
@@ -63,8 +62,7 @@ fn extract_equijoin_predicate_rules(
 /// # References
 ///
 /// - DataFusion: `filter_null_join_keys.rs`
-fn filter_null_join_keys_rules(
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+fn filter_null_join_keys_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Add IS NOT NULL on left join key
         rewrite!("filter-null-join-key-left";
@@ -89,8 +87,7 @@ fn filter_null_join_keys_rules(
 ///
 /// - DataFusion: `propagate_empty_relation.rs`
 /// - Calcite: `PruneEmptyRules`
-fn propagate_empty_relation_rules(
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+fn propagate_empty_relation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Inner join with empty left side => empty
         rewrite!("empty-inner-join-left";
@@ -195,11 +192,8 @@ mod tests {
     use ra_core::algebra::{JoinType, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 
-    fn run_with_consensus_rules(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_with_consensus_rules(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(50_000)
@@ -294,10 +288,7 @@ mod tests {
         let expr = RelExpr::Join {
             join_type: JoinType::Inner,
             condition: eq_expr("a", "b"),
-            left: Box::new(
-                RelExpr::scan("empty_table")
-                    .filter(Expr::Const(Const::Bool(false))),
-            ),
+            left: Box::new(RelExpr::scan("empty_table").filter(Expr::Const(Const::Bool(false)))),
             right: Box::new(RelExpr::scan("orders")),
         };
         let runner = run_with_consensus_rules(&expr);
@@ -325,10 +316,7 @@ mod tests {
         // union(all, filter(false, left), right) => right
         let expr = RelExpr::Union {
             all: true,
-            left: Box::new(
-                RelExpr::scan("empty_table")
-                    .filter(Expr::Const(Const::Bool(false))),
-            ),
+            left: Box::new(RelExpr::scan("empty_table").filter(Expr::Const(Const::Bool(false)))),
             right: Box::new(RelExpr::scan("orders")),
         };
         let runner = run_with_consensus_rules(&expr);
@@ -347,10 +335,7 @@ mod tests {
                 direction: ra_core::algebra::SortDirection::Asc,
                 nulls: ra_core::algebra::NullOrdering::Last,
             }],
-            input: Box::new(
-                RelExpr::scan("t")
-                    .filter(Expr::Const(Const::Bool(false))),
-            ),
+            input: Box::new(RelExpr::scan("t").filter(Expr::Const(Const::Bool(false)))),
         };
         let runner = run_with_consensus_rules(&expr);
         assert!(
@@ -364,10 +349,7 @@ mod tests {
         let expr = RelExpr::Join {
             join_type: JoinType::Cross,
             condition: Expr::Const(Const::Bool(true)),
-            left: Box::new(
-                RelExpr::scan("empty_table")
-                    .filter(Expr::Const(Const::Bool(false))),
-            ),
+            left: Box::new(RelExpr::scan("empty_table").filter(Expr::Const(Const::Bool(false)))),
             right: Box::new(RelExpr::scan("data")),
         };
         let runner = run_with_consensus_rules(&expr);

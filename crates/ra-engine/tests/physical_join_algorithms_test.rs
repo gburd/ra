@@ -155,8 +155,16 @@ fn test_nested_loop_non_equijoin() {
     let join = RelExpr::Join {
         join_type: JoinType::Inner,
         condition: and(
-            binop(BinOp::Ge, qcol("events", "timestamp"), qcol("timeranges", "start_time")),
-            binop(BinOp::Le, qcol("events", "timestamp"), qcol("timeranges", "end_time")),
+            binop(
+                BinOp::Ge,
+                qcol("events", "timestamp"),
+                qcol("timeranges", "start_time"),
+            ),
+            binop(
+                BinOp::Le,
+                qcol("events", "timestamp"),
+                qcol("timeranges", "end_time"),
+            ),
         ),
         left: Box::new(t1),
         right: Box::new(t2),
@@ -231,7 +239,12 @@ fn test_shuffle_hash_join_both_large() {
     // Both tables large, shuffle both
     let _large1 = scan("large_distributed1");
     let _large2 = scan("large_distributed2");
-    let join = two_table_join("large_distributed1", "large_distributed2", "partition_key", "partition_key");
+    let join = two_table_join(
+        "large_distributed1",
+        "large_distributed2",
+        "partition_key",
+        "partition_key",
+    );
     assert_optimization_improves(join);
 }
 
@@ -325,7 +338,10 @@ fn test_semi_join_optimization() {
     let t2 = scan("active_categories");
     let join = RelExpr::Join {
         join_type: JoinType::Semi,
-        condition: eq(qcol("products", "category_id"), qcol("active_categories", "id")),
+        condition: eq(
+            qcol("products", "category_id"),
+            qcol("active_categories", "id"),
+        ),
         left: Box::new(t1),
         right: Box::new(t2),
     };

@@ -222,10 +222,7 @@ fn benchmark_query(
     metrics
 }
 
-fn compute_category_summary(
-    category: &str,
-    metrics: &[QueryMetrics],
-) -> CategorySummary {
+fn compute_category_summary(category: &str, metrics: &[QueryMetrics]) -> CategorySummary {
     let total_queries = metrics.len();
     let parsed_queries = metrics.iter().filter(|m| m.parser_success).count();
     let optimized_queries = metrics.iter().filter(|m| m.optimizer_success).count();
@@ -363,13 +360,11 @@ fn generate_markdown_report(report: &BenchmarkReport) -> String {
     ));
     md.push_str(&format!(
         "- Parsed successfully: {} ({:.1}%)\n",
-        report.overall_summary.parsed_queries,
-        report.overall_summary.parser_success_rate
+        report.overall_summary.parsed_queries, report.overall_summary.parser_success_rate
     ));
     md.push_str(&format!(
         "- Optimized successfully: {} ({:.1}%)\n",
-        report.overall_summary.optimized_queries,
-        report.overall_summary.optimizer_success_rate
+        report.overall_summary.optimized_queries, report.overall_summary.optimizer_success_rate
     ));
     md.push_str(&format!(
         "- Median plan time: {:.2}ms\n",
@@ -462,10 +457,7 @@ fn generate_markdown_report(report: &BenchmarkReport) -> String {
         md.push_str("|----------|----------|-------|\n");
 
         for q in failed {
-            let error = q
-                .error_message
-                .as_deref()
-                .unwrap_or("Unknown error");
+            let error = q.error_message.as_deref().unwrap_or("Unknown error");
             md.push_str(&format!(
                 "| {} | {} | {} |\n",
                 q.query_id, q.category, error
@@ -500,7 +492,11 @@ fn main() {
     let mut category_summaries = Vec::new();
 
     for (category, files) in &categories {
-        println!("\nProcessing category: {} ({} queries)", category, files.len());
+        println!(
+            "\nProcessing category: {} ({} queries)",
+            category,
+            files.len()
+        );
 
         let mut cat_metrics = Vec::new();
 

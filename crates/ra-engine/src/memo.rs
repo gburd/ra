@@ -80,7 +80,12 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             table.hash(hasher);
             column.hash(hasher);
         }
-        RelExpr::IndexOnlyScan { table, index, columns, predicate } => {
+        RelExpr::IndexOnlyScan {
+            table,
+            index,
+            columns,
+            predicate,
+        } => {
             table.hash(hasher);
             index.hash(hasher);
             columns.len().hash(hasher);
@@ -170,7 +175,10 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             }
         }
         RelExpr::Unnest {
-            expr, alias, input, with_ordinality,
+            expr,
+            alias,
+            input,
+            with_ordinality,
         } => {
             hash_scalar_expr(expr, hasher);
             alias.hash(hasher);
@@ -180,7 +188,9 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             }
         }
         RelExpr::MultiUnnest {
-            exprs, aliases, with_ordinality,
+            exprs,
+            aliases,
+            with_ordinality,
         } => {
             exprs.len().hash(hasher);
             for expr in exprs {
@@ -222,21 +232,24 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             hash_rel_expr(input, hasher);
         }
         RelExpr::BitmapIndexScan {
-            table, index, predicate,
+            table,
+            index,
+            predicate,
         } => {
             table.hash(hasher);
             index.hash(hasher);
             hash_scalar_expr(predicate, hasher);
         }
-        RelExpr::BitmapAnd { inputs }
-        | RelExpr::BitmapOr { inputs } => {
+        RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
             inputs.len().hash(hasher);
             for inp in inputs {
                 hash_rel_expr(inp, hasher);
             }
         }
         RelExpr::BitmapHeapScan {
-            table, bitmap, recheck_cond,
+            table,
+            bitmap,
+            recheck_cond,
         } => {
             table.hash(hasher);
             hash_rel_expr(bitmap, hasher);
@@ -374,9 +387,7 @@ mod tests {
             left: Box::new(Expr::Column(ColumnRef::new("a"))),
             right: Box::new(Expr::Const(Const::Int(1))),
         });
-        let e2 = RelExpr::scan("t").filter(Expr::Column(
-            ColumnRef::new("flag"),
-        ));
+        let e2 = RelExpr::scan("t").filter(Expr::Column(ColumnRef::new("flag")));
         assert_ne!(structural_hash(&e1), structural_hash(&e2));
     }
 

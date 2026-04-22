@@ -146,6 +146,52 @@ The `filter-true` rule simplifies the filter predicate.
 
 **Note:** Rule tracking requires resource budgets. Use `--resource-budget standard` or similar.
 
+## Rule Advisor
+
+The Rule Advisor is a three-stage pipeline that eliminates irrelevant rules before equality saturation, reducing the optimizer's search space.
+
+### Stages
+
+1. **Stage 1: Context Elimination** — Filters rule groups by target database engine. DocumentDB BSON rules are excluded when targeting PostgreSQL, Oracle JSON Duality rules are excluded for non-Oracle databases, etc. Runs once per optimizer instance.
+
+2. **Stage 2: Query-Shape Elimination** — Analyzes the query tree for structural and content-type features (joins, aggregates, JSON access, vector distance, FTS match, XML functions, etc.). Rule groups that require absent features are excluded. For example, vector-search rules are excluded from a plain SQL JOIN query.
+
+3. **Stage 3: Learned Ranking** — Uses historical EWMA effectiveness data to reorder surviving rules by priority. Rules that chronically fail to fire for a given query shape are deprioritized. Knowledge is persisted to `~/.ra/rule-knowledge.json`.
+
+### CLI Usage
+
+```bash
+# Enable Stages 1+2 with PostgreSQL context filtering
+ra-cli optimize "SELECT ..." --rule-advisor --rule-advisor-db postgresql
+
+# Enable all three stages with learning
+ra-cli optimize "SELECT ..." --rule-advisor --rule-advisor-learn --rule-advisor-db postgresql
+
+# View advisor statistics (with --verbose or --rules flags)
+ra-cli optimize "SELECT ..." --rule-advisor --verbose
+```
+
+### Advisor Statistics Output
+
+When `--verbose` is enabled with `--rule-advisor`, the output includes:
+
+```
+Rule Advisor Statistics:
+  Total rules:      224
+  After Stage 1:    214 (context elimination)
+  After Stage 2:    186 (query-shape elimination)
+  After Stage 3:    186 (learned ranking)
+  Stage 1 excluded: documentdb-bson, oracle-json-duality
+  Stage 2 excluded: set-operations, xml-optimization, vector-search, full-text-search, hybrid-search, cast-optimization
+```
+
+### Related Files
+
+- `crates/ra-engine/src/rule_advisor.rs` — Three-stage pipeline orchestrator
+- `crates/ra-engine/src/query_features.rs` — `QueryFeatureSet` bitflag type for feature detection
+- `crates/ra-engine/src/rule_knowledge.rs` — Persistent EWMA learning store
+- `crates/ra-engine/src/rewrite.rs` — `RuleAnnotation` and `all_rules_annotated()`
+
 ## Performance Impact
 
 - **Without tracking** (`optimize_bounded`): Zero overhead

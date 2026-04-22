@@ -61,7 +61,11 @@ fn test_drill_schema_discovery_parquet() {
 #[test]
 fn test_drill_schema_discovery_mixed() {
     let optimizer = create_optimizer();
-    let plan = join(scan("json_source"), scan("parquet_source"), eq_pred("id", "id"));
+    let plan = join(
+        scan("json_source"),
+        scan("parquet_source"),
+        eq_pred("id", "id"),
+    );
     assert!(optimizer.optimize(&plan).is_ok());
 }
 

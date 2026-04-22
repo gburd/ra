@@ -95,6 +95,7 @@ pub fn run_tests(
         max_staleness_penalty: 10.0,
         use_lazy_rules: false,
         transaction_context: None,
+        ..OptimizerConfig::default()
     };
     let optimizer = Optimizer::with_config(test_config);
     let start = Instant::now();
@@ -377,6 +378,7 @@ mod tests {
             max_staleness_penalty: 10.0,
             use_lazy_rules: false,
             transaction_context: None,
+            ..OptimizerConfig::default()
         })
     }
 

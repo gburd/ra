@@ -8,14 +8,10 @@
 
 use std::time::Duration;
 
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, ProjectionColumn,
-    RelExpr,
-};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, ProjectionColumn, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_engine::{
-    ExceededResource, OptimizationStatus, Optimizer, OverflowStrategy,
-    ResourceBudget,
+    ExceededResource, OptimizationStatus, Optimizer, OverflowStrategy, ResourceBudget,
 };
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -37,12 +33,8 @@ fn two_table_join() -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users")),
         right: Box::new(RelExpr::scan("orders")),
@@ -64,24 +56,18 @@ fn aggregate_query() -> RelExpr {
 
 fn complex_query() -> RelExpr {
     RelExpr::Aggregate {
-        group_by: vec![Expr::Column(ColumnRef::qualified(
-            "users", "name",
-        ))],
+        group_by: vec![Expr::Column(ColumnRef::qualified("users", "name"))],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
             arg: Some(Expr::Column(ColumnRef::new("amount"))),
             distinct: false,
             alias: Some("total".to_owned()),
         }],
-        input: Box::new(
-            two_table_join().filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new(
-                    "amount",
-                ))),
-                right: Box::new(Expr::Const(Const::Int(100))),
-            }),
-        ),
+        input: Box::new(two_table_join().filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("amount"))),
+            right: Box::new(Expr::Const(Const::Int(100))),
+        })),
     }
 }
 
@@ -89,8 +75,7 @@ fn complex_query() -> RelExpr {
 
 #[test]
 fn interactive_profile_produces_result() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
     let result = optimizer
         .optimize_bounded(&filtered_scan())
         .expect("should produce a result");
@@ -100,8 +85,7 @@ fn interactive_profile_produces_result() {
 
 #[test]
 fn standard_profile_produces_result() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
     let result = optimizer
         .optimize_bounded(&two_table_join())
         .expect("should produce a result");
@@ -110,8 +94,7 @@ fn standard_profile_produces_result() {
 
 #[test]
 fn batch_profile_produces_result() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::batch());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::batch());
     let result = optimizer
         .optimize_bounded(&aggregate_query())
         .expect("should produce a result");
@@ -120,8 +103,7 @@ fn batch_profile_produces_result() {
 
 #[test]
 fn memory_constrained_profile_produces_result() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::memory_constrained());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::memory_constrained());
     let result = optimizer
         .optimize_bounded(&simple_scan())
         .expect("should produce a result");
@@ -130,8 +112,7 @@ fn memory_constrained_profile_produces_result() {
 
 #[test]
 fn unlimited_profile_produces_result() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::unlimited());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::unlimited());
     let result = optimizer
         .optimize_bounded(&simple_scan())
         .expect("should produce a result");
@@ -180,8 +161,7 @@ fn overflow_fail_still_succeeds_within_budget() {
 
 #[test]
 fn report_tracks_iterations() {
-    let budget =
-        ResourceBudget::unlimited().with_iteration_limit(5);
+    let budget = ResourceBudget::unlimited().with_iteration_limit(5);
     let optimizer = Optimizer::new().with_resource_budget(budget);
     let result = optimizer
         .optimize_bounded(&filtered_scan())
@@ -191,8 +171,7 @@ fn report_tracks_iterations() {
 
 #[test]
 fn report_tracks_elapsed_time() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
     let result = optimizer
         .optimize_bounded(&simple_scan())
         .expect("should produce a result");
@@ -201,8 +180,7 @@ fn report_tracks_elapsed_time() {
 
 #[test]
 fn report_tracks_egraph_nodes() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
     let result = optimizer
         .optimize_bounded(&two_table_join())
         .expect("should produce a result");
@@ -211,8 +189,7 @@ fn report_tracks_egraph_nodes() {
 
 #[test]
 fn report_tracks_memory_estimate() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
     let result = optimizer
         .optimize_bounded(&two_table_join())
         .expect("should produce a result");
@@ -221,8 +198,7 @@ fn report_tracks_memory_estimate() {
 
 #[test]
 fn incomplete_status_on_iteration_exceeded() {
-    let budget =
-        ResourceBudget::unlimited().with_iteration_limit(1);
+    let budget = ResourceBudget::unlimited().with_iteration_limit(1);
     let optimizer = Optimizer::new().with_resource_budget(budget);
     let result = optimizer
         .optimize_bounded(&complex_query())
@@ -237,8 +213,7 @@ fn incomplete_status_on_iteration_exceeded() {
 
 #[test]
 fn complete_status_on_simple_query() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
     let result = optimizer
         .optimize_bounded(&simple_scan())
         .expect("should produce a result");
@@ -249,8 +224,7 @@ fn complete_status_on_simple_query() {
 
 #[test]
 fn custom_time_override_applied() {
-    let budget = ResourceBudget::interactive()
-        .with_time_limit(Duration::from_secs(5));
+    let budget = ResourceBudget::interactive().with_time_limit(Duration::from_secs(5));
     let optimizer = Optimizer::new().with_resource_budget(budget);
     let result = optimizer
         .optimize_bounded(&filtered_scan())
@@ -260,8 +234,7 @@ fn custom_time_override_applied() {
 
 #[test]
 fn custom_iteration_override_applied() {
-    let budget =
-        ResourceBudget::standard().with_iteration_limit(2);
+    let budget = ResourceBudget::standard().with_iteration_limit(2);
     let optimizer = Optimizer::new().with_resource_budget(budget);
     let result = optimizer
         .optimize_bounded(&two_table_join())
@@ -286,11 +259,8 @@ fn custom_strategy_override_applied() {
 
 #[test]
 fn hardware_profile_with_budget() {
-    let mut optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
-    optimizer.set_hardware_profile(
-        ra_hardware::HardwareProfile::cpu_only(),
-    );
+    let mut optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
+    optimizer.set_hardware_profile(ra_hardware::HardwareProfile::cpu_only());
     let result = optimizer
         .optimize_bounded(&two_table_join())
         .expect("should produce a result with hardware profile");
@@ -299,11 +269,8 @@ fn hardware_profile_with_budget() {
 
 #[test]
 fn gpu_hardware_with_interactive_budget() {
-    let mut optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
-    optimizer.set_hardware_profile(
-        ra_hardware::HardwareProfile::gpu_server(),
-    );
+    let mut optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
+    optimizer.set_hardware_profile(ra_hardware::HardwareProfile::gpu_server());
     let result = optimizer
         .optimize_bounded(&aggregate_query())
         .expect("should produce a result");
@@ -314,10 +281,8 @@ fn gpu_hardware_with_interactive_budget() {
 
 #[test]
 fn interactive_faster_than_batch() {
-    let int_opt = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
-    let batch_opt = Optimizer::new()
-        .with_resource_budget(ResourceBudget::batch());
+    let int_opt = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
+    let batch_opt = Optimizer::new().with_resource_budget(ResourceBudget::batch());
 
     let query = complex_query();
 
@@ -330,10 +295,8 @@ fn interactive_faster_than_batch() {
 
     // Interactive should have fewer iterations or less time
     assert!(
-        int_result.resource_usage.iterations_used
-            <= batch_result.resource_usage.iterations_used
-            || int_result.resource_usage.elapsed_time
-                <= batch_result.resource_usage.elapsed_time
+        int_result.resource_usage.iterations_used <= batch_result.resource_usage.iterations_used
+            || int_result.resource_usage.elapsed_time <= batch_result.resource_usage.elapsed_time
     );
 }
 
@@ -341,8 +304,7 @@ fn interactive_faster_than_batch() {
 
 #[test]
 fn reuse_optimizer_across_queries() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
 
     let r1 = optimizer
         .optimize_bounded(&simple_scan())
@@ -363,8 +325,7 @@ fn reuse_optimizer_across_queries() {
 
 #[test]
 fn exceeded_report_identifies_resource() {
-    let budget =
-        ResourceBudget::unlimited().with_iteration_limit(0);
+    let budget = ResourceBudget::unlimited().with_iteration_limit(0);
     let optimizer = Optimizer::new().with_resource_budget(budget);
     let result = optimizer
         .optimize_bounded(&filtered_scan())
@@ -420,8 +381,7 @@ fn project_query_with_budget() {
         expr: Expr::Column(ColumnRef::new("name")),
         alias: None,
     }]);
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::standard());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
     let result = optimizer
         .optimize_bounded(&plan)
         .expect("should optimize project query");

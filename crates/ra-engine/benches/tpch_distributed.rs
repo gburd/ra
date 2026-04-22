@@ -11,18 +11,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId,
-    Criterion,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 use ra_core::algebra::RelExpr;
 use ra_core::distribution::{DataDistribution, NodeId};
 use ra_core::expr::{ColumnRef, Expr};
 use ra_core::statistics::Statistics;
 use ra_engine::distributed_optimizer::{
-    ClusterTopology, DistributedOptimizer,
-    DistributedOptimizerConfig,
+    ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig,
 };
 use ra_engine::network_cost::NetworkCostModel;
 use ra_hardware::network::NetworkTopology;
@@ -70,26 +66,37 @@ fn tpch_queries_dir() -> PathBuf {
 
 fn load_tpch_query(name: &str) -> RelExpr {
     let path = tpch_queries_dir().join(name);
-    let sql = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    sql_to_relexpr(&sql)
-        .unwrap_or_else(|e| panic!("parse {name}: {e}"))
+    let sql = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    sql_to_relexpr(&sql).unwrap_or_else(|e| panic!("parse {name}: {e}"))
 }
 
-fn tpch_q1() -> RelExpr { load_tpch_query("q1.sql") }
-fn tpch_q3() -> RelExpr { load_tpch_query("q3.sql") }
-fn tpch_q5() -> RelExpr { load_tpch_query("q5.sql") }
-fn tpch_q6() -> RelExpr { load_tpch_query("q6.sql") }
-fn tpch_q8() -> RelExpr { load_tpch_query("q8.sql") }
-fn tpch_q13() -> RelExpr { load_tpch_query("q13.sql") }
-fn tpch_q18() -> RelExpr { load_tpch_query("q18.sql") }
+fn tpch_q1() -> RelExpr {
+    load_tpch_query("q1.sql")
+}
+fn tpch_q3() -> RelExpr {
+    load_tpch_query("q3.sql")
+}
+fn tpch_q5() -> RelExpr {
+    load_tpch_query("q5.sql")
+}
+fn tpch_q6() -> RelExpr {
+    load_tpch_query("q6.sql")
+}
+fn tpch_q8() -> RelExpr {
+    load_tpch_query("q8.sql")
+}
+fn tpch_q13() -> RelExpr {
+    load_tpch_query("q13.sql")
+}
+fn tpch_q18() -> RelExpr {
+    load_tpch_query("q18.sql")
+}
 
 // ── topology builders ────────────────────────────────────────────
 
 fn tpch_tables() -> Vec<&'static str> {
     vec![
-        "lineitem", "orders", "customer", "supplier", "nation",
-        "region", "part", "partsupp",
+        "lineitem", "orders", "customer", "supplier", "nation", "region", "part", "partsupp",
     ]
 }
 
@@ -100,9 +107,7 @@ fn single_node_optimizer() -> DistributedOptimizer {
         topo.register_table(
             table,
             NodeId(0),
-            DataDistribution::SinglePartition {
-                node: NodeId(0),
-            },
+            DataDistribution::SinglePartition { node: NodeId(0) },
         );
     }
     let config = DistributedOptimizerConfig::default();
@@ -116,10 +121,7 @@ fn single_dc_optimizer() -> DistributedOptimizer {
     let hw_topo = NetworkTopology::single_datacenter_cluster();
     let mut assignments = HashMap::new();
     for (i, table) in tpch_tables().iter().enumerate() {
-        assignments.insert(
-            (*table).to_string(),
-            hw_node((i % 4) as u32),
-        );
+        assignments.insert((*table).to_string(), hw_node((i % 4) as u32));
     }
     let ncm = NetworkCostModel::new(hw_topo, assignments);
 
@@ -138,16 +140,11 @@ fn single_dc_optimizer() -> DistributedOptimizer {
         );
     }
     for table in small {
-        cluster.register_table(
-            table,
-            NodeId(0),
-            DataDistribution::Replicated,
-        );
+        cluster.register_table(table, NodeId(0), DataDistribution::Replicated);
     }
 
     let config = DistributedOptimizerConfig::default();
-    let mut opt = DistributedOptimizer::new(config, cluster)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, cluster).with_network_cost(ncm);
     register_tpch_stats(&mut opt);
     opt
 }
@@ -200,16 +197,11 @@ fn multi_dc_optimizer() -> DistributedOptimizer {
         );
     }
     for table in small {
-        cluster.register_table(
-            table,
-            NodeId(0),
-            DataDistribution::Replicated,
-        );
+        cluster.register_table(table, NodeId(0), DataDistribution::Replicated);
     }
 
     let config = DistributedOptimizerConfig::default();
-    let mut opt = DistributedOptimizer::new(config, cluster)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, cluster).with_network_cost(ncm);
     register_tpch_stats(&mut opt);
     opt
 }
@@ -261,19 +253,14 @@ fn cloud_federation_optimizer() -> DistributedOptimizer {
         );
     }
     for table in small {
-        cluster.register_table(
-            table,
-            NodeId(0),
-            DataDistribution::Replicated,
-        );
+        cluster.register_table(table, NodeId(0), DataDistribution::Replicated);
     }
 
     let config = DistributedOptimizerConfig {
         monetary_weight: 5.0,
         ..DistributedOptimizerConfig::default()
     };
-    let mut opt = DistributedOptimizer::new(config, cluster)
-        .with_network_cost(ncm);
+    let mut opt = DistributedOptimizer::new(config, cluster).with_network_cost(ncm);
     register_tpch_stats(&mut opt);
     opt
 }
@@ -293,63 +280,38 @@ const QUERIES: &[(&str, QueryFn)] = &[
 ];
 
 fn bench_strategy_selection(c: &mut Criterion) {
-    let mut group =
-        c.benchmark_group("tpch_strategy_selection");
+    let mut group = c.benchmark_group("tpch_strategy_selection");
 
     for (name, query_fn) in QUERIES {
         let plan = query_fn();
 
-        group.bench_with_input(
-            BenchmarkId::new("single_node", name),
-            &plan,
-            |b, p| {
-                let opt = single_node_optimizer();
-                b.iter(|| {
-                    let _ = black_box(
-                        opt.optimize_distribution(p),
-                    );
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("single_node", name), &plan, |b, p| {
+            let opt = single_node_optimizer();
+            b.iter(|| {
+                let _ = black_box(opt.optimize_distribution(p));
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("single_dc", name),
-            &plan,
-            |b, p| {
-                let opt = single_dc_optimizer();
-                b.iter(|| {
-                    let _ = black_box(
-                        opt.optimize_distribution(p),
-                    );
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("single_dc", name), &plan, |b, p| {
+            let opt = single_dc_optimizer();
+            b.iter(|| {
+                let _ = black_box(opt.optimize_distribution(p));
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("multi_dc", name),
-            &plan,
-            |b, p| {
-                let opt = multi_dc_optimizer();
-                b.iter(|| {
-                    let _ = black_box(
-                        opt.optimize_distribution(p),
-                    );
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("multi_dc", name), &plan, |b, p| {
+            let opt = multi_dc_optimizer();
+            b.iter(|| {
+                let _ = black_box(opt.optimize_distribution(p));
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("cloud_federation", name),
-            &plan,
-            |b, p| {
-                let opt = cloud_federation_optimizer();
-                b.iter(|| {
-                    let _ = black_box(
-                        opt.optimize_distribution(p),
-                    );
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("cloud_federation", name), &plan, |b, p| {
+            let opt = cloud_federation_optimizer();
+            b.iter(|| {
+                let _ = black_box(opt.optimize_distribution(p));
+            });
+        });
     }
     group.finish();
 }
@@ -382,13 +344,10 @@ fn bench_cost_estimation(c: &mut Criterion) {
     ];
 
     for (topo_name, builder) in topologies {
-        for (strat_name, _, _, left_bytes, right_bytes) in
-            &strategies
-        {
+        for (strat_name, _, _, left_bytes, right_bytes) in &strategies {
             let opt = builder();
             let nodes = &opt.topology().nodes;
-            let source =
-                nodes.first().copied().unwrap_or(NodeId(0));
+            let source = nodes.first().copied().unwrap_or(NodeId(0));
 
             let strat = if *strat_name == "broadcast_small" {
                 ra_core::distribution::DistributionStrategy::Broadcast {
@@ -404,18 +363,11 @@ fn bench_cost_estimation(c: &mut Criterion) {
             };
 
             group.bench_with_input(
-                BenchmarkId::new(
-                    format!("{topo_name}/{strat_name}"),
-                    "",
-                ),
+                BenchmarkId::new(format!("{topo_name}/{strat_name}"), ""),
                 &(),
                 |b, _| {
                     b.iter(|| {
-                        black_box(opt.cost_strategy(
-                            &strat,
-                            *left_bytes,
-                            *right_bytes,
-                        ));
+                        black_box(opt.cost_strategy(&strat, *left_bytes, *right_bytes));
                     });
                 },
             );
@@ -424,9 +376,5 @@ fn bench_cost_estimation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_strategy_selection,
-    bench_cost_estimation,
-);
+criterion_group!(benches, bench_strategy_selection, bench_cost_estimation,);
 criterion_main!(benches);

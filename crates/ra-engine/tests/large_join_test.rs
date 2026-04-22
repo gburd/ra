@@ -19,7 +19,12 @@ impl CostModel for MockCostModel {
     fn estimate(&self, expr: &RelExpr, _stats: &dyn StatisticsProvider) -> Cost {
         // Simple cost model: cost increases with join depth
         let depth = count_join_depth(expr);
-        Cost::new(depth as f64 * 100.0, depth as f64 * 10.0, 0.0, depth as u64 * 1024)
+        Cost::new(
+            depth as f64 * 100.0,
+            depth as f64 * 10.0,
+            0.0,
+            depth as u64 * 1024,
+        )
     }
 }
 
@@ -116,11 +121,7 @@ fn test_greedy_join_order_empty() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(
-        LargeJoinStrategy::Greedy,
-        cost_model,
-        stats_provider,
-    );
+    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider);
 
     let result = optimizer.optimize(vec![]);
     assert!(result.is_err());
@@ -131,11 +132,7 @@ fn test_greedy_join_order_single_table() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(
-        LargeJoinStrategy::Greedy,
-        cost_model,
-        stats_provider,
-    );
+    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider);
 
     let joins = vec![JoinNode {
         table: "users".to_string(),
@@ -152,11 +149,7 @@ fn test_greedy_join_order_two_tables() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(
-        LargeJoinStrategy::Greedy,
-        cost_model,
-        stats_provider,
-    );
+    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider);
 
     let joins = vec![
         JoinNode {
@@ -185,11 +178,7 @@ fn test_greedy_join_order_multiple_tables() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(
-        LargeJoinStrategy::Greedy,
-        cost_model,
-        stats_provider,
-    );
+    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider);
 
     let joins = vec![
         JoinNode {
@@ -363,7 +352,11 @@ fn test_large_join_20_tables() {
     assert!(matches!(result, RelExpr::Join { .. }));
 
     // Simulated annealing should complete in under 30 seconds for 20 tables
-    assert!(sa_time.as_secs() < 30, "Simulated annealing took {:?}", sa_time);
+    assert!(
+        sa_time.as_secs() < 30,
+        "Simulated annealing took {:?}",
+        sa_time
+    );
 }
 
 #[test]

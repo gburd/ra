@@ -6,10 +6,9 @@
 //! - Strategy selection overhead
 //! - Score fusion methods
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_engine::{
-    HybridStrategy, ScoreFusion, choose_hybrid_strategy, fuse_scores,
-    hybrid_scan_cost_factor,
+    choose_hybrid_strategy, fuse_scores, hybrid_scan_cost_factor, HybridStrategy, ScoreFusion,
 };
 
 /// Benchmark hybrid search vs pure FTS.
@@ -229,11 +228,7 @@ fn bench_cost_estimation(c: &mut Criterion) {
 
     group.bench_function("fts_first", |b| {
         b.iter(|| {
-            hybrid_scan_cost_factor(
-                HybridStrategy::FTSFirst,
-                black_box(0.01),
-                black_box(0.05),
-            )
+            hybrid_scan_cost_factor(HybridStrategy::FTSFirst, black_box(0.01), black_box(0.05))
         });
     });
 
@@ -249,11 +244,7 @@ fn bench_cost_estimation(c: &mut Criterion) {
 
     group.bench_function("parallel", |b| {
         b.iter(|| {
-            hybrid_scan_cost_factor(
-                HybridStrategy::Parallel,
-                black_box(0.05),
-                black_box(0.05),
-            )
+            hybrid_scan_cost_factor(HybridStrategy::Parallel, black_box(0.05), black_box(0.05))
         });
     });
 
@@ -389,8 +380,8 @@ fn bench_realistic_scenarios(c: &mut Criterion) {
     group.bench_function("product_search_vector_selective", |b| {
         b.iter(|| {
             choose_hybrid_strategy(
-                black_box(0.05),   // 5% match category
-                black_box(0.005),  // 0.5% similar features
+                black_box(0.05),  // 5% match category
+                black_box(0.005), // 0.5% similar features
                 black_box(Some(50)),
                 black_box(500_000.0),
             )
@@ -401,8 +392,8 @@ fn bench_realistic_scenarios(c: &mut Criterion) {
     group.bench_function("document_search_small_limit", |b| {
         b.iter(|| {
             choose_hybrid_strategy(
-                black_box(0.02),  // 2% FTS match
-                black_box(0.03),  // 3% vector match
+                black_box(0.02), // 2% FTS match
+                black_box(0.03), // 3% vector match
                 black_box(Some(10)),
                 black_box(1_000_000.0),
             )

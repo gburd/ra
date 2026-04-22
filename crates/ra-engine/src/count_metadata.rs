@@ -47,22 +47,17 @@ fn var(s: &str) -> Var {
 fn is_ungrouped_count_star(
     groups_var: Var,
     aggs_var: Var,
-) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool
-{
+) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool {
     move |egraph, _id, subst| {
         let groups_id = subst[groups_var];
         let aggs_id = subst[aggs_var];
 
-        is_nil_or_empty_list(egraph, groups_id)
-            && is_single_count_star(egraph, aggs_id)
+        is_nil_or_empty_list(egraph, groups_id) && is_single_count_star(egraph, aggs_id)
     }
 }
 
 /// Check that a node is `nil` or an empty `(list)`.
-fn is_nil_or_empty_list(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    id: Id,
-) -> bool {
+fn is_nil_or_empty_list(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
         match node {
@@ -75,10 +70,7 @@ fn is_nil_or_empty_list(
 }
 
 /// Check that the aggs list is `(list (agg-expr (count nil) all ?alias))`.
-fn is_single_count_star(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    id: Id,
-) -> bool {
+fn is_single_count_star(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
         if let RelLang::List(ids) = node {
@@ -92,14 +84,10 @@ fn is_single_count_star(
 }
 
 /// Check that a node is `(agg-expr (count nil) all ?alias)`.
-fn is_count_star_agg_expr(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    id: Id,
-) -> bool {
+fn is_count_star_agg_expr(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
-        if let RelLang::AggExpr([func_id, distinct_id, _alias_id]) = node
-        {
+        if let RelLang::AggExpr([func_id, distinct_id, _alias_id]) = node {
             let is_count_nil = is_count_nil(egraph, *func_id);
             let is_all = is_all_flag(egraph, *distinct_id);
             if is_count_nil && is_all {
@@ -111,10 +99,7 @@ fn is_count_star_agg_expr(
 }
 
 /// Check that a node is `(count nil)` (COUNT with no argument = COUNT(*)).
-fn is_count_nil(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    id: Id,
-) -> bool {
+fn is_count_nil(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
         if let RelLang::Count([arg_id]) = node {
@@ -130,10 +115,7 @@ fn is_count_nil(
 }
 
 /// Check that a node is the `all` flag (non-distinct).
-fn is_all_flag(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    id: Id,
-) -> bool {
+fn is_all_flag(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
         if let RelLang::All = node {
@@ -152,11 +134,8 @@ mod tests {
     use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 
-    fn run_with_count_rules(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_with_count_rules(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         let rules = count_metadata_rules();
         Runner::default()
             .with_expr(&rec)
@@ -222,15 +201,11 @@ mod tests {
                 distinct: false,
                 alias: None,
             }],
-            input: Box::new(
-                RelExpr::scan("users").filter(Expr::BinOp {
-                    op: BinOp::Eq,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("active"),
-                    )),
-                    right: Box::new(Expr::Const(Const::Bool(true))),
-                }),
-            ),
+            input: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("active"))),
+                right: Box::new(Expr::Const(Const::Bool(true))),
+            })),
         };
         let runner = run_with_count_rules(&expr);
 
@@ -307,9 +282,7 @@ mod tests {
     }
 
     /// Search all e-classes for a MetadataLookup node.
-    fn egraph_contains_metadata_lookup(
-        runner: &Runner<RelLang, RelAnalysis>,
-    ) -> bool {
+    fn egraph_contains_metadata_lookup(runner: &Runner<RelLang, RelAnalysis>) -> bool {
         for class in runner.egraph.classes() {
             for node in &class.nodes {
                 if matches!(node, RelLang::MetadataLookup(_)) {

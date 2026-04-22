@@ -4,9 +4,7 @@
 //! available system facts. It determines whether a rule is applicable based
 //! on pattern matching, predicate checks, and fact lookups.
 
-use ra_core::{
-    EvaluationResult, FactValue, FactsProvider, LogicalOperator, PreCondition,
-};
+use ra_core::{EvaluationResult, FactValue, FactsProvider, LogicalOperator, PreCondition};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, warn};
@@ -103,12 +101,16 @@ impl PreConditionEvaluator {
                 comparator,
                 threshold,
                 ..
-            } => self.evaluate_fact(fact_type, table.as_deref(), column.as_deref(), comparator, threshold),
+            } => self.evaluate_fact(
+                fact_type,
+                table.as_deref(),
+                column.as_deref(),
+                comparator,
+                threshold,
+            ),
 
             PreCondition::Capability {
-                database,
-                requires,
-                ..
+                database, requires, ..
             } => self.evaluate_capability(database, requires),
 
             PreCondition::Composite {
@@ -163,9 +165,9 @@ impl PreConditionEvaluator {
     ) -> Result<bool, EvaluationError> {
         let actual_value = self.lookup_fact(fact_type, table, column)?;
 
-        actual_value.compare(comparator, threshold).map_err(|e| {
-            EvaluationError::ComparisonError(e)
-        })
+        actual_value
+            .compare(comparator, threshold)
+            .map_err(|e| EvaluationError::ComparisonError(e))
     }
 
     /// Look up a fact value from the facts provider
@@ -316,9 +318,7 @@ impl PreConditionEvaluator {
             }
 
             // Database facts
-            "database.dialect" => {
-                Ok(FactValue::String(self.facts.sql_dialect().to_string()))
-            }
+            "database.dialect" => Ok(FactValue::String(self.facts.sql_dialect().to_string())),
 
             // Storage format facts
             "schema.storage_format" => {

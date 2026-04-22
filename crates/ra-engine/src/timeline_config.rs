@@ -666,8 +666,8 @@ impl TimelineConfig {
     ///
     /// Returns `TimelineConfigError` if parsing fails or validation fails.
     pub fn from_toml(input: &str) -> Result<Self, TimelineConfigError> {
-        let config: Self = toml::from_str(input)
-            .map_err(|e| TimelineConfigError::ParseError(e.to_string()))?;
+        let config: Self =
+            toml::from_str(input).map_err(|e| TimelineConfigError::ParseError(e.to_string()))?;
         config.validate()?;
         Ok(config)
     }
@@ -899,7 +899,10 @@ mod tests {
         // Check second snapshot
         let snap1 = &config.snapshots[1];
         assert_eq!(snap1.schema.tables[0].indexes.len(), 1);
-        assert_eq!(snap1.schema.tables[0].indexes[0].name, "idx_orders_customer");
+        assert_eq!(
+            snap1.schema.tables[0].indexes[0].name,
+            "idx_orders_customer"
+        );
     }
 
     #[test]
@@ -952,7 +955,10 @@ mod tests {
         "#;
 
         let err = TimelineConfig::from_toml(toml).unwrap_err();
-        assert!(matches!(err, TimelineConfigError::InvalidSnapshotIndex { .. }));
+        assert!(matches!(
+            err,
+            TimelineConfigError::InvalidSnapshotIndex { .. }
+        ));
     }
 
     #[test]

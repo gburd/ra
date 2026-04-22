@@ -80,17 +80,11 @@ fn main() {
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .expect("cannot read queries dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map_or(false, |ext| ext == "sql")
-        })
+        .filter(|e| e.path().extension().map_or(false, |ext| ext == "sql"))
         .collect();
     entries.sort_by_key(|e| e.file_name());
 
-    println!(
-        "query,tables,parse_us,optimize_us,status,tables_parsed"
-    );
+    println!("query,tables,parse_us,optimize_us,status,tables_parsed");
 
     let mut total_parse = 0u128;
     let mut total_opt = 0u128;
@@ -126,10 +120,7 @@ fn main() {
         };
         let parse_us = parse_start.elapsed().as_micros();
 
-        let table_count_parsed =
-            ra_engine::large_join::LargeJoinOptimizer::count_tables(
-                &relexpr,
-            );
+        let table_count_parsed = ra_engine::large_join::LargeJoinOptimizer::count_tables(&relexpr);
 
         let opt_start = Instant::now();
         let status = match optimizer.optimize(&relexpr) {
@@ -159,14 +150,8 @@ fn main() {
     eprintln!("Success:        {success}");
     eprintln!("Opt failures:   {failures}");
     eprintln!("Parse failures: {parse_failures}");
-    eprintln!(
-        "Total parse:    {:.1}ms",
-        total_parse as f64 / 1000.0
-    );
-    eprintln!(
-        "Total optimize: {:.1}ms",
-        total_opt as f64 / 1000.0
-    );
+    eprintln!("Total parse:    {:.1}ms", total_parse as f64 / 1000.0);
+    eprintln!("Total optimize: {:.1}ms", total_opt as f64 / 1000.0);
     eprintln!(
         "Avg optimize:   {:.1}ms",
         total_opt as f64 / 1000.0 / entries.len() as f64

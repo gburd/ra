@@ -53,12 +53,7 @@ struct IsNotConstBool {
 }
 
 impl egg::Condition<RelLang, RelAnalysis> for IsNotConstBool {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let pred_id = subst[self.var];
         !egraph[pred_id]
             .nodes
@@ -99,13 +94,11 @@ pub fn index_selection_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(bitmap-index-scan ?table auto ?pred)"
             if IsNotConstBool { var: "?pred".parse().expect("valid var") }
         ),
-
         // Reverse direction for e-graph exploration
         rewrite!("bitmap-index-to-filter-scan";
             "(bitmap-index-scan ?table auto ?pred)" =>
             "(filter ?pred (scan ?table))"
         ),
-
         // Bitmap index scan with additional filter:
         // Some predicates can't be evaluated purely by the index
         // and need an additional filter step
@@ -175,7 +168,10 @@ mod tests {
     fn test_index_cost_factor_high_selectivity() {
         // High selectivity (0.1% of rows) - index should be much faster
         let factor = index_scan_cost_factor(0.001, 1_000_000, 100, 10_000);
-        assert!(factor < 0.1, "Index should be 10x+ faster for 0.1% selectivity");
+        assert!(
+            factor < 0.1,
+            "Index should be 10x+ faster for 0.1% selectivity"
+        );
     }
 
     #[test]
@@ -189,13 +185,19 @@ mod tests {
     fn test_index_cost_factor_low_selectivity() {
         // Low selectivity (50% of rows) - sequential scan should be faster
         let factor = index_scan_cost_factor(0.5, 1_000_000, 100, 10_000);
-        assert!(factor > 1.0, "Sequential scan should be faster for 50% selectivity");
+        assert!(
+            factor > 1.0,
+            "Sequential scan should be faster for 50% selectivity"
+        );
     }
 
     #[test]
     fn test_index_cost_factor_full_scan() {
         // Full table scan (100% of rows) - sequential scan definitely faster
         let factor = index_scan_cost_factor(1.0, 1_000_000, 100, 10_000);
-        assert!(factor > 2.0, "Sequential scan should be much faster for full table");
+        assert!(
+            factor > 2.0,
+            "Sequential scan should be much faster for full table"
+        );
     }
 }

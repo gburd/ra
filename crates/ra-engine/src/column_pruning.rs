@@ -23,8 +23,7 @@ use crate::egraph::RelLang;
 /// unused columns as early as possible. Only rules not already
 /// present in rewrite.rs are included.
 #[must_use]
-pub fn column_pruning_rules(
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn column_pruning_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push projection through intersect
         rewrite!("project-through-intersect";
@@ -67,11 +66,8 @@ mod tests {
     use ra_core::algebra::{ProjectionColumn, RelExpr};
     use ra_core::expr::{ColumnRef, Expr};
 
-    fn run_column_pruning(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_column_pruning(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(10_000)
@@ -88,9 +84,7 @@ mod tests {
 
     #[test]
     fn projection_through_limit() {
-        let expr = RelExpr::scan("t")
-            .limit(10, 0)
-            .project(vec![pcol("a")]);
+        let expr = RelExpr::scan("t").limit(10, 0).project(vec![pcol("a")]);
 
         let runner = run_column_pruning(&expr);
         assert!(runner.egraph.number_of_classes() > 1);
@@ -99,9 +93,7 @@ mod tests {
     #[test]
     fn projection_idempotent() {
         let cols = vec![pcol("a"), pcol("b")];
-        let expr = RelExpr::scan("t")
-            .project(cols.clone())
-            .project(cols);
+        let expr = RelExpr::scan("t").project(cols.clone()).project(cols);
 
         let runner = run_column_pruning(&expr);
         assert!(runner.egraph.number_of_classes() > 1);

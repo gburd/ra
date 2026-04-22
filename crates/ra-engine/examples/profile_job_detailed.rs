@@ -6,14 +6,14 @@
 
 #![allow(clippy::expect_used)]
 
+use egg::{EGraph, Runner};
 use ra_core::statistics::Statistics;
-use ra_engine::egraph::{to_rec_expr, OptimizerConfig, RelLang};
 use ra_engine::analysis::RelAnalysis;
+use ra_engine::egraph::{to_rec_expr, OptimizerConfig, RelLang};
 use ra_engine::extract::extract_best;
 use ra_engine::rewrite::all_rules;
 use ra_engine::stats_cache::StatsCache;
 use ra_parser::sql_to_relexpr;
-use egg::{EGraph, Runner};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -75,8 +75,10 @@ fn main() {
     let config = OptimizerConfig::default();
 
     eprintln!("Rules loaded: {}", rules.len());
-    eprintln!("Config: node_limit={}, adaptive={}",
-        config.node_limit, config.use_adaptive_limits);
+    eprintln!(
+        "Config: node_limit={}, adaptive={}",
+        config.node_limit, config.use_adaptive_limits
+    );
 
     // Select representative queries: 3b (4 tab), 5a (5 tab),
     // 10c (7 tab), 13b (9 tab), 17a (7 tab)
@@ -91,8 +93,7 @@ fn main() {
     for target in &targets {
         let path = dir.join(format!("{target}.sql"));
         let sql = fs::read_to_string(&path).expect("read");
-        let table_count = ra_engine::large_join::LargeJoinOptimizer
-            ::count_tables;
+        let table_count = ra_engine::large_join::LargeJoinOptimizer::count_tables;
 
         let parse_start = Instant::now();
         let relexpr = sql_to_relexpr(&sql).expect("parse");
@@ -105,8 +106,7 @@ fn main() {
         let rec_us = rec_start.elapsed().as_micros();
 
         // Determine adaptive limits
-        let complexity = ra_engine::query_complexity
-            ::QueryComplexity::from_expr(&relexpr);
+        let complexity = ra_engine::query_complexity::QueryComplexity::from_expr(&relexpr);
         let iter_limit = complexity.default_iter_limit();
         let timeout_ms = complexity.default_timeout_ms();
 
@@ -117,8 +117,7 @@ fn main() {
         );
 
         let egraph_start = Instant::now();
-        let mut egraph: EGraph<RelLang, RelAnalysis> =
-            EGraph::default();
+        let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
 
         let timeout = std::time::Duration::from_millis(timeout_ms);
@@ -132,17 +131,12 @@ fn main() {
             }
 
             let prev_nodes = egraph.total_size();
-            let runner: Runner<RelLang, RelAnalysis> =
-                Runner::default()
-                    .with_egraph(egraph)
-                    .with_node_limit(config.node_limit)
-                    .with_iter_limit(1)
-                    .with_time_limit(
-                        timeout.saturating_sub(
-                            egraph_start.elapsed(),
-                        ),
-                    )
-                    .run(&rules);
+            let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+                .with_egraph(egraph)
+                .with_node_limit(config.node_limit)
+                .with_iter_limit(1)
+                .with_time_limit(timeout.saturating_sub(egraph_start.elapsed()))
+                .run(&rules);
 
             egraph = runner.egraph;
             actual_iters = i + 1;
@@ -169,16 +163,10 @@ fn main() {
         let classes = egraph.number_of_classes();
 
         let extract_start = Instant::now();
-        let _result = extract_best(
-            &egraph,
-            root,
-            stats_cache.as_map(),
-            &hardware,
-        );
+        let _result = extract_best(&egraph, root, stats_cache.as_map(), &hardware);
         let extract_us = extract_start.elapsed().as_micros();
 
-        let total_us =
-            parse_us + rec_us + egraph_us + extract_us;
+        let total_us = parse_us + rec_us + egraph_us + extract_us;
 
         println!(
             "{target},{tables},{parse_us},{rec_us},\

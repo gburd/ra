@@ -4,12 +4,8 @@
 //! adjustments correctly across PostgreSQL, MySQL, Oracle, SQLite,
 //! and DuckDB backends.
 
-use ra_core::isolation::{
-    BackendKind, IsolationLevel, MultiXactPressure, TransactionContext,
-};
-use ra_engine::isolation_cost::{
-    IsolationCostConfig, PlanEstimates, isolation_cost_adjustment,
-};
+use ra_core::isolation::{BackendKind, IsolationLevel, MultiXactPressure, TransactionContext};
+use ra_engine::isolation_cost::{isolation_cost_adjustment, IsolationCostConfig, PlanEstimates};
 
 // ── Helper ───────────────────────────────────────────────────────
 
@@ -32,16 +28,8 @@ fn pg_ssi_favors_index_only_over_seq_scan() {
     let txn = TransactionContext::pg_serializable();
     let config = default_config();
 
-    let seq_adj = isolation_cost_adjustment(
-        Some(&txn),
-        &large_seq_scan(),
-        &config,
-    );
-    let idx_adj = isolation_cost_adjustment(
-        Some(&txn),
-        &small_index_only(),
-        &config,
-    );
+    let seq_adj = isolation_cost_adjustment(Some(&txn), &large_seq_scan(), &config);
+    let idx_adj = isolation_cost_adjustment(Some(&txn), &small_index_only(), &config);
 
     assert!(
         seq_adj.cpu > idx_adj.cpu,
@@ -57,11 +45,7 @@ fn pg_read_committed_no_lock_penalty() {
     let txn = TransactionContext::pg_read_committed();
     let config = default_config();
 
-    let adj = isolation_cost_adjustment(
-        Some(&txn),
-        &large_seq_scan(),
-        &config,
-    );
+    let adj = isolation_cost_adjustment(Some(&txn), &large_seq_scan(), &config);
 
     // READ COMMITTED has no lock penalty, no snapshot bloat,
     // no subxid overflow, no multixact pressure -> zero
@@ -85,10 +69,8 @@ fn old_snapshot_penalizes_long_running_plans() {
         ..PlanEstimates::index_only_scan(10.0, 100.0)
     };
 
-    let slow_adj =
-        isolation_cost_adjustment(Some(&txn), &slow_plan, &config);
-    let fast_adj =
-        isolation_cost_adjustment(Some(&txn), &fast_plan, &config);
+    let slow_adj = isolation_cost_adjustment(Some(&txn), &slow_plan, &config);
+    let fast_adj = isolation_cost_adjustment(Some(&txn), &fast_plan, &config);
 
     assert!(
         slow_adj.cpu > fast_adj.cpu,
@@ -131,10 +113,8 @@ fn deep_savepoints_penalize_wide_visibility_checks() {
     let wide = PlanEstimates::seq_scan(500.0, 500_000.0);
     let narrow = PlanEstimates::index_only_scan(5.0, 50.0);
 
-    let wide_adj =
-        isolation_cost_adjustment(Some(&txn), &wide, &config);
-    let narrow_adj =
-        isolation_cost_adjustment(Some(&txn), &narrow, &config);
+    let wide_adj = isolation_cost_adjustment(Some(&txn), &wide, &config);
+    let narrow_adj = isolation_cost_adjustment(Some(&txn), &narrow, &config);
 
     // SubXID overflow penalty dominates for wide scans
     assert!(wide_adj.cpu > narrow_adj.cpu * 100.0);
@@ -164,10 +144,8 @@ fn high_multixact_penalizes_wide_scans() {
     let wide = large_seq_scan();
     let narrow = small_index_only();
 
-    let wide_adj =
-        isolation_cost_adjustment(Some(&txn), &wide, &config);
-    let narrow_adj =
-        isolation_cost_adjustment(Some(&txn), &narrow, &config);
+    let wide_adj = isolation_cost_adjustment(Some(&txn), &wide, &config);
+    let narrow_adj = isolation_cost_adjustment(Some(&txn), &narrow, &config);
 
     assert!(wide_adj.cpu > narrow_adj.cpu);
 }
@@ -212,10 +190,8 @@ fn mysql_repeatable_read_gap_lock_on_range_scan() {
     let range_scan = PlanEstimates::index_scan(50.0, 30.0, 5000.0);
     let point_lookup = PlanEstimates::index_only_scan(1.0, 1.0);
 
-    let range_adj =
-        isolation_cost_adjustment(Some(&txn), &range_scan, &config);
-    let point_adj =
-        isolation_cost_adjustment(Some(&txn), &point_lookup, &config);
+    let range_adj = isolation_cost_adjustment(Some(&txn), &range_scan, &config);
+    let point_adj = isolation_cost_adjustment(Some(&txn), &point_lookup, &config);
 
     assert!(range_adj.cpu > point_adj.cpu);
 }
@@ -248,7 +224,10 @@ fn oracle_serializable_undo_pressure() {
     let plan = PlanEstimates::seq_scan(200.0, 20_000.0);
 
     let adj = isolation_cost_adjustment(Some(&txn), &plan, &config);
-    assert!(adj.cpu > 0.0, "Oracle SERIALIZABLE should have undo penalty");
+    assert!(
+        adj.cpu > 0.0,
+        "Oracle SERIALIZABLE should have undo penalty"
+    );
 }
 
 #[test]
@@ -331,8 +310,7 @@ fn optimizer_config_default_has_no_transaction_context() {
 #[test]
 fn optimizer_config_accepts_transaction_context() {
     let mut config = ra_engine::OptimizerConfig::default();
-    config.transaction_context =
-        Some(TransactionContext::pg_serializable());
+    config.transaction_context = Some(TransactionContext::pg_serializable());
     assert!(config.transaction_context.is_some());
 }
 
@@ -353,10 +331,8 @@ fn custom_weights_affect_penalties() {
 
     let plan = PlanEstimates::seq_scan(100.0, 10000.0);
 
-    let agg_adj =
-        isolation_cost_adjustment(Some(&txn), &plan, &aggressive);
-    let con_adj =
-        isolation_cost_adjustment(Some(&txn), &plan, &conservative);
+    let agg_adj = isolation_cost_adjustment(Some(&txn), &plan, &aggressive);
+    let con_adj = isolation_cost_adjustment(Some(&txn), &plan, &conservative);
 
     assert!(
         agg_adj.cpu > con_adj.cpu * 10.0,
@@ -383,10 +359,8 @@ fn tpcc_serializable_strongly_prefers_index_scan() {
     // Index-only scan: 47 index pages, 1000 matching rows
     let idx = PlanEstimates::index_only_scan(47.0, 1000.0);
 
-    let seq_adj =
-        isolation_cost_adjustment(Some(&txn), &seq, &config);
-    let idx_adj =
-        isolation_cost_adjustment(Some(&txn), &idx, &config);
+    let seq_adj = isolation_cost_adjustment(Some(&txn), &seq, &config);
+    let idx_adj = isolation_cost_adjustment(Some(&txn), &idx, &config);
 
     // The ratio should be substantial (RFC claims 12% -> 0.3% failure rate)
     let ratio = seq_adj.cpu / idx_adj.cpu;
@@ -413,10 +387,8 @@ fn django_savepoint_storm_penalizes_large_scans() {
     let large_scan = PlanEstimates::seq_scan(1000.0, 100_000.0);
     let point_lookup = PlanEstimates::index_only_scan(3.0, 1.0);
 
-    let large_adj =
-        isolation_cost_adjustment(Some(&txn), &large_scan, &config);
-    let point_adj =
-        isolation_cost_adjustment(Some(&txn), &point_lookup, &config);
+    let large_adj = isolation_cost_adjustment(Some(&txn), &large_scan, &config);
+    let point_adj = isolation_cost_adjustment(Some(&txn), &point_lookup, &config);
 
     assert!(
         large_adj.cpu > point_adj.cpu * 1000.0,

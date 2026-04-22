@@ -108,101 +108,146 @@ impl RuleRegistry {
         let mut id = 0;
 
         // Null simplification
-        self.register(id, "and-null-left", "null"); id += 1;
-        self.register(id, "and-null-right", "null"); id += 1;
-        self.register(id, "or-null-true-right", "null"); id += 1;
-        self.register(id, "or-null-true-left", "null"); id += 1;
-        self.register(id, "or-null-false-right", "null"); id += 1;
-        self.register(id, "or-null-false-left", "null"); id += 1;
-        self.register(id, "null-eq", "null"); id += 1;
-        self.register(id, "null-ne", "null"); id += 1;
-        self.register(id, "null-lt", "null"); id += 1;
-        self.register(id, "null-le", "null"); id += 1;
-        self.register(id, "null-gt", "null"); id += 1;
-        self.register(id, "null-ge", "null"); id += 1;
-        self.register(id, "is-null-of-null", "null"); id += 1;
-        self.register(id, "is-not-null-of-null", "null"); id += 1;
-        self.register(id, "filter-null-elimination", "null"); id += 1;
-        self.register(id, "null-add-left", "null"); id += 1;
-        self.register(id, "null-add-right", "null"); id += 1;
-        self.register(id, "null-sub-left", "null"); id += 1;
-        self.register(id, "null-sub-right", "null"); id += 1;
-        self.register(id, "null-mul-left", "null"); id += 1;
-        self.register(id, "null-mul-right", "null"); id += 1;
+        self.register(id, "and-null-left", "null");
+        id += 1;
+        self.register(id, "and-null-right", "null");
+        id += 1;
+        self.register(id, "or-null-true-right", "null");
+        id += 1;
+        self.register(id, "or-null-true-left", "null");
+        id += 1;
+        self.register(id, "or-null-false-right", "null");
+        id += 1;
+        self.register(id, "or-null-false-left", "null");
+        id += 1;
+        self.register(id, "null-eq", "null");
+        id += 1;
+        self.register(id, "null-ne", "null");
+        id += 1;
+        self.register(id, "null-lt", "null");
+        id += 1;
+        self.register(id, "null-le", "null");
+        id += 1;
+        self.register(id, "null-gt", "null");
+        id += 1;
+        self.register(id, "null-ge", "null");
+        id += 1;
+        self.register(id, "is-null-of-null", "null");
+        id += 1;
+        self.register(id, "is-not-null-of-null", "null");
+        id += 1;
+        self.register(id, "filter-null-elimination", "null");
+        id += 1;
+        self.register(id, "null-add-left", "null");
+        id += 1;
+        self.register(id, "null-add-right", "null");
+        id += 1;
+        self.register(id, "null-sub-left", "null");
+        id += 1;
+        self.register(id, "null-sub-right", "null");
+        id += 1;
+        self.register(id, "null-mul-left", "null");
+        id += 1;
+        self.register(id, "null-mul-right", "null");
+        id += 1;
 
         // Boolean simplification
-        self.register(id, "and-true-left", "boolean"); id += 1;
-        self.register(id, "and-true-right", "boolean"); id += 1;
-        self.register(id, "and-false-left", "boolean"); id += 1;
-        self.register(id, "and-false-right", "boolean"); id += 1;
-        self.register(id, "or-false-left", "boolean"); id += 1;
-        self.register(id, "or-false-right", "boolean"); id += 1;
-        self.register(id, "or-true-left", "boolean"); id += 1;
-        self.register(id, "or-true-right", "boolean"); id += 1;
-        self.register(id, "double-negation", "boolean"); id += 1;
-        self.register(id, "eq-reflexive", "boolean"); id += 1;
-        self.register(id, "ne-reflexive", "boolean"); id += 1;
-        self.register(id, "eq-null", "boolean"); id += 1;
-        self.register(id, "ne-null", "boolean"); id += 1;
-        self.register(id, "not-is-null", "boolean"); id += 1;
-        self.register(id, "not-is-not-null", "boolean"); id += 1;
-        self.register(id, "and-idempotent", "boolean"); id += 1;
-        self.register(id, "or-idempotent", "boolean"); id += 1;
-        self.register(id, "filter-true", "boolean"); id += 1;
+        self.register(id, "and-true-left", "boolean");
+        id += 1;
+        self.register(id, "and-true-right", "boolean");
+        id += 1;
+        self.register(id, "and-false-left", "boolean");
+        id += 1;
+        self.register(id, "and-false-right", "boolean");
+        id += 1;
+        self.register(id, "or-false-left", "boolean");
+        id += 1;
+        self.register(id, "or-false-right", "boolean");
+        id += 1;
+        self.register(id, "or-true-left", "boolean");
+        id += 1;
+        self.register(id, "or-true-right", "boolean");
+        id += 1;
+        self.register(id, "double-negation", "boolean");
+        id += 1;
+        self.register(id, "eq-reflexive", "boolean");
+        id += 1;
+        self.register(id, "ne-reflexive", "boolean");
+        id += 1;
+        self.register(id, "eq-null", "boolean");
+        id += 1;
+        self.register(id, "ne-null", "boolean");
+        id += 1;
+        self.register(id, "not-is-null", "boolean");
+        id += 1;
+        self.register(id, "not-is-not-null", "boolean");
+        id += 1;
+        self.register(id, "and-idempotent", "boolean");
+        id += 1;
+        self.register(id, "or-idempotent", "boolean");
+        id += 1;
+        self.register(id, "filter-true", "boolean");
+        id += 1;
 
         // Predicate pushdown
-        self.register(id, "filter-through-join-left", "pushdown"); id += 1;
-        self.register(id, "filter-through-join-right", "pushdown"); id += 1;
-        self.register(id, "filter-into-join-condition", "pushdown"); id += 1;
-        self.register(id, "filter-merge", "pushdown"); id += 1;
-        self.register(id, "filter-split-and", "pushdown"); id += 1;
-        self.register(id, "filter-through-project", "pushdown"); id += 1;
-        self.register(id, "filter-below-aggregate", "pushdown"); id += 1;
+        self.register(id, "filter-through-join-left", "pushdown");
+        id += 1;
+        self.register(id, "filter-through-join-right", "pushdown");
+        id += 1;
+        self.register(id, "filter-into-join-condition", "pushdown");
+        id += 1;
+        self.register(id, "filter-merge", "pushdown");
+        id += 1;
+        self.register(id, "filter-split-and", "pushdown");
+        id += 1;
+        self.register(id, "filter-through-project", "pushdown");
+        id += 1;
+        self.register(id, "filter-below-aggregate", "pushdown");
+        id += 1;
 
         // Join reordering
-        self.register(id, "join-commutativity", "join"); id += 1;
-        self.register(id, "cross-join-commutativity", "join"); id += 1;
-        self.register(id, "join-associativity-left", "join"); id += 1;
-        self.register(id, "join-associativity-right", "join"); id += 1;
-        self.register(id, "cartesian-to-join", "join"); id += 1;
+        self.register(id, "join-commutativity", "join");
+        id += 1;
+        self.register(id, "cross-join-commutativity", "join");
+        id += 1;
+        self.register(id, "join-associativity-left", "join");
+        id += 1;
+        self.register(id, "join-associativity-right", "join");
+        id += 1;
+        self.register(id, "cartesian-to-join", "join");
+        id += 1;
 
         // Projection
-        self.register(id, "project-merge", "projection"); id += 1;
+        self.register(id, "project-merge", "projection");
+        id += 1;
 
         // Aggregate
-        self.register(id, "aggregate-over-aggregate", "aggregate"); id += 1;
+        self.register(id, "aggregate-over-aggregate", "aggregate");
+        id += 1;
 
         // Limit/Sort
-        self.register(id, "limit-through-project", "limit"); id += 1;
-        self.register(id, "limit-merge", "limit"); id += 1;
+        self.register(id, "limit-through-project", "limit");
+        id += 1;
+        self.register(id, "limit-merge", "limit");
+        id += 1;
         self.register(id, "sort-below-sort", "sort");
         // Note: id not incremented after last register - it's no longer used
     }
 
     fn register(&mut self, id: RuleId, name: &'static str, category: &'static str) {
-        self.rules.push(RuleInfo {
-            id,
-            name,
-            category,
-        });
+        self.rules.push(RuleInfo { id, name, category });
     }
 
     /// Get rule name by ID.
     #[must_use]
     pub fn id_to_name(&self, id: RuleId) -> Option<&'static str> {
-        self.rules
-            .iter()
-            .find(|r| r.id == id)
-            .map(|r| r.name)
+        self.rules.iter().find(|r| r.id == id).map(|r| r.name)
     }
 
     /// Get rule ID by name.
     #[must_use]
     pub fn name_to_id(&self, name: &str) -> Option<RuleId> {
-        self.rules
-            .iter()
-            .find(|r| r.name == name)
-            .map(|r| r.id)
+        self.rules.iter().find(|r| r.name == name).map(|r| r.id)
     }
 
     /// Get all registered rules.

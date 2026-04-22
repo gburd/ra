@@ -6,20 +6,14 @@
 #![cfg(feature = "timeline")]
 #![allow(clippy::expect_used)]
 
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{Optimizer, OptimizerConfig, PlanCacheConfig, egraph::ParallelConfig};
+use ra_engine::{egraph::ParallelConfig, Optimizer, OptimizerConfig, PlanCacheConfig};
 use ra_stats::delta::DeltaSet;
 use ra_stats::timeline::{ColumnSnapshot, Snapshot, TableSnapshot};
 
-fn make_snapshot(
-    time: u64,
-    row_count: u64,
-    ndv: u64,
-) -> Snapshot {
+fn make_snapshot(time: u64, row_count: u64, ndv: u64) -> Snapshot {
     Snapshot {
         time_offset: time,
         label: None,
@@ -76,20 +70,14 @@ fn join_query() -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(
-                ColumnRef::qualified("users", "id"),
-            )),
-            right: Box::new(Expr::Column(
-                ColumnRef::qualified("orders", "user_id"),
-            )),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
-        left: Box::new(
-            RelExpr::scan("users").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new("age"))),
-                right: Box::new(Expr::Const(Const::Int(18))),
-            }),
-        ),
+        left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("age"))),
+            right: Box::new(Expr::Const(Const::Int(18))),
+        })),
         right: Box::new(RelExpr::scan("orders")),
     }
 }
@@ -117,6 +105,7 @@ fn bench_full_vs_incremental(c: &mut Criterion) {
         plan_cache_config: PlanCacheConfig::default(),
         max_staleness_penalty: 10.0,
         use_lazy_rules: false,
+        ..OptimizerConfig::default()
     };
 
     // Small change: 1% row count increase
@@ -143,21 +132,14 @@ fn bench_full_vs_incremental(c: &mut Criterion) {
         ("incremental_10pct", &medium_delta),
         ("incremental_50pct", &large_delta),
     ] {
-        group.bench_function(
-            BenchmarkId::from_parameter(label),
-            |b| {
-                b.iter(|| {
-                    let mut optimizer =
-                        Optimizer::with_config(config.clone());
-                    optimizer
-                        .optimize_incremental(
-                            black_box(&query),
-                            black_box(delta),
-                        )
-                        .expect("incremental");
-                });
-            },
-        );
+        group.bench_function(BenchmarkId::from_parameter(label), |b| {
+            b.iter(|| {
+                let mut optimizer = Optimizer::with_config(config.clone());
+                optimizer
+                    .optimize_incremental(black_box(&query), black_box(delta))
+                    .expect("incremental");
+            });
+        });
     }
 
     group.finish();
@@ -176,12 +158,7 @@ fn bench_delta_computation(c: &mut Criterion) {
             BenchmarkId::from_parameter(format!("{pct}pct")),
             &pct,
             |b, _| {
-                b.iter(|| {
-                    DeltaSet::compute(
-                        black_box(&base),
-                        black_box(&next),
-                    )
-                });
+                b.iter(|| DeltaSet::compute(black_box(&base), black_box(&next)));
             },
         );
     }
@@ -189,9 +166,5 @@ fn bench_delta_computation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_full_vs_incremental,
-    bench_delta_computation
-);
+criterion_group!(benches, bench_full_vs_incremental, bench_delta_computation);
 criterion_main!(benches);

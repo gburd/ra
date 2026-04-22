@@ -123,6 +123,10 @@ fn test_hyper_vectorized_interpretation_aggregate() {
 #[test]
 fn test_hyper_vectorized_interpretation_join() {
     let optimizer = create_optimizer();
-    let plan = join(scan("orders"), scan("customers"), eq_pred("customer_id", "id"));
+    let plan = join(
+        scan("orders"),
+        scan("customers"),
+        eq_pred("customer_id", "id"),
+    );
     assert!(optimizer.optimize(&plan).is_ok());
 }

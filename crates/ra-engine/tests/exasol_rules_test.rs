@@ -34,10 +34,13 @@ fn filter(input: RelExpr, condition: Expr) -> RelExpr {
 
 fn project(input: RelExpr, columns: Vec<String>) -> RelExpr {
     RelExpr::Project {
-        columns: columns.into_iter().map(|c| ra_core::algebra::ProjectionColumn {
-            expr: Expr::Column(ColumnRef::new(c)),
-            alias: None,
-        }).collect(),
+        columns: columns
+            .into_iter()
+            .map(|c| ra_core::algebra::ProjectionColumn {
+                expr: Expr::Column(ColumnRef::new(c)),
+                alias: None,
+            })
+            .collect(),
         input: Box::new(input),
     }
 }
@@ -54,7 +57,10 @@ fn join(left: RelExpr, right: RelExpr, condition: Expr) -> RelExpr {
 fn aggregate(input: RelExpr, group_by: Vec<String>, aggs: Vec<(String, String)>) -> RelExpr {
     use ra_core::algebra::{AggregateExpr, AggregateFunction};
     RelExpr::Aggregate {
-        group_by: group_by.into_iter().map(|c| Expr::Column(ColumnRef::new(c))).collect(),
+        group_by: group_by
+            .into_iter()
+            .map(|c| Expr::Column(ColumnRef::new(c)))
+            .collect(),
         aggregates: aggs
             .into_iter()
             .map(|(col, func)| {
@@ -112,7 +118,10 @@ fn test_exa001_columnar_scan_basic() {
     let optimizer = create_optimizer();
 
     // SELECT customer_id, total_amount FROM orders
-    let plan = project(scan("orders"), vec!["customer_id".to_string(), "total_amount".to_string()]);
+    let plan = project(
+        scan("orders"),
+        vec!["customer_id".to_string(), "total_amount".to_string()],
+    );
 
     let result = optimizer.optimize(&plan);
     assert!(result.is_ok(), "Columnar scan optimization should succeed");
@@ -161,7 +170,11 @@ fn test_exa002_late_materialization_selective_filter() {
     // Highly selective filter (1%), wide output columns
     let plan = project(
         filter(scan("customers"), eq_pred("loyalty_tier", "platinum")),
-        vec!["name".to_string(), "email".to_string(), "address".to_string()],
+        vec![
+            "name".to_string(),
+            "email".to_string(),
+            "address".to_string(),
+        ],
     );
 
     let result = optimizer.optimize(&plan);
@@ -299,7 +312,11 @@ fn test_exa003_column_filter_pushdown_conjunctive() {
                 and_pred(eq_pred("region", "US"), gt_pred("user_id", 1_000_000)),
             ),
         ),
-        vec!["user_id".to_string(), "action".to_string(), "timestamp".to_string()],
+        vec![
+            "user_id".to_string(),
+            "action".to_string(),
+            "timestamp".to_string(),
+        ],
     );
 
     let result = optimizer.optimize(&plan);
@@ -351,7 +368,11 @@ fn test_exa004_bloom_filter_join_star_schema() {
     //   AND l.l_suppkey = s.s_suppkey
     let plan = aggregate(
         join(
-            join(scan("nation"), scan("supplier"), eq_pred("n_nationkey", "s_nationkey")),
+            join(
+                scan("nation"),
+                scan("supplier"),
+                eq_pred("n_nationkey", "s_nationkey"),
+            ),
             scan("lineitem"),
             eq_pred("s_suppkey", "l_suppkey"),
         ),
@@ -407,7 +428,11 @@ fn test_exa004_no_bloom_filter_small_tables() {
     // Small table join (both < 1000 rows)
     // SELECT * FROM status_codes s
     // JOIN events e ON s.code = e.status
-    let plan = join(scan("status_codes"), scan("events"), eq_pred("code", "status"));
+    let plan = join(
+        scan("status_codes"),
+        scan("events"),
+        eq_pred("code", "status"),
+    );
 
     let result = optimizer.optimize(&plan);
     assert!(result.is_ok());
@@ -481,7 +506,11 @@ fn test_exa005_simd_hash_join() {
     // FROM orders o
     // JOIN customers c ON o.customer_id = c.customer_id
     let plan = project(
-        join(scan("orders"), scan("customers"), eq_pred("customer_id", "customer_id")),
+        join(
+            scan("orders"),
+            scan("customers"),
+            eq_pred("customer_id", "customer_id"),
+        ),
         vec!["o.order_id".to_string(), "c.customer_name".to_string()],
     );
 

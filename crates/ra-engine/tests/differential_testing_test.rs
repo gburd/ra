@@ -561,10 +561,7 @@ fn test_duckdb_columnar_scan() {
 #[test]
 fn test_duckdb_vectorized_execution() {
     // DuckDB: Vectorized filter execution
-    let query = scan("events").filter(and(
-        gt(col("value"), int(100)),
-        gt(col("score"), int(50)),
-    ));
+    let query = scan("events").filter(and(gt(col("value"), int(100)), gt(col("score"), int(50))));
     assert_optimization_improves(query);
 }
 
@@ -628,7 +625,10 @@ fn test_duckdb_complex_expression_evaluation() {
 #[test]
 fn test_duckdb_data_type_handling() {
     // DuckDB: Efficient type conversions
-    let query = project(scan("mixed_types"), vec!["int_col", "string_col", "float_col"]);
+    let query = project(
+        scan("mixed_types"),
+        vec!["int_col", "string_col", "float_col"],
+    );
     assert_optimization_improves(query);
 }
 
@@ -838,10 +838,7 @@ fn test_sqlite_nested_query() {
 #[test]
 fn test_sqlite_expression_evaluation() {
     // SQLite: Expression optimization
-    let query = scan("data").filter(and(
-        eq(col("status"), int(1)),
-        gt(col("value"), int(0)),
-    ));
+    let query = scan("data").filter(and(eq(col("status"), int(1)), gt(col("value"), int(0))));
     assert_optimization_improves(query);
 }
 

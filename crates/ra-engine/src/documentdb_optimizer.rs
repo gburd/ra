@@ -181,8 +181,7 @@ pub fn estimate_selectivity(
             if let Some(ndistinct) = distinct_count {
                 if ndistinct > 0 {
                     return SelectivityEstimate {
-                        selectivity: (1.0 / ndistinct as f64)
-                            .clamp(0.0001, 1.0),
+                        selectivity: (1.0 / ndistinct as f64).clamp(0.0001, 1.0),
                         source: SelectivitySource::IndexStats,
                     };
                 }
@@ -250,9 +249,7 @@ pub fn estimate_selectivity(
 /// The damping formula: `product(sel_i^(damping^i))` where
 /// selectivities are sorted ascending and damping = 0.85.
 #[must_use]
-pub fn combine_selectivities(
-    selectivities: &[f64],
-) -> f64 {
+pub fn combine_selectivities(selectivities: &[f64]) -> f64 {
     if selectivities.is_empty() {
         return 1.0;
     }
@@ -261,9 +258,7 @@ pub fn combine_selectivities(
     }
 
     let mut sorted: Vec<f64> = selectivities.to_vec();
-    sorted.sort_by(|a, b| {
-        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let damping: f64 = 0.85;
     let mut combined = 1.0_f64;
@@ -332,10 +327,9 @@ pub fn compound_gin_scan_cost(
 ) -> f64 {
     let matching = (total_rows * combined_selectivity).max(1.0);
     let lookup = f64::from(n_paths) * params.term_lookup_cost;
-    let intersection =
-        f64::from(n_paths.saturating_sub(1))
-            * params.bitmap_intersection_cost
-            * (total_rows * 0.01).max(1.0);
+    let intersection = f64::from(n_paths.saturating_sub(1))
+        * params.bitmap_intersection_cost
+        * (total_rows * 0.01).max(1.0);
     let fetch = matching * (params.recheck_cost + params.heap_fetch_cost);
     lookup + intersection + fetch
 }
@@ -387,20 +381,10 @@ impl GinIndexRecommendation {
     /// Generate the documentdb CREATE INDEX command for this
     /// recommendation.
     #[must_use]
-    pub fn to_create_index_command(
-        &self,
-        db_name: &str,
-    ) -> String {
-        let key_entries: Vec<String> = self
-            .paths
-            .iter()
-            .map(|p| format!("\"{p}\": 1"))
-            .collect();
+    pub fn to_create_index_command(&self, db_name: &str) -> String {
+        let key_entries: Vec<String> = self.paths.iter().map(|p| format!("\"{p}\": 1")).collect();
         let key_json = key_entries.join(", ");
-        let idx_name = format!(
-            "idx_{}",
-            self.paths.join("_").replace('.', "_")
-        );
+        let idx_name = format!("idx_{}", self.paths.join("_").replace('.', "_"));
 
         format!(
             "SELECT documentdb_api_internal.\
@@ -424,22 +408,15 @@ pub fn recommend_gin_indexes(
     patterns: &[QueryPattern],
     min_frequency: u32,
 ) -> Vec<GinIndexRecommendation> {
-    let mut path_usage: HashMap<
-        (String, String),
-        (u32, Vec<BsonOperator>),
-    > = HashMap::new();
+    let mut path_usage: HashMap<(String, String), (u32, Vec<BsonOperator>)> = HashMap::new();
 
     for pattern in patterns {
         for pred in &pattern.predicates {
             if !pred.operator.supports_gin_index() {
                 continue;
             }
-            let key = (
-                pattern.collection.clone(),
-                pred.path.clone(),
-            );
-            let entry =
-                path_usage.entry(key).or_insert_with(|| (0, Vec::new()));
+            let key = (pattern.collection.clone(), pred.path.clone());
+            let entry = path_usage.entry(key).or_insert_with(|| (0, Vec::new()));
             entry.0 += pattern.frequency;
             if !entry.1.contains(&pred.operator) {
                 entry.1.push(pred.operator);
@@ -448,10 +425,8 @@ pub fn recommend_gin_indexes(
     }
 
     // Group by collection for compound index candidates
-    let mut collection_paths: HashMap<
-        String,
-        Vec<(String, u32, Vec<BsonOperator>)>,
-    > = HashMap::new();
+    let mut collection_paths: HashMap<String, Vec<(String, u32, Vec<BsonOperator>)>> =
+        HashMap::new();
     for ((collection, path), (freq, ops)) in &path_usage {
         if *freq >= min_frequency {
             collection_paths
@@ -470,12 +445,8 @@ pub fn recommend_gin_indexes(
 
         if paths.len() >= 2 {
             // Recommend compound index for multi-path queries
-            let compound_paths: Vec<String> =
-                paths.iter().map(|p| p.0.clone()).collect();
-            let all_ops: Vec<BsonOperator> = paths
-                .iter()
-                .flat_map(|p| p.2.clone())
-                .collect();
+            let compound_paths: Vec<String> = paths.iter().map(|p| p.0.clone()).collect();
+            let all_ops: Vec<BsonOperator> = paths.iter().flat_map(|p| p.2.clone()).collect();
 
             let combined_sel = combine_selectivities(
                 &all_ops
@@ -493,32 +464,21 @@ pub fn recommend_gin_indexes(
             recommendations.push(GinIndexRecommendation {
                 collection: collection.clone(),
                 paths: compound_paths,
-                estimated_improvement: if ratio > 0.0 {
-                    1.0 / ratio
-                } else {
-                    1.0
-                },
+                estimated_improvement: if ratio > 0.0 { 1.0 / ratio } else { 1.0 },
                 operators: all_ops,
             });
         }
 
         // Also recommend single-path indexes for high-frequency paths
         for (path, _freq, ops) in &paths {
-            let sel = ops
-                .first()
-                .map_or(0.01, |op| op.default_selectivity());
-            let ratio =
-                gin_vs_sequential_ratio(100_000.0, sel, 1, &params);
+            let sel = ops.first().map_or(0.01, |op| op.default_selectivity());
+            let ratio = gin_vs_sequential_ratio(100_000.0, sel, 1, &params);
 
             if ratio < 0.5 {
                 recommendations.push(GinIndexRecommendation {
                     collection: collection.clone(),
                     paths: vec![path.clone()],
-                    estimated_improvement: if ratio > 0.0 {
-                        1.0 / ratio
-                    } else {
-                        1.0
-                    },
+                    estimated_improvement: if ratio > 0.0 { 1.0 / ratio } else { 1.0 },
                     operators: ops.clone(),
                 });
             }
@@ -561,9 +521,7 @@ impl QueryPattern {
         let sels: Vec<f64> = self
             .predicates
             .iter()
-            .map(|p| {
-                estimate_selectivity(p.operator, None, None).selectivity
-            })
+            .map(|p| estimate_selectivity(p.operator, None, None).selectivity)
             .collect();
         combine_selectivities(&sels)
     }
@@ -583,8 +541,7 @@ impl QueryPattern {
 /// 2. Compound filter splitting for GIN index exploitation
 /// 3. Predicate ordering for multi-path GIN scans
 #[must_use]
-pub fn documentdb_rewrite_rules(
-) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn documentdb_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Rule 1: Push BSON equality filter through join.
         //
@@ -650,8 +607,7 @@ fn var(s: &str) -> Var {
 /// nodes which indicate BSON column access.
 fn is_bson_operator_filter(
     pred_var: Var,
-) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool
-{
+) -> impl Fn(&mut egg::EGraph<RelLang, RelAnalysis>, Id, &Subst) -> bool {
     move |egraph, _id, subst| {
         let pred_id = subst[pred_var];
         contains_bson_pattern(egraph, pred_id, 3)
@@ -664,11 +620,7 @@ fn is_bson_operator_filter(
 /// - `func` nodes (documentdb custom operators)
 /// - `json-access` nodes (BSON path extraction)
 /// - Comparison operators with BSON operands
-fn contains_bson_pattern(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    id: Id,
-    depth: u32,
-) -> bool {
+fn contains_bson_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
     if depth == 0 {
         return false;
     }
@@ -806,18 +758,10 @@ impl BsonRumOpfamily {
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
-            "bson_extended_rum_single_path_ops" => {
-                Some(Self::SinglePath)
-            }
-            "bson_extended_rum_composite_path_ops" => {
-                Some(Self::CompositePath)
-            }
-            "documentdb_extended_rum_hashed_ops" => {
-                Some(Self::Hashed)
-            }
-            "bson_extended_rum_unique_shard_path_ops" => {
-                Some(Self::UniqueShard)
-            }
+            "bson_extended_rum_single_path_ops" => Some(Self::SinglePath),
+            "bson_extended_rum_composite_path_ops" => Some(Self::CompositePath),
+            "documentdb_extended_rum_hashed_ops" => Some(Self::Hashed),
+            "bson_extended_rum_unique_shard_path_ops" => Some(Self::UniqueShard),
             _ => None,
         }
     }
@@ -839,10 +783,7 @@ impl BsonRumOpfamily {
 }
 
 impl std::fmt::Display for BsonRumOpfamily {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SinglePath => {
                 write!(f, "bson_extended_rum_single_path_ops")
@@ -865,24 +806,16 @@ impl std::fmt::Display for BsonRumOpfamily {
 /// Returns `None` for operators that do not benefit from RUM
 /// (e.g., `$ne`, `$nin`, `$exists`).
 #[must_use]
-pub fn bson_op_to_rum_opfamily(
-    op: BsonOperator,
-) -> Option<BsonRumOpfamily> {
+pub fn bson_op_to_rum_opfamily(op: BsonOperator) -> Option<BsonRumOpfamily> {
     match op {
         BsonOperator::Eq => Some(BsonRumOpfamily::Hashed),
-        BsonOperator::Gt
-        | BsonOperator::Gte
-        | BsonOperator::Lt
-        | BsonOperator::Lte => Some(BsonRumOpfamily::SinglePath),
-        BsonOperator::In => Some(BsonRumOpfamily::SinglePath),
-        BsonOperator::All
-        | BsonOperator::ElemMatch => {
+        BsonOperator::Gt | BsonOperator::Gte | BsonOperator::Lt | BsonOperator::Lte => {
             Some(BsonRumOpfamily::SinglePath)
         }
+        BsonOperator::In => Some(BsonRumOpfamily::SinglePath),
+        BsonOperator::All | BsonOperator::ElemMatch => Some(BsonRumOpfamily::SinglePath),
         BsonOperator::Regex => Some(BsonRumOpfamily::SinglePath),
-        BsonOperator::Ne
-        | BsonOperator::Nin
-        | BsonOperator::Exists => None,
+        BsonOperator::Ne | BsonOperator::Nin | BsonOperator::Exists => None,
     }
 }
 
@@ -900,16 +833,11 @@ pub fn bson_op_benefits_from_rum(op: BsonOperator) -> bool {
         // Array ops: RUM can provide ordered array scans.
         BsonOperator::All | BsonOperator::ElemMatch => true,
         // Range ops: RUM provides boundary-qualified scans.
-        BsonOperator::Gt
-        | BsonOperator::Gte
-        | BsonOperator::Lt
-        | BsonOperator::Lte => true,
+        BsonOperator::Gt | BsonOperator::Gte | BsonOperator::Lt | BsonOperator::Lte => true,
         // Equality: hashed RUM is comparable to GIN.
         BsonOperator::Eq | BsonOperator::In => false,
         // Not indexable by either.
-        BsonOperator::Ne
-        | BsonOperator::Nin
-        | BsonOperator::Exists => false,
+        BsonOperator::Ne | BsonOperator::Nin | BsonOperator::Exists => false,
     }
 }
 
@@ -970,16 +898,12 @@ pub fn rum_bson_text_scan_cost(
             let visit = k as f64 * 1.2;
             params.term_lookup_cost
                 + params.boundary_cost
-                + visit
-                    * (params.phrase_verify_cost
-                        + params.heap_fetch_cost)
+                + visit * (params.phrase_verify_cost + params.heap_fetch_cost)
         }
         None => {
             params.term_lookup_cost
                 + params.boundary_cost
-                + matching
-                    * (params.phrase_verify_cost
-                        + params.heap_fetch_cost)
+                + matching * (params.phrase_verify_cost + params.heap_fetch_cost)
         }
     }
 }
@@ -999,8 +923,7 @@ pub fn rum_bson_near_scan_cost(
     let _ = total_rows; // used for future distance histogram estimation
     params.term_lookup_cost
         + params.boundary_cost
-        + visit
-            * (params.distance_compute_cost + params.heap_fetch_cost)
+        + visit * (params.distance_compute_cost + params.heap_fetch_cost)
 }
 
 /// Estimate the cost of a RUM index scan for a BSON array
@@ -1037,12 +960,9 @@ pub fn gin_bson_equivalent_cost(
     let scan = gin_scan_cost(total_rows, selectivity, 1, &gin_params);
 
     if needs_ordering {
-        let sort_cost =
-            matching * matching.log2().max(1.0) * 0.01;
+        let sort_cost = matching * matching.log2().max(1.0) * 0.01;
         let limit_savings = match limit {
-            Some(k) if matching > k as f64 * 10.0 => {
-                sort_cost * 0.5
-            }
+            Some(k) if matching > k as f64 * 10.0 => sort_cost * 0.5,
             _ => 0.0,
         };
         // GIN: scan + heap recheck + external sort
@@ -1057,18 +977,10 @@ pub fn gin_bson_equivalent_cost(
 ///
 /// Returns ratio < 1.0 when RUM is cheaper.
 #[must_use]
-pub fn rum_vs_gin_bson_text_ratio(
-    total_rows: f64,
-    selectivity: f64,
-    limit: Option<u64>,
-) -> f64 {
+pub fn rum_vs_gin_bson_text_ratio(total_rows: f64, selectivity: f64, limit: Option<u64>) -> f64 {
     let rum_params = RumBsonCostParams::default();
-    let rum = rum_bson_text_scan_cost(
-        total_rows, selectivity, limit, &rum_params,
-    );
-    let gin = gin_bson_equivalent_cost(
-        total_rows, selectivity, true, limit,
-    );
+    let rum = rum_bson_text_scan_cost(total_rows, selectivity, limit, &rum_params);
+    let gin = gin_bson_equivalent_cost(total_rows, selectivity, true, limit);
     if gin <= 0.0 {
         return 1.0;
     }
@@ -1079,18 +991,10 @@ pub fn rum_vs_gin_bson_text_ratio(
 ///
 /// Returns ratio < 1.0 when RUM is cheaper.
 #[must_use]
-pub fn rum_vs_gin_bson_near_ratio(
-    total_rows: f64,
-    selectivity: f64,
-    limit: Option<u64>,
-) -> f64 {
+pub fn rum_vs_gin_bson_near_ratio(total_rows: f64, selectivity: f64, limit: Option<u64>) -> f64 {
     let rum_params = RumBsonCostParams::default();
-    let rum = rum_bson_near_scan_cost(
-        total_rows, limit, &rum_params,
-    );
-    let gin = gin_bson_equivalent_cost(
-        total_rows, selectivity, true, limit,
-    );
+    let rum = rum_bson_near_scan_cost(total_rows, limit, &rum_params);
+    let gin = gin_bson_equivalent_cost(total_rows, selectivity, true, limit);
     if gin <= 0.0 {
         return 1.0;
     }
@@ -1121,20 +1025,10 @@ pub struct RumBsonIndexRecommendation {
 impl RumBsonIndexRecommendation {
     /// Generate the documentdb CREATE INDEX command for a RUM index.
     #[must_use]
-    pub fn to_create_index_command(
-        &self,
-        db_name: &str,
-    ) -> String {
-        let key_entries: Vec<String> = self
-            .paths
-            .iter()
-            .map(|p| format!("\"{p}\": 1"))
-            .collect();
+    pub fn to_create_index_command(&self, db_name: &str) -> String {
+        let key_entries: Vec<String> = self.paths.iter().map(|p| format!("\"{p}\": 1")).collect();
         let key_json = key_entries.join(", ");
-        let idx_name = format!(
-            "idx_rum_{}",
-            self.paths.join("_").replace('.', "_")
-        );
+        let idx_name = format!("idx_rum_{}", self.paths.join("_").replace('.', "_"));
 
         format!(
             "SELECT documentdb_api_internal.\
@@ -1176,29 +1070,26 @@ pub fn evaluate_rum_bson_recommendation(
 
         let limit = Some(10_u64);
         let ratio = match op {
-            BsonOperator::Regex => rum_vs_gin_bson_text_ratio(
-                total_rows, selectivity, limit,
-            ),
-            BsonOperator::All
-            | BsonOperator::ElemMatch => {
+            BsonOperator::Regex => rum_vs_gin_bson_text_ratio(total_rows, selectivity, limit),
+            BsonOperator::All | BsonOperator::ElemMatch => {
                 let rum_params = RumBsonCostParams::default();
-                let rum = rum_bson_array_scan_cost(
-                    total_rows, selectivity, 2, &rum_params,
-                );
-                let gin = gin_bson_equivalent_cost(
-                    total_rows, selectivity, true, limit,
-                );
-                if gin > 0.0 { rum / gin } else { 1.0 }
+                let rum = rum_bson_array_scan_cost(total_rows, selectivity, 2, &rum_params);
+                let gin = gin_bson_equivalent_cost(total_rows, selectivity, true, limit);
+                if gin > 0.0 {
+                    rum / gin
+                } else {
+                    1.0
+                }
             }
             _ => {
                 let rum_params = RumBsonCostParams::default();
-                let rum = rum_bson_text_scan_cost(
-                    total_rows, selectivity, limit, &rum_params,
-                );
-                let gin = gin_bson_equivalent_cost(
-                    total_rows, selectivity, true, limit,
-                );
-                if gin > 0.0 { rum / gin } else { 1.0 }
+                let rum = rum_bson_text_scan_cost(total_rows, selectivity, limit, &rum_params);
+                let gin = gin_bson_equivalent_cost(total_rows, selectivity, true, limit);
+                if gin > 0.0 {
+                    rum / gin
+                } else {
+                    1.0
+                }
             }
         };
 
@@ -1295,22 +1186,13 @@ mod tests {
 
     #[test]
     fn parse_pg_operators() {
-        assert_eq!(
-            BsonOperator::from_pg_operator("@="),
-            Some(BsonOperator::Eq)
-        );
-        assert_eq!(
-            BsonOperator::from_pg_operator("@>"),
-            Some(BsonOperator::Gt)
-        );
+        assert_eq!(BsonOperator::from_pg_operator("@="), Some(BsonOperator::Eq));
+        assert_eq!(BsonOperator::from_pg_operator("@>"), Some(BsonOperator::Gt));
         assert_eq!(
             BsonOperator::from_pg_operator("@>="),
             Some(BsonOperator::Gte)
         );
-        assert_eq!(
-            BsonOperator::from_pg_operator("@<"),
-            Some(BsonOperator::Lt)
-        );
+        assert_eq!(BsonOperator::from_pg_operator("@<"), Some(BsonOperator::Lt));
         assert_eq!(
             BsonOperator::from_pg_operator("@<="),
             Some(BsonOperator::Lte)
@@ -1367,41 +1249,22 @@ mod tests {
 
     #[test]
     fn equality_selectivity_with_distinct_count() {
-        let est = estimate_selectivity(
-            BsonOperator::Eq,
-            Some(1000),
-            None,
-        );
-        assert!(
-            (est.selectivity - 0.001).abs() < 0.0001,
-            "1/1000 = 0.001"
-        );
+        let est = estimate_selectivity(BsonOperator::Eq, Some(1000), None);
+        assert!((est.selectivity - 0.001).abs() < 0.0001, "1/1000 = 0.001");
         assert_eq!(est.source, SelectivitySource::IndexStats);
     }
 
     #[test]
     fn equality_selectivity_without_stats() {
-        let est =
-            estimate_selectivity(BsonOperator::Eq, None, None);
-        assert_eq!(
-            est.selectivity,
-            BsonOperator::Eq.default_selectivity()
-        );
+        let est = estimate_selectivity(BsonOperator::Eq, None, None);
+        assert_eq!(est.selectivity, BsonOperator::Eq.default_selectivity());
         assert_eq!(est.source, SelectivitySource::OperatorHeuristic);
     }
 
     #[test]
     fn in_selectivity_scales_with_array_length() {
-        let small = estimate_selectivity(
-            BsonOperator::In,
-            Some(1000),
-            Some(5),
-        );
-        let large = estimate_selectivity(
-            BsonOperator::In,
-            Some(1000),
-            Some(50),
-        );
+        let small = estimate_selectivity(BsonOperator::In, Some(1000), Some(5));
+        let large = estimate_selectivity(BsonOperator::In, Some(1000), Some(50));
         assert!(
             large.selectivity > small.selectivity,
             "$in with more elements should be less selective"
@@ -1410,16 +1273,8 @@ mod tests {
 
     #[test]
     fn all_selectivity_decreases_with_elements() {
-        let few = estimate_selectivity(
-            BsonOperator::All,
-            Some(100),
-            Some(2),
-        );
-        let many = estimate_selectivity(
-            BsonOperator::All,
-            Some(100),
-            Some(5),
-        );
+        let few = estimate_selectivity(BsonOperator::All, Some(100), Some(2));
+        let many = estimate_selectivity(BsonOperator::All, Some(100), Some(5));
         assert!(
             many.selectivity < few.selectivity,
             "$all with more required elements should be more selective"
@@ -1442,9 +1297,7 @@ mod tests {
 
     #[test]
     fn combine_single_selectivity() {
-        assert!(
-            (combine_selectivities(&[0.3]) - 0.3).abs() < f64::EPSILON
-        );
+        assert!((combine_selectivities(&[0.3]) - 0.3).abs() < f64::EPSILON);
     }
 
     // -- GIN cost model tests --
@@ -1452,12 +1305,7 @@ mod tests {
     #[test]
     fn gin_scan_cheaper_than_seq_for_selective_queries() {
         let params = GinBsonCostParams::default();
-        let ratio = gin_vs_sequential_ratio(
-            100_000.0,
-            0.001,
-            1,
-            &params,
-        );
+        let ratio = gin_vs_sequential_ratio(100_000.0, 0.001, 1, &params);
         assert!(
             ratio < 1.0,
             "GIN should beat seq scan for 0.1% selectivity: {ratio}"
@@ -1467,12 +1315,7 @@ mod tests {
     #[test]
     fn gin_scan_not_worth_it_for_unselective_queries() {
         let params = GinBsonCostParams::default();
-        let ratio = gin_vs_sequential_ratio(
-            100_000.0,
-            0.9,
-            1,
-            &params,
-        );
+        let ratio = gin_vs_sequential_ratio(100_000.0, 0.9, 1, &params);
         assert!(
             ratio > 1.0,
             "GIN should lose to seq scan for 90% selectivity: {ratio}"
@@ -1482,16 +1325,9 @@ mod tests {
     #[test]
     fn compound_gin_cheaper_than_single_for_multi_pred() {
         let params = GinBsonCostParams::default();
-        let single1 =
-            gin_scan_cost(100_000.0, 0.01, 1, &params);
-        let single2 =
-            gin_scan_cost(100_000.0, 0.05, 1, &params);
-        let compound = compound_gin_scan_cost(
-            100_000.0,
-            0.01 * 0.05,
-            2,
-            &params,
-        );
+        let single1 = gin_scan_cost(100_000.0, 0.01, 1, &params);
+        let single2 = gin_scan_cost(100_000.0, 0.05, 1, &params);
+        let compound = compound_gin_scan_cost(100_000.0, 0.01 * 0.05, 2, &params);
         // Compound should be cheaper than sum of singles
         // (fewer total heap fetches due to bitmap intersection)
         assert!(
@@ -1524,18 +1360,10 @@ mod tests {
         }];
 
         let recs = recommend_gin_indexes(&patterns, 10);
-        assert!(
-            !recs.is_empty(),
-            "should recommend at least one index"
-        );
+        assert!(!recs.is_empty(), "should recommend at least one index");
         // Should include a compound index
-        let compound = recs
-            .iter()
-            .find(|r| r.paths.len() >= 2);
-        assert!(
-            compound.is_some(),
-            "should recommend a compound index"
-        );
+        let compound = recs.iter().find(|r| r.paths.len() >= 2);
+        assert!(compound.is_some(), "should recommend a compound index");
     }
 
     #[test]
@@ -1570,20 +1398,14 @@ mod tests {
         }];
 
         let recs = recommend_gin_indexes(&patterns, 10);
-        assert!(
-            recs.is_empty(),
-            "$ne does not benefit from GIN index"
-        );
+        assert!(recs.is_empty(), "$ne does not benefit from GIN index");
     }
 
     #[test]
     fn create_index_command_format() {
         let rec = GinIndexRecommendation {
             collection: "users".to_string(),
-            paths: vec![
-                "status".to_string(),
-                "age".to_string(),
-            ],
+            paths: vec!["status".to_string(), "age".to_string()],
             estimated_improvement: 10.0,
             operators: vec![BsonOperator::Eq, BsonOperator::Gt],
         };
@@ -1623,19 +1445,13 @@ mod tests {
         let eq_sel = BsonOperator::Eq.default_selectivity();
         let gt_sel = BsonOperator::Gt.default_selectivity();
         assert!(sel < gt_sel, "combined < range alone");
-        assert!(
-            sel > eq_sel * gt_sel,
-            "combined > pure product (damping)"
-        );
+        assert!(sel > eq_sel * gt_sel, "combined > pure product (damping)");
     }
 
     // -- E-graph rewrite rule tests --
 
-    fn run_with_docdb_rules(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_with_docdb_rules(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         let rules = documentdb_rewrite_rules();
         Runner::default()
             .with_expr(&rec)
@@ -1660,16 +1476,10 @@ mod tests {
                 op: BinOp::Eq,
                 left: Box::new(Expr::BinOp {
                     op: BinOp::JsonAccess,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("document"),
-                    )),
-                    right: Box::new(Expr::Const(Const::String(
-                        "status".to_string(),
-                    ))),
+                    left: Box::new(Expr::Column(ColumnRef::new("document"))),
+                    right: Box::new(Expr::Const(Const::String("status".to_string()))),
                 }),
-                right: Box::new(Expr::Const(Const::String(
-                    "active".to_string(),
-                ))),
+                right: Box::new(Expr::Const(Const::String("active".to_string()))),
             },
             input: Box::new(joined),
         };
@@ -1700,16 +1510,10 @@ mod tests {
                 op: BinOp::Eq,
                 left: Box::new(Expr::BinOp {
                     op: BinOp::JsonAccess,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("document"),
-                    )),
-                    right: Box::new(Expr::Const(Const::String(
-                        "name".to_string(),
-                    ))),
+                    left: Box::new(Expr::Column(ColumnRef::new("document"))),
+                    right: Box::new(Expr::Const(Const::String("name".to_string()))),
                 }),
-                right: Box::new(Expr::Const(Const::String(
-                    "Alice".to_string(),
-                ))),
+                right: Box::new(Expr::Const(Const::String("Alice".to_string()))),
             },
             input: Box::new(projected),
         };
@@ -1732,27 +1536,17 @@ mod tests {
                 op: BinOp::Eq,
                 left: Box::new(Expr::BinOp {
                     op: BinOp::JsonAccess,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("document"),
-                    )),
-                    right: Box::new(Expr::Const(Const::String(
-                        "status".to_string(),
-                    ))),
+                    left: Box::new(Expr::Column(ColumnRef::new("document"))),
+                    right: Box::new(Expr::Const(Const::String("status".to_string()))),
                 }),
-                right: Box::new(Expr::Const(Const::String(
-                    "completed".to_string(),
-                ))),
+                right: Box::new(Expr::Const(Const::String("completed".to_string()))),
             }),
             right: Box::new(Expr::BinOp {
                 op: BinOp::Gt,
                 left: Box::new(Expr::BinOp {
                     op: BinOp::JsonAccess,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("document"),
-                    )),
-                    right: Box::new(Expr::Const(Const::String(
-                        "amount".to_string(),
-                    ))),
+                    left: Box::new(Expr::Column(ColumnRef::new("document"))),
+                    right: Box::new(Expr::Const(Const::String("amount".to_string()))),
                 }),
                 right: Box::new(Expr::Const(Const::Int(100))),
             }),
@@ -1781,19 +1575,15 @@ mod tests {
         let filtered = RelExpr::Filter {
             predicate: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("id"))),
                 right: Box::new(Expr::Const(Const::Int(42))),
             },
             input: Box::new(scan),
         };
 
-        let rec = to_rec_expr(&filtered)
-            .expect("conversion should succeed");
+        let rec = to_rec_expr(&filtered).expect("conversion should succeed");
         let initial_classes = {
-            let mut eg =
-                egg::EGraph::<RelLang, RelAnalysis>::default();
+            let mut eg = egg::EGraph::<RelLang, RelAnalysis>::default();
             eg.add_expr(&rec);
             eg.number_of_classes()
         };
@@ -1817,9 +1607,7 @@ mod tests {
 
         let scan = RelExpr::scan("orders");
         let agg = RelExpr::Aggregate {
-            group_by: vec![Expr::Column(
-                ColumnRef::new("customer_id"),
-            )],
+            group_by: vec![Expr::Column(ColumnRef::new("customer_id"))],
             aggregates: vec![AggregateExpr {
                 function: AggregateFunction::Sum,
                 arg: Some(Expr::Column(ColumnRef::new("amount"))),
@@ -1835,16 +1623,10 @@ mod tests {
                 op: BinOp::Eq,
                 left: Box::new(Expr::BinOp {
                     op: BinOp::JsonAccess,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("document"),
-                    )),
-                    right: Box::new(Expr::Const(Const::String(
-                        "status".to_string(),
-                    ))),
+                    left: Box::new(Expr::Column(ColumnRef::new("document"))),
+                    right: Box::new(Expr::Const(Const::String("status".to_string()))),
                 }),
-                right: Box::new(Expr::Const(Const::String(
-                    "completed".to_string(),
-                ))),
+                right: Box::new(Expr::Const(Const::String("completed".to_string()))),
             },
             input: Box::new(agg),
         };
@@ -1906,37 +1688,23 @@ mod tests {
     #[test]
     fn rum_opfamily_from_name() {
         assert_eq!(
-            BsonRumOpfamily::from_name(
-                "bson_extended_rum_single_path_ops"
-            ),
+            BsonRumOpfamily::from_name("bson_extended_rum_single_path_ops"),
             Some(BsonRumOpfamily::SinglePath)
         );
         assert_eq!(
-            BsonRumOpfamily::from_name(
-                "bson_extended_rum_composite_path_ops"
-            ),
+            BsonRumOpfamily::from_name("bson_extended_rum_composite_path_ops"),
             Some(BsonRumOpfamily::CompositePath)
         );
         assert_eq!(
-            BsonRumOpfamily::from_name(
-                "documentdb_extended_rum_hashed_ops"
-            ),
+            BsonRumOpfamily::from_name("documentdb_extended_rum_hashed_ops"),
             Some(BsonRumOpfamily::Hashed)
         );
         assert_eq!(
-            BsonRumOpfamily::from_name(
-                "bson_extended_rum_unique_shard_path_ops"
-            ),
+            BsonRumOpfamily::from_name("bson_extended_rum_unique_shard_path_ops"),
             Some(BsonRumOpfamily::UniqueShard)
         );
-        assert_eq!(
-            BsonRumOpfamily::from_name("gin_ops"),
-            None
-        );
-        assert_eq!(
-            BsonRumOpfamily::from_name(""),
-            None
-        );
+        assert_eq!(BsonRumOpfamily::from_name("gin_ops"), None);
+        assert_eq!(BsonRumOpfamily::from_name(""), None);
     }
 
     #[test]
@@ -1995,18 +1763,9 @@ mod tests {
             bson_op_to_rum_opfamily(BsonOperator::ElemMatch),
             Some(BsonRumOpfamily::SinglePath)
         );
-        assert_eq!(
-            bson_op_to_rum_opfamily(BsonOperator::Ne),
-            None
-        );
-        assert_eq!(
-            bson_op_to_rum_opfamily(BsonOperator::Nin),
-            None
-        );
-        assert_eq!(
-            bson_op_to_rum_opfamily(BsonOperator::Exists),
-            None
-        );
+        assert_eq!(bson_op_to_rum_opfamily(BsonOperator::Ne), None);
+        assert_eq!(bson_op_to_rum_opfamily(BsonOperator::Nin), None);
+        assert_eq!(bson_op_to_rum_opfamily(BsonOperator::Exists), None);
     }
 
     #[test]
@@ -2026,12 +1785,8 @@ mod tests {
     #[test]
     fn rum_bson_text_cheaper_than_gin_with_limit() {
         let rum_params = RumBsonCostParams::default();
-        let rum = rum_bson_text_scan_cost(
-            100_000.0, 0.1, Some(10), &rum_params,
-        );
-        let gin = gin_bson_equivalent_cost(
-            100_000.0, 0.1, true, Some(10),
-        );
+        let rum = rum_bson_text_scan_cost(100_000.0, 0.1, Some(10), &rum_params);
+        let gin = gin_bson_equivalent_cost(100_000.0, 0.1, true, Some(10));
         assert!(
             rum < gin,
             "RUM $text with limit should beat GIN: \
@@ -2042,12 +1797,8 @@ mod tests {
     #[test]
     fn rum_bson_text_without_limit_still_cheaper_for_ordered() {
         let rum_params = RumBsonCostParams::default();
-        let rum = rum_bson_text_scan_cost(
-            100_000.0, 0.01, None, &rum_params,
-        );
-        let gin = gin_bson_equivalent_cost(
-            100_000.0, 0.01, true, None,
-        );
+        let rum = rum_bson_text_scan_cost(100_000.0, 0.01, None, &rum_params);
+        let gin = gin_bson_equivalent_cost(100_000.0, 0.01, true, None);
         assert!(
             rum < gin,
             "RUM $text without limit should still beat GIN \
@@ -2058,13 +1809,9 @@ mod tests {
     #[test]
     fn rum_bson_near_very_cheap_with_limit() {
         let rum_params = RumBsonCostParams::default();
-        let rum = rum_bson_near_scan_cost(
-            1_000_000.0, Some(10), &rum_params,
-        );
+        let rum = rum_bson_near_scan_cost(1_000_000.0, Some(10), &rum_params);
         // $near via GIN requires scanning all rows + sort
-        let gin = gin_bson_equivalent_cost(
-            1_000_000.0, 0.1, true, Some(10),
-        );
+        let gin = gin_bson_equivalent_cost(1_000_000.0, 0.1, true, Some(10));
         assert!(
             rum < gin * 0.01,
             "RUM $near with limit 10 should be 100x+ cheaper: \
@@ -2075,9 +1822,7 @@ mod tests {
     #[test]
     fn rum_bson_array_cost_reasonable() {
         let rum_params = RumBsonCostParams::default();
-        let cost = rum_bson_array_scan_cost(
-            100_000.0, 0.001, 3, &rum_params,
-        );
+        let cost = rum_bson_array_scan_cost(100_000.0, 0.001, 3, &rum_params);
         assert!(
             cost > 0.0 && cost < 100_000.0,
             "RUM array cost should be between 0 and seq scan: \
@@ -2087,9 +1832,7 @@ mod tests {
 
     #[test]
     fn rum_vs_gin_text_ratio_with_limit() {
-        let ratio = rum_vs_gin_bson_text_ratio(
-            100_000.0, 0.1, Some(10),
-        );
+        let ratio = rum_vs_gin_bson_text_ratio(100_000.0, 0.1, Some(10));
         assert!(
             ratio < 0.5,
             "RUM should be 2x+ cheaper for $text with limit: \
@@ -2099,9 +1842,7 @@ mod tests {
 
     #[test]
     fn rum_vs_gin_near_ratio_with_limit() {
-        let ratio = rum_vs_gin_bson_near_ratio(
-            1_000_000.0, 0.01, Some(10),
-        );
+        let ratio = rum_vs_gin_bson_near_ratio(1_000_000.0, 0.01, Some(10));
         assert!(
             ratio < 0.1,
             "RUM should be 10x+ cheaper for $near with limit: \
@@ -2121,10 +1862,7 @@ mod tests {
             &[BsonOperator::Regex],
             true,
         );
-        assert!(
-            rec.is_some(),
-            "should recommend RUM for $regex queries"
-        );
+        assert!(rec.is_some(), "should recommend RUM for $regex queries");
         let rec = rec.unwrap_or_else(|| unreachable!());
         assert_eq!(rec.collection, "articles");
         assert_eq!(rec.opfamily, BsonRumOpfamily::SinglePath);
@@ -2136,19 +1874,13 @@ mod tests {
     fn recommend_rum_composite_for_multi_path() {
         let rec = evaluate_rum_bson_recommendation(
             "orders",
-            &[
-                "status".to_string(),
-                "total".to_string(),
-            ],
+            &["status".to_string(), "total".to_string()],
             1_000_000.0,
             0.01,
             &[BsonOperator::Gt, BsonOperator::Lte],
             true,
         );
-        assert!(
-            rec.is_some(),
-            "should recommend RUM for multi-path range"
-        );
+        assert!(rec.is_some(), "should recommend RUM for multi-path range");
         let rec = rec.unwrap_or_else(|| unreachable!());
         assert_eq!(rec.opfamily, BsonRumOpfamily::CompositePath);
         assert_eq!(rec.paths.len(), 2);
@@ -2271,9 +2003,7 @@ mod tests {
     fn combine_selectivities_damping_applied() {
         let sel_eq = BsonOperator::Eq.default_selectivity();
         let sel_gt = BsonOperator::Gt.default_selectivity();
-        let combined = combine_selectivities(
-            &[sel_eq, sel_gt],
-        );
+        let combined = combine_selectivities(&[sel_eq, sel_gt]);
         // With damping, combined > pure product
         assert!(
             combined > sel_eq * sel_gt,
@@ -2306,14 +2036,9 @@ mod tests {
     #[test]
     fn gin_scan_cost_scales_with_selectivity() {
         let params = GinBsonCostParams::default();
-        let selective =
-            gin_scan_cost(1_000_000.0, 0.001, 1, &params);
-        let broad =
-            gin_scan_cost(1_000_000.0, 0.5, 1, &params);
-        assert!(
-            selective < broad,
-            "more selective scan should be cheaper"
-        );
+        let selective = gin_scan_cost(1_000_000.0, 0.001, 1, &params);
+        let broad = gin_scan_cost(1_000_000.0, 0.5, 1, &params);
+        assert!(selective < broad, "more selective scan should be cheaper");
     }
 
     #[test]
@@ -2333,9 +2058,7 @@ mod tests {
     #[test]
     fn gin_vs_sequential_ratio_below_one_for_selective() {
         let params = GinBsonCostParams::default();
-        let ratio = gin_vs_sequential_ratio(
-            100_000.0, 0.001, 1, &params,
-        );
+        let ratio = gin_vs_sequential_ratio(100_000.0, 0.001, 1, &params);
         assert!(
             ratio < 1.0,
             "GIN should be cheaper for selective queries: {ratio}"
@@ -2345,9 +2068,7 @@ mod tests {
     #[test]
     fn gin_vs_sequential_ratio_above_one_for_broad() {
         let params = GinBsonCostParams::default();
-        let ratio = gin_vs_sequential_ratio(
-            100_000.0, 0.99, 1, &params,
-        );
+        let ratio = gin_vs_sequential_ratio(100_000.0, 0.99, 1, &params);
         assert!(
             ratio > 0.5,
             "GIN should not help much for broad scans: {ratio}"
@@ -2359,11 +2080,8 @@ mod tests {
     #[test]
     fn compound_gin_cheaper_than_multiple_single() {
         let params = GinBsonCostParams::default();
-        let compound = compound_gin_scan_cost(
-            100_000.0, 0.01, 3, &params,
-        );
-        let single =
-            gin_scan_cost(100_000.0, 0.01, 1, &params);
+        let compound = compound_gin_scan_cost(100_000.0, 0.01, 3, &params);
+        let single = gin_scan_cost(100_000.0, 0.01, 1, &params);
         assert!(
             compound < single * 3.0,
             "compound GIN should be cheaper than 3x single"
@@ -2437,57 +2155,31 @@ mod tests {
 
     #[test]
     fn selectivity_estimate_from_operator_heuristic() {
-        let est = estimate_selectivity(
-            BsonOperator::Eq,
-            None,
-            None,
-        );
-        assert!(
-            est.selectivity > 0.0 && est.selectivity < 1.0
-        );
-        assert_eq!(
-            est.source,
-            SelectivitySource::OperatorHeuristic
-        );
+        let est = estimate_selectivity(BsonOperator::Eq, None, None);
+        assert!(est.selectivity > 0.0 && est.selectivity < 1.0);
+        assert_eq!(est.source, SelectivitySource::OperatorHeuristic);
     }
 
     #[test]
     fn selectivity_estimate_from_index_stats() {
-        let est = estimate_selectivity(
-            BsonOperator::Eq,
-            Some(1000),
-            None,
-        );
+        let est = estimate_selectivity(BsonOperator::Eq, Some(1000), None);
         assert!(
             (est.selectivity - 0.001).abs() < 0.0001,
             "1/1000 ndistinct should give ~0.001"
         );
-        assert_eq!(
-            est.source,
-            SelectivitySource::IndexStats
-        );
+        assert_eq!(est.source, SelectivitySource::IndexStats);
     }
 
     #[test]
     fn selectivity_in_operator_with_array_length() {
-        let est = estimate_selectivity(
-            BsonOperator::In,
-            Some(100),
-            Some(5),
-        );
+        let est = estimate_selectivity(BsonOperator::In, Some(100), Some(5));
         // 1/100 * 5 = 0.05
-        assert!(
-            (est.selectivity - 0.05).abs() < 0.01
-        );
+        assert!((est.selectivity - 0.05).abs() < 0.01);
     }
 
     #[test]
     fn selectivity_all_operator_very_selective() {
-        let est = estimate_selectivity(
-            BsonOperator::All,
-            Some(100),
-            Some(3),
-        );
+        let est = estimate_selectivity(BsonOperator::All, Some(100), Some(3));
         // (1/100)^3 = 0.000001, clamped to 0.000001
         assert!(est.selectivity <= 0.001);
     }

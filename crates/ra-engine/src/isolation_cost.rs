@@ -13,9 +13,7 @@
 //! See RFC 0058 for the full design rationale.
 
 use ra_core::cost::Cost;
-use ra_core::isolation::{
-    BackendKind, IsolationLevel, MultiXactPressure, TransactionContext,
-};
+use ra_core::isolation::{BackendKind, IsolationLevel, MultiXactPressure, TransactionContext};
 
 /// Tunable weights for isolation-aware cost penalties.
 ///
@@ -97,10 +95,7 @@ impl PlanEstimates {
 
     /// Create estimates for an index-only scan.
     #[must_use]
-    pub fn index_only_scan(
-        index_pages: f64,
-        rows: f64,
-    ) -> Self {
+    pub fn index_only_scan(index_pages: f64, rows: f64) -> Self {
         Self {
             pages_accessed: index_pages,
             rows_accessed: rows,
@@ -113,11 +108,7 @@ impl PlanEstimates {
 
     /// Create estimates for an index scan with heap fetches.
     #[must_use]
-    pub fn index_scan(
-        index_pages: f64,
-        heap_pages: f64,
-        rows: f64,
-    ) -> Self {
+    pub fn index_scan(index_pages: f64, heap_pages: f64, rows: f64) -> Self {
         let total_pages = index_pages + heap_pages;
         Self {
             pages_accessed: total_pages,
@@ -152,12 +143,7 @@ pub fn isolation_cost_adjustment(
     let subxid = compute_subxid_penalty(txn, plan, config);
     let multixact = compute_multixact_penalty(txn, plan, config);
 
-    Cost::new(
-        lock + bloat + subxid + multixact,
-        0.0,
-        0.0,
-        0,
-    )
+    Cost::new(lock + bloat + subxid + multixact, 0.0, 0.0, 0)
 }
 
 /// Lock footprint penalty.
@@ -228,11 +214,8 @@ fn compute_bloat_penalty(
 
     match txn.backend {
         BackendKind::PostgreSQL | BackendKind::MySQLInnoDB => {
-            if txn.snapshot_age_ms > config.bloat_snapshot_threshold_ms
-            {
-                plan.estimated_runtime_ms
-                    * config.dead_tuple_rate
-                    * config.bloat_weight
+            if txn.snapshot_age_ms > config.bloat_snapshot_threshold_ms {
+                plan.estimated_runtime_ms * config.dead_tuple_rate * config.bloat_weight
             } else {
                 0.0
             }
@@ -240,8 +223,7 @@ fn compute_bloat_penalty(
         BackendKind::Oracle => {
             // Oracle SERIALIZABLE: undo retention pressure
             if txn.isolation_level == IsolationLevel::Serializable {
-                plan.estimated_runtime_ms
-                    * config.undo_retention_weight
+                plan.estimated_runtime_ms * config.undo_retention_weight
             } else {
                 0.0
             }
@@ -269,11 +251,8 @@ fn compute_subxid_penalty(
         return 0.0;
     }
 
-    let overflow_depth =
-        txn.subtransaction_depth - TransactionContext::PG_SUBXID_CACHE_LIMIT;
-    plan.visibility_checks
-        * f64::from(overflow_depth)
-        * config.subxid_weight
+    let overflow_depth = txn.subtransaction_depth - TransactionContext::PG_SUBXID_CACHE_LIMIT;
+    plan.visibility_checks * f64::from(overflow_depth) * config.subxid_weight
 }
 
 /// MultiXact avoidance penalty.
@@ -358,9 +337,7 @@ mod tests {
         let config = default_config();
         let plan = PlanEstimates::seq_scan(100.0, 5000.0);
         let penalty = compute_lock_penalty(&txn, &plan, &config);
-        assert!(
-            (penalty - config.lock_base_cost * 5000.0).abs() < 1e-10
-        );
+        assert!((penalty - config.lock_base_cost * 5000.0).abs() < 1e-10);
     }
 
     #[test]
@@ -437,9 +414,7 @@ mod tests {
         let config = default_config();
         let plan = PlanEstimates::seq_scan(100.0, 10000.0);
         let penalty = compute_bloat_penalty(&txn, &plan, &config);
-        let expected = plan.estimated_runtime_ms
-            * config.dead_tuple_rate
-            * config.bloat_weight;
+        let expected = plan.estimated_runtime_ms * config.dead_tuple_rate * config.bloat_weight;
         assert!((penalty - expected).abs() < 1e-10);
         assert!(penalty > 0.0);
     }
@@ -465,8 +440,7 @@ mod tests {
         let config = default_config();
         let plan = PlanEstimates::seq_scan(100.0, 10000.0);
         let penalty = compute_bloat_penalty(&txn, &plan, &config);
-        let expected =
-            plan.estimated_runtime_ms * config.undo_retention_weight;
+        let expected = plan.estimated_runtime_ms * config.undo_retention_weight;
         assert!((penalty - expected).abs() < 1e-10);
     }
 
@@ -537,8 +511,7 @@ mod tests {
         txn.multi_xact_pressure = MultiXactPressure::Medium;
         let config = default_config();
         let plan = PlanEstimates::seq_scan(100.0, 10000.0);
-        let penalty =
-            compute_multixact_penalty(&txn, &plan, &config);
+        let penalty = compute_multixact_penalty(&txn, &plan, &config);
         let expected = 10000.0 * config.multixact_weight * 0.5;
         assert!((penalty - expected).abs() < 1e-10);
     }
@@ -549,8 +522,7 @@ mod tests {
         txn.multi_xact_pressure = MultiXactPressure::High;
         let config = default_config();
         let plan = PlanEstimates::seq_scan(100.0, 10000.0);
-        let penalty =
-            compute_multixact_penalty(&txn, &plan, &config);
+        let penalty = compute_multixact_penalty(&txn, &plan, &config);
         let expected = 10000.0 * config.multixact_weight * 1.0;
         assert!((penalty - expected).abs() < 1e-10);
     }
@@ -564,10 +536,7 @@ mod tests {
         };
         let config = default_config();
         let plan = PlanEstimates::seq_scan(100.0, 10000.0);
-        assert_eq!(
-            compute_multixact_penalty(&txn, &plan, &config),
-            0.0
-        );
+        assert_eq!(compute_multixact_penalty(&txn, &plan, &config), 0.0);
     }
 
     // ── Combined adjustment ──────────────────────────────────────
@@ -585,14 +554,9 @@ mod tests {
         let lock = compute_lock_penalty(&txn, &plan, &config);
         let bloat = compute_bloat_penalty(&txn, &plan, &config);
         let subxid = compute_subxid_penalty(&txn, &plan, &config);
-        let multixact =
-            compute_multixact_penalty(&txn, &plan, &config);
+        let multixact = compute_multixact_penalty(&txn, &plan, &config);
 
-        let adj = isolation_cost_adjustment(
-            Some(&txn),
-            &plan,
-            &config,
-        );
+        let adj = isolation_cost_adjustment(Some(&txn), &plan, &config);
 
         let expected = lock + bloat + subxid + multixact;
         assert!((adj.cpu - expected).abs() < 1e-10);
@@ -607,10 +571,8 @@ mod tests {
         let seq = PlanEstimates::seq_scan(1000.0, 100_000.0);
         let idx = PlanEstimates::index_only_scan(50.0, 100.0);
 
-        let seq_adj =
-            isolation_cost_adjustment(Some(&txn), &seq, &config);
-        let idx_adj =
-            isolation_cost_adjustment(Some(&txn), &idx, &config);
+        let seq_adj = isolation_cost_adjustment(Some(&txn), &seq, &config);
+        let idx_adj = isolation_cost_adjustment(Some(&txn), &idx, &config);
 
         assert!(
             seq_adj.cpu > idx_adj.cpu,
@@ -630,10 +592,8 @@ mod tests {
         let wide = PlanEstimates::seq_scan(500.0, 50_000.0);
         let narrow = PlanEstimates::index_only_scan(10.0, 100.0);
 
-        let wide_adj =
-            isolation_cost_adjustment(Some(&txn), &wide, &config);
-        let narrow_adj =
-            isolation_cost_adjustment(Some(&txn), &narrow, &config);
+        let wide_adj = isolation_cost_adjustment(Some(&txn), &wide, &config);
+        let narrow_adj = isolation_cost_adjustment(Some(&txn), &narrow, &config);
 
         assert!(
             wide_adj.cpu > narrow_adj.cpu,

@@ -148,8 +148,12 @@ pub fn assert_hardware_affects_cost(input: RelExpr) {
     let mut opt_gpu = Optimizer::new();
     opt_gpu.set_hardware_profile(HardwareProfile::gpu_server());
 
-    let result_cpu = opt_cpu.optimize(&input).expect("CPU optimization should succeed");
-    let result_gpu = opt_gpu.optimize(&input).expect("GPU optimization should succeed");
+    let result_cpu = opt_cpu
+        .optimize(&input)
+        .expect("CPU optimization should succeed");
+    let result_gpu = opt_gpu
+        .optimize(&input)
+        .expect("GPU optimization should succeed");
 
     // Note: Currently both may produce same logical plan since we don't
     // have algorithm selection yet. This validates the mechanism works.

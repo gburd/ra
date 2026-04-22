@@ -11,9 +11,7 @@
 
 #![allow(clippy::expect_used)]
 
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::RelExpr;
 use ra_core::statistics::Statistics;
 use ra_core::EmptyFactsProvider;
@@ -74,11 +72,7 @@ fn load_queries() -> Vec<(String, RelExpr)> {
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map_or(false, |ext| ext == "sql")
-        })
+        .filter(|e| e.path().extension().map_or(false, |ext| ext == "sql"))
         .collect();
     entries.sort_by_key(|e| e.file_name());
 
@@ -93,9 +87,7 @@ fn load_queries() -> Vec<(String, RelExpr)> {
                 .expect("valid utf8")
                 .to_owned();
             let sql = fs::read_to_string(&path)
-                .unwrap_or_else(|e| {
-                    panic!("cannot read {}: {e}", path.display())
-                });
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
             match sql_to_relexpr(&sql) {
                 Ok(relexpr) => Some((query_id, relexpr)),
                 Err(e) => {
@@ -114,17 +106,11 @@ fn bench_job_optimize_all(c: &mut Criterion) {
     let mut group = c.benchmark_group("job_optimize");
 
     for (name, plan) in &queries {
-        group.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     group.finish();
 }
@@ -175,56 +161,34 @@ fn bench_job_by_category(c: &mut Criterion) {
 
     let mut grp = c.benchmark_group("job_simple");
     for (name, plan) in &simple {
-        grp.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        grp.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     grp.finish();
 
     let mut grp = c.benchmark_group("job_medium");
     for (name, plan) in &medium {
-        grp.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        grp.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     grp.finish();
 
     let mut grp = c.benchmark_group("job_complex");
     for (name, plan) in &complex {
-        grp.bench_with_input(
-            BenchmarkId::new("optimize", name),
-            plan,
-            |b, p| {
-                b.iter(|| {
-                    let _ = black_box(
-                        optimizer.optimize_with_facts(p, &facts),
-                    );
-                });
-            },
-        );
+        grp.bench_with_input(BenchmarkId::new("optimize", name), plan, |b, p| {
+            b.iter(|| {
+                let _ = black_box(optimizer.optimize_with_facts(p, &facts));
+            });
+        });
     }
     grp.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_job_optimize_all,
-    bench_job_by_category,
-);
+criterion_group!(benches, bench_job_optimize_all, bench_job_by_category,);
 criterion_main!(benches);

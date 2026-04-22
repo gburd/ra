@@ -8,11 +8,11 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use rand::prelude::*;
 use ra_core::{
     algebra::{JoinType, RelExpr},
     cost::{CostModel, StatisticsProvider},
 };
+use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Strategy for optimizing large join graphs.
@@ -113,19 +113,25 @@ impl LargeJoinOptimizer {
                 .iter()
                 .enumerate()
                 .map(|(i, join)| {
-                    let candidate = self.create_join(&current, &join.to_scan(), join.condition.as_ref())?;
-                    let cost = self.cost_model.estimate(&candidate, self.stats_provider.as_ref());
+                    let candidate =
+                        self.create_join(&current, &join.to_scan(), join.condition.as_ref())?;
+                    let cost = self
+                        .cost_model
+                        .estimate(&candidate, self.stats_provider.as_ref());
                     Ok((i, cost))
                 })
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
                 .min_by(|(_, a), (_, b)| {
-                    a.total().partial_cmp(&b.total()).unwrap_or(std::cmp::Ordering::Equal)
+                    a.total()
+                        .partial_cmp(&b.total())
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .ok_or_else(|| anyhow!("No valid join found"))?;
 
             let next_join = joins.swap_remove(best_idx);
-            current = self.create_join(&current, &next_join.to_scan(), next_join.condition.as_ref())?;
+            current =
+                self.create_join(&current, &next_join.to_scan(), next_join.condition.as_ref())?;
         }
 
         Ok(current)
@@ -137,7 +143,8 @@ impl LargeJoinOptimizer {
             .iter()
             .enumerate()
             .map(|(i, j)| {
-                let stats = self.stats_provider
+                let stats = self
+                    .stats_provider
                     .get_statistics(&j.table)
                     .ok_or_else(|| anyhow!("No statistics for table {}", j.table))?;
                 Ok((i, stats.row_count))
@@ -176,7 +183,9 @@ impl LargeJoinOptimizer {
 
         // 1. Start with greedy initial solution
         let mut current = self.greedy_join_order(joins.clone())?;
-        let mut current_cost = self.cost_model.estimate(&current, self.stats_provider.as_ref());
+        let mut current_cost = self
+            .cost_model
+            .estimate(&current, self.stats_provider.as_ref());
         let mut best = current.clone();
         let mut best_cost = current_cost.clone();
 
@@ -201,7 +210,9 @@ impl LargeJoinOptimizer {
                 Err(_) => continue, // Skip if perturbation fails
             };
 
-            let neighbor_cost = self.cost_model.estimate(&neighbor, self.stats_provider.as_ref());
+            let neighbor_cost = self
+                .cost_model
+                .estimate(&neighbor, self.stats_provider.as_ref());
 
             // Accept if better, or probabilistically if worse
             let delta = neighbor_cost.total() - current_cost.total();
@@ -258,9 +269,7 @@ impl LargeJoinOptimizer {
     /// Count the number of tables in a relational expression.
     pub fn count_tables(expr: &RelExpr) -> usize {
         match expr {
-            RelExpr::Scan { .. }
-            | RelExpr::IndexScan { .. }
-            | RelExpr::IndexOnlyScan { .. } => 1,
+            RelExpr::Scan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => 1,
             RelExpr::Filter { input, .. } => Self::count_tables(input),
             RelExpr::Project { input, .. } => Self::count_tables(input),
             RelExpr::Join { left, right, .. } => {
@@ -278,14 +287,17 @@ impl LargeJoinOptimizer {
             RelExpr::Except { left, right, .. } => {
                 Self::count_tables(left).max(Self::count_tables(right))
             }
-            RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
-                Self::count_tables(base_case)
-                    .max(Self::count_tables(recursive_case))
-                    .max(Self::count_tables(body))
-            }
-            RelExpr::CTE { definition, body, .. } => {
-                Self::count_tables(definition).max(Self::count_tables(body))
-            }
+            RelExpr::RecursiveCTE {
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => Self::count_tables(base_case)
+                .max(Self::count_tables(recursive_case))
+                .max(Self::count_tables(body)),
+            RelExpr::CTE {
+                definition, body, ..
+            } => Self::count_tables(definition).max(Self::count_tables(body)),
             RelExpr::Window { input, .. } => Self::count_tables(input),
             RelExpr::Distinct { input } => Self::count_tables(input),
             RelExpr::Values { .. } => 0,
@@ -297,7 +309,9 @@ impl LargeJoinOptimizer {
             RelExpr::BitmapHeapScan { bitmap, .. } => Self::count_tables(bitmap),
             RelExpr::Unnest { input, .. } => input.as_ref().map_or(0, |i| Self::count_tables(i)),
             RelExpr::MultiUnnest { .. } => 0,
-            RelExpr::TableFunction { input, .. } => input.as_ref().map_or(0, |i| Self::count_tables(i)),
+            RelExpr::TableFunction { input, .. } => {
+                input.as_ref().map_or(0, |i| Self::count_tables(i))
+            }
             RelExpr::IncrementalSort { input, .. } => Self::count_tables(input),
             RelExpr::ParallelScan { .. } => 1,
             RelExpr::ParallelHashJoin { left, right, .. } => {
@@ -357,7 +371,10 @@ impl LargeJoinOptimizer {
                 Self::extract_joins_recursive(right, joins);
             }
             RelExpr::RecursiveCTE {
-                base_case, recursive_case, body, ..
+                base_case,
+                recursive_case,
+                body,
+                ..
             } => {
                 Self::extract_joins_recursive(base_case, joins);
                 Self::extract_joins_recursive(recursive_case, joins);
@@ -377,7 +394,13 @@ impl LargeJoinOptimizer {
                     Self::extract_joins_recursive(input, joins);
                 }
             }
-            RelExpr::Values { .. } | RelExpr::BitmapIndexScan { .. } | RelExpr::MultiUnnest { .. } | RelExpr::ParallelScan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } | RelExpr::MvScan { .. } => {
+            RelExpr::Values { .. }
+            | RelExpr::BitmapIndexScan { .. }
+            | RelExpr::MultiUnnest { .. }
+            | RelExpr::ParallelScan { .. }
+            | RelExpr::IndexScan { .. }
+            | RelExpr::IndexOnlyScan { .. }
+            | RelExpr::MvScan { .. } => {
                 // Leaf nodes, no joins to extract
             }
             RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
@@ -385,7 +408,9 @@ impl LargeJoinOptimizer {
                     Self::extract_joins_recursive(inp, joins);
                 }
             }
-            RelExpr::IncrementalSort { input, .. } | RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
+            RelExpr::IncrementalSort { input, .. }
+            | RelExpr::ParallelAggregate { input, .. }
+            | RelExpr::Gather { input, .. } => {
                 Self::extract_joins_recursive(input, joins);
             }
             RelExpr::ParallelHashJoin { left, right, .. } => {
@@ -412,13 +437,8 @@ mod tests {
     struct MockCostModel;
 
     impl CostModel for MockCostModel {
-        fn estimate(
-            &self,
-            expr: &RelExpr,
-            _stats: &dyn StatisticsProvider,
-        ) -> Cost {
-            let tables =
-                LargeJoinOptimizer::count_tables(expr);
+        fn estimate(&self, expr: &RelExpr, _stats: &dyn StatisticsProvider) -> Cost {
+            let tables = LargeJoinOptimizer::count_tables(expr);
             Cost::new(tables as f64 * 10.0, 0.0, 0.0, 0)
         }
     }
@@ -432,20 +452,14 @@ mod tests {
         fn new(entries: &[(&str, f64)]) -> Self {
             let mut stats = HashMap::new();
             for &(name, rows) in entries {
-                stats.insert(
-                    name.to_string(),
-                    Statistics::new(rows),
-                );
+                stats.insert(name.to_string(), Statistics::new(rows));
             }
             Self { stats }
         }
     }
 
     impl StatisticsProvider for MockStats {
-        fn get_statistics(
-            &self,
-            table: &str,
-        ) -> Option<&Statistics> {
+        fn get_statistics(&self, table: &str) -> Option<&Statistics> {
             self.stats.get(table)
         }
     }
@@ -484,10 +498,7 @@ mod tests {
 
     #[test]
     fn count_tables_single_scan() {
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&scan("t")),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&scan("t")), 1,);
     }
 
     #[test]
@@ -515,10 +526,7 @@ mod tests {
             left: Box::new(inner),
             right: Box::new(scan("c")),
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&outer),
-            3,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&outer), 3,);
     }
 
     #[test]
@@ -537,10 +545,7 @@ mod tests {
             columns: vec![],
             input: Box::new(filtered),
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&projected),
-            2,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&projected), 2,);
     }
 
     #[test]
@@ -559,10 +564,7 @@ mod tests {
             keys: vec![],
             input: Box::new(scan("t")),
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&sorted),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&sorted), 1,);
     }
 
     #[test]
@@ -572,10 +574,7 @@ mod tests {
             offset: 0,
             input: Box::new(scan("t")),
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&limited),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&limited), 1,);
     }
 
     #[test]
@@ -649,8 +648,7 @@ mod tests {
 
     #[test]
     fn extract_joins_single_scan() {
-        let joins =
-            LargeJoinOptimizer::extract_joins(&scan("t"));
+        let joins = LargeJoinOptimizer::extract_joins(&scan("t"));
         assert_eq!(joins.len(), 1);
         assert_eq!(joins[0].table, "t");
         assert!(joins[0].alias.is_none());
@@ -664,10 +662,7 @@ mod tests {
         };
         let joins = LargeJoinOptimizer::extract_joins(&expr);
         assert_eq!(joins.len(), 1);
-        assert_eq!(
-            joins[0].alias,
-            Some("u".to_string()),
-        );
+        assert_eq!(joins[0].alias, Some("u".to_string()),);
     }
 
     #[test]
@@ -695,8 +690,7 @@ mod tests {
                 right: Box::new(scan("y")),
             }),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&filtered);
+        let joins = LargeJoinOptimizer::extract_joins(&filtered);
         assert_eq!(joins.len(), 2);
     }
 
@@ -714,8 +708,7 @@ mod tests {
             left: Box::new(inner),
             right: Box::new(scan("c")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&outer);
+        let joins = LargeJoinOptimizer::extract_joins(&outer);
         assert_eq!(joins.len(), 3);
     }
 
@@ -769,14 +762,8 @@ mod tests {
                 cooling_rate,
                 max_iterations,
             } => {
-                assert!(
-                    (initial_temp - 1000.0).abs()
-                        < f64::EPSILON,
-                );
-                assert!(
-                    (cooling_rate - 0.95).abs()
-                        < f64::EPSILON,
-                );
+                assert!((initial_temp - 1000.0).abs() < f64::EPSILON,);
+                assert!((cooling_rate - 0.95).abs() < f64::EPSILON,);
                 assert_eq!(max_iterations, 10000);
             }
             _ => panic!("Expected SimulatedAnnealing"),
@@ -787,20 +774,15 @@ mod tests {
 
     #[test]
     fn greedy_empty_joins_returns_error() {
-        let opt =
-            make_optimizer(LargeJoinStrategy::Greedy, &[]);
+        let opt = make_optimizer(LargeJoinStrategy::Greedy, &[]);
         let result = opt.optimize(vec![]);
         assert!(result.is_err());
     }
 
     #[test]
     fn greedy_single_table_returns_scan() {
-        let opt = make_optimizer(
-            LargeJoinStrategy::Greedy,
-            &[("t", 100.0)],
-        );
-        let result =
-            opt.optimize(vec![make_join_node("t")]);
+        let opt = make_optimizer(LargeJoinStrategy::Greedy, &[("t", 100.0)]);
+        let result = opt.optimize(vec![make_join_node("t")]);
         assert!(result.is_ok());
         let expr = result.unwrap();
         match &expr {
@@ -817,22 +799,15 @@ mod tests {
             LargeJoinStrategy::Greedy,
             &[("big", 10000.0), ("small", 10.0)],
         );
-        let joins = vec![
-            make_join_node("big"),
-            make_join_node("small"),
-        ];
+        let joins = vec![make_join_node("big"), make_join_node("small")];
         let result = opt.optimize(joins).unwrap();
         match &result {
-            RelExpr::Join { left, .. } => {
-                match left.as_ref() {
-                    RelExpr::Scan { table, .. } => {
-                        assert_eq!(table, "small");
-                    }
-                    _ => panic!(
-                        "Expected Scan as left child"
-                    ),
+            RelExpr::Join { left, .. } => match left.as_ref() {
+                RelExpr::Scan { table, .. } => {
+                    assert_eq!(table, "small");
                 }
-            }
+                _ => panic!("Expected Scan as left child"),
+            },
             _ => panic!("Expected Join"),
         }
     }
@@ -841,11 +816,7 @@ mod tests {
     fn greedy_three_tables_produces_valid_plan() {
         let opt = make_optimizer(
             LargeJoinStrategy::Greedy,
-            &[
-                ("a", 100.0),
-                ("b", 200.0),
-                ("c", 50.0),
-            ],
+            &[("a", 100.0), ("b", 200.0), ("c", 50.0)],
         );
         let joins = vec![
             make_join_node("a"),
@@ -853,22 +824,13 @@ mod tests {
             make_join_node("c"),
         ];
         let result = opt.optimize(joins).unwrap();
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&result),
-            3,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&result), 3,);
     }
 
     #[test]
     fn greedy_missing_stats_returns_error() {
-        let opt = make_optimizer(
-            LargeJoinStrategy::Greedy,
-            &[("a", 100.0)],
-        );
-        let joins = vec![
-            make_join_node("a"),
-            make_join_node("unknown"),
-        ];
+        let opt = make_optimizer(LargeJoinStrategy::Greedy, &[("a", 100.0)]);
+        let joins = vec![make_join_node("a"), make_join_node("unknown")];
         let result = opt.optimize(joins);
         assert!(result.is_err());
     }
@@ -877,12 +839,8 @@ mod tests {
 
     #[test]
     fn egraph_strategy_returns_error() {
-        let opt = make_optimizer(
-            LargeJoinStrategy::EGraph,
-            &[("t", 100.0)],
-        );
-        let result =
-            opt.optimize(vec![make_join_node("t")]);
+        let opt = make_optimizer(LargeJoinStrategy::EGraph, &[("t", 100.0)]);
+        let result = opt.optimize(vec![make_join_node("t")]);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("EGraph"));
@@ -892,10 +850,7 @@ mod tests {
 
     #[test]
     fn annealing_empty_joins_returns_error() {
-        let opt = make_optimizer(
-            LargeJoinStrategy::default(),
-            &[],
-        );
+        let opt = make_optimizer(LargeJoinStrategy::default(), &[]);
         let result = opt.optimize(vec![]);
         assert!(result.is_err());
     }
@@ -910,8 +865,7 @@ mod tests {
             },
             &[("t", 100.0)],
         );
-        let result =
-            opt.optimize(vec![make_join_node("t")]);
+        let result = opt.optimize(vec![make_join_node("t")]);
         assert!(result.is_ok());
     }
 
@@ -925,15 +879,9 @@ mod tests {
             },
             &[("a", 500.0), ("b", 100.0)],
         );
-        let joins = vec![
-            make_join_node("a"),
-            make_join_node("b"),
-        ];
+        let joins = vec![make_join_node("a"), make_join_node("b")];
         let result = opt.optimize(joins).unwrap();
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&result),
-            2,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&result), 2,);
     }
 
     #[test]
@@ -946,10 +894,7 @@ mod tests {
             },
             &[("a", 100.0), ("b", 200.0)],
         );
-        let joins = vec![
-            make_join_node("a"),
-            make_join_node("b"),
-        ];
+        let joins = vec![make_join_node("a"), make_join_node("b")];
         let result = opt.optimize(joins);
         assert!(result.is_ok());
     }
@@ -960,19 +905,14 @@ mod tests {
     fn find_smallest_picks_smallest_cardinality() {
         let opt = make_optimizer(
             LargeJoinStrategy::Greedy,
-            &[
-                ("big", 10000.0),
-                ("mid", 500.0),
-                ("small", 10.0),
-            ],
+            &[("big", 10000.0), ("mid", 500.0), ("small", 10.0)],
         );
         let joins = vec![
             make_join_node("big"),
             make_join_node("mid"),
             make_join_node("small"),
         ];
-        let idx =
-            opt.find_smallest_relation(&joins).unwrap();
+        let idx = opt.find_smallest_relation(&joins).unwrap();
         assert_eq!(joins[idx].table, "small");
     }
 
@@ -980,14 +920,9 @@ mod tests {
 
     #[test]
     fn create_join_with_condition() {
-        let opt =
-            make_optimizer(LargeJoinStrategy::Greedy, &[]);
+        let opt = make_optimizer(LargeJoinStrategy::Greedy, &[]);
         let cond = Expr::Const(Const::Bool(true));
-        let result = opt.create_join(
-            &scan("a"),
-            &scan("b"),
-            Some(&cond),
-        );
+        let result = opt.create_join(&scan("a"), &scan("b"), Some(&cond));
         assert!(result.is_ok());
         match result.unwrap() {
             RelExpr::Join {
@@ -995,14 +930,8 @@ mod tests {
                 condition,
                 ..
             } => {
-                assert!(matches!(
-                    join_type,
-                    JoinType::Inner,
-                ));
-                assert!(matches!(
-                    condition,
-                    Expr::Const(Const::Bool(true)),
-                ));
+                assert!(matches!(join_type, JoinType::Inner,));
+                assert!(matches!(condition, Expr::Const(Const::Bool(true)),));
             }
             _ => panic!("Expected Join"),
         }
@@ -1010,17 +939,12 @@ mod tests {
 
     #[test]
     fn create_join_without_condition_uses_true() {
-        let opt =
-            make_optimizer(LargeJoinStrategy::Greedy, &[]);
-        let result =
-            opt.create_join(&scan("a"), &scan("b"), None);
+        let opt = make_optimizer(LargeJoinStrategy::Greedy, &[]);
+        let result = opt.create_join(&scan("a"), &scan("b"), None);
         assert!(result.is_ok());
         match result.unwrap() {
             RelExpr::Join { condition, .. } => {
-                assert!(matches!(
-                    condition,
-                    Expr::Const(Const::Bool(true)),
-                ));
+                assert!(matches!(condition, Expr::Const(Const::Bool(true)),));
             }
             _ => panic!("Expected Join"),
         }
@@ -1030,30 +954,21 @@ mod tests {
 
     #[test]
     fn strategy_serialization_roundtrip() {
-        let strategy =
-            LargeJoinStrategy::SimulatedAnnealing {
-                initial_temp: 500.0,
-                cooling_rate: 0.99,
-                max_iterations: 5000,
-            };
-        let json =
-            serde_json::to_string(&strategy).unwrap();
-        let restored: LargeJoinStrategy =
-            serde_json::from_str(&json).unwrap();
+        let strategy = LargeJoinStrategy::SimulatedAnnealing {
+            initial_temp: 500.0,
+            cooling_rate: 0.99,
+            max_iterations: 5000,
+        };
+        let json = serde_json::to_string(&strategy).unwrap();
+        let restored: LargeJoinStrategy = serde_json::from_str(&json).unwrap();
         match restored {
             LargeJoinStrategy::SimulatedAnnealing {
                 initial_temp,
                 cooling_rate,
                 max_iterations,
             } => {
-                assert!(
-                    (initial_temp - 500.0).abs()
-                        < f64::EPSILON,
-                );
-                assert!(
-                    (cooling_rate - 0.99).abs()
-                        < f64::EPSILON,
-                );
+                assert!((initial_temp - 500.0).abs() < f64::EPSILON,);
+                assert!((cooling_rate - 0.99).abs() < f64::EPSILON,);
                 assert_eq!(max_iterations, 5000);
             }
             _ => panic!("Wrong variant"),
@@ -1063,27 +978,17 @@ mod tests {
     #[test]
     fn greedy_strategy_serialization() {
         let strategy = LargeJoinStrategy::Greedy;
-        let json =
-            serde_json::to_string(&strategy).unwrap();
-        let restored: LargeJoinStrategy =
-            serde_json::from_str(&json).unwrap();
-        assert!(matches!(
-            restored,
-            LargeJoinStrategy::Greedy,
-        ));
+        let json = serde_json::to_string(&strategy).unwrap();
+        let restored: LargeJoinStrategy = serde_json::from_str(&json).unwrap();
+        assert!(matches!(restored, LargeJoinStrategy::Greedy,));
     }
 
     #[test]
     fn egraph_strategy_serialization() {
         let strategy = LargeJoinStrategy::EGraph;
-        let json =
-            serde_json::to_string(&strategy).unwrap();
-        let restored: LargeJoinStrategy =
-            serde_json::from_str(&json).unwrap();
-        assert!(matches!(
-            restored,
-            LargeJoinStrategy::EGraph,
-        ));
+        let json = serde_json::to_string(&strategy).unwrap();
+        let restored: LargeJoinStrategy = serde_json::from_str(&json).unwrap();
+        assert!(matches!(restored, LargeJoinStrategy::EGraph,));
     }
 
     // ---- count_tables: rare variant coverage ----
@@ -1103,10 +1008,7 @@ mod tests {
             cycle_detection: None,
         };
         // max(1, 1, 2) = 2
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&rcte),
-            2,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&rcte), 2,);
     }
 
     #[test]
@@ -1122,17 +1024,12 @@ mod tests {
             body: Box::new(scan("c")),
         };
         // max(2, 1) = 2
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&cte),
-            2,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&cte), 2,);
     }
 
     #[test]
     fn count_tables_row_pattern() {
-        use ra_core::row_pattern::{
-            MatchMode, PatternExpr, SkipMode,
-        };
+        use ra_core::row_pattern::{MatchMode, PatternExpr, SkipMode};
         let rp = RelExpr::RowPattern {
             input: Box::new(scan("t")),
             partition_by: vec![],
@@ -1143,10 +1040,7 @@ mod tests {
             mode: MatchMode::OneRowPerMatch,
             skip_mode: SkipMode::PastLastRow,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&rp),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&rp), 1,);
     }
 
     #[test]
@@ -1156,10 +1050,7 @@ mod tests {
             index: "idx".to_string(),
             predicate: true_expr(),
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&bis),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&bis), 1,);
     }
 
     #[test]
@@ -1178,10 +1069,7 @@ mod tests {
                 }),
             ],
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&ba),
-            2,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&ba), 2,);
     }
 
     #[test]
@@ -1193,10 +1081,7 @@ mod tests {
                 predicate: true_expr(),
             })],
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&bo),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&bo), 1,);
     }
 
     #[test]
@@ -1210,10 +1095,7 @@ mod tests {
             }),
             recheck_cond: None,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&bhs),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&bhs), 1,);
     }
 
     #[test]
@@ -1224,10 +1106,7 @@ mod tests {
             input: Some(Box::new(scan("t"))),
             with_ordinality: false,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&u),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&u), 1,);
     }
 
     #[test]
@@ -1238,10 +1117,7 @@ mod tests {
             input: None,
             with_ordinality: false,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&u),
-            0,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&u), 0,);
     }
 
     #[test]
@@ -1251,10 +1127,7 @@ mod tests {
             aliases: vec![],
             with_ordinality: false,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&mu),
-            0,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&mu), 0,);
     }
 
     #[test]
@@ -1265,10 +1138,7 @@ mod tests {
             columns: vec![],
             input: Some(Box::new(scan("t"))),
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&tf),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&tf), 1,);
     }
 
     #[test]
@@ -1278,10 +1148,7 @@ mod tests {
             suffix_keys: vec![],
             input: Box::new(scan("t")),
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&isort),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&isort), 1,);
     }
 
     #[test]
@@ -1290,10 +1157,7 @@ mod tests {
             table: "t".to_string(),
             workers: 4,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&ps),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&ps), 1,);
     }
 
     #[test]
@@ -1305,10 +1169,7 @@ mod tests {
             right: Box::new(scan("b")),
             workers: 4,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&phj),
-            2,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&phj), 2,);
     }
 
     #[test]
@@ -1319,10 +1180,7 @@ mod tests {
             input: Box::new(scan("t")),
             workers: 4,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&pa),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&pa), 1,);
     }
 
     #[test]
@@ -1331,10 +1189,7 @@ mod tests {
             input: Box::new(scan("t")),
             workers: 4,
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&g),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&g), 1,);
     }
 
     #[test]
@@ -1350,10 +1205,7 @@ mod tests {
             }],
             predicate: true_expr(),
         };
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&ios),
-            1,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&ios), 1,);
     }
 
     // ---- extract_joins: rare variant coverage ----
@@ -1364,8 +1216,7 @@ mod tests {
             columns: vec![],
             input: Box::new(scan("t")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&projected);
+        let joins = LargeJoinOptimizer::extract_joins(&projected);
         assert_eq!(joins.len(), 1);
         assert_eq!(joins[0].table, "t");
     }
@@ -1377,8 +1228,7 @@ mod tests {
             aggregates: vec![],
             input: Box::new(scan("t")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&agg);
+        let joins = LargeJoinOptimizer::extract_joins(&agg);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1388,8 +1238,7 @@ mod tests {
             keys: vec![],
             input: Box::new(scan("t")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&sorted);
+        let joins = LargeJoinOptimizer::extract_joins(&sorted);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1400,8 +1249,7 @@ mod tests {
             offset: 0,
             input: Box::new(scan("t")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&limited);
+        let joins = LargeJoinOptimizer::extract_joins(&limited);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1411,8 +1259,7 @@ mod tests {
             functions: vec![],
             input: Box::new(scan("t")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&w);
+        let joins = LargeJoinOptimizer::extract_joins(&w);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1421,16 +1268,13 @@ mod tests {
         let d = RelExpr::Distinct {
             input: Box::new(scan("t")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&d);
+        let joins = LargeJoinOptimizer::extract_joins(&d);
         assert_eq!(joins.len(), 1);
     }
 
     #[test]
     fn extract_joins_through_row_pattern() {
-        use ra_core::row_pattern::{
-            MatchMode, PatternExpr, SkipMode,
-        };
+        use ra_core::row_pattern::{MatchMode, PatternExpr, SkipMode};
         let rp = RelExpr::RowPattern {
             input: Box::new(scan("t")),
             partition_by: vec![],
@@ -1441,8 +1285,7 @@ mod tests {
             mode: MatchMode::OneRowPerMatch,
             skip_mode: SkipMode::PastLastRow,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&rp);
+        let joins = LargeJoinOptimizer::extract_joins(&rp);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1453,8 +1296,7 @@ mod tests {
             right: Box::new(scan("b")),
             all: true,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&u);
+        let joins = LargeJoinOptimizer::extract_joins(&u);
         assert_eq!(joins.len(), 2);
     }
 
@@ -1465,8 +1307,7 @@ mod tests {
             right: Box::new(scan("b")),
             all: false,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&i);
+        let joins = LargeJoinOptimizer::extract_joins(&i);
         assert_eq!(joins.len(), 2);
     }
 
@@ -1477,8 +1318,7 @@ mod tests {
             right: Box::new(scan("b")),
             all: false,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&e);
+        let joins = LargeJoinOptimizer::extract_joins(&e);
         assert_eq!(joins.len(), 2);
     }
 
@@ -1491,8 +1331,7 @@ mod tests {
             body: Box::new(scan("c")),
             cycle_detection: None,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&rcte);
+        let joins = LargeJoinOptimizer::extract_joins(&rcte);
         assert_eq!(joins.len(), 3);
     }
 
@@ -1503,8 +1342,7 @@ mod tests {
             definition: Box::new(scan("a")),
             body: Box::new(scan("b")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&cte);
+        let joins = LargeJoinOptimizer::extract_joins(&cte);
         assert_eq!(joins.len(), 2);
     }
 
@@ -1519,8 +1357,7 @@ mod tests {
             }),
             recheck_cond: None,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&bhs);
+        let joins = LargeJoinOptimizer::extract_joins(&bhs);
         // BitmapIndexScan is a leaf, nothing extracted
         assert!(joins.is_empty());
     }
@@ -1541,24 +1378,20 @@ mod tests {
                 }),
             ],
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&ba);
+        let joins = LargeJoinOptimizer::extract_joins(&ba);
         assert!(joins.is_empty());
     }
 
     #[test]
     fn extract_joins_bitmap_or() {
         let bo = RelExpr::BitmapOr {
-            inputs: vec![Box::new(
-                RelExpr::BitmapIndexScan {
-                    table: "t".to_string(),
-                    index: "idx".to_string(),
-                    predicate: true_expr(),
-                },
-            )],
+            inputs: vec![Box::new(RelExpr::BitmapIndexScan {
+                table: "t".to_string(),
+                index: "idx".to_string(),
+                predicate: true_expr(),
+            })],
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&bo);
+        let joins = LargeJoinOptimizer::extract_joins(&bo);
         assert!(joins.is_empty());
     }
 
@@ -1568,61 +1401,50 @@ mod tests {
         use ra_core::expr::ColumnRef;
 
         // Values
-        assert!(LargeJoinOptimizer::extract_joins(
-            &RelExpr::Values { rows: vec![] }
-        )
-        .is_empty());
+        assert!(LargeJoinOptimizer::extract_joins(&RelExpr::Values { rows: vec![] }).is_empty());
 
         // BitmapIndexScan
-        assert!(LargeJoinOptimizer::extract_joins(
-            &RelExpr::BitmapIndexScan {
+        assert!(
+            LargeJoinOptimizer::extract_joins(&RelExpr::BitmapIndexScan {
                 table: "t".to_string(),
                 index: "idx".to_string(),
                 predicate: true_expr(),
-            }
-        )
-        .is_empty());
+            })
+            .is_empty()
+        );
 
         // MultiUnnest
-        assert!(LargeJoinOptimizer::extract_joins(
-            &RelExpr::MultiUnnest {
-                exprs: vec![],
-                aliases: vec![],
-                with_ordinality: false,
-            }
-        )
+        assert!(LargeJoinOptimizer::extract_joins(&RelExpr::MultiUnnest {
+            exprs: vec![],
+            aliases: vec![],
+            with_ordinality: false,
+        })
         .is_empty());
 
         // ParallelScan
-        assert!(LargeJoinOptimizer::extract_joins(
-            &RelExpr::ParallelScan {
-                table: "t".to_string(),
-                workers: 4,
-            }
-        )
+        assert!(LargeJoinOptimizer::extract_joins(&RelExpr::ParallelScan {
+            table: "t".to_string(),
+            workers: 4,
+        })
         .is_empty());
 
         // IndexScan
-        assert!(LargeJoinOptimizer::extract_joins(
-            &RelExpr::IndexScan {
-                table: "t".to_string(),
-                column: "id".to_string(),
-            }
-        )
+        assert!(LargeJoinOptimizer::extract_joins(&RelExpr::IndexScan {
+            table: "t".to_string(),
+            column: "id".to_string(),
+        })
         .is_empty());
 
         // IndexOnlyScan
-        assert!(LargeJoinOptimizer::extract_joins(
-            &RelExpr::IndexOnlyScan {
-                table: "t".to_string(),
-                index: "idx".to_string(),
-                columns: vec![ProjectionColumn {
-                    expr: Expr::Column(ColumnRef::new("id")),
-                    alias: None,
-                }],
-                predicate: true_expr(),
-            }
-        )
+        assert!(LargeJoinOptimizer::extract_joins(&RelExpr::IndexOnlyScan {
+            table: "t".to_string(),
+            index: "idx".to_string(),
+            columns: vec![ProjectionColumn {
+                expr: Expr::Column(ColumnRef::new("id")),
+                alias: None,
+            }],
+            predicate: true_expr(),
+        })
         .is_empty());
     }
 
@@ -1634,8 +1456,7 @@ mod tests {
             input: Some(Box::new(scan("t"))),
             with_ordinality: false,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&u);
+        let joins = LargeJoinOptimizer::extract_joins(&u);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1647,8 +1468,7 @@ mod tests {
             input: None,
             with_ordinality: false,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&u);
+        let joins = LargeJoinOptimizer::extract_joins(&u);
         assert!(joins.is_empty());
     }
 
@@ -1660,8 +1480,7 @@ mod tests {
             columns: vec![],
             input: Some(Box::new(scan("t"))),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&tf);
+        let joins = LargeJoinOptimizer::extract_joins(&tf);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1672,8 +1491,7 @@ mod tests {
             suffix_keys: vec![],
             input: Box::new(scan("t")),
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&isort);
+        let joins = LargeJoinOptimizer::extract_joins(&isort);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1685,8 +1503,7 @@ mod tests {
             input: Box::new(scan("t")),
             workers: 4,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&pa);
+        let joins = LargeJoinOptimizer::extract_joins(&pa);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1696,8 +1513,7 @@ mod tests {
             input: Box::new(scan("t")),
             workers: 4,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&g);
+        let joins = LargeJoinOptimizer::extract_joins(&g);
         assert_eq!(joins.len(), 1);
     }
 
@@ -1710,8 +1526,7 @@ mod tests {
             right: Box::new(scan("b")),
             workers: 4,
         };
-        let joins =
-            LargeJoinOptimizer::extract_joins(&phj);
+        let joins = LargeJoinOptimizer::extract_joins(&phj);
         assert_eq!(joins.len(), 2);
     }
 
@@ -1725,12 +1540,7 @@ mod tests {
                 cooling_rate: 0.95,
                 max_iterations: 200,
             },
-            &[
-                ("a", 100.0),
-                ("b", 200.0),
-                ("c", 50.0),
-                ("d", 300.0),
-            ],
+            &[("a", 100.0), ("b", 200.0), ("c", 50.0), ("d", 300.0)],
         );
         let joins = vec![
             make_join_node("a"),
@@ -1739,9 +1549,6 @@ mod tests {
             make_join_node("d"),
         ];
         let result = opt.optimize(joins).unwrap();
-        assert_eq!(
-            LargeJoinOptimizer::count_tables(&result),
-            4,
-        );
+        assert_eq!(LargeJoinOptimizer::count_tables(&result), 4,);
     }
 }

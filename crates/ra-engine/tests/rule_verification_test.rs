@@ -10,13 +10,12 @@ mod helpers;
 
 use helpers::*;
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering,
-    ProjectionColumn, RelExpr, SortDirection, SortKey,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
+    SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, Const, Expr, UnaryOp};
 use ra_engine::{
-    rec_expr_to_rel_expr, to_rec_expr, Optimizer, OptimizerConfig,
-    egraph::ParallelConfig,
+    egraph::ParallelConfig, rec_expr_to_rel_expr, to_rec_expr, Optimizer, OptimizerConfig,
 };
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -40,6 +39,7 @@ fn optimize(expr: &RelExpr) -> RelExpr {
         max_staleness_penalty: 10.0,
         use_lazy_rules: false,
         transaction_context: None,
+        ..OptimizerConfig::default()
     });
     opt.optimize(expr).expect("optimization should succeed")
 }
@@ -88,10 +88,8 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
             collect_tables_rec(recursive_case, out);
             collect_tables_rec(body, out);
         }
-        RelExpr::Values { .. }
-        | RelExpr::MultiUnnest { .. } => {}
-        RelExpr::Unnest { input, .. }
-        | RelExpr::TableFunction { input, .. } => {
+        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_tables_rec(inp, out);
             }
@@ -103,15 +101,16 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::BitmapIndexScan { table, .. }
         | RelExpr::IndexOnlyScan { table, .. }
         | RelExpr::ParallelScan { table, .. }
-        | RelExpr::MvScan { view_name: table, .. } => {
+        | RelExpr::MvScan {
+            view_name: table, ..
+        } => {
             out.push(table.clone());
         }
         RelExpr::BitmapHeapScan { table, bitmap, .. } => {
             out.push(table.clone());
             collect_tables_rec(bitmap, out);
         }
-        RelExpr::BitmapAnd { inputs }
-        | RelExpr::BitmapOr { inputs } => {
+        RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
             for inp in inputs {
                 collect_tables_rec(inp, out);
             }
@@ -120,8 +119,7 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
             collect_tables_rec(left, out);
             collect_tables_rec(right, out);
         }
-        RelExpr::ParallelAggregate { input, .. }
-        | RelExpr::Gather { input, .. } => {
+        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
             collect_tables_rec(input, out);
         }
     }
@@ -143,9 +141,7 @@ fn depth(expr: &RelExpr) -> usize {
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => {
-            1 + depth(left).max(depth(right))
-        }
+        | RelExpr::Except { left, right, .. } => 1 + depth(left).max(depth(right)),
         RelExpr::CTE {
             definition, body, ..
         } => 1 + depth(definition).max(depth(body)),
@@ -154,13 +150,8 @@ fn depth(expr: &RelExpr) -> usize {
             recursive_case,
             body,
             ..
-        } => {
-            1 + depth(base_case)
-                .max(depth(recursive_case))
-                .max(depth(body))
-        }
-        RelExpr::Unnest { input, .. }
-        | RelExpr::TableFunction { input, .. } => match input {
+        } => 1 + depth(base_case).max(depth(recursive_case)).max(depth(body)),
+        RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => match input {
             Some(inp) => 1 + depth(inp),
             None => 1,
         },
@@ -170,17 +161,15 @@ fn depth(expr: &RelExpr) -> usize {
         | RelExpr::BitmapIndexScan { .. }
         | RelExpr::ParallelScan { .. }
         | RelExpr::MvScan { .. } => 1,
-        RelExpr::BitmapAnd { inputs }
-        | RelExpr::BitmapOr { inputs } => {
+        RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
             1 + inputs.iter().map(|i| depth(i)).max().unwrap_or(0)
         }
         RelExpr::BitmapHeapScan { bitmap, .. } => 1 + depth(bitmap),
         RelExpr::IndexOnlyScan { .. } => 1,
-        RelExpr::ParallelHashJoin { left, right, .. } => {
-            1 + depth(left).max(depth(right))
+        RelExpr::ParallelHashJoin { left, right, .. } => 1 + depth(left).max(depth(right)),
+        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
+            1 + depth(input)
         }
-        RelExpr::ParallelAggregate { input, .. }
-        | RelExpr::Gather { input, .. } => 1 + depth(input),
     }
 }
 
@@ -196,8 +185,7 @@ fn is_scan(expr: &RelExpr) -> bool {
 
 #[test]
 fn filter_true_eliminated() {
-    let input = RelExpr::scan("users")
-        .filter(Expr::Const(Const::Bool(true)));
+    let input = RelExpr::scan("users").filter(Expr::Const(Const::Bool(true)));
     let result = optimize(&input);
     // filter(true, scan) should collapse to just scan
     assert!(
@@ -245,8 +233,7 @@ fn filter_pushdown_through_project() {
                 is_filter(input)
                     || matches!(
                         input.as_ref(),
-                        RelExpr::BitmapIndexScan { .. }
-                            | RelExpr::IndexScan { .. }
+                        RelExpr::BitmapIndexScan { .. } | RelExpr::IndexScan { .. }
                     ),
                 "filter should be pushed below project, got: {input:?}"
             );
@@ -491,10 +478,7 @@ fn sort_below_sort_eliminated() {
     let result = optimize(&outer_sort);
     // The inner sort should be eliminated
     let d = depth(&result);
-    assert!(
-        d <= 2,
-        "redundant sort should be eliminated, depth={d}"
-    );
+    assert!(d <= 2, "redundant sort should be eliminated, depth={d}");
 }
 
 #[test]
@@ -798,10 +782,7 @@ fn project_merge_eliminates_redundant() {
     }]);
     let result = optimize(&outer_proj);
     let d = depth(&result);
-    assert!(
-        d <= 2,
-        "redundant project should be merged, depth={d}"
-    );
+    assert!(d <= 2, "redundant project should be merged, depth={d}");
 }
 
 // ── Cross-Cutting Invariant Tests ───────────────────────────────
@@ -855,8 +836,7 @@ fn optimization_idempotent_tables() {
 fn roundtrip_conversion_preserves_simple_scan() {
     let input = RelExpr::scan("users");
     let rec = to_rec_expr(&input).expect("to_rec_expr");
-    let back =
-        rec_expr_to_rel_expr(&rec).expect("rec_expr_to_rel_expr");
+    let back = rec_expr_to_rel_expr(&rec).expect("rec_expr_to_rel_expr");
     assert_eq!(input, back);
 }
 
@@ -864,18 +844,15 @@ fn roundtrip_conversion_preserves_simple_scan() {
 fn roundtrip_conversion_preserves_filter() {
     let input = filtered_scan("users", "age", 18);
     let rec = to_rec_expr(&input).expect("to_rec_expr");
-    let back =
-        rec_expr_to_rel_expr(&rec).expect("rec_expr_to_rel_expr");
+    let back = rec_expr_to_rel_expr(&rec).expect("rec_expr_to_rel_expr");
     assert_eq!(input, back);
 }
 
 #[test]
 fn roundtrip_conversion_preserves_join() {
-    let input =
-        two_table_join("orders", "customers", "customer_id", "id");
+    let input = two_table_join("orders", "customers", "customer_id", "id");
     let rec = to_rec_expr(&input).expect("to_rec_expr");
-    let back =
-        rec_expr_to_rel_expr(&rec).expect("rec_expr_to_rel_expr");
+    let back = rec_expr_to_rel_expr(&rec).expect("rec_expr_to_rel_expr");
     assert_eq!(input, back);
 }
 
@@ -910,10 +887,7 @@ fn deeply_nested_filters_simplify() {
     // The depth should be reduced from 6 (scan + 5 filters)
     // to at most 2 (scan + one merged filter with ANDs)
     let d = depth(&result);
-    assert!(
-        d <= 3,
-        "5 stacked filters should merge, depth={d}"
-    );
+    assert!(d <= 3, "5 stacked filters should merge, depth={d}");
 }
 
 #[test]
@@ -960,8 +934,7 @@ fn complex_predicate_with_all_simplification_rules() {
         is_filter(&result)
             || matches!(
                 &result,
-                RelExpr::BitmapIndexScan { .. }
-                    | RelExpr::IndexScan { .. }
+                RelExpr::BitmapIndexScan { .. } | RelExpr::IndexScan { .. }
             ),
         "complex predicate should simplify to a single filter or index scan, got: {result:?}"
     );

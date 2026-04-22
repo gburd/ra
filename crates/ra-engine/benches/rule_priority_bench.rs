@@ -7,9 +7,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use egg::Runner;
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, RelExpr,
-};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_engine::analysis::RelAnalysis;
 use ra_engine::egraph::RelLang;
@@ -22,9 +20,7 @@ fn two_table_join() -> RelExpr {
         condition: Expr::BinOp {
             op: BinOp::Eq,
             left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
-            right: Box::new(Expr::Column(ColumnRef::qualified(
-                "orders", "user_id",
-            ))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users")),
         right: Box::new(RelExpr::scan("orders")),
@@ -36,13 +32,8 @@ fn three_table_join() -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(ColumnRef::qualified(
-                "orders",
-                "product_id",
-            ))),
-            right: Box::new(Expr::Column(ColumnRef::qualified(
-                "products", "id",
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::qualified("orders", "product_id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("products", "id"))),
         },
         left: Box::new(two_table_join()),
         right: Box::new(RelExpr::scan("products")),
@@ -60,9 +51,7 @@ fn filtered_three_table_join() -> RelExpr {
         right: Box::new(Expr::BinOp {
             op: BinOp::Eq,
             left: Box::new(Expr::Column(ColumnRef::new("status"))),
-            right: Box::new(Expr::Const(Const::String(
-                "active".to_owned(),
-            ))),
+            right: Box::new(Expr::Const(Const::String("active".to_owned()))),
         }),
     })
 }
@@ -85,8 +74,7 @@ fn run_with_rules(
     expr: &RelExpr,
     rules: &[egg::Rewrite<RelLang, RelAnalysis>],
 ) -> Runner<RelLang, RelAnalysis> {
-    let rec =
-        to_rec_expr(expr).expect("conversion should succeed");
+    let rec = to_rec_expr(expr).expect("conversion should succeed");
     Runner::default()
         .with_expr(&rec)
         .with_node_limit(50_000)
@@ -101,9 +89,7 @@ fn bench_priority_sorting(c: &mut Criterion) {
     group.bench_function("sort_rules", |b| {
         b.iter(|| {
             let rules = all_rules_unsorted();
-            black_box(
-                ra_engine::sort_rules_by_priority(rules),
-            );
+            black_box(ra_engine::sort_rules_by_priority(rules));
         });
     });
 
@@ -166,8 +152,7 @@ fn bench_high_priority_first(c: &mut Criterion) {
     // and check how many rewrites fire
     group.bench_function("single_iter_sorted", |b| {
         let expr = filtered_three_table_join();
-        let rec =
-            to_rec_expr(&expr).expect("conversion should succeed");
+        let rec = to_rec_expr(&expr).expect("conversion should succeed");
         b.iter(|| {
             Runner::default()
                 .with_expr(&rec)

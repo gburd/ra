@@ -57,7 +57,9 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 // Index-only scan: O(log n) -- much cheaper than full table scan.
                 // Models B-tree traversal to first/last key.
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
-                return costs(*table_id) + costs(*cols_id) + costs(*pred_id)
+                return costs(*table_id)
+                    + costs(*cols_id)
+                    + costs(*pred_id)
                     + (5.0 * storage_factor);
             }
             RelLang::Filter(_) | RelLang::Project(_) => {
@@ -90,8 +92,7 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 // group_size * log(group_size) instead of n * log(n).
                 // Model as 40% of full sort cost (conservative estimate
                 // assuming moderate prefix selectivity).
-                let parallelism_factor =
-                    8.0 / f64::from(self.hardware.cpu_cores);
+                let parallelism_factor = 8.0 / f64::from(self.hardware.cpu_cores);
                 60.0 * parallelism_factor.max(0.5)
             }
             RelLang::Limit(_) => 0.5,
@@ -99,14 +100,11 @@ impl egg::CostFunction<RelLang> for RelCostFn {
             RelLang::RecursiveCTE(_) => 1000.0,
             RelLang::CTE(_) => 10.0,
             RelLang::Window(_) => {
-                let parallelism_factor =
-                    8.0 / f64::from(self.hardware.cpu_cores);
+                let parallelism_factor = 8.0 / f64::from(self.hardware.cpu_cores);
                 200.0 * parallelism_factor.max(0.5)
             }
             RelLang::DistinctRel(_) => {
-                let cache_mb = self.hardware.l3_cache_bytes
-                    as f64
-                    / (1024.0 * 1024.0);
+                let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb;
                 150.0 * cache_factor
             }
@@ -117,10 +115,8 @@ impl egg::CostFunction<RelLang> for RelCostFn {
             }
             RelLang::MvScan(_) => {
                 // MV scan reads pre-computed, pre-joined data.
-                let storage_factor =
-                    100.0 / self.hardware.storage_bandwidth_gbps;
-                return costs(enode.children()[0])
-                    + (15.0 * storage_factor);
+                let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
+                return costs(enode.children()[0]) + (15.0 * storage_factor);
             }
             RelLang::Cast(_) => {
                 // Type casts are typically very cheap (often free at runtime)
@@ -158,7 +154,10 @@ pub fn extract_best<S: BuildHasher>(
         rec_expr_to_rel_expr(&best_expr)
     } else {
         // Clone once to create owned HashMap (unavoidable)
-        let stats: HashMap<String, Statistics> = table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let stats: HashMap<String, Statistics> = table_stats
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
 
         // Create staleness map (all Fresh by default)
         let staleness_map: HashMap<String, Staleness> = stats
@@ -168,11 +167,7 @@ pub fn extract_best<S: BuildHasher>(
 
         // IntegratedCostFn::new wraps these in Arc internally, so subsequent
         // clones of IntegratedCostFn are cheap (just Arc reference count increments)
-        let cost_fn = IntegratedCostFn::new(
-            hardware.clone(),
-            stats,
-            staleness_map,
-        );
+        let cost_fn = IntegratedCostFn::new(hardware.clone(), stats, staleness_map);
         let extractor = egg::Extractor::new(egraph, cost_fn);
         let (_, best_expr) = extractor.find_best(root);
         rec_expr_to_rel_expr(&best_expr)
@@ -198,7 +193,10 @@ pub fn extract_best_with_staleness<S: BuildHasher, S2: BuildHasher>(
 ) -> Result<RelExpr, EGraphError> {
     let cost_fn = IntegratedCostFn::new(
         hardware.clone(),
-        table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        table_stats
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
     );
     let extractor = egg::Extractor::new(egraph, cost_fn);
@@ -225,7 +223,10 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
 ) -> Result<RelExpr, EGraphError> {
     let cost_fn = crate::cardinality_cost::CardinalityAwareCostFn::new(
         hardware.clone(),
-        table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        table_stats
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
     );
     let extractor = egg::Extractor::new(egraph, cost_fn);
@@ -275,11 +276,13 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
             keys: convert_sort_key_list(nodes, id(*keys_id))?,
             input: Box::new(convert_node(nodes, id(*input_id))?),
         }),
-        RelLang::IncrementalSort([prefix_keys_id, suffix_keys_id, input_id]) => Ok(RelExpr::IncrementalSort {
-            prefix_keys: convert_sort_key_list(nodes, id(*prefix_keys_id))?,
-            suffix_keys: convert_sort_key_list(nodes, id(*suffix_keys_id))?,
-            input: Box::new(convert_node(nodes, id(*input_id))?),
-        }),
+        RelLang::IncrementalSort([prefix_keys_id, suffix_keys_id, input_id]) => {
+            Ok(RelExpr::IncrementalSort {
+                prefix_keys: convert_sort_key_list(nodes, id(*prefix_keys_id))?,
+                suffix_keys: convert_sort_key_list(nodes, id(*suffix_keys_id))?,
+                input: Box::new(convert_node(nodes, id(*input_id))?),
+            })
+        }
         RelLang::Limit(ids) => convert_limit(nodes, ids),
         RelLang::Union([all_id, left_id, right_id]) => {
             convert_set_op(nodes, *all_id, *left_id, *right_id, "union")
@@ -300,22 +303,18 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
                 base_case: Box::new(base_case),
                 recursive_case: Box::new(recursive_case),
                 body: Box::new(body),
-                cycle_detection: Some(
-                    ra_core::algebra::CycleDetection {
-                        track_columns: vec![],
-                        max_depth: Some(1000),
-                        cycle_mark_column: None,
-                        path_column: None,
-                    },
-                ),
+                cycle_detection: Some(ra_core::algebra::CycleDetection {
+                    track_columns: vec![],
+                    max_depth: Some(1000),
+                    cycle_mark_column: None,
+                    path_column: None,
+                }),
             })
         }
         RelLang::CTE([name_id, def_id, body_id]) => {
             let name = get_symbol(nodes, id(*name_id))?;
-            let definition =
-                convert_node(nodes, id(*def_id))?;
-            let body =
-                convert_node(nodes, id(*body_id))?;
+            let definition = convert_node(nodes, id(*def_id))?;
+            let body = convert_node(nodes, id(*body_id))?;
             Ok(RelExpr::CTE {
                 name,
                 definition: Box::new(definition),
@@ -323,30 +322,23 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
             })
         }
         RelLang::Window([fns_id, input_id]) => {
-            let functions =
-                convert_window_expr_list(nodes, id(*fns_id))?;
-            let input =
-                convert_node(nodes, id(*input_id))?;
+            let functions = convert_window_expr_list(nodes, id(*fns_id))?;
+            let input = convert_node(nodes, id(*input_id))?;
             Ok(RelExpr::Window {
                 functions,
                 input: Box::new(input),
             })
         }
         RelLang::DistinctRel([input_id]) => {
-            let input =
-                convert_node(nodes, id(*input_id))?;
+            let input = convert_node(nodes, id(*input_id))?;
             Ok(RelExpr::Distinct {
                 input: Box::new(input),
             })
         }
         RelLang::Values(row_ids) => {
-            let mut rows =
-                Vec::with_capacity(row_ids.len());
+            let mut rows = Vec::with_capacity(row_ids.len());
             for &row_id in row_ids.iter() {
-                rows.push(convert_values_row(
-                    nodes,
-                    id(row_id),
-                )?);
+                rows.push(convert_values_row(nodes, id(row_id))?);
             }
             Ok(RelExpr::Values { rows })
         }
@@ -371,20 +363,11 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
             let column = get_symbol(nodes, id(*column_id))?;
             Ok(RelExpr::IndexScan { table, column })
         }
-        RelLang::IndexOnlyScan([
-            table_id,
-            index_id,
-            cols_id,
-            pred_id,
-        ]) => {
-            let table =
-                get_symbol(nodes, id(*table_id))?;
-            let index =
-                get_symbol(nodes, id(*index_id))?;
-            let columns =
-                convert_projection_list(nodes, id(*cols_id))?;
-            let predicate =
-                convert_scalar(nodes, id(*pred_id))?;
+        RelLang::IndexOnlyScan([table_id, index_id, cols_id, pred_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            let index = get_symbol(nodes, id(*index_id))?;
+            let columns = convert_projection_list(nodes, id(*cols_id))?;
+            let predicate = convert_scalar(nodes, id(*pred_id))?;
             Ok(RelExpr::IndexOnlyScan {
                 table,
                 index,
@@ -393,10 +376,8 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
             })
         }
         RelLang::MvScan([view_id, alias_id, _, _]) => {
-            let view_name =
-                get_symbol(nodes, id(*view_id))?;
-            let alias_str =
-                get_symbol(nodes, id(*alias_id))?;
+            let view_name = get_symbol(nodes, id(*view_id))?;
+            let alias_str = get_symbol(nodes, id(*alias_id))?;
             let alias = if alias_str == "auto" || alias_str.is_empty() {
                 None
             } else {
@@ -407,8 +388,7 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
         RelLang::BitmapIndexScan([table_id, index_id, pred_id]) => {
             let table = get_symbol(nodes, id(*table_id))?;
             let index = get_symbol(nodes, id(*index_id))?;
-            let predicate =
-                convert_scalar(nodes, id(*pred_id))?;
+            let predicate = convert_scalar(nodes, id(*pred_id))?;
             Ok(RelExpr::BitmapIndexScan {
                 table,
                 index,
@@ -416,50 +396,35 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
             })
         }
         RelLang::BitmapAnd(input_ids) => {
-            let mut inputs =
-                Vec::with_capacity(input_ids.len());
+            let mut inputs = Vec::with_capacity(input_ids.len());
             for &input_id in input_ids.iter() {
-                inputs.push(Box::new(
-                    convert_node(nodes, id(input_id))?,
-                ));
+                inputs.push(Box::new(convert_node(nodes, id(input_id))?));
             }
             Ok(RelExpr::BitmapAnd { inputs })
         }
         RelLang::BitmapOr(input_ids) => {
-            let mut inputs =
-                Vec::with_capacity(input_ids.len());
+            let mut inputs = Vec::with_capacity(input_ids.len());
             for &input_id in input_ids.iter() {
-                inputs.push(Box::new(
-                    convert_node(nodes, id(input_id))?,
-                ));
+                inputs.push(Box::new(convert_node(nodes, id(input_id))?));
             }
             Ok(RelExpr::BitmapOr { inputs })
         }
         RelLang::BitmapHeapScan([table_id, bitmap_id, recheck_id]) => {
-            let table =
-                get_symbol(nodes, id(*table_id))?;
-            let bitmap =
-                convert_node(nodes, id(*bitmap_id))?;
-            let recheck_cond =
-                if get_symbol(nodes, id(*recheck_id))
-                    .map_or(false, |s| s.is_empty())
-                {
-                    None
-                } else {
-                    Some(convert_scalar(
-                        nodes,
-                        id(*recheck_id),
-                    )?)
-                };
+            let table = get_symbol(nodes, id(*table_id))?;
+            let bitmap = convert_node(nodes, id(*bitmap_id))?;
+            let recheck_cond = if get_symbol(nodes, id(*recheck_id)).map_or(false, |s| s.is_empty())
+            {
+                None
+            } else {
+                Some(convert_scalar(nodes, id(*recheck_id))?)
+            };
             Ok(RelExpr::BitmapHeapScan {
                 table,
                 bitmap: Box::new(bitmap),
                 recheck_cond,
             })
         }
-        RelLang::Func(ids) if !ids.is_empty() => {
-            convert_func_as_relational(nodes, ids)
-        }
+        RelLang::Func(ids) if !ids.is_empty() => convert_func_as_relational(nodes, ids),
         RelLang::VectorKNN([table_id, _col_id, _target_id, _k_id]) => {
             // Extract as annotated scan for now
             let table = get_symbol(nodes, id(*table_id))?;
@@ -496,12 +461,10 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
                 alias: Some("fts_skip_list_and".to_string()),
             })
         }
-        RelLang::HybridScan(_ids) => {
-            Ok(RelExpr::Scan {
-                table: "hybrid_scan".to_string(),
-                alias: Some("hybrid_scan".to_string()),
-            })
-        }
+        RelLang::HybridScan(_ids) => Ok(RelExpr::Scan {
+            table: "hybrid_scan".to_string(),
+            alias: Some("hybrid_scan".to_string()),
+        }),
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"
         ))),
@@ -573,10 +536,7 @@ fn convert_set_op(
 /// Unnest and `TableFunction` are encoded as `Func` nodes in the
 /// e-graph with a tag symbol as the first child. This function
 /// dispatches on the tag to reconstruct the original `RelExpr`.
-fn convert_func_as_relational(
-    nodes: &[RelLang],
-    ids: &[Id],
-) -> Result<RelExpr, EGraphError> {
+fn convert_func_as_relational(nodes: &[RelLang], ids: &[Id]) -> Result<RelExpr, EGraphError> {
     let tag = get_symbol(nodes, id(ids[0]))?;
 
     match tag.as_str() {
@@ -594,8 +554,7 @@ fn convert_func_as_relational(
             } else {
                 Some(alias_str)
             };
-            let with_ordinality =
-                convert_bool_flag(nodes, id(ids[3]))?;
+            let with_ordinality = convert_bool_flag(nodes, id(ids[3]))?;
             Ok(RelExpr::Unnest {
                 expr,
                 alias,
@@ -607,8 +566,7 @@ fn convert_func_as_relational(
             // [tag, expr, alias, ordinality, input]
             if ids.len() < 5 {
                 return Err(EGraphError::ExtractionError(
-                    "unnest_lateral Func node requires 5 children"
-                        .into(),
+                    "unnest_lateral Func node requires 5 children".into(),
                 ));
             }
             let expr = convert_scalar(nodes, id(ids[1]))?;
@@ -618,8 +576,7 @@ fn convert_func_as_relational(
             } else {
                 Some(alias_str)
             };
-            let with_ordinality =
-                convert_bool_flag(nodes, id(ids[3]))?;
+            let with_ordinality = convert_bool_flag(nodes, id(ids[3]))?;
             let input = convert_node(nodes, id(ids[4]))?;
             Ok(RelExpr::Unnest {
                 expr,
@@ -632,22 +589,16 @@ fn convert_func_as_relational(
             // [tag, ordinality, expr0, alias0, expr1, alias1, ...]
             if ids.len() < 4 {
                 return Err(EGraphError::ExtractionError(
-                    "multi_unnest requires at least 4 children"
-                        .into(),
+                    "multi_unnest requires at least 4 children".into(),
                 ));
             }
-            let with_ordinality =
-                convert_bool_flag(nodes, id(ids[1]))?;
+            let with_ordinality = convert_bool_flag(nodes, id(ids[1]))?;
             let mut exprs = Vec::new();
             let mut aliases = Vec::new();
             let mut i = 2;
             while i + 1 < ids.len() {
-                exprs.push(convert_scalar(
-                    nodes,
-                    id(ids[i]),
-                )?);
-                let alias_str =
-                    get_symbol(nodes, id(ids[i + 1]))?;
+                exprs.push(convert_scalar(nodes, id(ids[i]))?);
+                let alias_str = get_symbol(nodes, id(ids[i + 1]))?;
                 aliases.push(if alias_str.is_empty() {
                     None
                 } else {
@@ -672,8 +623,7 @@ fn convert_func_as_relational(
                     Ok(expr) => args.push(expr),
                     Err(_) => {
                         // Assume it's a relational input
-                        let input =
-                            convert_node(nodes, id(arg_id))?;
+                        let input = convert_node(nodes, id(arg_id))?;
                         return Ok(RelExpr::TableFunction {
                             name,
                             args,
@@ -819,17 +769,12 @@ fn convert_scalar_operator(
         if name == "ARRAY_INDEX" && ids.len() == 3 {
             let array = convert_scalar(nodes, id(ids[1]))?;
             let index = convert_scalar(nodes, id(ids[2]))?;
-            return Ok(Expr::ArrayIndex(
-                Box::new(array),
-                Box::new(index),
-            ));
+            return Ok(Expr::ArrayIndex(Box::new(array), Box::new(index)));
         }
         if name == "ARRAY_SLICE" && ids.len() == 4 {
             let array = convert_scalar(nodes, id(ids[1]))?;
-            let start_expr =
-                convert_scalar(nodes, id(ids[2]))?;
-            let end_expr =
-                convert_scalar(nodes, id(ids[3]))?;
+            let start_expr = convert_scalar(nodes, id(ids[2]))?;
+            let end_expr = convert_scalar(nodes, id(ids[3]))?;
             let start = if start_expr == Expr::Const(Const::Null) {
                 None
             } else {
@@ -1098,14 +1043,8 @@ fn convert_window_expr(
     nodes: &[RelLang],
     idx: usize,
 ) -> Result<ra_core::algebra::WindowExpr, EGraphError> {
-    let RelLang::WindowExprNode([
-        fn_id,
-        arg_id,
-        part_id,
-        order_id,
-        frame_id,
-        alias_id,
-    ]) = &nodes[idx]
+    let RelLang::WindowExprNode([fn_id, arg_id, part_id, order_id, frame_id, alias_id]) =
+        &nodes[idx]
     else {
         return Err(EGraphError::ExtractionError(format!(
             "expected WindowExprNode, got {:?}",
@@ -1114,10 +1053,8 @@ fn convert_window_expr(
     };
     let function = convert_window_fn(nodes, id(*fn_id))?;
     let arg = convert_optional_scalar(nodes, id(*arg_id))?;
-    let partition_by =
-        convert_scalar_list(nodes, id(*part_id))?;
-    let order_by =
-        convert_sort_key_list(nodes, id(*order_id))?;
+    let partition_by = convert_scalar_list(nodes, id(*part_id))?;
+    let order_by = convert_sort_key_list(nodes, id(*order_id))?;
     let frame = convert_window_frame(nodes, id(*frame_id))?;
     let alias = convert_optional_symbol(nodes, id(*alias_id))?;
     Ok(ra_core::algebra::WindowExpr {
@@ -1167,20 +1104,12 @@ fn convert_window_fn(
 fn convert_window_frame(
     nodes: &[RelLang],
     idx: usize,
-) -> Result<Option<ra_core::algebra::WindowFrame>, EGraphError>
-{
-    use ra_core::algebra::{
-        WindowFrame, WindowFrameMode,
-    };
+) -> Result<Option<ra_core::algebra::WindowFrame>, EGraphError> {
+    use ra_core::algebra::{WindowFrame, WindowFrameMode};
     if let RelLang::Nil = &nodes[idx] {
         return Ok(None);
     }
-    let RelLang::WindowFrameNode([
-        mode_id,
-        start_id,
-        end_id,
-    ]) = &nodes[idx]
-    else {
+    let RelLang::WindowFrameNode([mode_id, start_id, end_id]) = &nodes[idx] else {
         return Err(EGraphError::ExtractionError(format!(
             "expected WindowFrameNode, got {:?}",
             nodes[idx]
@@ -1191,11 +1120,9 @@ fn convert_window_frame(
         RelLang::FrameRange => WindowFrameMode::Range,
         RelLang::FrameGroups => WindowFrameMode::Groups,
         other => {
-            return Err(EGraphError::ExtractionError(
-                format!(
-                    "expected frame mode, got {other:?}"
-                ),
-            ))
+            return Err(EGraphError::ExtractionError(format!(
+                "expected frame mode, got {other:?}"
+            )))
         }
     };
     let start = convert_frame_bound(nodes, id(*start_id))?;
@@ -1209,33 +1136,23 @@ fn convert_frame_bound(
 ) -> Result<ra_core::algebra::WindowFrameBound, EGraphError> {
     use ra_core::algebra::WindowFrameBound;
     match &nodes[idx] {
-        RelLang::FrameUnboundedPreceding => {
-            Ok(WindowFrameBound::UnboundedPreceding)
-        }
+        RelLang::FrameUnboundedPreceding => Ok(WindowFrameBound::UnboundedPreceding),
         RelLang::FramePreceding([n_id]) => {
             let s = get_symbol(nodes, id(*n_id))?;
-            let n = s.parse::<u64>().map_err(|e| {
-                EGraphError::ExtractionError(format!(
-                    "invalid frame bound: {e}"
-                ))
-            })?;
+            let n = s
+                .parse::<u64>()
+                .map_err(|e| EGraphError::ExtractionError(format!("invalid frame bound: {e}")))?;
             Ok(WindowFrameBound::Preceding(n))
         }
-        RelLang::FrameCurrentRow => {
-            Ok(WindowFrameBound::CurrentRow)
-        }
+        RelLang::FrameCurrentRow => Ok(WindowFrameBound::CurrentRow),
         RelLang::FrameFollowing([n_id]) => {
             let s = get_symbol(nodes, id(*n_id))?;
-            let n = s.parse::<u64>().map_err(|e| {
-                EGraphError::ExtractionError(format!(
-                    "invalid frame bound: {e}"
-                ))
-            })?;
+            let n = s
+                .parse::<u64>()
+                .map_err(|e| EGraphError::ExtractionError(format!("invalid frame bound: {e}")))?;
             Ok(WindowFrameBound::Following(n))
         }
-        RelLang::FrameUnboundedFollowing => {
-            Ok(WindowFrameBound::UnboundedFollowing)
-        }
+        RelLang::FrameUnboundedFollowing => Ok(WindowFrameBound::UnboundedFollowing),
         other => Err(EGraphError::ExtractionError(format!(
             "expected frame bound, got {other:?}"
         ))),
@@ -1267,10 +1184,7 @@ fn convert_optional_scalar(
     Ok(Some(convert_scalar(nodes, idx)?))
 }
 
-fn convert_optional_symbol(
-    nodes: &[RelLang],
-    idx: usize,
-) -> Result<Option<String>, EGraphError> {
+fn convert_optional_symbol(nodes: &[RelLang], idx: usize) -> Result<Option<String>, EGraphError> {
     match &nodes[idx] {
         RelLang::Nil => Ok(None),
         RelLang::Symbol(s) => Ok(Some(s.to_string())),
@@ -1544,14 +1458,12 @@ mod tests {
             base_case: Box::new(RelExpr::scan("people")),
             recursive_case: Box::new(RelExpr::scan("ancestors")),
             body: Box::new(RelExpr::scan("ancestors")),
-            cycle_detection: Some(
-                ra_core::algebra::CycleDetection {
-                    track_columns: vec![],
-                    max_depth: Some(1000),
-                    cycle_mark_column: None,
-                    path_column: None,
-                },
-            ),
+            cycle_detection: Some(ra_core::algebra::CycleDetection {
+                track_columns: vec![],
+                max_depth: Some(1000),
+                cycle_mark_column: None,
+                path_column: None,
+            }),
         };
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
@@ -1574,8 +1486,14 @@ mod tests {
     fn extract_values() {
         let expr = RelExpr::Values {
             rows: vec![
-                vec![Expr::Const(Const::Int(1)), Expr::Const(Const::String("a".into()))],
-                vec![Expr::Const(Const::Int(2)), Expr::Const(Const::String("b".into()))],
+                vec![
+                    Expr::Const(Const::Int(1)),
+                    Expr::Const(Const::String("a".into())),
+                ],
+                vec![
+                    Expr::Const(Const::Int(2)),
+                    Expr::Const(Const::String("b".into())),
+                ],
             ],
         };
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
@@ -1588,8 +1506,8 @@ mod tests {
     #[test]
     fn extract_window_row_number() {
         use ra_core::algebra::{
-            WindowExpr as WExpr, WindowFunction as WFn,
-            WindowFrame, WindowFrameMode, WindowFrameBound,
+            WindowExpr as WExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
+            WindowFunction as WFn,
         };
         let expr = RelExpr::Window {
             functions: vec![WExpr {
@@ -1617,9 +1535,7 @@ mod tests {
 
     #[test]
     fn extract_window_no_frame() {
-        use ra_core::algebra::{
-            WindowExpr as WExpr, WindowFunction as WFn,
-        };
+        use ra_core::algebra::{WindowExpr as WExpr, WindowFunction as WFn};
         let expr = RelExpr::Window {
             functions: vec![WExpr {
                 function: WFn::Sum,
@@ -1639,8 +1555,8 @@ mod tests {
     #[test]
     fn extract_window_frame_range_following() {
         use ra_core::algebra::{
-            WindowExpr as WExpr, WindowFunction as WFn,
-            WindowFrame, WindowFrameMode, WindowFrameBound,
+            WindowExpr as WExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
+            WindowFunction as WFn,
         };
         let expr = RelExpr::Window {
             functions: vec![WExpr {
@@ -1669,8 +1585,8 @@ mod tests {
     #[test]
     fn extract_window_frame_groups_unbounded() {
         use ra_core::algebra::{
-            WindowExpr as WExpr, WindowFunction as WFn,
-            WindowFrame, WindowFrameMode, WindowFrameBound,
+            WindowExpr as WExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
+            WindowFunction as WFn,
         };
         let expr = RelExpr::Window {
             functions: vec![WExpr {
@@ -1855,13 +1771,11 @@ mod tests {
 
     #[test]
     fn extract_qualified_column() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Column(ColumnRef::qualified("t", "id"))),
-                right: Box::new(Expr::Const(Const::Int(1))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::qualified("t", "id"))),
+            right: Box::new(Expr::Const(Const::Int(1))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -1869,13 +1783,11 @@ mod tests {
 
     #[test]
     fn extract_const_null() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Column(ColumnRef::new("x"))),
-                right: Box::new(Expr::Const(Const::Null)),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("x"))),
+            right: Box::new(Expr::Const(Const::Null)),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -1891,13 +1803,11 @@ mod tests {
 
     #[test]
     fn extract_const_float() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new("price"))),
-                right: Box::new(Expr::Const(Const::Float(9.99))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("price"))),
+            right: Box::new(Expr::Const(Const::Float(9.99))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -1905,13 +1815,11 @@ mod tests {
 
     #[test]
     fn extract_const_string() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Column(ColumnRef::new("name"))),
-                right: Box::new(Expr::Const(Const::String("Alice".into()))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("name"))),
+            right: Box::new(Expr::Const(Const::String("Alice".into()))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -1922,35 +1830,41 @@ mod tests {
     #[test]
     fn extract_all_binary_operators() {
         let ops = [
-            BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Div, BinOp::Mod,
-            BinOp::Eq, BinOp::Ne, BinOp::Lt, BinOp::Le, BinOp::Gt,
-            BinOp::Ge, BinOp::And, BinOp::Or, BinOp::Concat,
+            BinOp::Add,
+            BinOp::Sub,
+            BinOp::Mul,
+            BinOp::Div,
+            BinOp::Mod,
+            BinOp::Eq,
+            BinOp::Ne,
+            BinOp::Lt,
+            BinOp::Le,
+            BinOp::Gt,
+            BinOp::Ge,
+            BinOp::And,
+            BinOp::Or,
+            BinOp::Concat,
         ];
         for op in &ops {
-            let expr = RelExpr::scan("t").filter(
-                Expr::BinOp {
-                    op: *op,
-                    left: Box::new(Expr::Column(ColumnRef::new("a"))),
-                    right: Box::new(Expr::Column(ColumnRef::new("b"))),
-                },
-            );
-            let rec = to_rec_expr(&expr)
-                .unwrap_or_else(|e| panic!("to_rec_expr for {op:?}: {e}"));
-            let result = rec_expr_to_rel_expr(&rec)
-                .unwrap_or_else(|e| panic!("extraction for {op:?}: {e}"));
+            let expr = RelExpr::scan("t").filter(Expr::BinOp {
+                op: *op,
+                left: Box::new(Expr::Column(ColumnRef::new("a"))),
+                right: Box::new(Expr::Column(ColumnRef::new("b"))),
+            });
+            let rec = to_rec_expr(&expr).unwrap_or_else(|e| panic!("to_rec_expr for {op:?}: {e}"));
+            let result =
+                rec_expr_to_rel_expr(&rec).unwrap_or_else(|e| panic!("extraction for {op:?}: {e}"));
             assert_eq!(result, expr, "round-trip failed for {op:?}");
         }
     }
 
     #[test]
     fn extract_json_access() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::JsonAccess,
-                left: Box::new(Expr::Column(ColumnRef::new("data"))),
-                right: Box::new(Expr::Const(Const::String("key".into()))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::JsonAccess,
+            left: Box::new(Expr::Column(ColumnRef::new("data"))),
+            right: Box::new(Expr::Const(Const::String("key".into()))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -1960,12 +1874,10 @@ mod tests {
 
     #[test]
     fn extract_not() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::UnaryOp {
-                op: ra_core::expr::UnaryOp::Not,
-                operand: Box::new(Expr::Column(ColumnRef::new("active"))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::UnaryOp {
+            op: ra_core::expr::UnaryOp::Not,
+            operand: Box::new(Expr::Column(ColumnRef::new("active"))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -1973,12 +1885,10 @@ mod tests {
 
     #[test]
     fn extract_is_null() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::UnaryOp {
-                op: ra_core::expr::UnaryOp::IsNull,
-                operand: Box::new(Expr::Column(ColumnRef::new("x"))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::UnaryOp {
+            op: ra_core::expr::UnaryOp::IsNull,
+            operand: Box::new(Expr::Column(ColumnRef::new("x"))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -1986,12 +1896,10 @@ mod tests {
 
     #[test]
     fn extract_is_not_null() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::UnaryOp {
-                op: ra_core::expr::UnaryOp::IsNotNull,
-                operand: Box::new(Expr::Column(ColumnRef::new("x"))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::UnaryOp {
+            op: ra_core::expr::UnaryOp::IsNotNull,
+            operand: Box::new(Expr::Column(ColumnRef::new("x"))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -1999,16 +1907,14 @@ mod tests {
 
     #[test]
     fn extract_neg() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::UnaryOp {
-                    op: ra_core::expr::UnaryOp::Neg,
-                    operand: Box::new(Expr::Column(ColumnRef::new("x"))),
-                }),
-                right: Box::new(Expr::Const(Const::Int(0))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::UnaryOp {
+                op: ra_core::expr::UnaryOp::Neg,
+                operand: Box::new(Expr::Column(ColumnRef::new("x"))),
+            }),
+            right: Box::new(Expr::Const(Const::Int(0))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -2018,16 +1924,14 @@ mod tests {
 
     #[test]
     fn extract_function_call() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Function {
-                    name: "LENGTH".into(),
-                    args: vec![Expr::Column(ColumnRef::new("name"))],
-                }),
-                right: Box::new(Expr::Const(Const::Int(5))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Function {
+                name: "LENGTH".into(),
+                args: vec![Expr::Column(ColumnRef::new("name"))],
+            }),
+            right: Box::new(Expr::Const(Const::Int(5))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -2037,16 +1941,14 @@ mod tests {
 
     #[test]
     fn extract_array() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Array(vec![
-                    Expr::Const(Const::Int(1)),
-                    Expr::Const(Const::Int(2)),
-                ])),
-                right: Box::new(Expr::Column(ColumnRef::new("arr"))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Array(vec![
+                Expr::Const(Const::Int(1)),
+                Expr::Const(Const::Int(2)),
+            ])),
+            right: Box::new(Expr::Column(ColumnRef::new("arr"))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -2054,16 +1956,14 @@ mod tests {
 
     #[test]
     fn extract_array_index() {
-        let expr = RelExpr::scan("t").filter(
-            Expr::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(Expr::ArrayIndex(
-                    Box::new(Expr::Column(ColumnRef::new("arr"))),
-                    Box::new(Expr::Const(Const::Int(0))),
-                )),
-                right: Box::new(Expr::Const(Const::Int(42))),
-            },
-        );
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::ArrayIndex(
+                Box::new(Expr::Column(ColumnRef::new("arr"))),
+                Box::new(Expr::Const(Const::Int(0))),
+            )),
+            right: Box::new(Expr::Const(Const::Int(42))),
+        });
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let result = rec_expr_to_rel_expr(&rec).expect("extraction");
         assert_eq!(result, expr);
@@ -2120,10 +2020,7 @@ mod tests {
     fn extract_table_function() {
         let expr = RelExpr::TableFunction {
             name: "generate_series".into(),
-            args: vec![
-                Expr::Const(Const::Int(1)),
-                Expr::Const(Const::Int(10)),
-            ],
+            args: vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(10))],
             columns: vec![],
             input: None,
         };
@@ -2403,24 +2300,20 @@ mod tests {
         let cost_slow = {
             let mut cf = RelCostFn::new(slow);
             cf.cost(&nodes[nodes.len() - 1], |child| {
-                let mut cf2 = RelCostFn::new(
-                    ra_hardware::HardwareProfile {
-                        storage_bandwidth_gbps: 1.0,
-                        ..ra_hardware::HardwareProfile::cpu_only()
-                    },
-                );
+                let mut cf2 = RelCostFn::new(ra_hardware::HardwareProfile {
+                    storage_bandwidth_gbps: 1.0,
+                    ..ra_hardware::HardwareProfile::cpu_only()
+                });
                 cf2.cost(&nodes[usize::from(child)], |_| 0.0)
             })
         };
         let cost_fast = {
             let mut cf = RelCostFn::new(fast);
             cf.cost(&nodes[nodes.len() - 1], |child| {
-                let mut cf2 = RelCostFn::new(
-                    ra_hardware::HardwareProfile {
-                        storage_bandwidth_gbps: 10.0,
-                        ..ra_hardware::HardwareProfile::cpu_only()
-                    },
-                );
+                let mut cf2 = RelCostFn::new(ra_hardware::HardwareProfile {
+                    storage_bandwidth_gbps: 10.0,
+                    ..ra_hardware::HardwareProfile::cpu_only()
+                });
                 cf2.cost(&nodes[usize::from(child)], |_| 0.0)
             })
         };
@@ -2536,21 +2429,18 @@ mod tests {
 
     #[test]
     fn extract_best_without_stats() {
-        let expr = RelExpr::scan("users").filter(
-            Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new("age"))),
-                right: Box::new(Expr::Const(Const::Int(18))),
-            },
-        );
+        let expr = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("age"))),
+            right: Box::new(Expr::Const(Const::Int(18))),
+        });
         let hw = ra_hardware::HardwareProfile::cpu_only();
         let mut egraph = egg::EGraph::<RelLang, RelAnalysis>::default();
         let rec = to_rec_expr(&expr).expect("to_rec_expr");
         let root = egraph.add_expr(&rec);
 
         let stats: HashMap<String, ra_core::statistics::Statistics> = HashMap::new();
-        let result = extract_best(&egraph, root, &stats, &hw)
-            .expect("extraction should succeed");
+        let result = extract_best(&egraph, root, &stats, &hw).expect("extraction should succeed");
         assert!(matches!(result, RelExpr::Filter { .. }));
     }
 
@@ -2567,8 +2457,7 @@ mod tests {
             "users".to_string(),
             ra_core::statistics::Statistics::new(10000.0),
         );
-        let result = extract_best(&egraph, root, &stats, &hw)
-            .expect("extraction should succeed");
+        let result = extract_best(&egraph, root, &stats, &hw).expect("extraction should succeed");
         assert!(matches!(result, RelExpr::Scan { .. }));
     }
 
@@ -2587,10 +2476,8 @@ mod tests {
         );
         let mut staleness = HashMap::new();
         staleness.insert("users".to_string(), Staleness::Fresh);
-        let result = extract_best_with_staleness(
-            &egraph, root, &stats, &staleness, &hw,
-        )
-        .expect("extraction should succeed");
+        let result = extract_best_with_staleness(&egraph, root, &stats, &staleness, &hw)
+            .expect("extraction should succeed");
         assert!(matches!(result, RelExpr::Scan { .. }));
     }
 
@@ -2598,14 +2485,19 @@ mod tests {
 
     #[test]
     fn extract_window_all_ranking_functions() {
-        use ra_core::algebra::{
-            WindowExpr as WExpr, WindowFunction as WFn,
-        };
+        use ra_core::algebra::{WindowExpr as WExpr, WindowFunction as WFn};
         let funcs = [
-            WFn::Rank, WFn::DenseRank, WFn::PercentRank,
-            WFn::Ntile, WFn::Lag, WFn::Lead,
-            WFn::FirstValue, WFn::LastValue, WFn::NthValue,
-            WFn::Min, WFn::Max,
+            WFn::Rank,
+            WFn::DenseRank,
+            WFn::PercentRank,
+            WFn::Ntile,
+            WFn::Lag,
+            WFn::Lead,
+            WFn::FirstValue,
+            WFn::LastValue,
+            WFn::NthValue,
+            WFn::Min,
+            WFn::Max,
         ];
         for wfn in &funcs {
             let expr = RelExpr::Window {
@@ -2619,8 +2511,7 @@ mod tests {
                 }],
                 input: Box::new(RelExpr::scan("t")),
             };
-            let rec = to_rec_expr(&expr)
-                .unwrap_or_else(|e| panic!("to_rec_expr for {wfn:?}: {e}"));
+            let rec = to_rec_expr(&expr).unwrap_or_else(|e| panic!("to_rec_expr for {wfn:?}: {e}"));
             let result = rec_expr_to_rel_expr(&rec)
                 .unwrap_or_else(|e| panic!("extraction for {wfn:?}: {e}"));
             assert_eq!(result, expr, "round-trip failed for {wfn:?}");

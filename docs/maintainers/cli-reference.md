@@ -120,6 +120,9 @@ echo 'SELECT ...' | ra-cli optimize --stdin --trace
 | `--overflow-strategy` | What to do on budget overflow: `best-so-far`, `original`, `fail` |
 | `--explain-format` | Database-specific EXPLAIN: `postgresql`, `mysql`, `oracle`, `sqlserver` |
 | `--trace` | Show optimizer trace (iteration details, search/apply times) |
+| `--rule-advisor` | Enable the Rule Advisor pipeline for intelligent rule filtering |
+| `--rule-advisor-learn` | Enable Rule Advisor learning (Stage 3). Persists effectiveness data to `~/.ra/rule-knowledge.json` |
+| `--rule-advisor-db <NAME>` | Target database for context filtering (e.g., `postgresql`, `mysql`, `oracle`, `documentdb`) |
 
 ### format
 

@@ -7,8 +7,8 @@
 
 use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
 use ra_core::distributed_agg::{
-    all_decomposable, decompose_all, is_two_phase_worthwhile,
-    AggregationStrategy, DistributedAggConfig,
+    all_decomposable, decompose_all, is_two_phase_worthwhile, AggregationStrategy,
+    DistributedAggConfig,
 };
 use ra_core::distribution::{DataDistribution, NodeId};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
@@ -17,8 +17,8 @@ use ra_engine::distributed_optimizer::{
     ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig,
 };
 use ra_stats::skew::{
-    generate_uniform_histogram, generate_zipf_histogram,
-    FrequencyBucket, FrequencyHistogram, SkewDetector,
+    generate_uniform_histogram, generate_zipf_histogram, FrequencyBucket, FrequencyHistogram,
+    SkewDetector,
 };
 
 fn col(name: &str) -> Expr {
@@ -40,11 +40,7 @@ fn optimizer_with_skewed_table(
 ) -> DistributedOptimizer {
     let config = DistributedOptimizerConfig::default();
     let mut topology = ClusterTopology::uniform(num_nodes);
-    topology.register_table(
-        "sales",
-        NodeId(0),
-        DataDistribution::Arbitrary,
-    );
+    topology.register_table("sales", NodeId(0), DataDistribution::Arbitrary);
     let mut stats = Statistics::new(50_000_000.0);
     stats.avg_row_size = 128;
     stats.total_size = 6_400_000_000;
@@ -55,16 +51,10 @@ fn optimizer_with_skewed_table(
 }
 
 /// Build an optimizer with a large table (no histograms).
-fn optimizer_large_table(
-    num_nodes: u32,
-) -> DistributedOptimizer {
+fn optimizer_large_table(num_nodes: u32) -> DistributedOptimizer {
     let config = DistributedOptimizerConfig::default();
     let mut topology = ClusterTopology::uniform(num_nodes);
-    topology.register_table(
-        "orders",
-        NodeId(0),
-        DataDistribution::Arbitrary,
-    );
+    topology.register_table("orders", NodeId(0), DataDistribution::Arbitrary);
     let mut stats = Statistics::new(100_000_000.0);
     stats.avg_row_size = 256;
     stats.total_size = 25_600_000_000;
@@ -74,16 +64,10 @@ fn optimizer_large_table(
 }
 
 /// Build an optimizer with a small table.
-fn optimizer_small_table(
-    num_nodes: u32,
-) -> DistributedOptimizer {
+fn optimizer_small_table(num_nodes: u32) -> DistributedOptimizer {
     let config = DistributedOptimizerConfig::default();
     let mut topology = ClusterTopology::uniform(num_nodes);
-    topology.register_table(
-        "lookup",
-        NodeId(0),
-        DataDistribution::Arbitrary,
-    );
+    topology.register_table("lookup", NodeId(0), DataDistribution::Arbitrary);
     let mut stats = Statistics::new(500.0);
     stats.avg_row_size = 64;
     stats.total_size = 32_000;
@@ -92,10 +76,7 @@ fn optimizer_small_table(
     opt
 }
 
-fn make_agg(
-    func: AggregateFunction,
-    alias: &str,
-) -> AggregateExpr {
+fn make_agg(func: AggregateFunction, alias: &str) -> AggregateExpr {
     AggregateExpr {
         function: func,
         arg: Some(col("amount")),
@@ -125,13 +106,8 @@ fn two_phase_count_uniform_distribution() {
         aggregates: vec![make_count("cnt")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
-    let strategy = dre
-        .input_strategy
-        .as_ref()
-        .expect("should have strategy");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
+    let strategy = dre.input_strategy.as_ref().expect("should have strategy");
     assert_eq!(strategy.label(), "Shuffle");
 }
 
@@ -143,9 +119,7 @@ fn two_phase_sum_uniform_distribution() {
         aggregates: vec![make_agg(AggregateFunction::Sum, "total")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(
         dre.input_strategy.is_some(),
         "grouped aggregate on large table should have strategy"
@@ -163,9 +137,7 @@ fn two_phase_min_max_uniform() {
         ],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.input_strategy.is_some());
 }
 
@@ -218,9 +190,7 @@ fn stddev_falls_back_to_single_phase() {
         }],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     // StdDev is not decomposable, so it should still shuffle
     // (single-phase with group-by still requires shuffle).
     assert!(dre.input_strategy.is_some());
@@ -261,10 +231,7 @@ fn mixed_decomposable_and_non() {
 fn zipf_histogram_detects_skew() {
     let histogram = generate_zipf_histogram(100, 10_000_000, 1.5);
     let opt = optimizer_with_skewed_table(8, histogram);
-    let has_skew = opt.analyze_group_key_skew(
-        &RelExpr::scan("sales"),
-        &[col("region")],
-    );
+    let has_skew = opt.analyze_group_key_skew(&RelExpr::scan("sales"), &[col("region")]);
     assert!(
         has_skew.is_some(),
         "Zipf 1.5 histogram should be detected as skewed"
@@ -275,10 +242,7 @@ fn zipf_histogram_detects_skew() {
 fn uniform_histogram_no_skew() {
     let histogram = generate_uniform_histogram(100, 10_000_000);
     let opt = optimizer_with_skewed_table(8, histogram);
-    let has_skew = opt.analyze_group_key_skew(
-        &RelExpr::scan("sales"),
-        &[col("region")],
-    );
+    let has_skew = opt.analyze_group_key_skew(&RelExpr::scan("sales"), &[col("region")]);
     assert!(
         has_skew.is_none(),
         "Uniform histogram should not detect skew"
@@ -294,9 +258,7 @@ fn skew_aware_plan_with_extreme_zipf() {
         aggregates: vec![make_agg(AggregateFunction::Sum, "total")],
         input: Box::new(RelExpr::scan("sales")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     // With extreme skew detected, should still produce a valid plan.
     assert!(
         dre.input_strategy.is_some(),
@@ -348,9 +310,7 @@ fn global_count_single_partition() {
         aggregates: vec![make_count("total")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(
         dre.is_single_partition(),
         "global aggregate should gather to single node"
@@ -365,9 +325,7 @@ fn global_sum_single_partition() {
         aggregates: vec![make_agg(AggregateFunction::Sum, "total")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.is_single_partition());
 }
 
@@ -379,9 +337,7 @@ fn global_avg_single_partition() {
         aggregates: vec![make_agg(AggregateFunction::Avg, "mean")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.is_single_partition());
 }
 
@@ -412,13 +368,8 @@ fn colocated_aggregate_partition_wise() {
         aggregates: vec![make_count("cnt")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
-    let strategy = dre
-        .input_strategy
-        .as_ref()
-        .expect("should have strategy");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
+    let strategy = dre.input_strategy.as_ref().expect("should have strategy");
     assert_eq!(
         strategy.label(),
         "PartitionWise",
@@ -438,9 +389,7 @@ fn small_table_aggregate_has_strategy() {
         aggregates: vec![make_count("cnt")],
         input: Box::new(RelExpr::scan("lookup")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     // Small table: 500 rows, should still produce a plan.
     // The strategy selection should handle this gracefully.
     assert!(dre.input_strategy.is_some());
@@ -459,13 +408,8 @@ fn choose_strategy_respects_thresholds() {
         num_nodes: 8,
         ..DistributedAggConfig::default()
     };
-    let small = AggregationStrategy::choose_strategy(
-        AggregateFunction::Sum,
-        50_000,
-        100,
-        false,
-        &config,
-    );
+    let small =
+        AggregationStrategy::choose_strategy(AggregateFunction::Sum, 50_000, 100, false, &config);
     assert_eq!(small, AggregationStrategy::SinglePhase);
 
     let medium = AggregationStrategy::choose_strategy(
@@ -527,9 +471,7 @@ fn aggregate_over_filtered_input() {
             Expr::Const(Const::String("active".into())),
         ))),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.input_strategy.is_some());
 }
 
@@ -545,9 +487,7 @@ fn single_node_aggregate() {
         aggregates: vec![make_count("cnt")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     // Even single-node should produce a valid plan.
     assert!(dre.input_strategy.is_some());
 }
@@ -556,11 +496,7 @@ fn single_node_aggregate() {
 fn large_cluster_aggregate() {
     let config = DistributedOptimizerConfig::default();
     let mut topology = ClusterTopology::uniform(64);
-    topology.register_table(
-        "events",
-        NodeId(0),
-        DataDistribution::Arbitrary,
-    );
+    topology.register_table("events", NodeId(0), DataDistribution::Arbitrary);
     let mut stats = Statistics::new(1_000_000_000.0);
     stats.avg_row_size = 200;
     stats.total_size = 200_000_000_000;
@@ -572,9 +508,7 @@ fn large_cluster_aggregate() {
         aggregates: vec![make_count("event_count")],
         input: Box::new(RelExpr::scan("events")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.input_strategy.is_some());
     if let DataDistribution::HashPartitioned {
         partition_count, ..
@@ -596,9 +530,7 @@ fn grouped_aggregate_output_is_hash_partitioned() {
         aggregates: vec![make_count("cnt")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     if let DataDistribution::HashPartitioned {
         keys,
         partition_count,
@@ -622,9 +554,7 @@ fn global_aggregate_output_is_single_partition() {
         aggregates: vec![make_count("total")],
         input: Box::new(RelExpr::scan("orders")),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.is_single_partition());
     assert!(dre.node_assignment.is_some());
 }
@@ -645,14 +575,8 @@ fn register_multiple_histograms() {
     opt.register_histogram("sales", "status", h2);
 
     // region should have skew, status should not.
-    let skew_region = opt.analyze_group_key_skew(
-        &RelExpr::scan("sales"),
-        &[col("region")],
-    );
-    let skew_status = opt.analyze_group_key_skew(
-        &RelExpr::scan("sales"),
-        &[col("status")],
-    );
+    let skew_region = opt.analyze_group_key_skew(&RelExpr::scan("sales"), &[col("region")]);
+    let skew_status = opt.analyze_group_key_skew(&RelExpr::scan("sales"), &[col("status")]);
     assert!(skew_region.is_some());
     assert!(skew_status.is_none());
 }
@@ -672,10 +596,7 @@ fn analyze_skew_returns_hot_key_values() {
     let histogram = FrequencyHistogram::new(buckets);
     let opt = optimizer_with_skewed_table(8, histogram);
     let result = opt
-        .analyze_group_key_skew(
-            &RelExpr::scan("sales"),
-            &[col("region")],
-        )
+        .analyze_group_key_skew(&RelExpr::scan("sales"), &[col("region")])
         .expect("should detect skew");
     let (_strategy, hot_values) = result;
     assert!(!hot_values.is_empty());
@@ -689,16 +610,8 @@ fn analyze_skew_returns_hot_key_values() {
 fn aggregate_over_join() {
     let config = DistributedOptimizerConfig::default();
     let mut topology = ClusterTopology::uniform(4);
-    topology.register_table(
-        "orders",
-        NodeId(0),
-        DataDistribution::Arbitrary,
-    );
-    topology.register_table(
-        "customers",
-        NodeId(1),
-        DataDistribution::Arbitrary,
-    );
+    topology.register_table("orders", NodeId(0), DataDistribution::Arbitrary);
+    topology.register_table("customers", NodeId(1), DataDistribution::Arbitrary);
     let mut orders_stats = Statistics::new(100_000_000.0);
     orders_stats.avg_row_size = 128;
     orders_stats.total_size = 12_800_000_000;
@@ -724,9 +637,7 @@ fn aggregate_over_join() {
         ],
         input: Box::new(join),
     };
-    let dre = opt
-        .optimize_distribution(&plan)
-        .expect("should succeed");
+    let dre = opt.optimize_distribution(&plan).expect("should succeed");
     assert!(dre.input_strategy.is_some());
 }
 
@@ -786,12 +697,6 @@ fn decompose_avg_to_sum_and_count() {
 fn decompose_preserves_aliases() {
     let aggs = vec![make_agg(AggregateFunction::Sum, "revenue")];
     let decomposed = decompose_all(&aggs).expect("decomposable");
-    assert_eq!(
-        decomposed[0].0.alias.as_deref(),
-        Some("partial_revenue")
-    );
-    assert_eq!(
-        decomposed[0].1.alias.as_deref(),
-        Some("revenue")
-    );
+    assert_eq!(decomposed[0].0.alias.as_deref(), Some("partial_revenue"));
+    assert_eq!(decomposed[0].1.alias.as_deref(), Some("revenue"));
 }

@@ -46,14 +46,12 @@ pub fn min_max_index_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(aggregate (list) (list (agg-expr (min (col ?col)) ?dist ?alias)) (scan ?table))" =>
             "(aggregate (list) (list (agg-expr (min (col ?col)) ?dist ?alias)) (limit (const-int 1) (const-int 0) (sort (list (sort-key (col ?col) asc nulls-last)) (index-scan ?table ?col))))"
         ),
-
         // MAX(col) with no GROUP BY on a table scan =>
         // LIMIT 1, SORT DESC on index-scan
         rewrite!("max-to-index-scan";
             "(aggregate (list) (list (agg-expr (max (col ?col)) ?dist ?alias)) (scan ?table))" =>
             "(aggregate (list) (list (agg-expr (max (col ?col)) ?dist ?alias)) (limit (const-int 1) (const-int 0) (sort (list (sort-key (col ?col) desc nulls-last)) (index-scan ?table ?col))))"
         ),
-
         // MIN(col) with filter: push index-scan under filter
         //
         // This handles WHERE-filtered MIN queries by replacing the
@@ -62,7 +60,6 @@ pub fn min_max_index_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(aggregate (list) (list (agg-expr (min (col ?col)) ?dist ?alias)) (filter ?pred (scan ?table)))" =>
             "(aggregate (list) (list (agg-expr (min (col ?col)) ?dist ?alias)) (limit (const-int 1) (const-int 0) (sort (list (sort-key (col ?col) asc nulls-last)) (filter ?pred (index-scan ?table ?col)))))"
         ),
-
         // MAX(col) with filter
         rewrite!("max-filtered-to-index-scan";
             "(aggregate (list) (list (agg-expr (max (col ?col)) ?dist ?alias)) (filter ?pred (scan ?table)))" =>
@@ -82,15 +79,10 @@ mod tests {
     use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 
-    fn run_with_min_max_rules(
-        expr: &RelExpr,
-    ) -> Runner<RelLang, RelAnalysis> {
-        let rec =
-            to_rec_expr(expr).expect("conversion should succeed");
+    fn run_with_min_max_rules(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
+        let rec = to_rec_expr(expr).expect("conversion should succeed");
         let mut rules = min_max_index_rules();
-        rules.extend(
-            crate::rewrite::aggregate_optimization_rules(),
-        );
+        rules.extend(crate::rewrite::aggregate_optimization_rules());
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(50_000)
@@ -141,9 +133,10 @@ mod tests {
 
         // Verify the index-scan node exists somewhere in the e-graph
         let has_index_scan = runner.egraph.classes().any(|class| {
-            class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexScan(_))
-            })
+            class
+                .nodes
+                .iter()
+                .any(|node| matches!(node, RelLang::IndexScan(_)))
         });
         assert!(
             has_index_scan,
@@ -151,13 +144,11 @@ mod tests {
         );
 
         // Verify the sort node with ascending direction exists
-        let has_asc_sort = runner.egraph.classes().any(|class| {
-            class.nodes.iter().any(|node| matches!(node, RelLang::Asc))
-        });
-        assert!(
-            has_asc_sort,
-            "expected ascending sort in MIN index rewrite"
-        );
+        let has_asc_sort = runner
+            .egraph
+            .classes()
+            .any(|class| class.nodes.iter().any(|node| matches!(node, RelLang::Asc)));
+        assert!(has_asc_sort, "expected ascending sort in MIN index rewrite");
     }
 
     #[test]
@@ -166,9 +157,10 @@ mod tests {
         let runner = run_with_min_max_rules(&expr);
 
         let has_index_scan = runner.egraph.classes().any(|class| {
-            class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexScan(_))
-            })
+            class
+                .nodes
+                .iter()
+                .any(|node| matches!(node, RelLang::IndexScan(_)))
         });
         assert!(
             has_index_scan,
@@ -176,9 +168,10 @@ mod tests {
         );
 
         // Verify descending sort for MAX
-        let has_desc_sort = runner.egraph.classes().any(|class| {
-            class.nodes.iter().any(|node| matches!(node, RelLang::Desc))
-        });
+        let has_desc_sort = runner
+            .egraph
+            .classes()
+            .any(|class| class.nodes.iter().any(|node| matches!(node, RelLang::Desc)));
         assert!(
             has_desc_sort,
             "expected descending sort in MAX index rewrite"
@@ -198,9 +191,7 @@ mod tests {
             input: Box::new(RelExpr::Filter {
                 predicate: Expr::BinOp {
                     op: BinOp::Gt,
-                    left: Box::new(Expr::Column(ColumnRef::new(
-                        "quantity",
-                    ))),
+                    left: Box::new(Expr::Column(ColumnRef::new("quantity"))),
                     right: Box::new(Expr::Const(Const::Int(0))),
                 },
                 input: Box::new(RelExpr::scan("orders")),
@@ -209,14 +200,12 @@ mod tests {
         let runner = run_with_min_max_rules(&expr);
 
         let has_index_scan = runner.egraph.classes().any(|class| {
-            class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexScan(_))
-            })
+            class
+                .nodes
+                .iter()
+                .any(|node| matches!(node, RelLang::IndexScan(_)))
         });
-        assert!(
-            has_index_scan,
-            "expected index-scan for filtered MIN query"
-        );
+        assert!(has_index_scan, "expected index-scan for filtered MIN query");
     }
 
     #[test]
@@ -246,9 +235,10 @@ mod tests {
         // With multiple aggregates the pattern should not match,
         // so no index-scan should appear.
         let has_index_scan = runner.egraph.classes().any(|class| {
-            class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexScan(_))
-            })
+            class
+                .nodes
+                .iter()
+                .any(|node| matches!(node, RelLang::IndexScan(_)))
         });
         assert!(
             !has_index_scan,
@@ -259,8 +249,7 @@ mod tests {
     #[test]
     fn min_max_rules_integrate_with_all_rules() {
         let expr = min_aggregate("order_id");
-        let rec =
-            to_rec_expr(&expr).expect("conversion should succeed");
+        let rec = to_rec_expr(&expr).expect("conversion should succeed");
         let rules = all_rules();
         let runner = Runner::default()
             .with_expr(&rec)
@@ -269,9 +258,10 @@ mod tests {
             .run(&rules);
 
         let has_index_scan = runner.egraph.classes().any(|class| {
-            class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexScan(_))
-            })
+            class
+                .nodes
+                .iter()
+                .any(|node| matches!(node, RelLang::IndexScan(_)))
         });
         assert!(
             has_index_scan,
@@ -287,9 +277,10 @@ mod tests {
         // Find the e-class containing the index-scan and verify
         // it tracks the "orders" table.
         let tracks_table = runner.egraph.classes().any(|class| {
-            let has_iscan = class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexScan(_))
-            });
+            let has_iscan = class
+                .nodes
+                .iter()
+                .any(|node| matches!(node, RelLang::IndexScan(_)));
             has_iscan && class.data.tables.contains("orders")
         });
         assert!(

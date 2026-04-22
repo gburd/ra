@@ -13,8 +13,8 @@ use egg::{rewrite as rw, Rewrite};
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
 use crate::vector_cost::{
-    VectorIndexType, VectorMetric, hnsw_search_cost, ivfflat_search_cost,
-    vector_sequential_scan_cost,
+    hnsw_search_cost, ivfflat_search_cost, vector_sequential_scan_cost, VectorIndexType,
+    VectorMetric,
 };
 
 /// Generate vector similarity search optimization rules.
@@ -57,7 +57,6 @@ pub fn vector_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(limit ?k ?offset
                (vector-knn ?table ?col ?target ?k))"
         ),
-
         // Rule 2: Distance filter < threshold → Vector range scan
         //
         // Pattern: filter(vector-distance < threshold, scan)
@@ -70,7 +69,6 @@ pub fn vector_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
                (scan ?table))" =>
             "(vector-range-scan ?table ?col ?target ?threshold ?metric)"
         ),
-
         // Rule 2b: Distance filter <= threshold variant
         rw!("vector-filter-to-range-le";
             "(filter
@@ -78,7 +76,6 @@ pub fn vector_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
                (scan ?table))" =>
             "(vector-range-scan ?table ?col ?target ?threshold ?metric)"
         ),
-
         // Rule 3: Pre-filter optimization - scalar filter before vector
         //
         // Pattern: sort(distance, filter(pred, scan)) where pred is highly selective
@@ -94,7 +91,6 @@ pub fn vector_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
                (limit ?k ?offset
                  (vector-knn ?table ?col ?target ?k)))"
         ),
-
         // Rule 4: Post-filter optimization - vector first, then scalar
         //
         // Pattern: filter(pred, sort(distance, scan)) where pred is not selective
@@ -186,28 +182,24 @@ pub fn estimate_vector_query_cost(
     let prefilter_rows = (total_rows as f64 * (1.0 - non_vector_selectivity)).ceil() as usize;
     let prefilter_nv_cost = total_rows as f64 * non_vector_cost_per_row;
     let prefilter_vec_cost = match index_type {
-        VectorIndexType::HNSW => {
-            hnsw_search_cost(
-                dimensions,
-                index_params.hnsw_m,
-                index_params.hnsw_ef_search,
-                prefilter_rows,
-                index_params.k,
-                vector_metric,
-            )
-            .total()
-        }
-        VectorIndexType::IVFFlat => {
-            ivfflat_search_cost(
-                dimensions,
-                index_params.ivfflat_lists,
-                index_params.ivfflat_probes,
-                prefilter_rows,
-                index_params.k,
-                vector_metric,
-            )
-            .total()
-        }
+        VectorIndexType::HNSW => hnsw_search_cost(
+            dimensions,
+            index_params.hnsw_m,
+            index_params.hnsw_ef_search,
+            prefilter_rows,
+            index_params.k,
+            vector_metric,
+        )
+        .total(),
+        VectorIndexType::IVFFlat => ivfflat_search_cost(
+            dimensions,
+            index_params.ivfflat_lists,
+            index_params.ivfflat_probes,
+            prefilter_rows,
+            index_params.k,
+            vector_metric,
+        )
+        .total(),
         VectorIndexType::Sequential => {
             vector_sequential_scan_cost(dimensions, prefilter_rows, vector_metric).total()
         }
@@ -216,28 +208,24 @@ pub fn estimate_vector_query_cost(
 
     // Strategy 2: Post-filter (vector first)
     let postfilter_vec_cost = match index_type {
-        VectorIndexType::HNSW => {
-            hnsw_search_cost(
-                dimensions,
-                index_params.hnsw_m,
-                index_params.hnsw_ef_search,
-                total_rows,
-                index_params.k,
-                vector_metric,
-            )
-            .total()
-        }
-        VectorIndexType::IVFFlat => {
-            ivfflat_search_cost(
-                dimensions,
-                index_params.ivfflat_lists,
-                index_params.ivfflat_probes,
-                total_rows,
-                index_params.k,
-                vector_metric,
-            )
-            .total()
-        }
+        VectorIndexType::HNSW => hnsw_search_cost(
+            dimensions,
+            index_params.hnsw_m,
+            index_params.hnsw_ef_search,
+            total_rows,
+            index_params.k,
+            vector_metric,
+        )
+        .total(),
+        VectorIndexType::IVFFlat => ivfflat_search_cost(
+            dimensions,
+            index_params.ivfflat_lists,
+            index_params.ivfflat_probes,
+            total_rows,
+            index_params.k,
+            vector_metric,
+        )
+        .total(),
         VectorIndexType::Sequential => {
             vector_sequential_scan_cost(dimensions, total_rows, vector_metric).total()
         }
@@ -250,15 +238,14 @@ pub fn estimate_vector_query_cost(
     let integrated_total = postfilter_vec_cost.min(prefilter_total) * 1.2;
 
     // Select best strategy
-    let (strategy, total_cost) = if prefilter_total < postfilter_total
-        && prefilter_total < integrated_total
-    {
-        (FilterStrategy::PreFilter, prefilter_total)
-    } else if postfilter_total < integrated_total {
-        (FilterStrategy::PostFilter, postfilter_total)
-    } else {
-        (FilterStrategy::Integrated, integrated_total)
-    };
+    let (strategy, total_cost) =
+        if prefilter_total < postfilter_total && prefilter_total < integrated_total {
+            (FilterStrategy::PreFilter, prefilter_total)
+        } else if postfilter_total < integrated_total {
+            (FilterStrategy::PostFilter, postfilter_total)
+        } else {
+            (FilterStrategy::Integrated, integrated_total)
+        };
 
     VectorQueryCost {
         strategy,
@@ -348,9 +335,9 @@ mod tests {
     #[test]
     fn optimize_filter_order_highly_selective_prefilters() {
         let (prefilter, postfilter, speedup) = optimize_vector_filter_order(
-            0.95,                          // 95% selectivity
-            0.001,                         // cheap filter
-            0.01,                          // vector very selective
+            0.95,  // 95% selectivity
+            0.001, // cheap filter
+            0.01,  // vector very selective
             VectorIndexType::HNSW,
             100_000,
         );
@@ -362,9 +349,9 @@ mod tests {
     #[test]
     fn optimize_filter_order_barely_selective_postfilters() {
         let (prefilter, postfilter, _speedup) = optimize_vector_filter_order(
-            0.05,                          // 5% selectivity (barely any)
+            0.05, // 5% selectivity (barely any)
             0.01,
-            0.10,                          // vector moderately selective
+            0.10, // vector moderately selective
             VectorIndexType::HNSW,
             100_000,
         );
@@ -375,10 +362,10 @@ mod tests {
     #[test]
     fn optimize_filter_order_sequential_prefers_prefilter() {
         let (prefilter, postfilter, _speedup) = optimize_vector_filter_order(
-            0.50,                          // moderate selectivity
-            0.001,                         // cheap filter
+            0.50,  // moderate selectivity
+            0.001, // cheap filter
             0.10,
-            VectorIndexType::Sequential,  // no index
+            VectorIndexType::Sequential, // no index
             100_000,
         );
         assert!(prefilter);
@@ -392,8 +379,8 @@ mod tests {
             128,
             100_000,
             VectorMetric::L2,
-            0.01,   // vector 1% selectivity
-            0.90,   // non-vector 90% selectivity (eliminate 90%)
+            0.01, // vector 1% selectivity
+            0.90, // non-vector 90% selectivity (eliminate 90%)
             0.001,
             VectorIndexType::HNSW,
             params,
@@ -411,9 +398,9 @@ mod tests {
             128,
             100_000,
             VectorMetric::L2,
-            0.01,   // vector 1% selectivity (very selective)
-            0.05,   // non-vector 5% selectivity (barely any)
-            0.01,   // expensive per-row filter
+            0.01, // vector 1% selectivity (very selective)
+            0.05, // non-vector 5% selectivity (barely any)
+            0.01, // expensive per-row filter
             VectorIndexType::HNSW,
             params,
         );
@@ -445,15 +432,25 @@ mod tests {
         let params = VectorIndexParams::default();
 
         let hnsw_cost = estimate_vector_query_cost(
-            128, 100_000, VectorMetric::L2,
-            0.01, 0.50, 0.001,
-            VectorIndexType::HNSW, params,
+            128,
+            100_000,
+            VectorMetric::L2,
+            0.01,
+            0.50,
+            0.001,
+            VectorIndexType::HNSW,
+            params,
         );
 
         let ivfflat_cost = estimate_vector_query_cost(
-            128, 100_000, VectorMetric::L2,
-            0.01, 0.50, 0.001,
-            VectorIndexType::IVFFlat, params,
+            128,
+            100_000,
+            VectorMetric::L2,
+            0.01,
+            0.50,
+            0.001,
+            VectorIndexType::IVFFlat,
+            params,
         );
 
         // HNSW should be faster for large datasets

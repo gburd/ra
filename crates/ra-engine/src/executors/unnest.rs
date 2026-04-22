@@ -22,11 +22,7 @@ pub struct UnnestExecutor {
 impl UnnestExecutor {
     /// Create an unnest executor.
     #[must_use]
-    pub fn new(
-        expr: Expr,
-        alias: Option<String>,
-        with_ordinality: bool,
-    ) -> Self {
+    pub fn new(expr: Expr, alias: Option<String>, with_ordinality: bool) -> Self {
         Self {
             expr,
             alias,
@@ -50,21 +46,15 @@ impl UnnestExecutor {
     ///
     /// Returns an error if the expression does not evaluate to
     /// an array or if a column reference is used without input.
-    pub fn execute(
-        &self,
-        input: Option<&[Row]>,
-    ) -> Result<Vec<Row>, ExecutionError> {
+    pub fn execute(&self, input: Option<&[Row]>) -> Result<Vec<Row>, ExecutionError> {
         match &self.expr {
-            Expr::Array(elements) => {
-                self.unnest_array_literal(elements)
-            }
+            Expr::Array(elements) => self.unnest_array_literal(elements),
             Expr::Column(_) => {
                 if let Some(rows) = input {
                     self.unnest_column(rows)
                 } else {
                     Err(ExecutionError::EvalError(
-                        "UNNEST of column requires input relation"
-                            .to_owned(),
+                        "UNNEST of column requires input relation".to_owned(),
                     ))
                 }
             }
@@ -75,10 +65,7 @@ impl UnnestExecutor {
     }
 
     /// Expand a constant array literal into rows.
-    fn unnest_array_literal(
-        &self,
-        elements: &[Expr],
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn unnest_array_literal(&self, elements: &[Expr]) -> Result<Vec<Row>, ExecutionError> {
         let mut rows = Vec::with_capacity(elements.len());
         for (idx, elem) in elements.iter().enumerate() {
             let value = eval_const_expr(elem)?;
@@ -96,16 +83,12 @@ impl UnnestExecutor {
     /// For each input row, extracts the array value at the
     /// referenced column position and produces one output row
     /// per array element, concatenated with the input row values.
-    fn unnest_column(
-        &self,
-        input_rows: &[Row],
-    ) -> Result<Vec<Row>, ExecutionError> {
+    fn unnest_column(&self, input_rows: &[Row]) -> Result<Vec<Row>, ExecutionError> {
         let col_idx = self.resolve_column_index(input_rows)?;
         let mut output = Vec::new();
 
         for input_row in input_rows {
-            let array_elements =
-                extract_array_elements(&input_row.values[col_idx])?;
+            let array_elements = extract_array_elements(&input_row.values[col_idx])?;
 
             for (ord, elem) in array_elements.iter().enumerate() {
                 let mut values = input_row.values.clone();
@@ -124,10 +107,7 @@ impl UnnestExecutor {
     ///
     /// Currently uses positional index 0 as a fallback when
     /// column name resolution is not available.
-    fn resolve_column_index(
-        &self,
-        input_rows: &[Row],
-    ) -> Result<usize, ExecutionError> {
+    fn resolve_column_index(&self, input_rows: &[Row]) -> Result<usize, ExecutionError> {
         if input_rows.is_empty() {
             return Ok(0);
         }
@@ -160,11 +140,7 @@ pub struct MultiUnnestExecutor {
 impl MultiUnnestExecutor {
     /// Create a multi-argument unnest executor.
     #[must_use]
-    pub fn new(
-        exprs: Vec<Expr>,
-        aliases: Vec<Option<String>>,
-        with_ordinality: bool,
-    ) -> Self {
+    pub fn new(exprs: Vec<Expr>, aliases: Vec<Option<String>>, with_ordinality: bool) -> Self {
         Self {
             exprs,
             aliases,
@@ -183,30 +159,20 @@ impl MultiUnnestExecutor {
     /// Returns an error if any expression does not evaluate to
     /// an array.
     pub fn execute(&self) -> Result<Vec<Row>, ExecutionError> {
-        let mut columns: Vec<Vec<Const>> =
-            Vec::with_capacity(self.exprs.len());
+        let mut columns: Vec<Vec<Const>> = Vec::with_capacity(self.exprs.len());
 
         for expr in &self.exprs {
             let elements = extract_array_from_expr(expr)?;
             columns.push(elements);
         }
 
-        let max_len = columns
-            .iter()
-            .map(Vec::len)
-            .max()
-            .unwrap_or(0);
+        let max_len = columns.iter().map(Vec::len).max().unwrap_or(0);
 
         let mut rows = Vec::with_capacity(max_len);
         for idx in 0..max_len {
-            let mut values = Vec::with_capacity(
-                columns.len() + usize::from(self.with_ordinality),
-            );
+            let mut values = Vec::with_capacity(columns.len() + usize::from(self.with_ordinality));
             for col in &columns {
-                let val = col
-                    .get(idx)
-                    .cloned()
-                    .unwrap_or(Const::Null);
+                let val = col.get(idx).cloned().unwrap_or(Const::Null);
                 values.push(val);
             }
             if self.with_ordinality {
@@ -226,13 +192,10 @@ impl MultiUnnestExecutor {
 }
 
 /// Extract array elements from an expression.
-fn extract_array_from_expr(
-    expr: &Expr,
-) -> Result<Vec<Const>, ExecutionError> {
+fn extract_array_from_expr(expr: &Expr) -> Result<Vec<Const>, ExecutionError> {
     match expr {
         Expr::Array(elements) => {
-            let mut result =
-                Vec::with_capacity(elements.len());
+            let mut result = Vec::with_capacity(elements.len());
             for elem in elements {
                 result.push(eval_const_expr(elem)?);
             }
@@ -262,9 +225,7 @@ fn eval_const_expr(expr: &Expr) -> Result<Const, ExecutionError> {
 /// format like `{1,2,3}`, or as nested structures depending on
 /// the source. For literal arrays, the UnnestExecutor already
 /// has the elements from the `Expr::Array` variant.
-fn extract_array_elements(
-    value: &Const,
-) -> Result<Vec<Const>, ExecutionError> {
+fn extract_array_elements(value: &Const) -> Result<Vec<Const>, ExecutionError> {
     match value {
         Const::String(s) => parse_pg_array_literal(s),
         Const::Null => Ok(vec![]),
@@ -275,9 +236,7 @@ fn extract_array_elements(
 }
 
 /// Parse a PostgreSQL-style array literal `{1,2,3}`.
-fn parse_pg_array_literal(
-    s: &str,
-) -> Result<Vec<Const>, ExecutionError> {
+fn parse_pg_array_literal(s: &str) -> Result<Vec<Const>, ExecutionError> {
     let trimmed = s.trim();
     if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
         return Err(ExecutionError::EvalError(format!(
@@ -298,11 +257,8 @@ fn parse_pg_array_literal(
         } else if let Ok(f) = part.parse::<f64>() {
             elements.push(Const::Float(f));
         } else {
-            let unquoted = part
-                .trim_matches('"')
-                .trim_matches('\'');
-            elements
-                .push(Const::String(unquoted.to_owned()));
+            let unquoted = part.trim_matches('"').trim_matches('\'');
+            elements.push(Const::String(unquoted.to_owned()));
         }
     }
     Ok(elements)
@@ -322,8 +278,7 @@ mod tests {
             Expr::Const(Const::Int(30)),
         ]);
         let executor = UnnestExecutor::new(expr, None, false);
-        let rows =
-            executor.execute(None).expect("should succeed");
+        let rows = executor.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].values, vec![Const::Int(10)]);
         assert_eq!(rows[1].values, vec![Const::Int(20)]);
@@ -336,16 +291,11 @@ mod tests {
             Expr::Const(Const::String("a".into())),
             Expr::Const(Const::String("b".into())),
         ]);
-        let executor =
-            UnnestExecutor::new(expr, Some("val".into()), false);
+        let executor = UnnestExecutor::new(expr, Some("val".into()), false);
         assert_eq!(executor.column_alias(), "val");
-        let rows =
-            executor.execute(None).expect("should succeed");
+        let rows = executor.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows[0].values,
-            vec![Const::String("a".into())]
-        );
+        assert_eq!(rows[0].values, vec![Const::String("a".into())]);
     }
 
     #[test]
@@ -354,34 +304,24 @@ mod tests {
             Expr::Const(Const::Int(100)),
             Expr::Const(Const::Int(200)),
         ]);
-        let executor =
-            UnnestExecutor::new(expr, None, true);
-        let rows =
-            executor.execute(None).expect("should succeed");
+        let executor = UnnestExecutor::new(expr, None, true);
+        let rows = executor.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows[0].values,
-            vec![Const::Int(100), Const::Int(1)]
-        );
-        assert_eq!(
-            rows[1].values,
-            vec![Const::Int(200), Const::Int(2)]
-        );
+        assert_eq!(rows[0].values, vec![Const::Int(100), Const::Int(1)]);
+        assert_eq!(rows[1].values, vec![Const::Int(200), Const::Int(2)]);
     }
 
     #[test]
     fn unnest_empty_array() {
         let expr = Expr::Array(vec![]);
         let executor = UnnestExecutor::new(expr, None, false);
-        let rows =
-            executor.execute(None).expect("should succeed");
+        let rows = executor.execute(None).expect("should succeed");
         assert!(rows.is_empty());
     }
 
     #[test]
     fn unnest_column_requires_input() {
-        let expr =
-            Expr::Column(ColumnRef::new("arr"));
+        let expr = Expr::Column(ColumnRef::new("arr"));
         let executor = UnnestExecutor::new(expr, None, false);
         let result = executor.execute(None);
         assert!(result.is_err());
@@ -389,22 +329,13 @@ mod tests {
 
     #[test]
     fn unnest_column_from_input_rows() {
-        let expr =
-            Expr::Column(ColumnRef::new("arr"));
+        let expr = Expr::Column(ColumnRef::new("arr"));
         let executor = UnnestExecutor::new(expr, None, false);
         let input = vec![
-            Row::new(vec![
-                Const::Int(1),
-                Const::String("{10,20}".into()),
-            ]),
-            Row::new(vec![
-                Const::Int(2),
-                Const::String("{30}".into()),
-            ]),
+            Row::new(vec![Const::Int(1), Const::String("{10,20}".into())]),
+            Row::new(vec![Const::Int(2), Const::String("{30}".into())]),
         ];
-        let rows = executor
-            .execute(Some(&input))
-            .expect("should succeed");
+        let rows = executor.execute(Some(&input)).expect("should succeed");
         // Row 1 produces 2 output rows, row 2 produces 1
         assert_eq!(rows.len(), 3);
         assert_eq!(
@@ -419,52 +350,36 @@ mod tests {
 
     #[test]
     fn parse_pg_array_integers() {
-        let elems = parse_pg_array_literal("{1,2,3}")
-            .expect("should parse");
-        assert_eq!(
-            elems,
-            vec![Const::Int(1), Const::Int(2), Const::Int(3)]
-        );
+        let elems = parse_pg_array_literal("{1,2,3}").expect("should parse");
+        assert_eq!(elems, vec![Const::Int(1), Const::Int(2), Const::Int(3)]);
     }
 
     #[test]
     fn parse_pg_array_empty() {
-        let elems = parse_pg_array_literal("{}")
-            .expect("should parse");
+        let elems = parse_pg_array_literal("{}").expect("should parse");
         assert!(elems.is_empty());
     }
 
     #[test]
     fn parse_pg_array_strings() {
-        let elems = parse_pg_array_literal("{\"a\",\"b\"}")
-            .expect("should parse");
+        let elems = parse_pg_array_literal("{\"a\",\"b\"}").expect("should parse");
         assert_eq!(
             elems,
-            vec![
-                Const::String("a".into()),
-                Const::String("b".into()),
-            ]
+            vec![Const::String("a".into()), Const::String("b".into()),]
         );
     }
 
     #[test]
     fn parse_pg_array_null() {
-        let elems = parse_pg_array_literal("{1,NULL,3}")
-            .expect("should parse");
-        assert_eq!(
-            elems,
-            vec![Const::Int(1), Const::Null, Const::Int(3)]
-        );
+        let elems = parse_pg_array_literal("{1,NULL,3}").expect("should parse");
+        assert_eq!(elems, vec![Const::Int(1), Const::Null, Const::Int(3)]);
     }
 
     #[test]
     fn multi_unnest_basic() {
         let exec = MultiUnnestExecutor::new(
             vec![
-                Expr::Array(vec![
-                    Expr::Const(Const::Int(1)),
-                    Expr::Const(Const::Int(2)),
-                ]),
+                Expr::Array(vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(2))]),
                 Expr::Array(vec![
                     Expr::Const(Const::String("a".into())),
                     Expr::Const(Const::String("b".into())),
@@ -494,9 +409,7 @@ mod tests {
                     Expr::Const(Const::Int(2)),
                     Expr::Const(Const::Int(3)),
                 ]),
-                Expr::Array(vec![
-                    Expr::Const(Const::String("x".into())),
-                ]),
+                Expr::Array(vec![Expr::Const(Const::String("x".into()))]),
             ],
             vec![None, None],
             false,
@@ -510,34 +423,22 @@ mod tests {
     #[test]
     fn multi_unnest_with_ordinality() {
         let exec = MultiUnnestExecutor::new(
-            vec![
-                Expr::Array(vec![
-                    Expr::Const(Const::Int(10)),
-                    Expr::Const(Const::Int(20)),
-                ]),
-            ],
+            vec![Expr::Array(vec![
+                Expr::Const(Const::Int(10)),
+                Expr::Const(Const::Int(20)),
+            ])],
             vec![None],
             true,
         );
         let rows = exec.execute().expect("should succeed");
         assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows[0].values,
-            vec![Const::Int(10), Const::Int(1)]
-        );
-        assert_eq!(
-            rows[1].values,
-            vec![Const::Int(20), Const::Int(2)]
-        );
+        assert_eq!(rows[0].values, vec![Const::Int(10), Const::Int(1)]);
+        assert_eq!(rows[1].values, vec![Const::Int(20), Const::Int(2)]);
     }
 
     #[test]
     fn multi_unnest_empty() {
-        let exec = MultiUnnestExecutor::new(
-            vec![Expr::Array(vec![])],
-            vec![None],
-            false,
-        );
+        let exec = MultiUnnestExecutor::new(vec![Expr::Array(vec![])], vec![None], false);
         let rows = exec.execute().expect("should succeed");
         assert!(rows.is_empty());
     }
@@ -545,15 +446,10 @@ mod tests {
     #[test]
     fn multi_unnest_column_aliases() {
         let exec = MultiUnnestExecutor::new(
-            vec![Expr::Array(vec![
-                Expr::Const(Const::Int(1)),
-            ])],
+            vec![Expr::Array(vec![Expr::Const(Const::Int(1))])],
             vec![Some("col1".into())],
             false,
         );
-        assert_eq!(
-            exec.column_aliases(),
-            &[Some("col1".to_owned())]
-        );
+        assert_eq!(exec.column_aliases(), &[Some("col1".to_owned())]);
     }
 }
