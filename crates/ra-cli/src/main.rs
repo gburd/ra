@@ -839,7 +839,14 @@ fn run_main() -> Result<()> {
             snapshot,
         } => {
             let resolved = resolve_query(&query, use_stdin)?;
-            cmd_explain(&resolved, &hardware_profile, timeline.as_deref(), snapshot, cli.verbose, cli.quiet)
+            cmd_explain(
+                &resolved,
+                &hardware_profile,
+                timeline.as_deref(),
+                snapshot,
+                cli.verbose,
+                cli.quiet,
+            )
         }
         Commands::Optimize {
             query,
@@ -959,7 +966,10 @@ fn run_main() -> Result<()> {
                 let sql_script =
                     pg_snapshot_commands::generate_capture_script(&tables, &output_dir, interval)?;
                 std::fs::write(&script, sql_script)?;
-                eprintln!("{}", format!("SQL script written to {}", script.display()).green());
+                eprintln!(
+                    "{}",
+                    format!("SQL script written to {}", script.display()).green()
+                );
                 Ok(())
             }
             PgSnapshotCommands::MergeTimeline {
@@ -1168,11 +1178,9 @@ fn run_main() -> Result<()> {
             }
         },
         Commands::Timeline(cmd) => timeline_commands::cmd_timeline(&cmd, cli.quiet),
-        Commands::Ml(cmd) => {
-            tokio::runtime::Runtime::new()
-                .context("failed to create tokio runtime")?
-                .block_on(ml_commands::handle_ml_command(cmd))
-        }
+        Commands::Ml(cmd) => tokio::runtime::Runtime::new()
+            .context("failed to create tokio runtime")?
+            .block_on(ml_commands::handle_ml_command(cmd)),
         Commands::Benchmark {
             all: _,
             database: _,
@@ -1180,8 +1188,10 @@ fn run_main() -> Result<()> {
             output: _,
             format: _,
         } => {
-            anyhow::bail!("Benchmark command is temporarily disabled due to incomplete implementation")
-        },
+            anyhow::bail!(
+                "Benchmark command is temporarily disabled due to incomplete implementation"
+            )
+        }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "ra-cli", &mut std::io::stdout());
@@ -1693,13 +1703,23 @@ fn cmd_explain(
         let timeline = TimelineConfig::from_file(path)
             .with_context(|| format!("Failed to load timeline from {}", path.display()))?;
 
-        let snapshot = timeline.snapshots.get(snapshot_index)
-            .ok_or_else(|| anyhow::anyhow!("Snapshot index {} not found in timeline (has {} snapshots)",
-                                           snapshot_index, timeline.snapshots.len()))?;
+        let snapshot = timeline.snapshots.get(snapshot_index).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Snapshot index {} not found in timeline (has {} snapshots)",
+                snapshot_index,
+                timeline.snapshots.len()
+            )
+        })?;
 
         // Get hardware profile from timeline's definitions
-        let hardware_def = timeline.get_hardware_profile(&snapshot.hardware_profile)
-            .ok_or_else(|| anyhow::anyhow!("Hardware profile '{}' not found in timeline", snapshot.hardware_profile))?;
+        let hardware_def = timeline
+            .get_hardware_profile(&snapshot.hardware_profile)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Hardware profile '{}' not found in timeline",
+                    snapshot.hardware_profile
+                )
+            })?;
 
         let hardware = hardware_profile_from_def(hardware_def);
 
@@ -1714,8 +1734,12 @@ fn cmd_explain(
 
         if let Some((timeline, idx)) = &timeline_context {
             let snapshot = &timeline.snapshots[*idx];
-            eprintln!("  {}: {} (snapshot {})", "Timeline".bold(),
-                     timeline.metadata.name, idx);
+            eprintln!(
+                "  {}: {} (snapshot {})",
+                "Timeline".bold(),
+                timeline.metadata.name,
+                idx
+            );
             if let Some(label) = &snapshot.label {
                 eprintln!("  {}: {label}", "Snapshot".bold());
             }
@@ -1784,7 +1808,9 @@ fn schema_info_to_table_stats(
         let mut indexes = HashMap::new();
         for idx in &table_info.indexes {
             // Check if this is a primary key index
-            let is_primary = table_info.primary_key_columns().iter()
+            let is_primary = table_info
+                .primary_key_columns()
+                .iter()
                 .all(|&pk_col| idx.columns.contains(&pk_col.to_string()));
 
             let idx_stats = IndexStats {
@@ -1866,12 +1892,16 @@ fn cmd_optimize(
         }
         let mut connector = ra_metadata::connect(db_url)
             .with_context(|| format!("connecting to database: {db_url}"))?;
-        let schema = connector.gather_schema()
+        let schema = connector
+            .gather_schema()
             .with_context(|| format!("gathering schema from: {db_url}"))?;
         Some(schema_info_to_table_stats(&schema))
     } else if let Some(json_path) = schema_json {
         if !quiet {
-            eprintln!("Loading schema from JSON: {}", json_path.display().to_string().cyan());
+            eprintln!(
+                "Loading schema from JSON: {}",
+                json_path.display().to_string().cyan()
+            );
         }
         let json_content = std::fs::read_to_string(json_path)
             .with_context(|| format!("reading schema JSON: {}", json_path.display()))?;
@@ -1892,13 +1922,23 @@ fn cmd_optimize(
         let timeline = TimelineConfig::from_file(path)
             .with_context(|| format!("Failed to load timeline from {}", path.display()))?;
 
-        let snapshot = timeline.snapshots.get(snapshot_index)
-            .ok_or_else(|| anyhow::anyhow!("Snapshot index {} not found in timeline (has {} snapshots)",
-                                           snapshot_index, timeline.snapshots.len()))?;
+        let snapshot = timeline.snapshots.get(snapshot_index).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Snapshot index {} not found in timeline (has {} snapshots)",
+                snapshot_index,
+                timeline.snapshots.len()
+            )
+        })?;
 
         // Get hardware profile from timeline's definitions
-        let hardware_def = timeline.get_hardware_profile(&snapshot.hardware_profile)
-            .ok_or_else(|| anyhow::anyhow!("Hardware profile '{}' not found in timeline", snapshot.hardware_profile))?;
+        let hardware_def = timeline
+            .get_hardware_profile(&snapshot.hardware_profile)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Hardware profile '{}' not found in timeline",
+                    snapshot.hardware_profile
+                )
+            })?;
 
         let hardware = hardware_profile_from_def(hardware_def);
 
@@ -1949,11 +1989,18 @@ fn cmd_optimize(
         if !show_rules.should_track() && !verbose {
             // Simple path: just optimize with facts and show result
             let snapshot = &timeline.snapshots[snapshot_index];
-            let hardware_def = timeline.get_hardware_profile(&snapshot.hardware_profile).unwrap();
+            let hardware_def = timeline
+                .get_hardware_profile(&snapshot.hardware_profile)
+                .unwrap();
             let facts = SnapshotFactsProvider::new(snapshot, hardware_def);
 
-            let optimized = optimizer.optimize_with_facts(&plan, &facts)
-                .with_context(|| format!("failed to optimize query with timeline snapshot {snapshot_index}: {query}"))?;
+            let optimized = optimizer
+                .optimize_with_facts(&plan, &facts)
+                .with_context(|| {
+                    format!(
+                        "failed to optimize query with timeline snapshot {snapshot_index}: {query}"
+                    )
+                })?;
 
             if let Some(fmt) = explain_format {
                 return print_explain_output(&optimized, fmt);
@@ -1962,7 +2009,12 @@ fn cmd_optimize(
             if !quiet {
                 print_header("Query Optimization (Timeline Snapshot)");
                 eprintln!("  {}: {query}", "SQL".bold());
-                eprintln!("  {}: {} (snapshot {})", "Timeline".bold(), timeline.metadata.name, snapshot_index);
+                eprintln!(
+                    "  {}: {} (snapshot {})",
+                    "Timeline".bold(),
+                    timeline.metadata.name,
+                    snapshot_index
+                );
                 if let Some(label) = &snapshot.label {
                     eprintln!("  {}: {label}", "Snapshot".bold());
                 }
@@ -1976,7 +2028,10 @@ fn cmd_optimize(
             // Verbose/tracking requested - note that timeline facts won't be used
             if !quiet {
                 eprintln!("{}", "Note: Timeline facts not used with --verbose or --rules-* flags (limitation of optimize_with_facts).".yellow());
-                eprintln!("{}",  "      Using standard optimization with verbose tracking instead.".yellow());
+                eprintln!(
+                    "{}",
+                    "      Using standard optimization with verbose tracking instead.".yellow()
+                );
                 eprintln!();
             }
             // Fall through to normal optimization path below
@@ -2017,10 +2072,7 @@ fn cmd_optimize(
         if let Some(stats) = optimizer.advisor_stats() {
             eprintln!();
             eprintln!("{}", "Rule Advisor Statistics:".bold());
-            eprintln!(
-                "  Total rules:      {}",
-                stats.total_rules,
-            );
+            eprintln!("  Total rules:      {}", stats.total_rules,);
             eprintln!(
                 "  After Stage 1:    {} (context elimination)",
                 stats.after_stage1,
@@ -2034,16 +2086,10 @@ fn cmd_optimize(
                 stats.after_stage3,
             );
             if !stats.stage1_eliminated.is_empty() {
-                eprintln!(
-                    "  Stage 1 excluded: {}",
-                    stats.stage1_eliminated.join(", "),
-                );
+                eprintln!("  Stage 1 excluded: {}", stats.stage1_eliminated.join(", "),);
             }
             if !stats.stage2_eliminated.is_empty() {
-                eprintln!(
-                    "  Stage 2 excluded: {}",
-                    stats.stage2_eliminated.join(", "),
-                );
+                eprintln!("  Stage 2 excluded: {}", stats.stage2_eliminated.join(", "),);
             }
         }
     }
@@ -2085,12 +2131,7 @@ fn optimize_bounded(
         } else {
             "Query Optimization (Resource-Bounded)"
         };
-        print_optimization_header(
-            title,
-            query,
-            hardware,
-            verbose,
-        );
+        print_optimization_header(title, query, hardware, verbose);
         print_resource_usage(&result, verbose);
 
         if show_stats {
@@ -2302,13 +2343,9 @@ fn print_explain_output(plan: &ra_core::algebra::RelExpr, format_str: &str) -> R
             let _ = cost_params; // TODO: integrate cost params into node conversion
             let explain_node = ra_metadata::relexpr_to_explain_node(plan);
             match database {
-                DatabaseTextFormat::Postgres => {
-                    ra_metadata::format_postgres_explain(&explain_node)
-                }
+                DatabaseTextFormat::Postgres => ra_metadata::format_postgres_explain(&explain_node),
                 DatabaseTextFormat::Mysql => ra_metadata::format_mysql_explain(&explain_node),
-                DatabaseTextFormat::Sqlite => {
-                    ra_metadata::format_sqlite_explain(&explain_node)
-                }
+                DatabaseTextFormat::Sqlite => ra_metadata::format_sqlite_explain(&explain_node),
             }
         }
     };
@@ -2621,22 +2658,35 @@ fn cmd_proxy(
 
     eprintln!("{}", "Ra Database Proxy".bold().green());
     eprintln!();
-    eprintln!("  {}: {}", "Backend".bold(), proxy::mask_connection_string(backend));
+    eprintln!(
+        "  {}: {}",
+        "Backend".bold(),
+        proxy::mask_connection_string(backend)
+    );
     eprintln!("  {}: {}", "Listening".bold(), listen);
     eprintln!("  {}: {:.1}%", "Min Improvement".bold(), min_improvement);
 
     if takeover {
-        eprintln!("  {}: {}", "Plan Takeover".bold(), "enabled (requires pg_plan_advice)".yellow());
+        eprintln!(
+            "  {}: {}",
+            "Plan Takeover".bold(),
+            "enabled (requires pg_plan_advice)".yellow()
+        );
     }
 
     eprintln!();
-    eprintln!("{}", "Note: Full wire protocol implementation is a work in progress.".dimmed());
-    eprintln!("{}", "      This command currently provides basic passthrough functionality.".dimmed());
+    eprintln!(
+        "{}",
+        "Note: Full wire protocol implementation is a work in progress.".dimmed()
+    );
+    eprintln!(
+        "{}",
+        "      This command currently provides basic passthrough functionality.".dimmed()
+    );
     eprintln!();
 
     // Run the proxy server (requires tokio runtime)
-    let runtime = tokio::runtime::Runtime::new()
-        .context("failed to create tokio runtime")?;
+    let runtime = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
 
     runtime.block_on(proxy::run_proxy(config))
 }
@@ -2864,7 +2914,7 @@ fn hardware_profile_from_def(def: &ra_engine::HardwareProfileDef) -> ra_hardware
         cpu_memory_bandwidth_gbps: 100.0, // Reasonable default
         l2_cache_bytes: def.l2_cache_size,
         l3_cache_bytes: def.l3_cache_size,
-        l3_latency_ns: 12.0, // Typical L3 latency
+        l3_latency_ns: 12.0,   // Typical L3 latency
         dram_latency_ns: 80.0, // Typical DRAM latency
         simd_width_bits: def.simd_width,
         numa_nodes: 1,
@@ -3184,7 +3234,9 @@ fn print_intermediate_steps(
         // Check if we should group with next steps
         let mut grouped_steps = vec![step];
         let mut j = i + 1;
-        while j < steps.len() && rule_explanations::should_group_with_previous(&steps[j].rule_name, &step.rule_name) {
+        while j < steps.len()
+            && rule_explanations::should_group_with_previous(&steps[j].rule_name, &step.rule_name)
+        {
             grouped_steps.push(&steps[j]);
             j += 1;
         }
@@ -3195,14 +3247,22 @@ fn print_intermediate_steps(
             let step_range = if step_numbers.len() == 2 {
                 format!("{} and {}", step_numbers[0], step_numbers[1])
             } else {
-                format!("{}-{}", step_numbers[0], step_numbers[step_numbers.len() - 1])
+                format!(
+                    "{}-{}",
+                    step_numbers[0],
+                    step_numbers[step_numbers.len() - 1]
+                )
             };
 
             eprintln!(
                 "{}",
-                format!("Steps {}: Applied {} related rules", step_range, grouped_steps.len())
-                    .bold()
-                    .green()
+                format!(
+                    "Steps {}: Applied {} related rules",
+                    step_range,
+                    grouped_steps.len()
+                )
+                .bold()
+                .green()
             );
 
             for s in &grouped_steps {
@@ -3234,7 +3294,8 @@ fn print_intermediate_steps(
         }
 
         // Show examples if available
-        if let (Some(before), Some(after)) = (explanation.before_example, explanation.after_example) {
+        if let (Some(before), Some(after)) = (explanation.before_example, explanation.after_example)
+        {
             eprintln!();
             eprintln!("  {}", "Example transformation:".bold());
             eprintln!("    {}: {}", "Before".dimmed(), before);
@@ -3244,11 +3305,22 @@ fn print_intermediate_steps(
         // Show cost impact
         eprintln!();
         if let Some(improvement) = step.cost_improvement {
-            eprintln!("  {}: {}", "Cost Impact".bold().yellow(), format_impact(improvement, &step.plan_before, &step.plan_after));
+            eprintln!(
+                "  {}: {}",
+                "Cost Impact".bold().yellow(),
+                format_impact(improvement, &step.plan_before, &step.plan_after)
+            );
         } else if let Some(reason) = explanation.why_no_cost_change {
-            eprintln!("  {}: {}", "Cost Impact".bold().yellow(), format!("No measurable change ({})", reason));
+            eprintln!(
+                "  {}: {}",
+                "Cost Impact".bold().yellow(),
+                format!("No measurable change ({})", reason)
+            );
         } else {
-            eprintln!("  {}: No cost change measured", "Cost Impact".bold().yellow());
+            eprintln!(
+                "  {}: No cost change measured",
+                "Cost Impact".bold().yellow()
+            );
         }
 
         eprintln!();
@@ -3262,7 +3334,10 @@ fn print_intermediate_steps(
             eprintln!("  {}:", "Plan Changes".bold());
             print_plan_with_changes_inline(&last_step.plan_after, &last_step.plan_before);
         } else {
-            eprintln!("  {}: Plan structure unchanged (added to search space)", "Plan Changes".bold().dimmed());
+            eprintln!(
+                "  {}: Plan structure unchanged (added to search space)",
+                "Plan Changes".bold().dimmed()
+            );
         }
 
         eprintln!();
@@ -3335,8 +3410,8 @@ fn identify_cost_change_type(
 
     // Look at operator types to infer cost type
     match (plan_before, plan_after) {
-        (RelExpr::Scan { .. }, RelExpr::IndexOnlyScan { .. }) |
-        (RelExpr::Scan { .. }, RelExpr::BitmapIndexScan { .. }) => {
+        (RelExpr::Scan { .. }, RelExpr::IndexOnlyScan { .. })
+        | (RelExpr::Scan { .. }, RelExpr::BitmapIndexScan { .. }) => {
             "I/O cost reduced (index access instead of sequential scan)".to_string()
         }
         (RelExpr::Join { .. }, RelExpr::ParallelHashJoin { .. }) => {
@@ -3371,9 +3446,15 @@ fn has_filter_near_scan_depth(plan: &ra_core::algebra::RelExpr, depth: usize) ->
     match plan {
         RelExpr::Filter { input, .. } => {
             matches!(**input, RelExpr::Scan { .. })
-                || plan.children().iter().any(|c| has_filter_near_scan_depth(c, depth + 1))
+                || plan
+                    .children()
+                    .iter()
+                    .any(|c| has_filter_near_scan_depth(c, depth + 1))
         }
-        _ => plan.children().iter().any(|c| has_filter_near_scan_depth(c, depth + 1))
+        _ => plan
+            .children()
+            .iter()
+            .any(|c| has_filter_near_scan_depth(c, depth + 1)),
     }
 }
 
@@ -3398,7 +3479,7 @@ fn detect_strategy_change(
         (RelExpr::IncrementalSort { .. }, RelExpr::Sort { .. }) => {
             Some("Incremental sort → Full sort".to_string())
         }
-        _ => None
+        _ => None,
     }
 }
 
@@ -3421,10 +3502,11 @@ fn detect_scan_optimization(
             (Some("BitmapIndexScan"), Some("IndexOnlyScan")) => {
                 Some("Upgraded to index-only scan".to_string())
             }
-            _ => Some(format!("Scan method: {} → {}",
+            _ => Some(format!(
+                "Scan method: {} → {}",
                 before_scan_type.unwrap_or_else(|| "Unknown".to_string()),
                 after_scan_type.unwrap_or_else(|| "Unknown".to_string())
-            ))
+            )),
         }
     } else {
         None
@@ -3496,18 +3578,30 @@ fn print_plan_with_changes_inline(
 
         // Check if we should show any removed lines before this one
         // (heuristic: show removed lines with similar tree depth)
-        let line_depth = line.chars().take_while(|c| c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─').count();
+        let line_depth = line
+            .chars()
+            .take_while(|c| c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─')
+            .count();
 
         for (removed_idx, removed_line) in &removed_ops {
             if shown_removed_indices.contains(removed_idx) {
                 continue;
             }
 
-            let removed_depth = removed_line.chars().take_while(|c| c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─').count();
+            let removed_depth = removed_line
+                .chars()
+                .take_while(|c| {
+                    c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─'
+                })
+                .count();
 
             // Show removed line if it's at similar depth and hasn't been shown yet
             if removed_depth <= line_depth && removed_depth + 4 >= line_depth {
-                eprintln!("    {} {}", "−".red().bold(), removed_line.trim().red().strikethrough());
+                eprintln!(
+                    "    {} {}",
+                    "−".red().bold(),
+                    removed_line.trim().red().strikethrough()
+                );
                 shown_removed_indices.insert(*removed_idx);
             }
         }
@@ -3525,7 +3619,11 @@ fn print_plan_with_changes_inline(
     // Show any remaining removed lines at the end
     for (removed_idx, removed_line) in &removed_ops {
         if !shown_removed_indices.contains(removed_idx) {
-            eprintln!("    {} {}", "−".red().bold(), removed_line.trim().red().strikethrough());
+            eprintln!(
+                "    {} {}",
+                "−".red().bold(),
+                removed_line.trim().red().strikethrough()
+            );
         }
     }
 }
@@ -3555,11 +3653,18 @@ fn has_index_scan(expr: &ra_core::algebra::RelExpr) -> bool {
 
 /// Count total operators in a plan.
 fn count_operators(expr: &ra_core::algebra::RelExpr) -> usize {
-    1 + expr.children().iter().map(|c| count_operators(c)).sum::<usize>()
+    1 + expr
+        .children()
+        .iter()
+        .map(|c| count_operators(c))
+        .sum::<usize>()
 }
 
 /// Detect if an operator was eliminated.
-fn has_operator_elimination(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
+fn has_operator_elimination(
+    before: &ra_core::algebra::RelExpr,
+    after: &ra_core::algebra::RelExpr,
+) -> bool {
     count_operators(before) > count_operators(after)
 }
 
@@ -3570,7 +3675,10 @@ fn has_parallelization(expr: &ra_core::algebra::RelExpr) -> bool {
         | ra_core::algebra::RelExpr::ParallelHashJoin { .. }
         | ra_core::algebra::RelExpr::ParallelAggregate { .. }
         | ra_core::algebra::RelExpr::Gather { .. } => true,
-        _ => expr.children().iter().any(|&child| has_parallelization(child)),
+        _ => expr
+            .children()
+            .iter()
+            .any(|&child| has_parallelization(child)),
     }
 }
 
@@ -3701,36 +3809,68 @@ fn format_contextual_help(error_msg: &str, error_line: &str, _col_idx: usize) ->
     if error_msg.contains("expected: an expression") && error_msg.contains("found: {") {
         help.push_str(&format!("{}: ", "help".green().bold()));
         help.push_str("JSON literals must be quoted strings\n");
-        help.push_str(&format!("      {} Use '{{\"key\": \"value\"}}' instead of {{key: value}}\n", "|".blue()));
-        help.push_str(&format!("      {} In bash, escape quotes: '\\'{{...}}\\'' or use $'...' syntax\n", "|".blue()));
+        help.push_str(&format!(
+            "      {} Use '{{\"key\": \"value\"}}' instead of {{key: value}}\n",
+            "|".blue()
+        ));
+        help.push_str(&format!(
+            "      {} In bash, escape quotes: '\\'{{...}}\\'' or use $'...' syntax\n",
+            "|".blue()
+        ));
     }
     // Check for @= operator
     else if error_line.contains("@=") {
         help.push_str(&format!("{}: ", "help".green().bold()));
         help.push_str("@= is not a standard PostgreSQL operator\n");
-        help.push_str(&format!("      {} Use @> (contains) or @? (path exists) instead\n", "|".blue()));
-        help.push_str(&format!("      {} Example: WHERE data @> '{{\"status\": \"active\"}}'\n", "|".blue()));
+        help.push_str(&format!(
+            "      {} Use @> (contains) or @? (path exists) instead\n",
+            "|".blue()
+        ));
+        help.push_str(&format!(
+            "      {} Example: WHERE data @> '{{\"status\": \"active\"}}'\n",
+            "|".blue()
+        ));
     }
     // Check for unrecognized @ operators
     else if error_msg.contains("found: @") && !error_line.contains("@@") {
         help.push_str(&format!("{}: ", "help".green().bold()));
         help.push_str("Check PostgreSQL operator syntax\n");
-        help.push_str(&format!("      {} Supported JSONB operators: @> <@ @? @@\n", "|".blue()));
-        help.push_str(&format!("      {} Supported text operators: @@ (tsvector match)\n", "|".blue()));
+        help.push_str(&format!(
+            "      {} Supported JSONB operators: @> <@ @? @@\n",
+            "|".blue()
+        ));
+        help.push_str(&format!(
+            "      {} Supported text operators: @@ (tsvector match)\n",
+            "|".blue()
+        ));
     }
     // Check for quote mismatch
-    else if error_msg.contains("unterminated") || error_line.chars().filter(|&c| c == '\'').count() % 2 != 0 {
+    else if error_msg.contains("unterminated")
+        || error_line.chars().filter(|&c| c == '\'').count() % 2 != 0
+    {
         help.push_str(&format!("{}: ", "help".green().bold()));
         help.push_str("Check string quote matching\n");
-        help.push_str(&format!("      {} SQL strings use single quotes: 'text'\n", "|".blue()));
-        help.push_str(&format!("      {} Escape quotes in bash: '\\''text'\\'' or \"'text'\"\n", "|".blue()));
+        help.push_str(&format!(
+            "      {} SQL strings use single quotes: 'text'\n",
+            "|".blue()
+        ));
+        help.push_str(&format!(
+            "      {} Escape quotes in bash: '\\''text'\\'' or \"'text'\"\n",
+            "|".blue()
+        ));
     }
     // Generic help
     else if !error_msg.contains("unsupported") {
         help.push_str(&format!("{}: ", "help".green().bold()));
         help.push_str("Check SQL syntax\n");
-        help.push_str(&format!("      {} Ensure proper quoting and operator usage\n", "|".blue()));
-        help.push_str(&format!("      {} Set DEBUG_RA=2 for full error details\n", "|".blue()));
+        help.push_str(&format!(
+            "      {} Ensure proper quoting and operator usage\n",
+            "|".blue()
+        ));
+        help.push_str(&format!(
+            "      {} Set DEBUG_RA=2 for full error details\n",
+            "|".blue()
+        ));
     }
 
     help
@@ -3768,7 +3908,11 @@ fn format_error_with_location(
 
     let mut output = String::new();
     output.push_str(&format!("{}: SQL parse error\n", "error".red().bold()));
-    output.push_str(&format!("  {} {}\n", "-->".blue().bold(), "query:".dimmed()));
+    output.push_str(&format!(
+        "  {} {}\n",
+        "-->".blue().bold(),
+        "query:".dimmed()
+    ));
     output.push('\n');
 
     // Show context: one line before (if exists)
@@ -3827,7 +3971,11 @@ fn format_error_with_location(
 fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
     let mut output = String::new();
     output.push_str(&format!("{}: SQL parse error\n", "error".red().bold()));
-    output.push_str(&format!("  {} {}\n", "-->".blue().bold(), "query:".dimmed()));
+    output.push_str(&format!(
+        "  {} {}\n",
+        "-->".blue().bold(),
+        "query:".dimmed()
+    ));
     output.push('\n');
 
     // Show the full query with line numbers

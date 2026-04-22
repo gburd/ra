@@ -48,12 +48,10 @@ pub enum MlCommands {
     },
 
     /// Load an ML model from the database.
-    #[command(
-        long_about = "Load a trained ML model from the database.\n\n\
+    #[command(long_about = "Load a trained ML model from the database.\n\n\
             Examples:\n  \
             ra-cli ml load --name production_model --scope overall\n  \
-            ra-cli ml load --name account_model --scope account --account-id abc123"
-    )]
+            ra-cli ml load --name account_model --scope account --account-id abc123")]
     Load {
         /// Model name to load.
         #[arg(short, long)]
@@ -77,12 +75,10 @@ pub enum MlCommands {
     },
 
     /// Save an ML model to the database.
-    #[command(
-        long_about = "Save a trained ML model to the database.\n\n\
+    #[command(long_about = "Save a trained ML model to the database.\n\n\
             Examples:\n  \
             ra-cli ml save --input model.json --name production_model\n  \
-            ra-cli ml save --input model.json --name account_model --scope account"
-    )]
+            ra-cli ml save --input model.json --name account_model --scope account")]
     Save {
         /// Input model file (JSON).
         #[arg(short, long)]
@@ -210,7 +206,16 @@ pub async fn handle_ml_command(cmd: MlCommands) -> Result<()> {
             account_id,
             project_id,
             database,
-        } => load_model(&name, &scope, account_id.as_deref(), project_id.as_deref(), &database).await,
+        } => {
+            load_model(
+                &name,
+                &scope,
+                account_id.as_deref(),
+                project_id.as_deref(),
+                &database,
+            )
+            .await
+        }
         MlCommands::Save {
             input,
             name,
@@ -309,7 +314,10 @@ async fn train_model(
         .green()
     );
 
-    println!("{}", "Training not yet implemented (requires external Python training)".yellow());
+    println!(
+        "{}",
+        "Training not yet implemented (requires external Python training)".yellow()
+    );
     println!("Use the exported training dataset with PyTorch or TensorFlow");
 
     Ok(())
@@ -322,7 +330,10 @@ async fn load_model(
     project_id: Option<&str>,
     database: &str,
 ) -> Result<()> {
-    println!("{}", format!("Loading model '{name}' from database...").bold());
+    println!(
+        "{}",
+        format!("Loading model '{name}' from database...").bold()
+    );
 
     let config = StorageConfig {
         backend: DatabaseBackend::Postgres,
@@ -447,9 +458,7 @@ async fn show_stats(
     network.import(belief_state);
 
     let stats = if let Some(rule_id) = rule {
-        vec![network
-            .rule_statistics(rule_id)
-            .context("Rule not found")?]
+        vec![network.rule_statistics(rule_id).context("Rule not found")?]
     } else {
         network.all_statistics()
     };
@@ -459,7 +468,10 @@ async fn show_stats(
         return Ok(());
     }
 
-    println!("{:<30} {:>10} {:>12} {:>12}", "Rule ID", "Obs Count", "Improvement", "Q-Error");
+    println!(
+        "{:<30} {:>10} {:>12} {:>12}",
+        "Rule ID", "Obs Count", "Improvement", "Q-Error"
+    );
     println!("{}", "-".repeat(70));
 
     for stat in stats {
@@ -487,7 +499,10 @@ async fn export_model(
     database: &str,
     backend_str: &str,
 ) -> Result<()> {
-    println!("{}", format!("Exporting model '{name}' to {format}...").bold());
+    println!(
+        "{}",
+        format!("Exporting model '{name}' to {format}...").bold()
+    );
 
     let backend = backend_str
         .parse::<DatabaseBackend>()

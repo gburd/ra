@@ -70,9 +70,7 @@ impl OutputFormat {
             "json" => Ok(Self::Json),
             "markdown" | "md" => Ok(Self::Markdown),
             "toml" => Ok(Self::Toml),
-            other => bail!(
-                "unknown format: {other}\nvalid formats: text, json, markdown, toml"
-            ),
+            other => bail!("unknown format: {other}\nvalid formats: text, json, markdown, toml"),
         }
     }
 }
@@ -248,12 +246,7 @@ fn run_test_mode(
         if all_passed {
             eprintln!("{} {} passed", "Success:".green().bold(), passed);
         } else {
-            eprintln!(
-                "{} {} passed, {} failed",
-                "Results:".bold(),
-                passed,
-                failed
-            );
+            eprintln!("{} {} passed, {} failed", "Results:".bold(), passed, failed);
         }
     }
 
@@ -379,8 +372,8 @@ fn validate_expectation(
 
     // Validate plan pattern
     if let Some(ref pattern) = expectation.expected_plan_pattern {
-        let regex = Regex::new(pattern)
-            .with_context(|| format!("invalid regex pattern: {pattern}"))?;
+        let regex =
+            Regex::new(pattern).with_context(|| format!("invalid regex pattern: {pattern}"))?;
         if !regex.is_match(&result.plan) {
             failures.push(format!("plan does not match pattern: {pattern}"));
         }
@@ -422,7 +415,10 @@ fn output_text(timeline_name: &str, results: &[SnapshotResult]) -> Result<()> {
     println!();
 
     for result in results {
-        println!("{}", format!("Snapshot {} - {}", result.snapshot_index, result.label).bold());
+        println!(
+            "{}",
+            format!("Snapshot {} - {}", result.snapshot_index, result.label).bold()
+        );
         println!("  Time Offset:     {}s", result.time_offset);
         println!("  Hardware:        {}", result.hardware_profile);
         println!("  Initial Cost:    {:.2}", result.initial_cost);
@@ -556,7 +552,10 @@ fn output_toml(timeline_name: &str, results: &[SnapshotResult]) -> Result<()> {
 /// Launch TUI visualization for timeline.
 fn launch_timeline_tui(_timeline: &TimelineConfig, quiet: bool) -> Result<()> {
     if !quiet {
-        eprintln!("{}", "TUI mode is not yet implemented for timeline command".yellow());
+        eprintln!(
+            "{}",
+            "TUI mode is not yet implemented for timeline command".yellow()
+        );
         eprintln!("Use 'ra-cli tui --timeline <file>' instead for now");
     }
     Ok(())

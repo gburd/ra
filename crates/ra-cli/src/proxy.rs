@@ -6,8 +6,8 @@
 
 use anyhow::{Context, Result};
 use std::net::SocketAddr;
-use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, error, info};
 
 /// Configuration for the proxy server.
@@ -104,7 +104,10 @@ async fn handle_connection(
         .await
         .context("failed to connect to backend database")?;
 
-    info!("Connected to backend: {}", mask_connection_string(&config.backend));
+    info!(
+        "Connected to backend: {}",
+        mask_connection_string(&config.backend)
+    );
 
     // Proxy data bidirectionally
     // In a full implementation, we would:
@@ -165,7 +168,9 @@ fn parse_backend_address(connection_string: &str) -> Result<String> {
     // Simple parser for postgres:// URLs
     // Full implementation would handle all connection string formats
 
-    if connection_string.starts_with("postgres://") || connection_string.starts_with("postgresql://") {
+    if connection_string.starts_with("postgres://")
+        || connection_string.starts_with("postgresql://")
+    {
         // Extract host:port from URL
         let url = connection_string
             .strip_prefix("postgres://")
@@ -234,8 +239,17 @@ mod tests {
 
     #[test]
     fn parse_log_format() {
-        assert!(matches!("postgres".parse::<LogFormat>().unwrap(), LogFormat::Postgres));
-        assert!(matches!("json".parse::<LogFormat>().unwrap(), LogFormat::Json));
-        assert!(matches!("plain".parse::<LogFormat>().unwrap(), LogFormat::Plain));
+        assert!(matches!(
+            "postgres".parse::<LogFormat>().unwrap(),
+            LogFormat::Postgres
+        ));
+        assert!(matches!(
+            "json".parse::<LogFormat>().unwrap(),
+            LogFormat::Json
+        ));
+        assert!(matches!(
+            "plain".parse::<LogFormat>().unwrap(),
+            LogFormat::Plain
+        ));
     }
 }

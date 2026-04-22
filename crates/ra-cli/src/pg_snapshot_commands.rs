@@ -35,10 +35,7 @@ pub fn capture_pg_snapshot(
         "{}",
         "WARNING: Direct PostgreSQL connection not yet implemented.".yellow()
     );
-    eprintln!(
-        "{}",
-        "Use the extension SQL functions instead:".yellow()
-    );
+    eprintln!("{}", "Use the extension SQL functions instead:".yellow());
     eprintln!();
     eprintln!("  {}", "-- Load the extension".bright_black());
     eprintln!("  {}", "CREATE EXTENSION IF NOT EXISTS pg_ra_planner;");
@@ -102,7 +99,9 @@ pub fn generate_capture_script(
         script.push_str(&format!(
             "SELECT ra.capture_snapshot_to_file(\n  {},\n  '{}',\n  'After {} seconds'\n);\n",
             table_array,
-            output_dir.join(format!("snapshot_{interval}.toml")).display(),
+            output_dir
+                .join(format!("snapshot_{interval}.toml"))
+                .display(),
             interval
         ));
     } else {
@@ -136,9 +135,7 @@ pub fn merge_snapshots_to_timeline(
 
     // Find all snapshot TOML files
     let mut snapshots = BTreeMap::new();
-    for entry in std::fs::read_dir(snapshot_dir)
-        .context("Failed to read snapshot directory")?
-    {
+    for entry in std::fs::read_dir(snapshot_dir).context("Failed to read snapshot directory")? {
         let entry = entry?;
         let path = entry.path();
 
@@ -224,8 +221,7 @@ pub fn merge_snapshots_to_timeline(
         .context("Generated timeline failed validation")?;
 
     // Write to file
-    let toml_str = toml::to_string_pretty(&timeline)
-        .context("Failed to serialize timeline")?;
+    let toml_str = toml::to_string_pretty(&timeline).context("Failed to serialize timeline")?;
 
     std::fs::write(output_path, toml_str)
         .with_context(|| format!("Failed to write {}", output_path.display()))?;

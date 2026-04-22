@@ -35,7 +35,9 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
                      • Enables null-aware join algorithms\n\
                      • Avoids wasted comparisons",
             before_example: Some("orders JOIN customers ON orders.customer_id = customers.id"),
-            after_example: Some("(orders WHERE customer_id IS NOT NULL) JOIN (customers WHERE id IS NOT NULL)"),
+            after_example: Some(
+                "(orders WHERE customer_id IS NOT NULL) JOIN (customers WHERE id IS NOT NULL)",
+            ),
             why_no_cost_change: Some("Cost model sees added Filter operators as overhead"),
         },
 
@@ -44,7 +46,9 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
             summary: "Pushes filter predicates into semi-join (EXISTS) conditions",
             impact: "Reduces the amount of work done in the subquery by filtering earlier. \
                      The subquery can stop as soon as it finds any matching row.",
-            before_example: Some("SELECT * FROM (SELECT * FROM orders WHERE EXISTS (...)) WHERE condition"),
+            before_example: Some(
+                "SELECT * FROM (SELECT * FROM orders WHERE EXISTS (...)) WHERE condition",
+            ),
             after_example: Some("SELECT * FROM orders WHERE EXISTS (... AND condition)"),
             why_no_cost_change: Some("Plan structure appears unchanged in the extracted tree"),
         },
@@ -76,7 +80,9 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
                      join order among all possibilities.",
             before_example: Some("(orders JOIN customers) JOIN products"),
             after_example: Some("orders JOIN (customers JOIN products)"),
-            why_no_cost_change: Some("Enables other rules; cost benefit comes from subsequent optimizations"),
+            why_no_cost_change: Some(
+                "Enables other rules; cost benefit comes from subsequent optimizations",
+            ),
         },
 
         // Filter optimizations
@@ -85,9 +91,15 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
             impact: "Applies filters as early as possible, reducing the size of intermediate \
                      results. If a filter can be evaluated on one side of a join, do it \
                      before joining - this is one of the most powerful optimizations.",
-            before_example: Some("SELECT * FROM (orders JOIN customers) WHERE customers.country = 'USA'"),
-            after_example: Some("SELECT * FROM orders JOIN (SELECT * FROM customers WHERE country = 'USA')"),
-            why_no_cost_change: Some("May reorganize join tree without changing extracted plan yet"),
+            before_example: Some(
+                "SELECT * FROM (orders JOIN customers) WHERE customers.country = 'USA'",
+            ),
+            after_example: Some(
+                "SELECT * FROM orders JOIN (SELECT * FROM customers WHERE country = 'USA')",
+            ),
+            why_no_cost_change: Some(
+                "May reorganize join tree without changing extracted plan yet",
+            ),
         },
 
         "filter-into-join-condition" => RuleExplanation {
@@ -95,8 +107,12 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
             impact: "Allows the join algorithm to evaluate the filter during joining rather \
                      than in a separate pass. Often enables more efficient join algorithms \
                      and better cardinality estimates.",
-            before_example: Some("SELECT * FROM orders JOIN customers WHERE orders.status = 'active'"),
-            after_example: Some("SELECT * FROM orders JOIN customers ON (... AND orders.status = 'active')"),
+            before_example: Some(
+                "SELECT * FROM orders JOIN customers WHERE orders.status = 'active'",
+            ),
+            after_example: Some(
+                "SELECT * FROM orders JOIN customers ON (... AND orders.status = 'active')",
+            ),
             why_no_cost_change: Some("Eliminates Filter operator but adds complexity to join"),
         },
 
@@ -106,7 +122,9 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
                      Multiple ANDed predicates can be reordered and evaluated more efficiently \
                      as a single filter.",
             before_example: Some("SELECT * FROM orders WHERE status = 'active' AND amount > 100"),
-            after_example: Some("SELECT * FROM orders WHERE status = 'active' AND amount > 100  -- single filter"),
+            after_example: Some(
+                "SELECT * FROM orders WHERE status = 'active' AND amount > 100  -- single filter",
+            ),
             why_no_cost_change: Some("Combines operators without changing selectivity"),
         },
 
@@ -127,8 +145,12 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
                      cheap predicates should be evaluated first (short-circuit evaluation). \
                      Also enables extract-equijoin rules to find join conditions.",
             before_example: Some("WHERE (expensive_func(x) AND y = 5)"),
-            after_example: Some("WHERE (y = 5 AND expensive_func(x))  -- evaluate cheap predicate first"),
-            why_no_cost_change: Some("Logical reordering - enables pattern matching for other rules"),
+            after_example: Some(
+                "WHERE (y = 5 AND expensive_func(x))  -- evaluate cheap predicate first",
+            ),
+            why_no_cost_change: Some(
+                "Logical reordering - enables pattern matching for other rules",
+            ),
         },
 
         "eq-commutative" => RuleExplanation {
@@ -146,9 +168,15 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
             impact: "Equijoins (a.x = b.x) can use hash joins and merge joins, which are much \
                      faster than nested loops. This rule finds equijoin conditions hidden in \
                      complex predicates and makes them explicit.",
-            before_example: Some("JOIN ON (a.status = 'active' AND a.id = b.id AND b.country = 'USA')"),
-            after_example: Some("JOIN ON (a.id = b.id) WHERE a.status = 'active' AND b.country = 'USA'"),
-            why_no_cost_change: Some("Restructures predicates to enable hash/merge join algorithms"),
+            before_example: Some(
+                "JOIN ON (a.status = 'active' AND a.id = b.id AND b.country = 'USA')",
+            ),
+            after_example: Some(
+                "JOIN ON (a.id = b.id) WHERE a.status = 'active' AND b.country = 'USA'",
+            ),
+            why_no_cost_change: Some(
+                "Restructures predicates to enable hash/merge join algorithms",
+            ),
         },
 
         // Covering indexes
@@ -180,7 +208,9 @@ pub fn explain_rule(rule_name: &str) -> RuleExplanation {
                      more efficient depending on data statistics and hardware capabilities.",
             before_example: None,
             after_example: None,
-            why_no_cost_change: Some("Adds alternative representations to the optimization search space"),
+            why_no_cost_change: Some(
+                "Adds alternative representations to the optimization search space",
+            ),
         },
     }
 }
