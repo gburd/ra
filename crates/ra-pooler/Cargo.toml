@@ -1,0 +1,36 @@
+[package]
+name = "ra-pooler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Ra connection pooler with QUIC backend pool and PG wire frontend"
+
+[[bin]]
+name = "ra-pooler"
+path = "src/main.rs"
+
+[dependencies]
+ra-core = { workspace = true }
+ra-wire = { workspace = true }
+ra-parser = { workspace = true }
+ra-engine = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+bytes = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+rcgen = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
