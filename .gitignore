@@ -53,6 +53,12 @@ tla/states/
 .worktrees/
 /tmp/
 
+# Merge conflict and patch files
+*.orig
+*.rej
+*.diff~
+*.merge_file_*
+
 # Agent working files (status, progress tracking)
 /agent/
 **/TASK*_PROGRESS.md
