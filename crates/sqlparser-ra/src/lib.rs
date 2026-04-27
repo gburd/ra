@@ -71,6 +71,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::upper_case_acronyms)]
+// Allow large enum variants in this fork - would require significant API changes to fix
+#![allow(clippy::large_enum_variant)]
 
 // Allow proc-macros to find this crate
 extern crate self as sqlparser;
