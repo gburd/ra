@@ -18,6 +18,7 @@ use egg::{rewrite, Id, Rewrite, Subst, Var};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+use crate::parse_var;
 
 /// Return rewrite rules for COUNT(*) metadata optimization.
 #[must_use]
@@ -31,15 +32,11 @@ pub fn count_metadata_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(aggregate ?groups ?aggs (scan ?table))" =>
             "(metadata-lookup ?table row-count)"
             if is_ungrouped_count_star(
-                var("?groups"),
-                var("?aggs")
+                parse_var("?groups"),
+                parse_var("?aggs")
             )
         ),
     ]
-}
-
-fn var(s: &str) -> Var {
-    s.parse().unwrap_or_else(|_| panic!("bad var: {s}"))
 }
 
 /// Condition: the aggregate has no grouping keys and a single

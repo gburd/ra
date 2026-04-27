@@ -59,40 +59,74 @@ impl GrammarExtension for MySQLExtension {
             // UPSERT
             "ON DUPLICATE KEY UPDATE",
             // INSERT variants
-            "INSERT IGNORE", "REPLACE INTO",
+            "INSERT IGNORE",
+            "REPLACE INTO",
             // SHOW statements
-            "SHOW", "DATABASES", "TABLES", "COLUMNS", "STATUS", "VARIABLES",
-            "PROCESSLIST", "GRANTS", "ENGINE", "ENGINES", "PLUGINS",
+            "SHOW",
+            "DATABASES",
+            "TABLES",
+            "COLUMNS",
+            "STATUS",
+            "VARIABLES",
+            "PROCESSLIST",
+            "GRANTS",
+            "ENGINE",
+            "ENGINES",
+            "PLUGINS",
             // MySQL-specific DDL
-            "AUTO_INCREMENT", "UNSIGNED", "ZEROFILL",
+            "AUTO_INCREMENT",
+            "UNSIGNED",
+            "ZEROFILL",
             // Storage engines
-            "ENGINE", "INNODB", "MYISAM", "MEMORY",
+            "ENGINE",
+            "INNODB",
+            "MYISAM",
+            "MEMORY",
             // Index hints
-            "USE INDEX", "FORCE INDEX", "IGNORE INDEX",
+            "USE INDEX",
+            "FORCE INDEX",
+            "IGNORE INDEX",
             // STRAIGHT_JOIN
             "STRAIGHT_JOIN",
             // PARTITION
-            "PARTITION", "PARTITIONS", "SUBPARTITION",
+            "PARTITION",
+            "PARTITIONS",
+            "SUBPARTITION",
             // EXPLAIN
-            "EXPLAIN", "DESCRIBE", "DESC",
+            "EXPLAIN",
+            "DESCRIBE",
+            "DESC",
             // SET
-            "SET", "GLOBAL", "SESSION", "LOCAL",
+            "SET",
+            "GLOBAL",
+            "SESSION",
+            "LOCAL",
             // HANDLER
-            "HANDLER", "OPEN", "READ", "CLOSE",
+            "HANDLER",
+            "OPEN",
+            "READ",
+            "CLOSE",
             // Full-Text Search
-            "MATCH", "AGAINST", "NATURAL", "LANGUAGE", "BOOLEAN", "EXPANSION",
-            "MODE", "WITH QUERY EXPANSION",
+            "MATCH",
+            "AGAINST",
+            "NATURAL",
+            "LANGUAGE",
+            "BOOLEAN",
+            "EXPANSION",
+            "MODE",
+            "WITH QUERY EXPANSION",
         ]
     }
 
     fn operators(&self) -> Vec<&str> {
         vec![
             // MySQL uses standard operators plus:
-            "DIV",    // Integer division
-            "MOD",    // Modulo (also %)
-            "<=>",    // NULL-safe equal
-            "REGEXP", "RLIKE",  // Regular expression
-            "SOUNDS LIKE",      // Phonetic comparison
+            "DIV", // Integer division
+            "MOD", // Modulo (also %)
+            "<=>", // NULL-safe equal
+            "REGEXP",
+            "RLIKE",       // Regular expression
+            "SOUNDS LIKE", // Phonetic comparison
         ]
     }
 
@@ -101,35 +135,104 @@ impl GrammarExtension for MySQLExtension {
             // String aggregation
             "GROUP_CONCAT",
             // String functions
-            "CONCAT_WS", "FORMAT", "SUBSTRING_INDEX", "LOCATE", "INSTR",
-            "LEFT", "RIGHT", "REVERSE", "REPEAT", "SPACE", "STRCMP",
+            "CONCAT_WS",
+            "FORMAT",
+            "SUBSTRING_INDEX",
+            "LOCATE",
+            "INSTR",
+            "LEFT",
+            "RIGHT",
+            "REVERSE",
+            "REPEAT",
+            "SPACE",
+            "STRCMP",
             // Date functions
-            "DATE_ADD", "DATE_SUB", "DATE_FORMAT", "STR_TO_DATE",
-            "UNIX_TIMESTAMP", "FROM_UNIXTIME", "CURDATE", "CURTIME",
-            "DATEDIFF", "TIMEDIFF", "TIMESTAMPDIFF", "TIMESTAMPADD",
-            "LAST_DAY", "MAKEDATE", "MAKETIME",
+            "DATE_ADD",
+            "DATE_SUB",
+            "DATE_FORMAT",
+            "STR_TO_DATE",
+            "UNIX_TIMESTAMP",
+            "FROM_UNIXTIME",
+            "CURDATE",
+            "CURTIME",
+            "DATEDIFF",
+            "TIMEDIFF",
+            "TIMESTAMPDIFF",
+            "TIMESTAMPADD",
+            "LAST_DAY",
+            "MAKEDATE",
+            "MAKETIME",
             // JSON functions (MySQL 5.7+)
-            "JSON_EXTRACT", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE",
-            "JSON_ARRAY", "JSON_OBJECT", "JSON_MERGE", "JSON_MERGE_PRESERVE",
-            "JSON_UNQUOTE", "JSON_QUOTE", "JSON_TYPE", "JSON_VALID",
-            "JSON_KEYS", "JSON_LENGTH", "JSON_DEPTH", "JSON_SEARCH",
-            "JSON_ARRAYAGG", "JSON_OBJECTAGG",
+            "JSON_EXTRACT",
+            "JSON_SET",
+            "JSON_INSERT",
+            "JSON_REPLACE",
+            "JSON_REMOVE",
+            "JSON_ARRAY",
+            "JSON_OBJECT",
+            "JSON_MERGE",
+            "JSON_MERGE_PRESERVE",
+            "JSON_UNQUOTE",
+            "JSON_QUOTE",
+            "JSON_TYPE",
+            "JSON_VALID",
+            "JSON_KEYS",
+            "JSON_LENGTH",
+            "JSON_DEPTH",
+            "JSON_SEARCH",
+            "JSON_ARRAYAGG",
+            "JSON_OBJECTAGG",
             // Control flow
-            "IF", "IFNULL", "NULLIF", "CASE",
+            "IF",
+            "IFNULL",
+            "NULLIF",
+            "CASE",
             // Conversion functions
-            "CAST", "CONVERT", "BINARY",
+            "CAST",
+            "CONVERT",
+            "BINARY",
             // Encryption/hashing
-            "MD5", "SHA1", "SHA2", "AES_ENCRYPT", "AES_DECRYPT",
-            "PASSWORD", "ENCRYPT",
+            "MD5",
+            "SHA1",
+            "SHA2",
+            "AES_ENCRYPT",
+            "AES_DECRYPT",
+            "PASSWORD",
+            "ENCRYPT",
             // Math functions
-            "RAND", "ROUND", "TRUNCATE", "CEILING", "FLOOR",
-            "POW", "POWER", "SQRT", "EXP", "LN", "LOG", "LOG10", "LOG2",
+            "RAND",
+            "ROUND",
+            "TRUNCATE",
+            "CEILING",
+            "FLOOR",
+            "POW",
+            "POWER",
+            "SQRT",
+            "EXP",
+            "LN",
+            "LOG",
+            "LOG10",
+            "LOG2",
             // System functions
-            "DATABASE", "USER", "VERSION", "CONNECTION_ID",
-            "LAST_INSERT_ID", "ROW_COUNT", "FOUND_ROWS",
+            "DATABASE",
+            "USER",
+            "VERSION",
+            "CONNECTION_ID",
+            "LAST_INSERT_ID",
+            "ROW_COUNT",
+            "FOUND_ROWS",
             // Window functions (MySQL 8.0+)
-            "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST",
-            "NTILE", "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
+            "ROW_NUMBER",
+            "RANK",
+            "DENSE_RANK",
+            "PERCENT_RANK",
+            "CUME_DIST",
+            "NTILE",
+            "LAG",
+            "LEAD",
+            "FIRST_VALUE",
+            "LAST_VALUE",
+            "NTH_VALUE",
         ]
     }
 

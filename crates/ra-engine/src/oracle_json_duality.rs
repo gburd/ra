@@ -21,6 +21,7 @@ use egg::{rewrite, Id, Rewrite, Subst, Var};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+use crate::parse_var;
 
 // ------------------------------------------------------------------
 // Duality view model
@@ -508,7 +509,7 @@ pub fn duality_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("duality-json-filter-through-join";
             "(filter ?pred (join inner ?cond ?left ?right))" =>
             "(join inner ?cond (filter ?pred ?left) ?right)"
-            if is_json_field_predicate(var("?pred"))
+            if is_json_field_predicate(parse_var("?pred"))
         ),
         // Rule 2: Split conjunctive JSON field filters.
         //
@@ -517,7 +518,7 @@ pub fn duality_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("duality-split-json-filters";
             "(filter (and ?p1 ?p2) ?input)" =>
             "(filter ?p1 (filter ?p2 ?input))"
-            if is_json_field_predicate(var("?p1"))
+            if is_json_field_predicate(parse_var("?p1"))
         ),
         // Rule 3: Merge adjacent JSON field filters.
         //
@@ -526,7 +527,7 @@ pub fn duality_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("duality-merge-json-filters";
             "(filter ?p1 (filter ?p2 ?input))" =>
             "(filter (and ?p1 ?p2) ?input)"
-            if is_json_field_predicate(var("?p1"))
+            if is_json_field_predicate(parse_var("?p1"))
         ),
         // Rule 4: Push JSON filter below projection.
         //
@@ -535,7 +536,7 @@ pub fn duality_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("duality-json-filter-below-project";
             "(filter ?pred (project ?cols ?input))" =>
             "(project ?cols (filter ?pred ?input))"
-            if is_json_field_predicate(var("?pred"))
+            if is_json_field_predicate(parse_var("?pred"))
         ),
         // Rule 5: Push JSON filter below aggregate.
         //
@@ -545,13 +546,9 @@ pub fn duality_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("duality-json-filter-below-aggregate";
             "(filter ?pred (aggregate ?groups ?aggs ?input))" =>
             "(aggregate ?groups ?aggs (filter ?pred ?input))"
-            if is_json_field_predicate(var("?pred"))
+            if is_json_field_predicate(parse_var("?pred"))
         ),
     ]
-}
-
-fn var(s: &str) -> Var {
-    s.parse().unwrap_or_else(|_| panic!("bad var: {s}"))
 }
 
 /// Condition: check if a predicate involves JSON field access.

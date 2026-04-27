@@ -734,7 +734,11 @@ impl IntegratedCostModel {
             OperationType::Sort => 1.2,      // Memory allocation
         };
 
-        let staleness_penalty = (base_factor * operation_multiplier).min(max_penalty);
+        // Apply the operation multiplier only to the excess
+        // staleness above 1.0 so fresh data (factor=1.0) incurs
+        // zero penalty regardless of operation type.
+        let excess = base_factor - 1.0;
+        let staleness_penalty = (1.0 + excess * operation_multiplier).min(max_penalty);
         let adjusted_cost = base_cost * staleness_penalty;
         let should_warn = staleness_penalty >= 3.0;
 
@@ -1279,9 +1283,14 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             }
             RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => 50.0,
             RelLang::RecursiveCTE(_) => 1000.0 * self.calibration.tuple_cost(),
-            RelLang::BitmapIndexScan(_) => 10.0 * self.calibration.rand_page_cost(),
+            RelLang::BitmapIndexScan(_) => {
+                // Without selectivity info, bitmap index scan costs at
+                // least as much as a sequential scan (random IO for
+                // index traversal plus heap access overhead).
+                120.0 * self.calibration.rand_page_cost()
+            }
             RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => 0.1,
-            RelLang::BitmapHeapScan(_) => 5.0 * self.calibration.seq_page_cost(),
+            RelLang::BitmapHeapScan(_) => 50.0 * self.calibration.seq_page_cost(),
             RelLang::MetadataLookup(_) => {
                 // O(1) metadata lookup, cheaper than any scan
                 return 1.0;

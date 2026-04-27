@@ -61,17 +61,20 @@ impl GrammarExtension for PgVectorExtension {
             // Data type
             "vector",
             // Index types
-            "ivfflat", "hnsw",
+            "ivfflat",
+            "hnsw",
             // Operator classes
-            "vector_l2_ops", "vector_ip_ops", "vector_cosine_ops",
+            "vector_l2_ops",
+            "vector_ip_ops",
+            "vector_cosine_ops",
         ]
     }
 
     fn operators(&self) -> Vec<&str> {
         vec![
-            "<->",  // L2 distance (Euclidean)
-            "<#>",  // Negative inner product
-            "<=>",  // Cosine distance
+            "<->", // L2 distance (Euclidean)
+            "<#>", // Negative inner product
+            "<=>", // Cosine distance
         ]
     }
 
@@ -123,9 +126,9 @@ mod tests {
         let ext = PgVectorExtension;
         let operators = ext.operators();
 
-        assert!(operators.contains(&"<->"));  // L2 distance
-        assert!(operators.contains(&"<#>"));  // Inner product
-        assert!(operators.contains(&"<=>"));  // Cosine distance
+        assert!(operators.contains(&"<->")); // L2 distance
+        assert!(operators.contains(&"<#>")); // Inner product
+        assert!(operators.contains(&"<=>")); // Cosine distance
     }
 
     #[test]

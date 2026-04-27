@@ -71,12 +71,18 @@ impl GrammarExtension for SQL2011Extension {
     fn keywords(&self) -> Vec<&str> {
         vec![
             // System versioning
-            "SYSTEM_TIME", "SYSTEM VERSIONING",
+            "SYSTEM_TIME",
+            "SYSTEM VERSIONING",
             "FOR SYSTEM_TIME",
-            "AS OF", "BETWEEN", "FROM", "TO",
+            "AS OF",
+            "BETWEEN",
+            "FROM",
+            "TO",
             "CONTAINED IN",
             // Periods
-            "PERIOD", "ROW START", "ROW END",
+            "PERIOD",
+            "ROW START",
+            "ROW END",
             "WITHOUT OVERLAPS",
         ]
     }

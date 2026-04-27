@@ -3,9 +3,7 @@
 //! Walks fenced code blocks and returns structured [`CodeBlock`]
 //! values preserving language tags and content.
 
-use pulldown_cmark::{
-    CodeBlockKind, Event, Options, Parser as MdParser, Tag,
-};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser as MdParser, Tag};
 
 /// A fenced code block extracted from markdown.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,8 +20,7 @@ pub struct CodeBlock {
 }
 
 /// Known languages that carry semantic meaning for `.rra` files.
-pub const KNOWN_LANGUAGES: &[&str] =
-    &["algebra", "ra", "rust", "sql", "tla", "test"];
+pub const KNOWN_LANGUAGES: &[&str] = &["algebra", "ra", "rust", "sql", "tla", "test"];
 
 /// Returns `true` when `lang` is in [`KNOWN_LANGUAGES`].
 #[must_use]
@@ -38,25 +35,18 @@ pub fn is_known_language(lang: &str) -> bool {
 /// are captured.
 #[must_use]
 pub fn extract_code_blocks(source: &str) -> Vec<CodeBlock> {
-    let opts = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_SMART_PUNCTUATION;
+    let opts =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_SMART_PUNCTUATION;
 
     let mut blocks = Vec::new();
     let mut current: Option<CodeBlockBuilder> = None;
 
-    for (event, range) in
-        MdParser::new_ext(source, opts).into_offset_iter()
-    {
+    for (event, range) in MdParser::new_ext(source, opts).into_offset_iter() {
         match event {
             Event::Start(Tag::CodeBlock(kind)) => {
                 let (language, info_string) = match &kind {
-                    CodeBlockKind::Fenced(info) => {
-                        parse_info_string(info)
-                    }
-                    CodeBlockKind::Indented => {
-                        (String::new(), String::new())
-                    }
+                    CodeBlockKind::Fenced(info) => parse_info_string(info),
+                    CodeBlockKind::Indented => (String::new(), String::new()),
                 };
                 current = Some(CodeBlockBuilder {
                     language,
@@ -100,11 +90,7 @@ pub fn extract_known_blocks(source: &str) -> Vec<CodeBlock> {
 /// the rest is preserved as-is.
 fn parse_info_string(info: &str) -> (String, String) {
     let info = info.trim();
-    let language = info
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let language = info.split_whitespace().next().unwrap_or("").to_lowercase();
     (language, info.to_owned())
 }
 
@@ -229,12 +215,8 @@ SELECT 1;
 
     #[test]
     fn multiline_content_preserved() {
-        let md =
-            "```sql\nSELECT 1;\nSELECT 2;\nSELECT 3;\n```\n";
+        let md = "```sql\nSELECT 1;\nSELECT 2;\nSELECT 3;\n```\n";
         let blocks = extract_code_blocks(md);
-        assert_eq!(
-            blocks[0].content,
-            "SELECT 1;\nSELECT 2;\nSELECT 3;"
-        );
+        assert_eq!(blocks[0].content, "SELECT 1;\nSELECT 2;\nSELECT 3;");
     }
 }

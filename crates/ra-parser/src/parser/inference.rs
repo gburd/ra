@@ -59,9 +59,8 @@ impl DialectInference {
 
         // SQL Server indicators: bracketed identifiers like [column_name]
         // Exclude ARRAY[...] syntax which is PostgreSQL
-        let has_bracket_identifiers = sql.contains('[')
-            && sql.contains(']')
-            && !sql.to_uppercase().contains("ARRAY[");
+        let has_bracket_identifiers =
+            sql.contains('[') && sql.contains(']') && !sql.to_uppercase().contains("ARRAY[");
         if has_bracket_identifiers {
             *self.scores.entry("sqlserver".to_string()).or_insert(0.0) += 0.8;
         }
@@ -132,17 +131,14 @@ impl DialectInference {
             return ("universal".to_string(), 0.5);
         }
 
-        let (dialect, &score) = self.scores
+        let (dialect, &score) = self
+            .scores
             .iter()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
             .unwrap();
 
         let total: f64 = self.scores.values().sum();
-        let confidence = if total > 0.0 {
-            score / total
-        } else {
-            0.0
-        };
+        let confidence = if total > 0.0 { score / total } else { 0.0 };
 
         (dialect.clone(), confidence.min(1.0))
     }

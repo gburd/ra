@@ -69,9 +69,7 @@ pub struct Token {
 }
 
 /// Known operator keywords (ASCII spellings of Greek letters).
-const OPERATORS: &[&str] = &[
-    "sigma", "pi", "rho", "delta", "gamma", "tau", "attrs",
-];
+const OPERATORS: &[&str] = &["sigma", "pi", "rho", "delta", "gamma", "tau", "attrs"];
 
 /// Known join/set keywords.
 const KEYWORDS: &[(&str, TokenKind)] = &[
@@ -84,8 +82,7 @@ const KEYWORDS: &[(&str, TokenKind)] = &[
     ("subset", TokenKind::Subset),
 ];
 
-type CharIter<'a> =
-    std::iter::Peekable<std::str::CharIndices<'a>>;
+type CharIter<'a> = std::iter::Peekable<std::str::CharIndices<'a>>;
 
 /// Lex the given algebra notation into a sequence of tokens.
 ///
@@ -106,12 +103,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
     Ok(tokens)
 }
 
-fn lex_one(
-    source: &str,
-    chars: &mut CharIter<'_>,
-    offset: usize,
-    ch: char,
-) -> Token {
+fn lex_one(source: &str, chars: &mut CharIter<'_>, offset: usize, ch: char) -> Token {
     match ch {
         c if c.is_whitespace() => lex_whitespace(source, chars),
         '[' | ']' | '(' | ')' | ',' | '.' => lex_punct(chars, ch, offset),
@@ -148,11 +140,7 @@ fn lex_whitespace(source: &str, chars: &mut CharIter<'_>) -> Token {
     }
 }
 
-fn lex_punct(
-    chars: &mut CharIter<'_>,
-    ch: char,
-    offset: usize,
-) -> Token {
+fn lex_punct(chars: &mut CharIter<'_>, ch: char, offset: usize) -> Token {
     chars.next();
     let kind = match ch {
         '[' => TokenKind::LBracket,
@@ -171,16 +159,21 @@ fn lex_punct(
     }
 }
 
-fn lex_arrow_or_unknown(
-    chars: &mut CharIter<'_>,
-    offset: usize,
-) -> Token {
+fn lex_arrow_or_unknown(chars: &mut CharIter<'_>, offset: usize) -> Token {
     chars.next();
     if let Some(&(_, '>')) = chars.peek() {
         chars.next();
-        Token { kind: TokenKind::Arrow, offset, len: 2 }
+        Token {
+            kind: TokenKind::Arrow,
+            offset,
+            len: 2,
+        }
     } else {
-        Token { kind: TokenKind::Unknown('-'), offset, len: 1 }
+        Token {
+            kind: TokenKind::Unknown('-'),
+            offset,
+            len: 1,
+        }
     }
 }
 
@@ -201,11 +194,7 @@ fn is_unicode_symbol(ch: char) -> bool {
     )
 }
 
-fn lex_unicode(
-    chars: &mut CharIter<'_>,
-    ch: char,
-    offset: usize,
-) -> Token {
+fn lex_unicode(chars: &mut CharIter<'_>, ch: char, offset: usize) -> Token {
     chars.next();
     let kind = match ch {
         '\u{2192}' => TokenKind::Arrow,
@@ -221,7 +210,11 @@ fn lex_unicode(
         '\u{03B3}' => TokenKind::Operator("gamma".to_owned()),
         _ => TokenKind::Unknown(ch),
     };
-    Token { kind, offset, len: ch.len_utf8() }
+    Token {
+        kind,
+        offset,
+        len: ch.len_utf8(),
+    }
 }
 
 fn lex_word(chars: &mut CharIter<'_>) -> Token {
@@ -236,7 +229,11 @@ fn lex_word(chars: &mut CharIter<'_>) -> Token {
         }
     }
     let kind = classify_word(&word);
-    Token { kind, offset: start, len: word.len() }
+    Token {
+        kind,
+        offset: start,
+        len: word.len(),
+    }
 }
 
 fn classify_word(word: &str) -> TokenKind {
@@ -263,9 +260,7 @@ mod tests {
         lex(source)
             .expect("lex should succeed")
             .into_iter()
-            .filter(|t| {
-                !matches!(t.kind, TokenKind::Whitespace(_))
-            })
+            .filter(|t| !matches!(t.kind, TokenKind::Whitespace(_)))
             .map(|t| t.kind)
             .collect()
     }
@@ -338,10 +333,7 @@ mod tests {
     #[test]
     fn lex_unicode_sigma() {
         let tokens = kinds("\u{03C3}[p](R)");
-        assert_eq!(
-            tokens[0],
-            TokenKind::Operator("sigma".to_owned())
-        );
+        assert_eq!(tokens[0], TokenKind::Operator("sigma".to_owned()));
     }
 
     #[test]

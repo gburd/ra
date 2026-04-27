@@ -89,8 +89,8 @@ impl SqlFormatter {
     /// Returns `FormatError` if the SQL cannot be parsed.
     pub fn format(&self, sql: &str) -> Result<String, FormatError> {
         let dialect = GenericDialect {};
-        let statements = Parser::parse_sql(&dialect, sql)
-            .map_err(|e| FormatError::ParseError(e.to_string()))?;
+        let statements =
+            Parser::parse_sql(&dialect, sql).map_err(|e| FormatError::ParseError(e.to_string()))?;
 
         let mut formatted_parts = Vec::new();
         for stmt in &statements {
@@ -120,9 +120,7 @@ impl SqlFormatter {
         match self.config.capitalize {
             CapitalizeMode::All => sql.to_uppercase(),
             CapitalizeMode::None => sql.to_owned(),
-            CapitalizeMode::Keywords => {
-                capitalize_keywords(sql)
-            }
+            CapitalizeMode::Keywords => capitalize_keywords(sql),
         }
     }
 
@@ -130,8 +128,7 @@ impl SqlFormatter {
         let indent = self.indent_string();
         // Alignment width for right-aligning keywords
         let align_width: usize = 9; // len("RETURNING") + 1
-        let mut result =
-            String::with_capacity(sql.len() + 64);
+        let mut result = String::with_capacity(sql.len() + 64);
         let mut depth: usize = 0;
         let mut in_string = false;
         let mut string_char: char = '\'';
@@ -142,20 +139,15 @@ impl SqlFormatter {
             let upper = token.to_uppercase();
 
             // Track string literals
-            if !in_string
-                && (token == "'" || token == "\"")
-            {
+            if !in_string && (token == "'" || token == "\"") {
                 in_string = true;
-                string_char =
-                    token.chars().next().unwrap_or('\'');
+                string_char = token.chars().next().unwrap_or('\'');
                 result.push_str(token);
                 continue;
             }
             if in_string {
                 result.push_str(token);
-                if token.len() == 1
-                    && token.starts_with(string_char)
-                {
+                if token.len() == 1 && token.starts_with(string_char) {
                     in_string = false;
                 }
                 continue;
@@ -193,40 +185,28 @@ impl SqlFormatter {
 
                 let is_join = matches!(
                     upper.as_str(),
-                    "JOIN"
-                        | "INNER"
-                        | "LEFT"
-                        | "RIGHT"
-                        | "FULL"
-                        | "CROSS"
+                    "JOIN" | "INNER" | "LEFT" | "RIGHT" | "FULL" | "CROSS"
                 );
 
-                let is_subclause = matches!(
-                    upper.as_str(),
-                    "AND" | "OR"
-                );
+                let is_subclause = matches!(upper.as_str(), "AND" | "OR");
 
                 if is_clause && i > 0 {
-                    result =
-                        result.trim_end().to_owned();
+                    result = result.trim_end().to_owned();
                     result.push('\n');
                     if self.config.align_keywords {
-                        let padding = align_width
-                            .saturating_sub(token.len());
+                        let padding = align_width.saturating_sub(token.len());
                         for _ in 0..padding {
                             result.push(' ');
                         }
                     }
                     result.push_str(token);
                 } else if is_join && i > 0 {
-                    result =
-                        result.trim_end().to_owned();
+                    result = result.trim_end().to_owned();
                     result.push('\n');
                     result.push_str(&indent);
                     result.push_str(token);
                 } else if is_subclause && i > 0 {
-                    result =
-                        result.trim_end().to_owned();
+                    result = result.trim_end().to_owned();
                     result.push('\n');
                     result.push_str(&indent);
                     result.push_str(token);
@@ -253,28 +233,109 @@ impl SqlFormatter {
 /// string literals.
 fn capitalize_keywords(sql: &str) -> String {
     let keywords: &[&str] = &[
-        "SELECT", "FROM", "WHERE", "AND", "OR", "NOT",
-        "INSERT", "INTO", "VALUES", "UPDATE", "SET",
-        "DELETE", "CREATE", "TABLE", "DROP", "ALTER",
-        "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER",
-        "CROSS", "ON", "AS", "IN", "EXISTS", "BETWEEN",
-        "LIKE", "ILIKE", "IS", "NULL", "TRUE", "FALSE",
-        "ORDER", "BY", "GROUP", "HAVING", "LIMIT", "OFFSET",
-        "UNION", "ALL", "INTERSECT", "EXCEPT", "DISTINCT",
-        "CASE", "WHEN", "THEN", "ELSE", "END",
-        "WITH", "RECURSIVE", "ASC", "DESC",
-        "NULLS", "FIRST", "LAST",
-        "OVER", "PARTITION", "ROWS", "RANGE", "GROUPS",
-        "PRECEDING", "FOLLOWING", "CURRENT", "ROW",
-        "UNBOUNDED", "FETCH", "NEXT", "ONLY",
-        "CAST", "COUNT", "SUM", "AVG", "MIN", "MAX",
-        "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
-        "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE",
-        "STDDEV", "VARIANCE", "COALESCE", "NULLIF",
-        "USING", "NATURAL", "WINDOW",
-        "RETURNING", "CONFLICT", "DO", "NOTHING",
-        "INDEX", "CONSTRAINT", "PRIMARY", "KEY",
-        "FOREIGN", "REFERENCES", "UNIQUE", "CHECK",
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "AND",
+        "OR",
+        "NOT",
+        "INSERT",
+        "INTO",
+        "VALUES",
+        "UPDATE",
+        "SET",
+        "DELETE",
+        "CREATE",
+        "TABLE",
+        "DROP",
+        "ALTER",
+        "JOIN",
+        "INNER",
+        "LEFT",
+        "RIGHT",
+        "FULL",
+        "OUTER",
+        "CROSS",
+        "ON",
+        "AS",
+        "IN",
+        "EXISTS",
+        "BETWEEN",
+        "LIKE",
+        "ILIKE",
+        "IS",
+        "NULL",
+        "TRUE",
+        "FALSE",
+        "ORDER",
+        "BY",
+        "GROUP",
+        "HAVING",
+        "LIMIT",
+        "OFFSET",
+        "UNION",
+        "ALL",
+        "INTERSECT",
+        "EXCEPT",
+        "DISTINCT",
+        "CASE",
+        "WHEN",
+        "THEN",
+        "ELSE",
+        "END",
+        "WITH",
+        "RECURSIVE",
+        "ASC",
+        "DESC",
+        "NULLS",
+        "FIRST",
+        "LAST",
+        "OVER",
+        "PARTITION",
+        "ROWS",
+        "RANGE",
+        "GROUPS",
+        "PRECEDING",
+        "FOLLOWING",
+        "CURRENT",
+        "ROW",
+        "UNBOUNDED",
+        "FETCH",
+        "NEXT",
+        "ONLY",
+        "CAST",
+        "COUNT",
+        "SUM",
+        "AVG",
+        "MIN",
+        "MAX",
+        "ROW_NUMBER",
+        "RANK",
+        "DENSE_RANK",
+        "NTILE",
+        "LAG",
+        "LEAD",
+        "FIRST_VALUE",
+        "LAST_VALUE",
+        "STDDEV",
+        "VARIANCE",
+        "COALESCE",
+        "NULLIF",
+        "USING",
+        "NATURAL",
+        "WINDOW",
+        "RETURNING",
+        "CONFLICT",
+        "DO",
+        "NOTHING",
+        "INDEX",
+        "CONSTRAINT",
+        "PRIMARY",
+        "KEY",
+        "FOREIGN",
+        "REFERENCES",
+        "UNIQUE",
+        "CHECK",
         "DEFAULT",
     ];
 
@@ -283,9 +344,7 @@ fn capitalize_keywords(sql: &str) -> String {
     let mut in_string = false;
 
     for token in &tokens {
-        if !in_string
-            && (token == "'" || token == "\"")
-        {
+        if !in_string && (token == "'" || token == "\"") {
             in_string = true;
             result.push_str(token);
             continue;
@@ -394,18 +453,9 @@ mod tests {
             .format("select id,name from users where age>18")
             .expect("should format");
         let upper = result.to_uppercase();
-        assert!(
-            upper.contains("SELECT"),
-            "expected SELECT in: {result}"
-        );
-        assert!(
-            upper.contains("FROM"),
-            "expected FROM in: {result}"
-        );
-        assert!(
-            upper.contains("WHERE"),
-            "expected WHERE in: {result}"
-        );
+        assert!(upper.contains("SELECT"), "expected SELECT in: {result}");
+        assert!(upper.contains("FROM"), "expected FROM in: {result}");
+        assert!(upper.contains("WHERE"), "expected WHERE in: {result}");
     }
 
     #[test]
@@ -418,14 +468,8 @@ mod tests {
         let result = formatter
             .format("select id from users")
             .expect("should format");
-        assert!(
-            result.contains("SELECT"),
-            "expected SELECT: {result}"
-        );
-        assert!(
-            result.contains("USERS"),
-            "expected USERS: {result}"
-        );
+        assert!(result.contains("SELECT"), "expected SELECT: {result}");
+        assert!(result.contains("USERS"), "expected USERS: {result}");
     }
 
     #[test]
@@ -458,10 +502,7 @@ mod tests {
                  order by name limit 10",
             )
             .expect("should format");
-        assert!(
-            result.contains('\n'),
-            "expected newlines in: {result}"
-        );
+        assert!(result.contains('\n'), "expected newlines in: {result}");
     }
 
     #[test]
@@ -474,10 +515,7 @@ mod tests {
             )
             .expect("should format");
         let upper = result.to_uppercase();
-        assert!(
-            upper.contains("JOIN"),
-            "expected JOIN in: {result}"
-        );
+        assert!(upper.contains("JOIN"), "expected JOIN in: {result}");
     }
 
     #[test]
@@ -490,10 +528,7 @@ mod tests {
             )
             .expect("should format");
         let upper = result.to_uppercase();
-        assert!(
-            upper.contains("WITH"),
-            "expected WITH in: {result}"
-        );
+        assert!(upper.contains("WITH"), "expected WITH in: {result}");
     }
 
     #[test]
@@ -510,10 +545,7 @@ mod tests {
             upper.contains("ROW_NUMBER"),
             "expected ROW_NUMBER in: {result}"
         );
-        assert!(
-            upper.contains("OVER"),
-            "expected OVER in: {result}"
-        );
+        assert!(upper.contains("OVER"), "expected OVER in: {result}");
     }
 
     #[test]
@@ -547,8 +579,7 @@ mod tests {
             .format("select * from users where name = 'from where'")
             .expect("should format");
         assert!(
-            result.contains("from where")
-                || result.contains("FROM WHERE"),
+            result.contains("from where") || result.contains("FROM WHERE"),
             "string literal should be preserved: {result}"
         );
     }
@@ -568,17 +599,13 @@ mod tests {
 
     #[test]
     fn tokenize_simple() {
-        let tokens =
-            tokenize_for_formatting("SELECT id FROM t");
+        let tokens = tokenize_for_formatting("SELECT id FROM t");
         let non_ws: Vec<_> = tokens
             .iter()
             .filter(|t| !t.trim().is_empty())
             .cloned()
             .collect();
-        assert_eq!(
-            non_ws,
-            vec!["SELECT", "id", "FROM", "t"]
-        );
+        assert_eq!(non_ws, vec!["SELECT", "id", "FROM", "t"]);
     }
 
     #[test]
@@ -594,17 +621,10 @@ mod tests {
                  where age > 18 order by name",
             )
             .expect("should format");
-        assert!(
-            result.contains('\n'),
-            "expected newlines: {result}"
-        );
+        assert!(result.contains('\n'), "expected newlines: {result}");
         // Keywords should be right-aligned with padding
-        let lines: Vec<&str> =
-            result.lines().collect();
-        assert!(
-            lines.len() >= 3,
-            "expected multiple lines: {result}"
-        );
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() >= 3, "expected multiple lines: {result}");
     }
 
     #[test]
@@ -617,12 +637,8 @@ mod tests {
             )
             .expect("should format");
         // AND and OR should be on their own lines
-        let lines: Vec<&str> =
-            result.lines().collect();
-        assert!(
-            lines.len() >= 3,
-            "expected AND/OR on own lines: {result}"
-        );
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() >= 3, "expected AND/OR on own lines: {result}");
     }
 
     #[test]
@@ -635,9 +651,6 @@ mod tests {
             )
             .expect("should format");
         let upper = result.to_uppercase();
-        assert!(
-            upper.contains("RETURNING"),
-            "expected RETURNING: {result}"
-        );
+        assert!(upper.contains("RETURNING"), "expected RETURNING: {result}");
     }
 }

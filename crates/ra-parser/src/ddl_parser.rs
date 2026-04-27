@@ -83,7 +83,10 @@ impl DdlParser {
                     if column_def.options.iter().any(|opt| {
                         matches!(
                             opt.option,
-                            ColumnOption::Unique { is_primary: true, .. }
+                            ColumnOption::Unique {
+                                is_primary: true,
+                                ..
+                            }
                         )
                     }) {
                         primary_key_columns.push(column_def.name.value.clone());
@@ -145,10 +148,10 @@ impl DdlParser {
 
         match statement {
             Statement::CreateIndex(create_index) => {
-                let name = create_index.name.as_ref().map_or_else(
-                    || "unnamed_index".to_string(),
-                    |n| n.to_string(),
-                );
+                let name = create_index
+                    .name
+                    .as_ref()
+                    .map_or_else(|| "unnamed_index".to_string(), |n| n.to_string());
 
                 let table_name = extract_table_name(&create_index.table_name)?;
 
@@ -199,7 +202,9 @@ impl DdlParser {
             .ok_or_else(|| DdlParseError::MissingInformation("no statement found".to_string()))?;
 
         match statement {
-            Statement::AlterTable { name, operations, .. } => {
+            Statement::AlterTable {
+                name, operations, ..
+            } => {
                 let table_name = extract_table_name(name)?;
                 let mut changes = Vec::new();
 
@@ -244,7 +249,11 @@ impl DdlParser {
         let nullable = !column_def.options.iter().any(|opt| {
             matches!(
                 opt.option,
-                ColumnOption::NotNull | ColumnOption::Unique { is_primary: true, .. }
+                ColumnOption::NotNull
+                    | ColumnOption::Unique {
+                        is_primary: true,
+                        ..
+                    }
             )
         });
 
@@ -296,16 +305,14 @@ impl DdlParser {
             | SqlDataType::Blob(_) => "binary".to_string(),
             SqlDataType::JSON | SqlDataType::JSONB => "json".to_string(),
             SqlDataType::Uuid => "uuid".to_string(),
-            SqlDataType::Array(array_def) => {
-                match array_def {
-                    ArrayElemTypeDef::None => "array".to_string(),
-                    ArrayElemTypeDef::SquareBracket(inner, _)
-                    | ArrayElemTypeDef::AngleBracket(inner)
-                    | ArrayElemTypeDef::Parenthesis(inner) => {
-                        format!("array[{}]", self.convert_data_type(inner))
-                    }
+            SqlDataType::Array(array_def) => match array_def {
+                ArrayElemTypeDef::None => "array".to_string(),
+                ArrayElemTypeDef::SquareBracket(inner, _)
+                | ArrayElemTypeDef::AngleBracket(inner)
+                | ArrayElemTypeDef::Parenthesis(inner) => {
+                    format!("array[{}]", self.convert_data_type(inner))
                 }
-            }
+            },
             SqlDataType::Custom(name, _) => {
                 let upper = name.to_string().to_uppercase();
                 if upper == "SERIAL" || upper == "BIGSERIAL" || upper == "SMALLSERIAL" {
@@ -416,7 +423,8 @@ mod tests {
     #[test]
     fn parse_simple_create_table() {
         let parser = DdlParser::new();
-        let sql = "CREATE TABLE orders (order_id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL)";
+        let sql =
+            "CREATE TABLE orders (order_id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL)";
         let table = parser.parse_create_table(sql).unwrap();
 
         assert_eq!(table.name, "orders");

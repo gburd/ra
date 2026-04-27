@@ -22,6 +22,7 @@ use egg::{rewrite, Id, Rewrite, Subst, Var};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+use crate::parse_var;
 
 // ------------------------------------------------------------------
 // RUM query type classification
@@ -543,40 +544,36 @@ pub fn rum_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("rum-filter-through-join-left";
             "(filter ?pred (join inner ?cond ?left ?right))" =>
             "(join inner ?cond (filter ?pred ?left) ?right)"
-            if is_text_search_filter(var("?pred"))
+            if is_text_search_filter(parse_var("?pred"))
         ),
         // Rule 2: Split conjunctive text-search filters for
         // independent index scans.
         rewrite!("rum-split-text-search-filter";
             "(filter (and ?p1 ?p2) ?input)" =>
             "(filter ?p1 (filter ?p2 ?input))"
-            if is_text_search_filter(var("?p1"))
+            if is_text_search_filter(parse_var("?p1"))
         ),
         // Rule 3: Merge adjacent text-search filters for compound
         // scan (inverse of rule 2).
         rewrite!("rum-merge-text-search-filters";
             "(filter ?p1 (filter ?p2 ?input))" =>
             "(filter (and ?p1 ?p2) ?input)"
-            if is_text_search_filter(var("?p1"))
+            if is_text_search_filter(parse_var("?p1"))
         ),
         // Rule 4: Push text-search filter below projection.
         rewrite!("rum-filter-below-project";
             "(filter ?pred (project ?cols ?input))" =>
             "(project ?cols (filter ?pred ?input))"
-            if is_text_search_filter(var("?pred"))
+            if is_text_search_filter(parse_var("?pred"))
         ),
         // Rule 5: Push text-search filter below aggregate
         // (equivalent to pushing $match before $group).
         rewrite!("rum-filter-below-aggregate";
             "(filter ?pred (aggregate ?groups ?aggs ?input))" =>
             "(aggregate ?groups ?aggs (filter ?pred ?input))"
-            if is_text_search_filter(var("?pred"))
+            if is_text_search_filter(parse_var("?pred"))
         ),
     ]
-}
-
-fn var(s: &str) -> Var {
-    s.parse().unwrap_or_else(|_| panic!("bad var: {s}"))
 }
 
 /// Condition: check if a predicate involves text search operators.

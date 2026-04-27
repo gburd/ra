@@ -122,17 +122,12 @@ impl GrammarExtension for SQLServerFTSExtension {
 
     fn operators(&self) -> Vec<&str> {
         vec![
-            "AND", "OR", "AND NOT",  // Boolean operators in CONTAINS
+            "AND", "OR", "AND NOT", // Boolean operators in CONTAINS
         ]
     }
 
     fn functions(&self) -> Vec<&str> {
-        vec![
-            "CONTAINS",
-            "FREETEXT",
-            "CONTAINSTABLE",
-            "FREETEXTTABLE",
-        ]
+        vec!["CONTAINS", "FREETEXT", "CONTAINSTABLE", "FREETEXTTABLE"]
     }
 
     fn parse_statement(&self, _sql: &str) -> Result<Option<Statement>, Box<dyn Error>> {
@@ -373,7 +368,9 @@ fn parse_isabout(query: &str) -> Result<ContainsQuery, String> {
         if let Some(weight_pos) = part.find(" WEIGHT(") {
             let term = part[..weight_pos].trim().to_string();
             let weight_str = &part[weight_pos + 8..];
-            let weight_end = weight_str.find(')').ok_or("Missing closing ')' for WEIGHT")?;
+            let weight_end = weight_str
+                .find(')')
+                .ok_or("Missing closing ')' for WEIGHT")?;
             let weight: f64 = weight_str[..weight_end]
                 .parse()
                 .map_err(|_| "Invalid weight value")?;
@@ -555,7 +552,10 @@ mod tests {
     #[test]
     fn test_parse_phrase() {
         let query = parse_contains_query(r#""query optimization""#).unwrap();
-        assert_eq!(query, ContainsQuery::Phrase("query optimization".to_string()));
+        assert_eq!(
+            query,
+            ContainsQuery::Phrase("query optimization".to_string())
+        );
     }
 
     #[test]
@@ -600,8 +600,16 @@ mod tests {
     #[test]
     fn test_parse_near_simple() {
         let query = parse_contains_query("NEAR((database, performance))").unwrap();
-        if let ContainsQuery::Near { terms, distance, ordered } = query {
-            assert_eq!(terms, vec!["database".to_string(), "performance".to_string()]);
+        if let ContainsQuery::Near {
+            terms,
+            distance,
+            ordered,
+        } = query
+        {
+            assert_eq!(
+                terms,
+                vec!["database".to_string(), "performance".to_string()]
+            );
             assert_eq!(distance, None);
             assert!(!ordered);
         } else {
@@ -612,8 +620,16 @@ mod tests {
     #[test]
     fn test_parse_near_with_distance() {
         let query = parse_contains_query("NEAR((database, performance), 5)").unwrap();
-        if let ContainsQuery::Near { terms, distance, ordered } = query {
-            assert_eq!(terms, vec!["database".to_string(), "performance".to_string()]);
+        if let ContainsQuery::Near {
+            terms,
+            distance,
+            ordered,
+        } = query
+        {
+            assert_eq!(
+                terms,
+                vec!["database".to_string(), "performance".to_string()]
+            );
             assert_eq!(distance, Some(5));
             assert!(!ordered);
         } else {
@@ -624,8 +640,16 @@ mod tests {
     #[test]
     fn test_parse_near_ordered() {
         let query = parse_contains_query("NEAR((database, performance), 5, TRUE)").unwrap();
-        if let ContainsQuery::Near { terms, distance, ordered } = query {
-            assert_eq!(terms, vec!["database".to_string(), "performance".to_string()]);
+        if let ContainsQuery::Near {
+            terms,
+            distance,
+            ordered,
+        } = query
+        {
+            assert_eq!(
+                terms,
+                vec!["database".to_string(), "performance".to_string()]
+            );
             assert_eq!(distance, Some(5));
             assert!(ordered);
         } else {
@@ -635,7 +659,8 @@ mod tests {
 
     #[test]
     fn test_parse_isabout() {
-        let query = parse_contains_query("ISABOUT(database WEIGHT(0.8), performance WEIGHT(0.5))").unwrap();
+        let query =
+            parse_contains_query("ISABOUT(database WEIGHT(0.8), performance WEIGHT(0.5))").unwrap();
         if let ContainsQuery::IsAbout(terms) = query {
             assert_eq!(terms.len(), 2);
             assert_eq!(terms[0].term, "database");
@@ -671,12 +696,16 @@ mod tests {
 
     #[test]
     fn test_parse_complex_query() {
-        let query = parse_contains_query(r#"database AND "query optimization" OR performance"#).unwrap();
+        let query =
+            parse_contains_query(r#"database AND "query optimization" OR performance"#).unwrap();
         // This tests operator precedence: AND binds tighter than OR
         if let ContainsQuery::Or(left, right) = query {
             if let ContainsQuery::And(left_left, left_right) = *left {
                 assert_eq!(*left_left, ContainsQuery::Term("database".to_string()));
-                assert_eq!(*left_right, ContainsQuery::Phrase("query optimization".to_string()));
+                assert_eq!(
+                    *left_right,
+                    ContainsQuery::Phrase("query optimization".to_string())
+                );
             } else {
                 panic!("Expected And in left side of Or");
             }
@@ -763,7 +792,10 @@ mod tests {
     #[test]
     fn test_parse_phrase_with_special_chars() {
         let query = parse_contains_query(r#""database-optimization-guide""#).unwrap();
-        assert_eq!(query, ContainsQuery::Phrase("database-optimization-guide".to_string()));
+        assert_eq!(
+            query,
+            ContainsQuery::Phrase("database-optimization-guide".to_string())
+        );
     }
 
     #[test]
@@ -789,7 +821,12 @@ mod tests {
     #[test]
     fn test_parse_near_many_terms() {
         let query = parse_contains_query("NEAR((term1, term2, term3, term4))").unwrap();
-        if let ContainsQuery::Near { terms, distance, ordered } = query {
+        if let ContainsQuery::Near {
+            terms,
+            distance,
+            ordered,
+        } = query
+        {
             assert_eq!(terms.len(), 4);
             assert_eq!(distance, None);
             assert!(!ordered);
@@ -801,7 +838,12 @@ mod tests {
     #[test]
     fn test_parse_near_zero_distance() {
         let query = parse_contains_query("NEAR((term1, term2), 0)").unwrap();
-        if let ContainsQuery::Near { terms: _, distance, ordered } = query {
+        if let ContainsQuery::Near {
+            terms: _,
+            distance,
+            ordered,
+        } = query
+        {
             assert_eq!(distance, Some(0));
             assert!(!ordered);
         } else {
@@ -893,7 +935,8 @@ mod tests {
 
     #[test]
     fn test_parse_complex_boolean_with_near() {
-        let query = parse_contains_query("database AND NEAR((performance, optimization), 5)").unwrap();
+        let query =
+            parse_contains_query("database AND NEAR((performance, optimization), 5)").unwrap();
         if let ContainsQuery::And(left, right) = query {
             assert_eq!(*left, ContainsQuery::Term("database".to_string()));
             if let ContainsQuery::Near { .. } = *right {
@@ -978,7 +1021,10 @@ mod tests {
     fn test_sqlserver_fts_type_enum() {
         assert_eq!(SQLServerFTSType::Contains, SQLServerFTSType::Contains);
         assert_ne!(SQLServerFTSType::Contains, SQLServerFTSType::FreeText);
-        assert_ne!(SQLServerFTSType::ContainsTable, SQLServerFTSType::FreeTextTable);
+        assert_ne!(
+            SQLServerFTSType::ContainsTable,
+            SQLServerFTSType::FreeTextTable
+        );
     }
 
     #[test]

@@ -4,12 +4,12 @@
 //! Each vendor module focuses on syntax unique to that database, building upon
 //! the standard SQL grammar.
 
-pub mod postgresql;
 pub mod mysql;
 pub mod oracle;
+pub mod postgresql;
 pub mod sqlserver;
 
-pub use postgresql::PostgreSQLExtension;
 pub use mysql::MySQLExtension;
 pub use oracle::OracleExtension;
+pub use postgresql::PostgreSQLExtension;
 pub use sqlserver::SQLServerExtension;

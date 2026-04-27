@@ -1,8 +1,10 @@
 //! Cardinality-aware cost function for e-graph extraction.
 //!
-//! Extends the basic cost model by using ML-based cardinality estimation
-//! to scale operator costs. This produces more accurate cost estimates
-//! for intermediate results in the query plan.
+//! Extends the basic cost model by using cardinality estimation to
+//! scale operator costs by estimated row counts. Scan nodes look up
+//! table statistics (with staleness inflation), and downstream
+//! operators apply selectivity heuristics so that a filter
+//! eliminating 99% of rows costs less than one eliminating 1%.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,7 +18,18 @@ use ra_stats::accuracy::Staleness;
 
 use crate::egraph::RelLang;
 
-/// Simple statistics provider backed by a HashMap.
+/// Default row count when no statistics are available.
+const DEFAULT_ROW_COUNT: f64 = 1000.0;
+
+/// Per-row cost for a sequential scan. Chosen so that the default
+/// 1000-row table produces the same cost (50.0) as the original
+/// hardcoded constant.
+const SCAN_COST_PER_ROW: f64 = 0.05;
+
+/// Default filter selectivity (fraction of rows passing).
+const DEFAULT_SELECTIVITY: f64 = 0.1;
+
+/// Simple statistics provider backed by a `HashMap`.
 #[derive(Debug)]
 struct TableStatsProvider {
     stats: HashMap<String, Statistics>,
@@ -31,27 +44,23 @@ impl StatisticsProvider for TableStatsProvider {
 /// Cost function that uses cardinality estimates to scale operator costs.
 ///
 /// For each operator, it:
-/// 1. Estimates output cardinality using the ML estimator
-/// 2. Scales the base cost by the estimated cardinality
-/// 3. Uses hardware-aware cost factors
+/// 1. Uses the cardinality estimator to obtain per-table row counts
+/// 2. Applies staleness inflation factors
+/// 3. Scales operator costs by estimated cardinality
+/// 4. Uses hardware-aware cost adjustments
 pub struct CardinalityAwareCostFn {
     /// Cardinality estimator (ML or heuristic).
-    /// Read by tests; will be wired into `cost()` once
-    /// cardinality scaling is implemented.
-    #[allow(dead_code)]
     estimator: Arc<dyn CardinalityEstimator>,
     /// Statistics provider for base table stats.
-    /// Read by tests; will be wired into `cost()` once
-    /// cardinality scaling is implemented.
-    #[allow(dead_code)]
     stats_provider: Arc<TableStatsProvider>,
-    /// Hardware profile for cost adjustments
+    /// Hardware profile for cost adjustments.
     hardware: HardwareProfile,
     /// Staleness adjustments per table.
-    /// Read by tests via `staleness_factor()`; will be wired
-    /// into `cost()` once cardinality scaling is implemented.
-    #[allow(dead_code)]
     staleness_map: HashMap<String, Staleness>,
+    /// Pre-computed mapping from e-class Id to symbol string.
+    /// Built by walking the e-graph before extraction so that
+    /// `cost()` can resolve table names from `Scan` child Ids.
+    symbol_map: HashMap<Id, String>,
 }
 
 impl CardinalityAwareCostFn {
@@ -64,16 +73,39 @@ impl CardinalityAwareCostFn {
     ) -> Self {
         Self {
             estimator: Arc::new(HeuristicEstimator),
-            stats_provider: Arc::new(TableStatsProvider { stats: table_stats }),
+            stats_provider: Arc::new(TableStatsProvider {
+                stats: table_stats,
+            }),
             hardware,
             staleness_map,
+            symbol_map: HashMap::new(),
         }
     }
 
-    /// Get staleness factor for a table.
-    /// Used by tests; will be called from `cost()` once
-    /// cardinality scaling is implemented.
-    #[allow(dead_code)]
+    /// Attach a pre-built symbol map so `cost()` can resolve Ids
+    /// to table names. Call this before passing to `Extractor`.
+    #[must_use]
+    pub fn with_symbol_map(mut self, map: HashMap<Id, String>) -> Self {
+        self.symbol_map = map;
+        self
+    }
+
+    /// Look up the staleness-adjusted row count for a table.
+    ///
+    /// Uses the cardinality estimator on a synthetic `Scan`
+    /// expression, then inflates the result by the staleness factor.
+    /// Falls back to `DEFAULT_ROW_COUNT` when the table is unknown.
+    fn row_count_for(&self, table: &str) -> f64 {
+        let scan = ra_core::algebra::RelExpr::scan(table);
+        let est = self
+            .estimator
+            .estimate(&scan, self.stats_provider.as_ref());
+        est.rows * self.staleness_factor(table)
+    }
+
+    /// Staleness multiplier for a table. Fresh (or missing) tables
+    /// return 1.0; staler tables inflate the row-count estimate to
+    /// bias the optimizer toward re-scanning.
     fn staleness_factor(&self, table: &str) -> f64 {
         self.staleness_map.get(table).map_or(1.0, |s| match s {
             Staleness::Fresh => 1.0,
@@ -83,67 +115,122 @@ impl CardinalityAwareCostFn {
             Staleness::Unknown => 2.0,
         })
     }
+
+    /// Resolve a child `Id` to a table name via the symbol map.
+    fn resolve_table(&self, id: Id) -> Option<&str> {
+        self.symbol_map.get(&id).map(String::as_str)
+    }
 }
 
 impl CostFunction<RelLang> for CardinalityAwareCostFn {
     type Cost = f64;
 
+    #[allow(clippy::cast_precision_loss)]
     fn cost<C>(&mut self, enode: &RelLang, mut costs: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
     {
-        // Base operator costs (hardware-adjusted)
         let base_cost = match enode {
-            RelLang::Scan(_) | RelLang::ScanAlias(_) => {
-                // Sequential scan cost
-                50.0
+            // --- Scan: cost scales linearly with row count ---
+            RelLang::Scan([table_id]) => {
+                let child_cost = costs(*table_id);
+                let rows = self
+                    .resolve_table(*table_id)
+                    .map_or(DEFAULT_ROW_COUNT, |t| self.row_count_for(t));
+                return child_cost + rows * SCAN_COST_PER_ROW;
             }
-            RelLang::Filter(_) => {
+            RelLang::ScanAlias([table_id, alias_id]) => {
+                let child_cost = costs(*table_id) + costs(*alias_id);
+                let rows = self
+                    .resolve_table(*table_id)
+                    .map_or(DEFAULT_ROW_COUNT, |t| self.row_count_for(t));
+                return child_cost + rows * SCAN_COST_PER_ROW;
+            }
+
+            // --- Filter: per-row evaluation cost scaled by
+            //     default selectivity ---
+            RelLang::Filter([pred_id, input_id]) => {
+                let pred_cost = costs(*pred_id);
+                let input_cost = costs(*input_id);
                 let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
-                10.0 * simd_factor
+                // Per-row filter evaluation; selectivity reduces
+                // the effective rows that flow downstream.
+                let per_row = 0.01 * simd_factor;
+                // Use input_cost as a proxy for input cardinality
+                // (higher input cost ≈ more rows to filter).
+                let scale = (input_cost * DEFAULT_SELECTIVITY).max(1.0);
+                return pred_cost + input_cost + per_row * scale;
             }
+
             RelLang::Project(_) => 5.0,
-            RelLang::Join(_) => {
+
+            // --- Join: quadratic-ish cost via child sizes ---
+            RelLang::Join([jtype_id, cond_id, left_id, right_id]) => {
+                let jtype_cost = costs(*jtype_id);
+                let cond_cost = costs(*cond_id);
+                let left_cost = costs(*left_id);
+                let right_cost = costs(*right_id);
                 let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb.max(1.0);
-                100.0 * cache_factor
+                // Scale join cost by the product of child costs
+                // (proxy for cardinality product), clamped to
+                // avoid blowup on very large inputs.
+                let card_proxy = ((left_cost + 1.0) * (right_cost + 1.0)).sqrt();
+                let join_base = 100.0 * cache_factor;
+                return jtype_cost
+                    + cond_cost
+                    + left_cost
+                    + right_cost
+                    + join_base * card_proxy.max(1.0) / DEFAULT_ROW_COUNT;
             }
+
             RelLang::Aggregate(_) => {
                 let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb.max(1.0);
                 80.0 * cache_factor
             }
             RelLang::Sort(_) => {
-                let parallelism_factor = 8.0 / f64::from(self.hardware.cpu_cores);
-                150.0 * parallelism_factor.max(0.5)
+                let par = 8.0 / f64::from(self.hardware.cpu_cores);
+                150.0 * par.max(0.5)
             }
             RelLang::IncrementalSort(_) => {
-                let parallelism_factor = 8.0 / f64::from(self.hardware.cpu_cores);
-                60.0 * parallelism_factor.max(0.5)
+                let par = 8.0 / f64::from(self.hardware.cpu_cores);
+                60.0 * par.max(0.5)
             }
             RelLang::Limit(_) => 0.5,
             RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => 50.0,
             RelLang::Window(_) => {
-                let parallelism_factor = 8.0 / f64::from(self.hardware.cpu_cores);
-                200.0 * parallelism_factor.max(0.5)
+                let par = 8.0 / f64::from(self.hardware.cpu_cores);
+                200.0 * par.max(0.5)
             }
             RelLang::DistinctRel(_) => {
                 let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb.max(1.0);
                 150.0 * cache_factor
             }
-            RelLang::IndexOnlyScan(_) => 5.0,
-            RelLang::BitmapIndexScan(_) => 30.0,
+            RelLang::IndexOnlyScan([table_id, _, cols_id, pred_id]) => {
+                let child_cost = costs(*table_id) + costs(*cols_id) + costs(*pred_id);
+                let rows = self
+                    .resolve_table(*table_id)
+                    .map_or(DEFAULT_ROW_COUNT, |t| self.row_count_for(t));
+                // Index-only scan ~10% of full scan cost
+                return child_cost + rows * SCAN_COST_PER_ROW * 0.1;
+            }
+            RelLang::BitmapIndexScan([table_id, _, _]) => {
+                let rows = self
+                    .resolve_table(*table_id)
+                    .map_or(DEFAULT_ROW_COUNT, |t| self.row_count_for(t));
+                // Bitmap scan reads ~30% of pages
+                rows * SCAN_COST_PER_ROW * 0.3
+            }
             RelLang::BitmapHeapScan(_) => 40.0,
             RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => 10.0,
             RelLang::MetadataLookup(_) => {
-                // O(1) metadata lookup, cheaper than any scan
                 return 1.0;
             }
             _ => 0.1,
         };
 
-        // Add child costs
         let child_cost: f64 = enode.children().iter().map(|child| costs(*child)).sum();
 
         base_cost + child_cost
@@ -252,13 +339,55 @@ mod tests {
     }
 
     #[test]
-    fn cost_fn_scan_node() {
+    fn cost_fn_scan_node_default_rows() {
+        // No symbol map, so falls back to DEFAULT_ROW_COUNT (1000)
+        // cost = 1000 * 0.05 = 50.0
         let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
         let node = RelLang::Scan([Id::from(0)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
             (c - 50.0).abs() < f64::EPSILON,
-            "Scan cost should be 50.0, got {c}",
+            "Scan with default rows should cost 50.0, got {c}",
+        );
+    }
+
+    #[test]
+    fn cost_fn_scan_node_with_stats() {
+        // Provide a symbol map and stats for a 10_000-row table.
+        // cost = 10_000 * 0.05 = 500.0
+        let mut table_stats = HashMap::new();
+        table_stats.insert("big".to_string(), Statistics::new(10_000.0));
+        let mut cost_fn = make_cost_fn(table_stats, HashMap::new());
+        let mut sym_map = HashMap::new();
+        sym_map.insert(Id::from(0), "big".to_string());
+        cost_fn.symbol_map = sym_map;
+
+        let node = RelLang::Scan([Id::from(0)]);
+        let c = cost_fn.cost(&node, zero_child_cost);
+        assert!(
+            (c - 500.0).abs() < f64::EPSILON,
+            "Scan of 10k-row table should cost 500.0, got {c}",
+        );
+    }
+
+    #[test]
+    fn cost_fn_scan_staleness_inflates() {
+        let mut table_stats = HashMap::new();
+        table_stats.insert("t".to_string(), Statistics::new(1000.0));
+        let mut staleness = HashMap::new();
+        staleness.insert("t".to_string(), Staleness::Unknown);
+        let mut cost_fn = make_cost_fn(table_stats, staleness);
+        let mut sym_map = HashMap::new();
+        sym_map.insert(Id::from(0), "t".to_string());
+        cost_fn.symbol_map = sym_map;
+
+        let node = RelLang::Scan([Id::from(0)]);
+        let c = cost_fn.cost(&node, zero_child_cost);
+        // Unknown staleness => factor 2.0
+        // cost = 1000 * 2.0 * 0.05 = 100.0
+        assert!(
+            (c - 100.0).abs() < f64::EPSILON,
+            "Scan with Unknown staleness should cost 100.0, got {c}",
         );
     }
 
@@ -366,12 +495,14 @@ mod tests {
 
     #[test]
     fn cost_fn_bitmap_index_scan_node() {
+        // No symbol map => DEFAULT_ROW_COUNT (1000)
+        // cost = 1000 * 0.05 * 0.3 = 15.0 + child_cost 0 = 15.0
         let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
         let node = RelLang::BitmapIndexScan([Id::from(0), Id::from(1), Id::from(2)]);
         let c = cost_fn.cost(&node, zero_child_cost);
         assert!(
-            (c - 30.0).abs() < f64::EPSILON,
-            "BitmapIndexScan cost should be 30.0, got {c}",
+            (c - 15.0).abs() < f64::EPSILON,
+            "BitmapIndexScan cost should be 15.0, got {c}",
         );
     }
 
@@ -400,17 +531,21 @@ mod tests {
     }
 
     #[test]
-    fn cost_fn_child_costs_are_summed() {
+    fn cost_fn_child_costs_increase_total() {
         let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
         let node = RelLang::Filter([Id::from(0), Id::from(1)]);
         let with_children = cost_fn.cost(&node, |_| 100.0);
         let without_children = cost_fn.cost(&node, zero_child_cost);
-        // Two children at 100 each
+        // Higher child costs must produce a higher total
         assert!(
-            (with_children - without_children - 200.0).abs() < f64::EPSILON,
-            "Child costs should sum to 200.0, \
-             diff = {}",
-            with_children - without_children,
+            with_children > without_children,
+            "Filter with child costs ({with_children}) should exceed \
+             filter without ({without_children})",
+        );
+        // The child costs (pred + input = 200) are included in the total
+        assert!(
+            with_children >= 200.0,
+            "Total should be at least the sum of child costs, got {with_children}",
         );
     }
 

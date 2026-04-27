@@ -38,48 +38,109 @@ impl GrammarExtension for SQL92Extension {
     fn keywords(&self) -> Vec<&str> {
         vec![
             // Core DML
-            "SELECT", "INSERT", "UPDATE", "DELETE",
-            "FROM", "WHERE", "GROUP BY", "HAVING", "ORDER BY",
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "FROM",
+            "WHERE",
+            "GROUP BY",
+            "HAVING",
+            "ORDER BY",
             // Joins
-            "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "ON", "USING",
+            "JOIN",
+            "INNER",
+            "LEFT",
+            "RIGHT",
+            "FULL",
+            "OUTER",
+            "CROSS",
+            "ON",
+            "USING",
             // Set operations
-            "UNION", "INTERSECT", "EXCEPT", "ALL", "DISTINCT",
+            "UNION",
+            "INTERSECT",
+            "EXCEPT",
+            "ALL",
+            "DISTINCT",
             // Subqueries
-            "EXISTS", "IN", "ANY", "SOME", "ALL",
+            "EXISTS",
+            "IN",
+            "ANY",
+            "SOME",
+            "ALL",
             // Aggregates
-            "COUNT", "SUM", "AVG", "MIN", "MAX",
+            "COUNT",
+            "SUM",
+            "AVG",
+            "MIN",
+            "MAX",
             // DDL
-            "CREATE", "ALTER", "DROP", "TABLE", "VIEW", "INDEX",
+            "CREATE",
+            "ALTER",
+            "DROP",
+            "TABLE",
+            "VIEW",
+            "INDEX",
             // Constraints
-            "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE", "CHECK", "NOT", "NULL",
+            "PRIMARY",
+            "KEY",
+            "FOREIGN",
+            "REFERENCES",
+            "UNIQUE",
+            "CHECK",
+            "NOT",
+            "NULL",
             // Transactions
-            "BEGIN", "COMMIT", "ROLLBACK", "TRANSACTION",
+            "BEGIN",
+            "COMMIT",
+            "ROLLBACK",
+            "TRANSACTION",
             // Data types
-            "CHAR", "VARCHAR", "INT", "INTEGER", "SMALLINT", "NUMERIC", "DECIMAL",
-            "FLOAT", "REAL", "DOUBLE", "PRECISION", "DATE", "TIME", "TIMESTAMP",
+            "CHAR",
+            "VARCHAR",
+            "INT",
+            "INTEGER",
+            "SMALLINT",
+            "NUMERIC",
+            "DECIMAL",
+            "FLOAT",
+            "REAL",
+            "DOUBLE",
+            "PRECISION",
+            "DATE",
+            "TIME",
+            "TIMESTAMP",
         ]
     }
 
     fn operators(&self) -> Vec<&str> {
         vec![
-            "=", "<>", "!=", "<", ">", "<=", ">=",
-            "AND", "OR", "NOT",
-            "LIKE", "BETWEEN",
-            "+", "-", "*", "/",
-            "||",  // String concatenation
+            "=", "<>", "!=", "<", ">", "<=", ">=", "AND", "OR", "NOT", "LIKE", "BETWEEN", "+", "-",
+            "*", "/", "||", // String concatenation
         ]
     }
 
     fn functions(&self) -> Vec<&str> {
         vec![
             // Aggregates
-            "COUNT", "SUM", "AVG", "MIN", "MAX",
+            "COUNT",
+            "SUM",
+            "AVG",
+            "MIN",
+            "MAX",
             // String functions
-            "SUBSTRING", "UPPER", "LOWER", "TRIM",
+            "SUBSTRING",
+            "UPPER",
+            "LOWER",
+            "TRIM",
             // Numeric
-            "ABS", "MOD",
+            "ABS",
+            "MOD",
             // Date/time
-            "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP",
+            "CURRENT_DATE",
+            "CURRENT_TIME",
+            "CURRENT_TIMESTAMP",
         ]
     }
 

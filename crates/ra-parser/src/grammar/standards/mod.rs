@@ -27,18 +27,18 @@
 //!
 //! Profiles can enable specific standards (e.g., PostgreSQL 17 supports SQL:1999, SQL:2003, SQL:2016).
 
-pub mod sql_92;
 pub mod sql_1999;
 pub mod sql_2003;
 pub mod sql_2008;
 pub mod sql_2011;
 pub mod sql_2016;
 pub mod sql_2023;
+pub mod sql_92;
 
-pub use sql_92::SQL92Extension;
 pub use sql_1999::SQL1999Extension;
 pub use sql_2003::SQL2003Extension;
 pub use sql_2008::SQL2008Extension;
 pub use sql_2011::SQL2011Extension;
 pub use sql_2016::SQL2016Extension;
 pub use sql_2023::SQL2023Extension;
+pub use sql_92::SQL92Extension;

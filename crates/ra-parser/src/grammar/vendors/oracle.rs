@@ -55,35 +55,56 @@ impl GrammarExtension for OracleExtension {
     fn keywords(&self) -> Vec<&str> {
         vec![
             // Hierarchical queries
-            "CONNECT BY", "START WITH", "PRIOR", "NOCYCLE",
-            "LEVEL", "SYS_CONNECT_BY_PATH", "CONNECT_BY_ROOT",
+            "CONNECT BY",
+            "START WITH",
+            "PRIOR",
+            "NOCYCLE",
+            "LEVEL",
+            "SYS_CONNECT_BY_PATH",
+            "CONNECT_BY_ROOT",
             "ORDER SIBLINGS BY",
             // DUAL table (not really a keyword but special)
             "DUAL",
             // Sequences
-            "NEXTVAL", "CURRVAL",
+            "NEXTVAL",
+            "CURRVAL",
             // MERGE enhancements
-            "MERGE", "MATCHED", "NOT MATCHED",
+            "MERGE",
+            "MATCHED",
+            "NOT MATCHED",
             // Flashback
-            "FLASHBACK", "AS OF", "TIMESTAMP", "SCN",
+            "FLASHBACK",
+            "AS OF",
+            "TIMESTAMP",
+            "SCN",
             // MODEL clause
-            "MODEL", "DIMENSION BY", "MEASURES", "RULES",
+            "MODEL",
+            "DIMENSION BY",
+            "MEASURES",
+            "RULES",
             // Analytic functions
-            "KEEP", "DENSE_RANK FIRST", "DENSE_RANK LAST",
+            "KEEP",
+            "DENSE_RANK FIRST",
+            "DENSE_RANK LAST",
             // PIVOT/UNPIVOT
-            "PIVOT", "UNPIVOT", "FOR", "IN",
+            "PIVOT",
+            "UNPIVOT",
+            "FOR",
+            "IN",
             // PL/SQL integration
-            "EXECUTE", "IMMEDIATE", "BULK COLLECT",
+            "EXECUTE",
+            "IMMEDIATE",
+            "BULK COLLECT",
             // Autonomous transactions
-            "PRAGMA", "AUTONOMOUS_TRANSACTION",
+            "PRAGMA",
+            "AUTONOMOUS_TRANSACTION",
         ]
     }
 
     fn operators(&self) -> Vec<&str> {
         vec![
             // Old-style outer join
-            "(+)",
-            // String concatenation
+            "(+)", // String concatenation
             "||",
         ]
     }
@@ -91,33 +112,80 @@ impl GrammarExtension for OracleExtension {
     fn functions(&self) -> Vec<&str> {
         vec![
             // Aggregate functions
-            "LISTAGG", "COLLECT", "XMLAGG",
+            "LISTAGG",
+            "COLLECT",
+            "XMLAGG",
             // String functions
-            "INSTR", "SUBSTR", "REPLACE", "TRANSLATE", "TRIM",
-            "NVL", "NVL2", "DECODE", "COALESCE",
-            "INITCAP", "LPAD", "RPAD",
+            "INSTR",
+            "SUBSTR",
+            "REPLACE",
+            "TRANSLATE",
+            "TRIM",
+            "NVL",
+            "NVL2",
+            "DECODE",
+            "COALESCE",
+            "INITCAP",
+            "LPAD",
+            "RPAD",
             // Date functions
-            "TO_DATE", "TO_CHAR", "TO_TIMESTAMP", "TO_NUMBER",
-            "TRUNC", "ADD_MONTHS", "MONTHS_BETWEEN", "NEXT_DAY", "LAST_DAY",
-            "SYSDATE", "SYSTIMESTAMP", "CURRENT_DATE", "CURRENT_TIMESTAMP",
+            "TO_DATE",
+            "TO_CHAR",
+            "TO_TIMESTAMP",
+            "TO_NUMBER",
+            "TRUNC",
+            "ADD_MONTHS",
+            "MONTHS_BETWEEN",
+            "NEXT_DAY",
+            "LAST_DAY",
+            "SYSDATE",
+            "SYSTIMESTAMP",
+            "CURRENT_DATE",
+            "CURRENT_TIMESTAMP",
             "EXTRACT",
             // Conversion functions
-            "CAST", "TO_CLOB", "TO_BLOB", "TO_NCLOB",
+            "CAST",
+            "TO_CLOB",
+            "TO_BLOB",
+            "TO_NCLOB",
             // Analytic functions
-            "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
-            "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE",
-            "RATIO_TO_REPORT", "PERCENT_RANK", "CUME_DIST",
-            "PERCENTILE_CONT", "PERCENTILE_DISC",
+            "ROW_NUMBER",
+            "RANK",
+            "DENSE_RANK",
+            "NTILE",
+            "LAG",
+            "LEAD",
+            "FIRST_VALUE",
+            "LAST_VALUE",
+            "RATIO_TO_REPORT",
+            "PERCENT_RANK",
+            "CUME_DIST",
+            "PERCENTILE_CONT",
+            "PERCENTILE_DISC",
             // JSON functions (12c+)
-            "JSON_TABLE", "JSON_QUERY", "JSON_VALUE", "JSON_EXISTS",
-            "JSON_OBJECT", "JSON_ARRAY", "JSON_ARRAYAGG", "JSON_OBJECTAGG",
+            "JSON_TABLE",
+            "JSON_QUERY",
+            "JSON_VALUE",
+            "JSON_EXISTS",
+            "JSON_OBJECT",
+            "JSON_ARRAY",
+            "JSON_ARRAYAGG",
+            "JSON_OBJECTAGG",
             // Hierarchical functions
-            "SYS_CONNECT_BY_PATH", "CONNECT_BY_ROOT",
+            "SYS_CONNECT_BY_PATH",
+            "CONNECT_BY_ROOT",
             // XML functions
-            "XMLELEMENT", "XMLATTRIBUTES", "XMLFOREST", "XMLAGG",
-            "XMLQUERY", "XMLTABLE", "XMLEXISTS",
+            "XMLELEMENT",
+            "XMLATTRIBUTES",
+            "XMLFOREST",
+            "XMLAGG",
+            "XMLQUERY",
+            "XMLTABLE",
+            "XMLEXISTS",
             // System functions
-            "USER", "SYS_CONTEXT", "USERENV",
+            "USER",
+            "SYS_CONTEXT",
+            "USERENV",
         ]
     }
 

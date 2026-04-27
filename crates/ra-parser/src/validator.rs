@@ -99,7 +99,7 @@ pub const KNOWN_DATABASES: &[&str] = &[
     "mariadb",
     "materialize",
     "memgraph",
-    "memsql",        // Legacy name for SingleStore
+    "memsql", // Legacy name for SingleStore
     "monetdb",
     "mongodb",
     "mssql",
@@ -108,7 +108,7 @@ pub const KNOWN_DATABASES: &[&str] = &[
     "neptune",
     "noisepage",
     "noria",
-    "omnisci",       // Legacy name for HeavyDB
+    "omnisci", // Legacy name for HeavyDB
     "oracle",
     "pg-strom",
     "pinot",
@@ -142,7 +142,7 @@ pub const KNOWN_DATABASES: &[&str] = &[
     "voltdb",
     "xilinx-alveo",
     "yellowbrick",
-    "yugabyte",      // Legacy name, use yugabytedb
+    "yugabyte", // Legacy name, use yugabytedb
     "yugabytedb",
 ];
 
@@ -167,9 +167,7 @@ pub const KNOWN_CATEGORY_PREFIXES: &[&str] = &[
 /// # Errors
 ///
 /// Returns [`ValidationError`] if any field is invalid.
-pub fn validate_metadata(
-    meta: &RuleMetadata,
-) -> Result<(), ValidationError> {
+pub fn validate_metadata(meta: &RuleMetadata) -> Result<(), ValidationError> {
     validate_required_fields(meta)?;
     validate_category(&meta.category)?;
     validate_databases(&meta.databases)?;
@@ -179,9 +177,7 @@ pub fn validate_metadata(
 
 /// Validate and collect *all* errors instead of failing fast.
 #[must_use]
-pub fn validate_metadata_all(
-    meta: &RuleMetadata,
-) -> Vec<ValidationError> {
+pub fn validate_metadata_all(meta: &RuleMetadata) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     if let Err(e) = validate_required_fields(meta) {
         errors.push(e);
@@ -200,32 +196,21 @@ pub fn validate_metadata_all(
 
 // ── Internals ────────────────────────────────────────────────
 
-fn validate_required_fields(
-    meta: &RuleMetadata,
-) -> Result<(), ValidationError> {
+fn validate_required_fields(meta: &RuleMetadata) -> Result<(), ValidationError> {
     if meta.id.trim().is_empty() {
-        return Err(ValidationError::RequiredFieldEmpty {
-            field: "id",
-        });
+        return Err(ValidationError::RequiredFieldEmpty { field: "id" });
     }
     if meta.name.trim().is_empty() {
-        return Err(ValidationError::RequiredFieldEmpty {
-            field: "name",
-        });
+        return Err(ValidationError::RequiredFieldEmpty { field: "name" });
     }
     if meta.category.trim().is_empty() {
-        return Err(ValidationError::RequiredFieldEmpty {
-            field: "category",
-        });
+        return Err(ValidationError::RequiredFieldEmpty { field: "category" });
     }
     Ok(())
 }
 
-fn validate_category(
-    category: &str,
-) -> Result<(), ValidationError> {
-    let prefix =
-        category.split('/').next().unwrap_or(category);
+fn validate_category(category: &str) -> Result<(), ValidationError> {
+    let prefix = category.split('/').next().unwrap_or(category);
     if KNOWN_CATEGORY_PREFIXES.contains(&prefix) {
         return Ok(());
     }
@@ -235,9 +220,7 @@ fn validate_category(
     })
 }
 
-fn validate_databases(
-    databases: &[String],
-) -> Result<(), ValidationError> {
+fn validate_databases(databases: &[String]) -> Result<(), ValidationError> {
     for db in databases {
         let lower = db.to_lowercase();
         if !KNOWN_DATABASES.contains(&lower.as_str()) {
@@ -250,9 +233,7 @@ fn validate_databases(
     Ok(())
 }
 
-fn validate_databases_all(
-    databases: &[String],
-) -> Vec<ValidationError> {
+fn validate_databases_all(databases: &[String]) -> Vec<ValidationError> {
     databases
         .iter()
         .filter(|db| {
@@ -266,9 +247,7 @@ fn validate_databases_all(
         .collect()
 }
 
-fn validate_version(
-    version: &str,
-) -> Result<(), ValidationError> {
+fn validate_version(version: &str) -> Result<(), ValidationError> {
     let parts: Vec<&str> = version.split('.').collect();
     if parts.len() != 3 {
         return Err(ValidationError::InvalidVersion {
@@ -319,9 +298,7 @@ mod tests {
         let err = validate_metadata(&m).unwrap_err();
         assert!(matches!(
             err,
-            ValidationError::RequiredFieldEmpty {
-                field: "id"
-            }
+            ValidationError::RequiredFieldEmpty { field: "id" }
         ));
     }
 
@@ -332,9 +309,7 @@ mod tests {
         let err = validate_metadata(&m).unwrap_err();
         assert!(matches!(
             err,
-            ValidationError::RequiredFieldEmpty {
-                field: "name"
-            }
+            ValidationError::RequiredFieldEmpty { field: "name" }
         ));
     }
 
@@ -345,9 +320,7 @@ mod tests {
         let err = validate_metadata(&m).unwrap_err();
         assert!(matches!(
             err,
-            ValidationError::RequiredFieldEmpty {
-                field: "category"
-            }
+            ValidationError::RequiredFieldEmpty { field: "category" }
         ));
     }
 
@@ -356,10 +329,7 @@ mod tests {
         let mut m = valid_meta();
         m.category = "bogus/thing".to_owned();
         let err = validate_metadata(&m).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::UnknownCategory { .. }
-        ));
+        assert!(matches!(err, ValidationError::UnknownCategory { .. }));
     }
 
     #[test]
@@ -379,10 +349,7 @@ mod tests {
         let mut m = valid_meta();
         m.databases = vec!["nosuchdb".to_owned()];
         let err = validate_metadata(&m).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::UnknownDatabase { .. }
-        ));
+        assert!(matches!(err, ValidationError::UnknownDatabase { .. }));
     }
 
     #[test]
@@ -418,17 +385,12 @@ mod tests {
 
     #[test]
     fn version_invalid_formats() {
-        for v in
-            &["1.0", "1", "v1.0.0", "1.0.0-beta", "a.b.c"]
-        {
+        for v in &["1.0", "1", "v1.0.0", "1.0.0-beta", "a.b.c"] {
             let mut m = valid_meta();
             m.version = (*v).to_owned();
             let err = validate_metadata(&m).unwrap_err();
             assert!(
-                matches!(
-                    err,
-                    ValidationError::InvalidVersion { .. }
-                ),
+                matches!(err, ValidationError::InvalidVersion { .. }),
                 "version `{v}` should be invalid"
             );
         }
@@ -449,10 +411,7 @@ mod tests {
             preconditions: vec![],
         };
         let errs = validate_metadata_all(&m);
-        assert!(
-            errs.len() >= 4,
-            "expected >= 4 errors, got: {errs:?}"
-        );
+        assert!(errs.len() >= 4, "expected >= 4 errors, got: {errs:?}");
     }
 
     #[test]

@@ -48,17 +48,34 @@ impl GrammarExtension for SQL2003Extension {
     fn keywords(&self) -> Vec<&str> {
         vec![
             // Window functions
-            "OVER", "PARTITION BY", "ROWS", "RANGE",
-            "PRECEDING", "FOLLOWING", "UNBOUNDED", "CURRENT ROW",
+            "OVER",
+            "PARTITION BY",
+            "ROWS",
+            "RANGE",
+            "PRECEDING",
+            "FOLLOWING",
+            "UNBOUNDED",
+            "CURRENT ROW",
             // XML
-            "XMLTYPE", "XMLELEMENT", "XMLATTRIBUTES", "XMLAGG",
-            "XMLEXISTS", "XMLQUERY", "XMLTABLE",
+            "XMLTYPE",
+            "XMLELEMENT",
+            "XMLATTRIBUTES",
+            "XMLAGG",
+            "XMLEXISTS",
+            "XMLQUERY",
+            "XMLTABLE",
             // Sequences
-            "SEQUENCE", "NEXTVAL", "CURRVAL",
+            "SEQUENCE",
+            "NEXTVAL",
+            "CURRVAL",
             // Identity columns
-            "IDENTITY", "GENERATED", "ALWAYS", "BY DEFAULT",
+            "IDENTITY",
+            "GENERATED",
+            "ALWAYS",
+            "BY DEFAULT",
             // MERGE
-            "MERGE", "MATCHED",
+            "MERGE",
+            "MATCHED",
         ]
     }
 
@@ -69,12 +86,23 @@ impl GrammarExtension for SQL2003Extension {
     fn functions(&self) -> Vec<&str> {
         vec![
             // Window/ranking functions
-            "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
-            "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE",
-            "PERCENT_RANK", "CUME_DIST",
+            "ROW_NUMBER",
+            "RANK",
+            "DENSE_RANK",
+            "NTILE",
+            "LAG",
+            "LEAD",
+            "FIRST_VALUE",
+            "LAST_VALUE",
+            "PERCENT_RANK",
+            "CUME_DIST",
             // XML functions
-            "XMLELEMENT", "XMLATTRIBUTES", "XMLAGG",
-            "XMLEXISTS", "XMLQUERY", "XMLTABLE",
+            "XMLELEMENT",
+            "XMLATTRIBUTES",
+            "XMLAGG",
+            "XMLEXISTS",
+            "XMLQUERY",
+            "XMLTABLE",
         ]
     }
 

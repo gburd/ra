@@ -8,6 +8,7 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::similar_names)]
 
+pub mod ddl_parser;
 pub mod extractor;
 pub mod formatter;
 pub mod grammar;
@@ -18,10 +19,10 @@ pub mod profile;
 pub mod rule_file_parser;
 pub mod rule_registry;
 pub mod sql_to_relexpr;
-pub mod ddl_parser;
 pub mod test_case;
 pub mod validator;
 
+pub use ddl_parser::*;
 pub use extractor::*;
 pub use formatter::*;
 pub use match_recognize::*;
@@ -30,6 +31,5 @@ pub use profile::*;
 pub use rule_file_parser::*;
 pub use rule_registry::*;
 pub use sql_to_relexpr::*;
-pub use ddl_parser::*;
 pub use test_case::*;
 pub use validator::*;

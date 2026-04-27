@@ -3,7 +3,7 @@
 //! These benchmarks ensure the inference engine maintains sub-millisecond
 //! performance for typical SQL queries.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_parser::parser::inference::DialectInference;
 
 /// Simple queries - should be very fast (< 10μs)
@@ -13,7 +13,10 @@ fn bench_simple_queries(c: &mut Criterion) {
         ("MySQL simple", "SELECT `id` FROM users"),
         ("Oracle simple", "SELECT * FROM DUAL"),
         ("SQL Server simple", "SELECT TOP 10 * FROM users"),
-        ("Standard SQL", "SELECT id, name FROM users WHERE active = true"),
+        (
+            "Standard SQL",
+            "SELECT id, name FROM users WHERE active = true",
+        ),
     ];
 
     let mut group = c.benchmark_group("simple_queries");
@@ -78,10 +81,9 @@ fn bench_medium_queries(c: &mut Criterion) {
 
 /// Complex queries with multiple features (< 100μs)
 fn bench_complex_queries(c: &mut Criterion) {
-    let queries = vec![
-        (
-            "PostgreSQL complex analytics",
-            "WITH RECURSIVE category_tree AS (
+    let queries = vec![(
+        "PostgreSQL complex analytics",
+        "WITH RECURSIVE category_tree AS (
                 SELECT id, parent_id, name, 1 as level, ARRAY[id] as path
                 FROM categories
                 WHERE parent_id IS NULL
@@ -112,8 +114,7 @@ fn bench_complex_queries(c: &mut Criterion) {
             FROM sales_by_category
             WHERE total_sales > 1000
             ORDER BY level, total_sales DESC",
-        ),
-    ];
+    )];
 
     let mut group = c.benchmark_group("complex_queries");
     for (name, sql) in queries {

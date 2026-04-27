@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ra_core::{RuleMetadata as CoreRuleMetadata, RuleCategory};
+use ra_core::{RuleCategory, RuleMetadata as CoreRuleMetadata};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -114,15 +114,19 @@ impl RuleRegistry {
             })?;
 
             let path = entry.path();
-            let file_type = entry.file_type().map_err(|source| RegistryError::DirectoryRead {
-                path: path.clone(),
-                source,
-            })?;
+            let file_type = entry
+                .file_type()
+                .map_err(|source| RegistryError::DirectoryRead {
+                    path: path.clone(),
+                    source,
+                })?;
 
             if file_type.is_dir() {
                 // Recursively scan subdirectories
                 self.scan_directory(base_dir, &path)?;
-            } else if file_type.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rra") {
+            } else if file_type.is_file()
+                && path.extension().and_then(|s| s.to_str()) == Some("rra")
+            {
                 // Parse .rra file
                 if let Err(e) = self.load_rule_file(&path) {
                     // Log error but continue loading other files
@@ -208,9 +212,13 @@ impl RuleRegistry {
     }
 
     /// Get rules matching a database
-    pub fn rules_for_database<'a>(&'a self, database: &'a str) -> impl Iterator<Item = &'a RuleEntry> + 'a {
+    pub fn rules_for_database<'a>(
+        &'a self,
+        database: &'a str,
+    ) -> impl Iterator<Item = &'a RuleEntry> + 'a {
         self.rules.values().filter(move |entry| {
-            entry.metadata.databases.is_empty() || entry.metadata.databases.contains(&database.to_string())
+            entry.metadata.databases.is_empty()
+                || entry.metadata.databases.contains(&database.to_string())
         })
     }
 

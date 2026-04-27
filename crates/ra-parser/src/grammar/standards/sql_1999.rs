@@ -48,24 +48,39 @@ impl GrammarExtension for SQL1999Extension {
 
     fn keywords(&self) -> Vec<&str> {
         vec![
-            "WITH", "RECURSIVE",
-            "CASE", "WHEN", "THEN", "ELSE", "END",
-            "TRIGGER", "BEFORE", "AFTER", "INSTEAD OF",
-            "FOR EACH ROW", "FOR EACH STATEMENT",
-            "OLD", "NEW",
+            "WITH",
+            "RECURSIVE",
+            "CASE",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+            "TRIGGER",
+            "BEFORE",
+            "AFTER",
+            "INSTEAD OF",
+            "FOR EACH ROW",
+            "FOR EACH STATEMENT",
+            "OLD",
+            "NEW",
         ]
     }
 
     fn operators(&self) -> Vec<&str> {
-        vec![]  // No new operators
+        vec![] // No new operators
     }
 
     fn functions(&self) -> Vec<&str> {
         vec![
             // String functions
-            "POSITION", "OVERLAY", "CHAR_LENGTH", "OCTET_LENGTH",
+            "POSITION",
+            "OVERLAY",
+            "CHAR_LENGTH",
+            "OCTET_LENGTH",
             // Type conversion
-            "CAST", "COALESCE", "NULLIF",
+            "CAST",
+            "COALESCE",
+            "NULLIF",
         ]
     }
 

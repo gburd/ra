@@ -39,9 +39,15 @@ impl GrammarExtension for SQL2008Extension {
 
     fn keywords(&self) -> Vec<&str> {
         vec![
-            "MERGE", "USING", "WHEN MATCHED", "WHEN NOT MATCHED",
+            "MERGE",
+            "USING",
+            "WHEN MATCHED",
+            "WHEN NOT MATCHED",
             "TRUNCATE",
-            "FETCH", "FIRST", "NEXT", "ONLY",
+            "FETCH",
+            "FIRST",
+            "NEXT",
+            "ONLY",
             "OFFSET",
         ]
     }

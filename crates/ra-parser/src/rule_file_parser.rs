@@ -8,7 +8,7 @@ use ra_core::PreCondition;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::extractor::{CodeBlock, extract_code_blocks};
+use crate::extractor::{extract_code_blocks, CodeBlock};
 use crate::validator::{self, ValidationError};
 
 // ── Error types ──────────────────────────────────────────────
@@ -112,9 +112,7 @@ impl Section {
         let lower = text.trim().to_lowercase();
         if lower.contains("description") {
             Self::Description
-        } else if lower.contains("relational algebra")
-            || lower.contains("algebra")
-        {
+        } else if lower.contains("relational algebra") || lower.contains("algebra") {
             Self::Algebra
         } else if lower.contains("implementation") {
             Self::Implementation
@@ -132,26 +130,21 @@ impl Section {
 
 /// Split `---`-delimited YAML frontmatter from the remaining
 /// markdown body.  Returns `(yaml, body, yaml_end_line)`.
-fn split_frontmatter(
-    source: &str,
-) -> Result<(&str, &str, usize), ParseError> {
+fn split_frontmatter(source: &str) -> Result<(&str, &str, usize), ParseError> {
     let trimmed = source.trim_start();
     if !trimmed.starts_with("---") {
         return Err(ParseError::MissingFrontmatter);
     }
-    let after_open =
-        trimmed.find('\n').map_or(trimmed.len(), |i| i + 1);
+    let after_open = trimmed.find('\n').map_or(trimmed.len(), |i| i + 1);
     let rest = &trimmed[after_open..];
-    let close = rest
-        .find("\n---")
-        .ok_or(ParseError::MissingFrontmatter)?;
+    let close = rest.find("\n---").ok_or(ParseError::MissingFrontmatter)?;
     let yaml = &rest[..close];
     // +2: one for the opening `---` line, one for the closing
     let yaml_end_line = yaml.lines().count() + 2;
     let body_start = close + 4; // skip `\n---`
-    let body = rest.get(body_start..).map_or("", |s| {
-        s.strip_prefix('\n').unwrap_or(s)
-    });
+    let body = rest
+        .get(body_start..)
+        .map_or("", |s| s.strip_prefix('\n').unwrap_or(s));
     Ok((yaml, body, yaml_end_line))
 }
 
@@ -160,9 +153,8 @@ fn split_frontmatter(
 /// Walk the pulldown-cmark event stream and collect prose and
 /// code blocks into the appropriate sections.
 fn parse_body(body: &str) -> BodyParts {
-    let opts = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_SMART_PUNCTUATION;
+    let opts =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_SMART_PUNCTUATION;
     let parser = MdParser::new_ext(body, opts);
 
     let mut parts = BodyParts::default();
@@ -173,25 +165,14 @@ fn parse_body(body: &str) -> BodyParts {
 
     for event in parser {
         match event {
-            Event::Start(Tag::Heading(
-                pulldown_cmark::HeadingLevel::H2,
-                ..
-            )) => {
-                flush_text(
-                    &mut parts,
-                    current_section,
-                    &text_buf,
-                );
+            Event::Start(Tag::Heading(pulldown_cmark::HeadingLevel::H2, ..)) => {
+                flush_text(&mut parts, current_section, &text_buf);
                 text_buf.clear();
                 in_heading = true;
                 heading_buf.clear();
             }
-            Event::End(Tag::Heading(
-                pulldown_cmark::HeadingLevel::H2,
-                ..
-            )) => {
-                current_section =
-                    Section::from_heading(&heading_buf);
+            Event::End(Tag::Heading(pulldown_cmark::HeadingLevel::H2, ..)) => {
+                current_section = Section::from_heading(&heading_buf);
                 in_heading = false;
             }
             Event::Text(ref t) | Event::Code(ref t) => {
@@ -217,11 +198,7 @@ fn parse_body(body: &str) -> BodyParts {
     parts
 }
 
-fn flush_text(
-    parts: &mut BodyParts,
-    section: Section,
-    text: &str,
-) {
+fn flush_text(parts: &mut BodyParts, section: Section, text: &str) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return;
@@ -241,26 +218,18 @@ fn flush_text(
                 }
             }
         }
-        Section::Algebra
-        | Section::Implementation
-        | Section::TestCases
-        | Section::Other => {}
+        Section::Algebra | Section::Implementation | Section::TestCases | Section::Other => {}
     }
 }
 
-fn assign_code_blocks(
-    parts: &mut BodyParts,
-    blocks: &[CodeBlock],
-) {
+fn assign_code_blocks(parts: &mut BodyParts, blocks: &[CodeBlock]) {
     for block in blocks {
         match block.language.as_str() {
             "algebra" | "ra" => {
-                parts.algebra_notation =
-                    Some(block.content.clone());
+                parts.algebra_notation = Some(block.content.clone());
             }
             "rust" => {
-                parts.implementation =
-                    Some(block.content.clone());
+                parts.implementation = Some(block.content.clone());
             }
             "sql" | "test" | "tla" => {
                 parts.test_cases.push(block.content.clone());
@@ -291,14 +260,11 @@ struct BodyParts {
 /// Returns [`ParseError`] when:
 /// - YAML frontmatter is missing or malformed
 /// - Metadata fields fail validation
-pub fn parse_rule_file(
-    source: &str,
-) -> Result<RuleFile, ParseError> {
-    let (yaml, body, yaml_end_line) =
-        split_frontmatter(source)?;
+pub fn parse_rule_file(source: &str) -> Result<RuleFile, ParseError> {
+    let (yaml, body, yaml_end_line) = split_frontmatter(source)?;
 
-    let metadata: RuleMetadata = serde_yaml::from_str(yaml)
-        .map_err(|e| ParseError::InvalidYaml {
+    let metadata: RuleMetadata =
+        serde_yaml::from_str(yaml).map_err(|e| ParseError::InvalidYaml {
             line: yaml_end_line,
             source: e,
         })?;
@@ -325,15 +291,11 @@ pub fn parse_rule_file(
 ///
 /// Returns [`ParseError`] when frontmatter is missing or
 /// contains invalid YAML.
-pub fn parse_metadata(
-    source: &str,
-) -> Result<RuleMetadata, ParseError> {
+pub fn parse_metadata(source: &str) -> Result<RuleMetadata, ParseError> {
     let (yaml, _, yaml_end_line) = split_frontmatter(source)?;
-    serde_yaml::from_str(yaml).map_err(|e| {
-        ParseError::InvalidYaml {
-            line: yaml_end_line,
-            source: e,
-        }
+    serde_yaml::from_str(yaml).map_err(|e| ParseError::InvalidYaml {
+        line: yaml_end_line,
+        source: e,
     })
 }
 
@@ -406,32 +368,18 @@ Graefe, \"The Cascades Framework for Query Optimization\" (1995)
 
     #[test]
     fn parse_full_rule_file() {
-        let rule = parse_rule_file(SAMPLE_RRA)
-            .expect("should parse sample");
+        let rule = parse_rule_file(SAMPLE_RRA).expect("should parse sample");
         assert_eq!(rule.metadata.id, "filter-through-join");
-        assert_eq!(
-            rule.metadata.name,
-            "Filter Pushdown Through Join"
-        );
-        assert_eq!(
-            rule.metadata.category,
-            "logical/predicate-pushdown"
-        );
+        assert_eq!(rule.metadata.name, "Filter Pushdown Through Join");
+        assert_eq!(rule.metadata.category, "logical/predicate-pushdown");
         assert_eq!(
             rule.metadata.databases,
-            vec![
-                "postgresql", "mysql", "duckdb", "sqlite"
-            ]
+            vec!["postgresql", "mysql", "duckdb", "sqlite"]
         );
-        assert_eq!(
-            rule.metadata.standard.as_deref(),
-            Some("sql:1992")
-        );
+        assert_eq!(rule.metadata.standard.as_deref(), Some("sql:1992"));
         assert_eq!(rule.metadata.version, "1.0.0");
         assert_eq!(rule.metadata.authors.len(), 2);
-        assert!(
-            rule.description.contains("selection predicates")
-        );
+        assert!(rule.description.contains("selection predicates"));
         assert!(rule.algebra_notation.is_some());
         assert!(rule.implementation.is_some());
         assert!(!rule.test_cases.is_empty());
@@ -440,13 +388,9 @@ Graefe, \"The Cascades Framework for Query Optimization\" (1995)
 
     #[test]
     fn parse_metadata_only() {
-        let meta = parse_metadata(SAMPLE_RRA)
-            .expect("should parse metadata");
+        let meta = parse_metadata(SAMPLE_RRA).expect("should parse metadata");
         assert_eq!(meta.id, "filter-through-join");
-        assert_eq!(
-            meta.tags,
-            vec!["filter", "join", "pushdown"]
-        );
+        assert_eq!(meta.tags, vec!["filter", "join", "pushdown"]);
     }
 
     #[test]
@@ -486,8 +430,7 @@ category: logical/expression-simplification
 
 A minimal rule for testing.
 ";
-        let rule = parse_rule_file(src)
-            .expect("should parse minimal rule");
+        let rule = parse_rule_file(src).expect("should parse minimal rule");
         assert_eq!(rule.metadata.id, "minimal");
         assert_eq!(rule.metadata.version, "0.1.0");
         assert!(rule.metadata.databases.is_empty());
@@ -539,8 +482,7 @@ SELECT 1;
 SELECT 2;
 ```
 ";
-        let rule =
-            parse_rule_file(src).expect("should parse");
+        let rule = parse_rule_file(src).expect("should parse");
         assert_eq!(rule.test_cases.len(), 2);
     }
 }

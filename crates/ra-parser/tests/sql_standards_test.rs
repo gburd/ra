@@ -123,9 +123,9 @@ fn test_sql2023_property_graphs() {
     assert!(keywords.contains(&"SHORTEST"));
 
     let operators = ext.operators();
-    assert!(operators.contains(&"->"));  // Directed edge
+    assert!(operators.contains(&"->")); // Directed edge
     assert!(operators.contains(&"<-"));
-    assert!(operators.contains(&"-"));   // Undirected edge
+    assert!(operators.contains(&"-")); // Undirected edge
 
     let functions = ext.functions();
     assert!(functions.contains(&"GRAPH_TABLE"));
@@ -169,7 +169,11 @@ fn test_documentation_urls() {
     for ext in extensions {
         let url = ext.documentation_url();
         assert!(url.is_some(), "{} missing documentation URL", ext.name());
-        assert!(url.unwrap().starts_with("http"), "{} URL should start with http", ext.name());
+        assert!(
+            url.unwrap().starts_with("http"),
+            "{} URL should start with http",
+            ext.name()
+        );
     }
 }
 
@@ -235,10 +239,10 @@ fn test_sql_compliance_matrix() {
             sql_92: true,
             sql_1999: true,
             sql_2003: true,
-            sql_2008: true,  // MERGE support
-            sql_2011: true,  // Temporal validity
-            sql_2016: true,  // JSON support
-            sql_2023: true,  // Property graphs via graph server
+            sql_2008: true, // MERGE support
+            sql_2011: true, // Temporal validity
+            sql_2016: true, // JSON support
+            sql_2023: true, // Property graphs via graph server
         },
         DatabaseCompliance {
             name: "SQL Server 2022",
@@ -246,9 +250,9 @@ fn test_sql_compliance_matrix() {
             sql_1999: true,
             sql_2003: true,
             sql_2008: true,
-            sql_2011: true,  // Temporal tables
-            sql_2016: true,  // JSON support
-            sql_2023: true,  // Graph tables (MATCH syntax)
+            sql_2011: true, // Temporal tables
+            sql_2016: true, // JSON support
+            sql_2023: true, // Graph tables (MATCH syntax)
         },
     ];
 

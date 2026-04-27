@@ -70,11 +70,7 @@ impl fmt::Display for TestExpectation {
 /// When a block has no structured markers, each standalone SQL
 /// statement becomes a `Parses` test.
 #[must_use]
-pub fn parse_test_block(
-    block: &str,
-    rule_id: &str,
-    block_index: usize,
-) -> Vec<TestCase> {
+pub fn parse_test_block(block: &str, rule_id: &str, block_index: usize) -> Vec<TestCase> {
     let lines: Vec<&str> = block.lines().collect();
     if lines.is_empty() {
         return vec![];
@@ -126,11 +122,7 @@ fn has_case_markers(lines: &[&str]) -> bool {
     })
 }
 
-fn parse_before_after(
-    lines: &[&str],
-    rule_id: &str,
-    block_index: usize,
-) -> Vec<TestCase> {
+fn parse_before_after(lines: &[&str], rule_id: &str, block_index: usize) -> Vec<TestCase> {
     let mut before_sql = String::new();
     let mut description = extract_description(lines);
     let negative = is_negative(lines);
@@ -138,16 +130,11 @@ fn parse_before_after(
 
     for line in lines {
         let trimmed = line.trim();
-        if trimmed.starts_with("-- Before")
-            || trimmed.starts_with("-- Input")
-        {
+        if trimmed.starts_with("-- Before") || trimmed.starts_with("-- Input") {
             in_before = true;
             if description.is_none() {
-                let after_marker =
-                    strip_comment_prefix(trimmed, "-- Before")
-                        .or_else(|| {
-                            strip_comment_prefix(trimmed, "-- Input")
-                        });
+                let after_marker = strip_comment_prefix(trimmed, "-- Before")
+                    .or_else(|| strip_comment_prefix(trimmed, "-- Input"));
                 if let Some(desc) = after_marker {
                     if !desc.is_empty() {
                         description = Some(desc.to_owned());
@@ -184,20 +171,12 @@ fn parse_before_after(
     vec![TestCase {
         input_sql: before_sql,
         expected,
-        description: description.or_else(|| {
-            Some(format!(
-                "{rule_id}::block_{block_index}"
-            ))
-        }),
+        description: description.or_else(|| Some(format!("{rule_id}::block_{block_index}"))),
         negative,
     }]
 }
 
-fn parse_input_output(
-    lines: &[&str],
-    rule_id: &str,
-    block_index: usize,
-) -> Vec<TestCase> {
+fn parse_input_output(lines: &[&str], rule_id: &str, block_index: usize) -> Vec<TestCase> {
     let mut input_sql = String::new();
     let mut in_input = false;
     let negative = is_negative(lines);
@@ -210,9 +189,7 @@ fn parse_input_output(
             in_input = true;
             continue;
         }
-        if trimmed.starts_with("-- Expected")
-            || trimmed.starts_with("-- Output")
-        {
+        if trimmed.starts_with("-- Expected") || trimmed.starts_with("-- Output") {
             break;
         }
         if in_input && !trimmed.starts_with("--") {
@@ -237,20 +214,12 @@ fn parse_input_output(
     vec![TestCase {
         input_sql,
         expected,
-        description: description.or_else(|| {
-            Some(format!(
-                "{rule_id}::block_{block_index}"
-            ))
-        }),
+        description: description.or_else(|| Some(format!("{rule_id}::block_{block_index}"))),
         negative,
     }]
 }
 
-fn parse_marked_cases(
-    lines: &[&str],
-    rule_id: &str,
-    block_index: usize,
-) -> Vec<TestCase> {
+fn parse_marked_cases(lines: &[&str], rule_id: &str, block_index: usize) -> Vec<TestCase> {
     let mut cases = Vec::new();
     let mut current_sql = String::new();
     let mut current_negative = false;
@@ -274,11 +243,7 @@ fn parse_marked_cases(
             );
             sub_index += 1;
             current_negative = false;
-            current_desc = strip_comment_prefix(
-                trimmed,
-                "-- Positive:",
-            )
-            .map(str::to_owned);
+            current_desc = strip_comment_prefix(trimmed, "-- Positive:").map(str::to_owned);
             continue;
         }
 
@@ -295,36 +260,22 @@ fn parse_marked_cases(
             );
             sub_index += 1;
             current_negative = true;
-            current_desc = strip_comment_prefix(
-                trimmed,
-                "-- Negative:",
-            )
-            .map(str::to_owned);
+            current_desc = strip_comment_prefix(trimmed, "-- Negative:").map(str::to_owned);
             continue;
         }
 
         if trimmed.starts_with("-- Expected-Rule:") {
-            if let Some(id) = strip_comment_prefix(
-                trimmed,
-                "-- Expected-Rule:",
-            ) {
-                current_expectation = Some(
-                    TestExpectation::RuleApplied {
-                        rule_id: id.to_owned(),
-                    },
-                );
+            if let Some(id) = strip_comment_prefix(trimmed, "-- Expected-Rule:") {
+                current_expectation = Some(TestExpectation::RuleApplied {
+                    rule_id: id.to_owned(),
+                });
             }
             continue;
         }
 
         if trimmed.starts_with("-- Expected:") {
-            if let Some(desc) =
-                strip_comment_prefix(trimmed, "-- Expected:")
-            {
-                current_expectation =
-                    Some(TestExpectation::Described(
-                        desc.to_owned(),
-                    ));
+            if let Some(desc) = strip_comment_prefix(trimmed, "-- Expected:") {
+                current_expectation = Some(TestExpectation::Described(desc.to_owned()));
             }
             continue;
         }
@@ -374,21 +325,14 @@ fn flush_case(
     cases.push(TestCase {
         input_sql: trimmed,
         expected,
-        description: description.or_else(|| {
-            Some(format!(
-                "{rule_id}::block_{block_index}_{sub_index}"
-            ))
-        }),
+        description: description
+            .or_else(|| Some(format!("{rule_id}::block_{block_index}_{sub_index}"))),
         negative,
     });
     sql.clear();
 }
 
-fn parse_single_block(
-    lines: &[&str],
-    rule_id: &str,
-    block_index: usize,
-) -> Vec<TestCase> {
+fn parse_single_block(lines: &[&str], rule_id: &str, block_index: usize) -> Vec<TestCase> {
     let mut sql = String::new();
     let negative = is_negative(lines);
     let description = extract_description(lines);
@@ -415,11 +359,7 @@ fn parse_single_block(
     vec![TestCase {
         input_sql: sql,
         expected,
-        description: description.or_else(|| {
-            Some(format!(
-                "{rule_id}::block_{block_index}"
-            ))
-        }),
+        description: description.or_else(|| Some(format!("{rule_id}::block_{block_index}"))),
         negative,
     }]
 }
@@ -439,60 +379,42 @@ fn extract_description(lines: &[&str]) -> Option<String> {
     for line in lines {
         let trimmed = line.trim();
         if trimmed.starts_with("-- Positive:") {
-            return strip_comment_prefix(trimmed, "-- Positive:")
-                .map(str::to_owned);
+            return strip_comment_prefix(trimmed, "-- Positive:").map(str::to_owned);
         }
         if trimmed.starts_with("-- Negative:") {
-            return strip_comment_prefix(trimmed, "-- Negative:")
-                .map(str::to_owned);
+            return strip_comment_prefix(trimmed, "-- Negative:").map(str::to_owned);
         }
     }
     None
 }
 
-fn extract_expectation(
-    lines: &[&str],
-) -> Option<TestExpectation> {
+fn extract_expectation(lines: &[&str]) -> Option<TestExpectation> {
     for line in lines {
         let trimmed = line.trim();
         if trimmed.starts_with("-- Expected-Rule:") {
-            if let Some(id) = strip_comment_prefix(
-                trimmed,
-                "-- Expected-Rule:",
-            ) {
+            if let Some(id) = strip_comment_prefix(trimmed, "-- Expected-Rule:") {
                 return Some(TestExpectation::RuleApplied {
                     rule_id: id.to_owned(),
                 });
             }
         }
         if trimmed.starts_with("-- Expected:") {
-            if let Some(desc) =
-                strip_comment_prefix(trimmed, "-- Expected:")
-            {
+            if let Some(desc) = strip_comment_prefix(trimmed, "-- Expected:") {
                 let lower = desc.to_lowercase();
-                if lower.contains("unchanged")
-                    || lower.contains("not apply")
-                {
+                if lower.contains("unchanged") || lower.contains("not apply") {
                     return Some(TestExpectation::PlanUnchanged);
                 }
-                if lower.contains("plan optimized")
-                    || lower.contains("plan changed")
-                {
+                if lower.contains("plan optimized") || lower.contains("plan changed") {
                     return Some(TestExpectation::PlanChanged);
                 }
-                return Some(TestExpectation::Described(
-                    desc.to_owned(),
-                ));
+                return Some(TestExpectation::Described(desc.to_owned()));
             }
         }
     }
     None
 }
 
-fn strip_comment_prefix<'a>(
-    line: &'a str,
-    prefix: &str,
-) -> Option<&'a str> {
+fn strip_comment_prefix<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
     let rest = line.strip_prefix(prefix)?;
     let trimmed = rest.trim();
     if trimmed.is_empty() {
@@ -550,14 +472,11 @@ SELECT name FROM employees WHERE age > 30;
 -- Expected: filter pushed below projection
 -- Plan: Project[name](Filter[age > 30](Scan(employees)))";
 
-        let cases =
-            parse_test_block(block, "filter-pushdown-basic", 0);
+        let cases = parse_test_block(block, "filter-pushdown-basic", 0);
         assert_eq!(cases.len(), 1);
         assert_eq!(
             cases[0].expected,
-            TestExpectation::Described(
-                "filter pushed below projection".to_owned()
-            )
+            TestExpectation::Described("filter pushed below projection".to_owned())
         );
     }
 

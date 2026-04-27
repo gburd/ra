@@ -299,3 +299,13 @@ pub use xml_optimizer::{
     XPathPredicate, XPathStep, XmlCostParams, XmlFunctionCall, XmlFunctionKind, XmlIndexInfo,
     XmlIndexType, XmlOptimizerError, XmlPlatform, XmlValueType,
 };
+
+/// Parse a string into an egg [`Var`] for use in e-graph rewrite patterns.
+///
+/// Only call with known-valid pattern variable literals (e.g. `"?x"`).
+/// Panics on invalid input since these are programmer-controlled constants.
+#[allow(clippy::expect_used)]
+pub fn parse_var(s: &str) -> egg::Var {
+    s.parse()
+        .expect("invalid egg::Var literal; pattern variables must start with '?'")
+}

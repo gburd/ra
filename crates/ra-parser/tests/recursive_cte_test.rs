@@ -20,8 +20,7 @@ fn simple_recursive_cte_parses() {
         )
         SELECT x FROM cnt
     ";
-    let expr = sql_to_relexpr(sql)
-        .expect("simple recursive CTE should parse");
+    let expr = sql_to_relexpr(sql).expect("simple recursive CTE should parse");
 
     let RelExpr::RecursiveCTE {
         name,
@@ -29,9 +28,7 @@ fn simple_recursive_cte_parses() {
         ..
     } = &expr
     else {
-        panic!(
-            "expected RecursiveCTE, got: {expr:?}"
-        );
+        panic!("expected RecursiveCTE, got: {expr:?}");
     };
 
     assert_eq!(name, "cnt");
@@ -53,11 +50,9 @@ fn recursive_cte_body_is_scan_of_cte_name() {
         )
         SELECT n FROM nums
     ";
-    let expr = sql_to_relexpr(sql)
-        .expect("recursive CTE should parse");
+    let expr = sql_to_relexpr(sql).expect("recursive CTE should parse");
 
-    let RelExpr::RecursiveCTE { body, .. } = &expr
-    else {
+    let RelExpr::RecursiveCTE { body, .. } = &expr else {
         panic!("expected RecursiveCTE");
     };
 
@@ -78,8 +73,7 @@ fn recursive_cte_base_case_does_not_reference_cte() {
         )
         SELECT val FROM r
     ";
-    let expr = sql_to_relexpr(sql)
-        .expect("recursive CTE should parse");
+    let expr = sql_to_relexpr(sql).expect("recursive CTE should parse");
 
     let RelExpr::RecursiveCTE {
         base_case,
@@ -114,8 +108,7 @@ fn graph_reachability_cte_parses() {
         )
         SELECT node FROM reachable
     ";
-    let expr = sql_to_relexpr(sql)
-        .expect("graph reachability CTE should parse");
+    let expr = sql_to_relexpr(sql).expect("graph reachability CTE should parse");
 
     let RelExpr::RecursiveCTE {
         name,
@@ -149,11 +142,9 @@ fn running_totals_cte_parses() {
         )
         SELECT id, total FROM running
     ";
-    let expr = sql_to_relexpr(sql)
-        .expect("running totals CTE should parse");
+    let expr = sql_to_relexpr(sql).expect("running totals CTE should parse");
 
-    let RelExpr::RecursiveCTE { name, .. } = &expr
-    else {
+    let RelExpr::RecursiveCTE { name, .. } = &expr else {
         panic!("expected RecursiveCTE");
     };
 
@@ -187,8 +178,7 @@ fn non_recursive_with_clause_not_recursive_cte() {
         )
         SELECT total FROM totals
     ";
-    let expr = sql_to_relexpr(sql)
-        .expect("non-recursive WITH should parse");
+    let expr = sql_to_relexpr(sql).expect("non-recursive WITH should parse");
 
     // Should produce a CTE, not a RecursiveCTE
     assert!(
@@ -209,11 +199,9 @@ fn fibonacci_cte_parses() {
         )
         SELECT n, a FROM fib
     ";
-    let expr = sql_to_relexpr(sql)
-        .expect("fibonacci CTE should parse");
+    let expr = sql_to_relexpr(sql).expect("fibonacci CTE should parse");
 
-    let RelExpr::RecursiveCTE { name, .. } = &expr
-    else {
+    let RelExpr::RecursiveCTE { name, .. } = &expr else {
         panic!("expected RecursiveCTE");
     };
 
@@ -236,8 +224,7 @@ fn employee_hierarchy_cte_parses() {
         )
         SELECT emp_id, level FROM org_chart
     ";
-    let expr = sql_to_relexpr(sql)
-        .expect("hierarchy CTE should parse");
+    let expr = sql_to_relexpr(sql).expect("hierarchy CTE should parse");
 
     let RelExpr::RecursiveCTE {
         name,

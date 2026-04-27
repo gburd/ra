@@ -62,17 +62,24 @@ impl GrammarExtension for PostgreSQLExtension {
             // RETURNING clause
             "RETURNING",
             // UPSERT (INSERT...ON CONFLICT)
-            "ON CONFLICT", "DO NOTHING", "DO UPDATE",
+            "ON CONFLICT",
+            "DO NOTHING",
+            "DO UPDATE",
             // Array operations
             "ARRAY",
             // Window frame exclusion
-            "EXCLUDE", "CURRENT ROW", "GROUP", "TIES",
+            "EXCLUDE",
+            "CURRENT ROW",
+            "GROUP",
+            "TIES",
             // LATERAL joins
             "LATERAL",
             // TABLESAMPLE
-            "TABLESAMPLE", "BERNOULLI", "SYSTEM",
+            "TABLESAMPLE",
+            "BERNOULLI",
+            "SYSTEM",
             // String constants
-            "E",  // Escape strings: E'foo\nbar'
+            "E", // Escape strings: E'foo\nbar'
             // Type modifiers
             "COLLATE",
             // DISTINCT ON
@@ -80,40 +87,44 @@ impl GrammarExtension for PostgreSQLExtension {
             // SELECT INTO
             "INTO",
             // VACUUM, ANALYZE
-            "VACUUM", "ANALYZE",
+            "VACUUM",
+            "ANALYZE",
             // LISTEN/NOTIFY
-            "LISTEN", "NOTIFY", "UNLISTEN",
+            "LISTEN",
+            "NOTIFY",
+            "UNLISTEN",
             // COPY
-            "COPY", "STDIN", "STDOUT",
+            "COPY",
+            "STDIN",
+            "STDOUT",
         ]
     }
 
     fn operators(&self) -> Vec<&str> {
         vec![
             // Type casting
-            "::",
-            // JSONB operators
-            "@>",   // Contains (JSONB, array, range)
-            "<@",   // Contained by
-            "@?",   // Path exists (JSON path query)
-            "@@",   // JSON path predicate
-            "?",    // Key exists
-            "?|",   // Any key exists
-            "?&",   // All keys exist
-            "#>",   // Get JSON at path (returns JSON)
-            "#>>",  // Get JSON at path (returns text)
-            "->",   // Get JSON field (returns JSON)
-            "->>",  // Get JSON field (returns text)
-            "#-",   // Delete path
+            "::", // JSONB operators
+            "@>",  // Contains (JSONB, array, range)
+            "<@",  // Contained by
+            "@?",  // Path exists (JSON path query)
+            "@@",  // JSON path predicate
+            "?",   // Key exists
+            "?|",  // Any key exists
+            "?&",  // All keys exist
+            "#>",  // Get JSON at path (returns JSON)
+            "#>>", // Get JSON at path (returns text)
+            "->",  // Get JSON field (returns JSON)
+            "->>", // Get JSON field (returns text)
+            "#-",  // Delete path
             // Array operators
-            "||",   // Array concatenation (also string concat)
-            "&&",   // Array overlap
+            "||", // Array concatenation (also string concat)
+            "&&", // Array overlap
             // Range operators
-            "-|-",  // Adjacent to
-            "<<",   // Strictly left of
-            ">>",   // Strictly right of
-            "&<",   // Does not extend right of
-            "&>",   // Does not extend left of
+            "-|-", // Adjacent to
+            "<<",  // Strictly left of
+            ">>",  // Strictly right of
+            "&<",  // Does not extend right of
+            "&>",  // Does not extend left of
             // Pattern matching
             "~",    // Matches regex (case sensitive)
             "~*",   // Matches regex (case insensitive)
@@ -124,47 +135,103 @@ impl GrammarExtension for PostgreSQLExtension {
             "!~~",  // NOT LIKE
             "!~~*", // NOT ILIKE
             // Text search
-            "@@@",  // Text search match
+            "@@@", // Text search match
             // Geometric operators (subset)
-            "@-@",  // Length
-            "@@",   // Center point
-            "<->",  // Distance
+            "@-@", // Length
+            "@@",  // Center point
+            "<->", // Distance
             // Network operators
-            "<<",   // Is subnet of
-            "<<=",  // Is subnet of or equals
-            ">>",   // Contains subnet
-            ">>=",  // Contains subnet or equals
-            "&&",   // Overlaps (network)
+            "<<",  // Is subnet of
+            "<<=", // Is subnet of or equals
+            ">>",  // Contains subnet
+            ">>=", // Contains subnet or equals
+            "&&",  // Overlaps (network)
         ]
     }
 
     fn functions(&self) -> Vec<&str> {
         vec![
             // Array functions
-            "array_length", "array_position", "array_positions", "array_append",
-            "array_prepend", "array_cat", "array_agg", "unnest",
+            "array_length",
+            "array_position",
+            "array_positions",
+            "array_append",
+            "array_prepend",
+            "array_cat",
+            "array_agg",
+            "unnest",
             // JSONB functions
-            "jsonb_build_object", "jsonb_build_array", "jsonb_object", "jsonb_agg",
-            "jsonb_object_agg", "jsonb_set", "jsonb_insert", "jsonb_strip_nulls",
-            "jsonb_pretty", "jsonb_typeof", "jsonb_path_exists", "jsonb_path_query",
+            "jsonb_build_object",
+            "jsonb_build_array",
+            "jsonb_object",
+            "jsonb_agg",
+            "jsonb_object_agg",
+            "jsonb_set",
+            "jsonb_insert",
+            "jsonb_strip_nulls",
+            "jsonb_pretty",
+            "jsonb_typeof",
+            "jsonb_path_exists",
+            "jsonb_path_query",
             // String functions
-            "concat_ws", "format", "regexp_replace", "regexp_split_to_array",
-            "regexp_split_to_table", "regexp_match", "regexp_matches",
-            "string_agg", "string_to_array", "array_to_string",
+            "concat_ws",
+            "format",
+            "regexp_replace",
+            "regexp_split_to_array",
+            "regexp_split_to_table",
+            "regexp_match",
+            "regexp_matches",
+            "string_agg",
+            "string_to_array",
+            "array_to_string",
             // Date/time functions
-            "date_trunc", "date_part", "age", "justify_days", "justify_hours",
-            "justify_interval", "generate_series", "to_timestamp", "to_char",
+            "date_trunc",
+            "date_part",
+            "age",
+            "justify_days",
+            "justify_hours",
+            "justify_interval",
+            "generate_series",
+            "to_timestamp",
+            "to_char",
             // Range functions
-            "numrange", "int4range", "int8range", "daterange", "tsrange", "tstzrange",
-            "lower", "upper", "isempty", "lower_inc", "upper_inc", "lower_inf", "upper_inf",
+            "numrange",
+            "int4range",
+            "int8range",
+            "daterange",
+            "tsrange",
+            "tstzrange",
+            "lower",
+            "upper",
+            "isempty",
+            "lower_inc",
+            "upper_inc",
+            "lower_inf",
+            "upper_inf",
             // Window functions (PostgreSQL-specific)
-            "cume_dist", "dense_rank", "ntile", "percent_rank", "rank", "row_number",
+            "cume_dist",
+            "dense_rank",
+            "ntile",
+            "percent_rank",
+            "rank",
+            "row_number",
             // Aggregate functions
-            "bool_and", "bool_or", "every", "mode", "percentile_cont", "percentile_disc",
+            "bool_and",
+            "bool_or",
+            "every",
+            "mode",
+            "percentile_cont",
+            "percentile_disc",
             // System functions
-            "pg_sleep", "pg_advisory_lock", "pg_advisory_unlock",
-            "pg_column_size", "pg_database_size", "pg_table_size",
-            "current_database", "current_schema", "current_schemas",
+            "pg_sleep",
+            "pg_advisory_lock",
+            "pg_advisory_unlock",
+            "pg_column_size",
+            "pg_database_size",
+            "pg_table_size",
+            "current_database",
+            "current_schema",
+            "current_schemas",
             "version",
         ]
     }

@@ -90,12 +90,12 @@ impl GrammarExtension for SQL2023Extension {
     fn operators(&self) -> Vec<&str> {
         vec![
             // Pattern operators (represented as strings in SQL)
-            "->",  // Directed edge (right)
-            "<-",  // Directed edge (left)
-            "-",   // Undirected edge
-            "~>",  // Directed path (right)
-            "<~",  // Directed path (left)
-            "~",   // Undirected path
+            "->", // Directed edge (right)
+            "<-", // Directed edge (left)
+            "-",  // Undirected edge
+            "~>", // Directed path (right)
+            "<~", // Directed path (left)
+            "~",  // Undirected path
         ]
     }
 
@@ -154,9 +154,9 @@ mod tests {
         let ext = SQL2023Extension;
         let operators = ext.operators();
 
-        assert!(operators.contains(&"->"));  // Directed edge
-        assert!(operators.contains(&"<-"));  // Reverse directed edge
-        assert!(operators.contains(&"-"));   // Undirected edge
+        assert!(operators.contains(&"->")); // Directed edge
+        assert!(operators.contains(&"<-")); // Reverse directed edge
+        assert!(operators.contains(&"-")); // Undirected edge
     }
 
     #[test]

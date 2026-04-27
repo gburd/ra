@@ -15,8 +15,7 @@ use ra_parser::sql_to_relexpr;
 #[test]
 fn parse_unnest_array_literal() {
     let sql = "SELECT * FROM UNNEST(ARRAY[1, 2, 3]) AS t(val)";
-    let expr = sql_to_relexpr(sql)
-        .expect("UNNEST with array literal should parse");
+    let expr = sql_to_relexpr(sql).expect("UNNEST with array literal should parse");
 
     // The top level should be a Project wrapping an Unnest
     fn find_unnest(e: &RelExpr) -> bool {
@@ -37,18 +36,14 @@ fn parse_unnest_with_ordinality() {
     let sql = "\
         SELECT * FROM UNNEST(ARRAY[10, 20, 30]) \
         WITH ORDINALITY AS t(val, ord)";
-    let expr = sql_to_relexpr(sql)
-        .expect("UNNEST WITH ORDINALITY should parse");
+    let expr = sql_to_relexpr(sql).expect("UNNEST WITH ORDINALITY should parse");
 
     fn find_unnest_ordinality(e: &RelExpr) -> bool {
         match e {
             RelExpr::Unnest {
                 with_ordinality, ..
             } => *with_ordinality,
-            _ => e
-                .children()
-                .iter()
-                .any(|c| find_unnest_ordinality(c)),
+            _ => e.children().iter().any(|c| find_unnest_ordinality(c)),
         }
     }
     assert!(
@@ -74,20 +69,13 @@ fn parse_unnest_column_ref() {
 
 #[test]
 fn parse_generate_series_basic() {
-    let sql =
-        "SELECT * FROM generate_series(1, 10) AS gs(val)";
-    let expr = sql_to_relexpr(sql)
-        .expect("generate_series should parse");
+    let sql = "SELECT * FROM generate_series(1, 10) AS gs(val)";
+    let expr = sql_to_relexpr(sql).expect("generate_series should parse");
 
     fn find_table_func(e: &RelExpr) -> Option<String> {
         match e {
-            RelExpr::TableFunction { name, .. } => {
-                Some(name.clone())
-            }
-            _ => e
-                .children()
-                .iter()
-                .find_map(|c| find_table_func(c)),
+            RelExpr::TableFunction { name, .. } => Some(name.clone()),
+            _ => e.children().iter().find_map(|c| find_table_func(c)),
         }
     }
 
@@ -100,28 +88,17 @@ fn parse_generate_series_basic() {
 
 #[test]
 fn parse_generate_series_with_step() {
-    let sql =
-        "SELECT * FROM generate_series(1, 100, 10) AS gs";
-    let expr = sql_to_relexpr(sql)
-        .expect("generate_series with step should parse");
+    let sql = "SELECT * FROM generate_series(1, 100, 10) AS gs";
+    let expr = sql_to_relexpr(sql).expect("generate_series with step should parse");
 
     fn count_args(e: &RelExpr) -> Option<usize> {
         match e {
-            RelExpr::TableFunction { args, .. } => {
-                Some(args.len())
-            }
-            _ => e
-                .children()
-                .iter()
-                .find_map(|c| count_args(c)),
+            RelExpr::TableFunction { args, .. } => Some(args.len()),
+            _ => e.children().iter().find_map(|c| count_args(c)),
         }
     }
 
-    assert_eq!(
-        count_args(&expr),
-        Some(3),
-        "should have 3 arguments"
-    );
+    assert_eq!(count_args(&expr), Some(3), "should have 3 arguments");
 }
 
 // ── Array expression parsing ──────────────────────────────
@@ -129,51 +106,33 @@ fn parse_generate_series_with_step() {
 #[test]
 fn parse_array_literal_in_select() {
     let sql = "SELECT ARRAY[1, 2, 3]";
-    let expr = sql_to_relexpr(sql)
-        .expect("ARRAY literal in SELECT should parse");
+    let expr = sql_to_relexpr(sql).expect("ARRAY literal in SELECT should parse");
 
     // Dig into the projection to find the Array expr
     fn find_array(e: &RelExpr) -> bool {
         match e {
             RelExpr::Project { columns, .. } => {
-                columns.iter().any(|c| {
-                    matches!(&c.expr, Expr::Array(_))
-                })
+                columns.iter().any(|c| matches!(&c.expr, Expr::Array(_)))
             }
-            _ => e
-                .children()
-                .iter()
-                .any(|c| find_array(c)),
+            _ => e.children().iter().any(|c| find_array(c)),
         }
     }
 
-    assert!(
-        find_array(&expr),
-        "should contain an Array expression"
-    );
+    assert!(find_array(&expr), "should contain an Array expression");
 }
 
 #[test]
 #[ignore] // Array subscript not yet supported in expression converter
 fn parse_array_subscript() {
     let sql = "SELECT arr[2] FROM t";
-    let expr = sql_to_relexpr(sql)
-        .expect("array subscript should parse");
+    let expr = sql_to_relexpr(sql).expect("array subscript should parse");
 
     fn find_array_index(e: &RelExpr) -> bool {
         match e {
-            RelExpr::Project { columns, .. } => {
-                columns.iter().any(|c| {
-                    matches!(
-                        &c.expr,
-                        Expr::ArrayIndex(_, _)
-                    )
-                })
-            }
-            _ => e
-                .children()
+            RelExpr::Project { columns, .. } => columns
                 .iter()
-                .any(|c| find_array_index(c)),
+                .any(|c| matches!(&c.expr, Expr::ArrayIndex(_, _))),
+            _ => e.children().iter().any(|c| find_array_index(c)),
         }
     }
 
@@ -194,18 +153,13 @@ fn parse_empty_array() {
     if let Ok(expr) = result {
         fn find_empty_array(e: &RelExpr) -> bool {
             match e {
-                RelExpr::Project { columns, .. } => {
-                    columns.iter().any(|c| {
-                        matches!(
-                            &c.expr,
-                            Expr::Array(elems) if elems.is_empty()
-                        )
-                    })
-                }
-                _ => e
-                    .children()
-                    .iter()
-                    .any(|c| find_empty_array(c)),
+                RelExpr::Project { columns, .. } => columns.iter().any(|c| {
+                    matches!(
+                        &c.expr,
+                        Expr::Array(elems) if elems.is_empty()
+                    )
+                }),
+                _ => e.children().iter().any(|c| find_empty_array(c)),
             }
         }
         assert!(find_empty_array(&expr));
@@ -217,10 +171,7 @@ fn parse_empty_array() {
 fn parse_nested_array() {
     let sql = "SELECT ARRAY[ARRAY[1, 2], ARRAY[3, 4]]";
     let result = sql_to_relexpr(sql);
-    assert!(
-        result.is_ok(),
-        "nested arrays should parse: {result:?}"
-    );
+    assert!(result.is_ok(), "nested arrays should parse: {result:?}");
 }
 
 // ── Array in WHERE clause ─────────────────────────────────
@@ -229,18 +180,12 @@ fn parse_nested_array() {
 #[ignore] // Array subscript not yet supported in expression converter
 fn parse_array_subscript_in_where() {
     let sql = "SELECT * FROM t WHERE arr[1] = 42";
-    let expr = sql_to_relexpr(sql)
-        .expect("array subscript in WHERE should parse");
+    let expr = sql_to_relexpr(sql).expect("array subscript in WHERE should parse");
 
     fn find_filter_with_array_index(e: &RelExpr) -> bool {
         match e {
-            RelExpr::Filter { predicate, .. } => {
-                contains_array_index(predicate)
-            }
-            _ => e
-                .children()
-                .iter()
-                .any(|c| find_filter_with_array_index(c)),
+            RelExpr::Filter { predicate, .. } => contains_array_index(predicate),
+            _ => e.children().iter().any(|c| find_filter_with_array_index(c)),
         }
     }
 
@@ -248,8 +193,7 @@ fn parse_array_subscript_in_where() {
         match e {
             Expr::ArrayIndex(_, _) => true,
             Expr::BinOp { left, right, .. } => {
-                contains_array_index(left)
-                    || contains_array_index(right)
+                contains_array_index(left) || contains_array_index(right)
             }
             _ => false,
         }
@@ -280,10 +224,7 @@ fn parse_unnest_in_cross_join() {
 
 #[test]
 fn unnest_builder_sets_defaults() {
-    let expr = RelExpr::unnest(
-        Expr::Const(Const::Int(1)),
-        None,
-    );
+    let expr = RelExpr::unnest(Expr::Const(Const::Int(1)), None);
 
     if let RelExpr::Unnest {
         alias,

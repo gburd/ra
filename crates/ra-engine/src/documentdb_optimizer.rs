@@ -29,6 +29,7 @@ use egg::{rewrite, Id, Rewrite, Subst, Var};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+use crate::parse_var;
 
 // ------------------------------------------------------------------
 // BSON operator types recognized from documentdb
@@ -557,7 +558,7 @@ pub fn documentdb_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("docdb-filter-through-join-left";
             "(filter ?pred (join inner ?cond ?left ?right))" =>
             "(join inner ?cond (filter ?pred ?left) ?right)"
-            if is_bson_operator_filter(var("?pred"))
+            if is_bson_operator_filter(parse_var("?pred"))
         ),
         // Rule 2: Split conjunctive BSON filters for independent
         // GIN scans. When two BSON predicates are ANDed, splitting
@@ -565,7 +566,7 @@ pub fn documentdb_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("docdb-split-conjunctive-bson-filter";
             "(filter (and ?p1 ?p2) ?input)" =>
             "(filter ?p1 (filter ?p2 ?input))"
-            if is_bson_operator_filter(var("?p1"))
+            if is_bson_operator_filter(parse_var("?p1"))
         ),
         // Rule 3: Merge adjacent BSON filters for compound GIN
         // scan. The inverse of rule 2: merging allows a compound
@@ -573,7 +574,7 @@ pub fn documentdb_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("docdb-merge-bson-filters";
             "(filter ?p1 (filter ?p2 ?input))" =>
             "(filter (and ?p1 ?p2) ?input)"
-            if is_bson_operator_filter(var("?p1"))
+            if is_bson_operator_filter(parse_var("?p1"))
         ),
         // Rule 4: Push BSON filter below projection. DocumentDB
         // often wraps results in a projection; pushing the filter
@@ -581,7 +582,7 @@ pub fn documentdb_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("docdb-filter-below-project";
             "(filter ?pred (project ?cols ?input))" =>
             "(project ?cols (filter ?pred ?input))"
-            if is_bson_operator_filter(var("?pred"))
+            if is_bson_operator_filter(parse_var("?pred"))
         ),
         // Rule 5: Push $match predicates below aggregate.
         // In aggregation pipelines, $match after $group can
@@ -589,13 +590,9 @@ pub fn documentdb_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("docdb-match-below-aggregate";
             "(filter ?pred (aggregate ?groups ?aggs ?input))" =>
             "(aggregate ?groups ?aggs (filter ?pred ?input))"
-            if is_bson_operator_filter(var("?pred"))
+            if is_bson_operator_filter(parse_var("?pred"))
         ),
     ]
-}
-
-fn var(s: &str) -> Var {
-    s.parse().unwrap_or_else(|_| panic!("bad var: {s}"))
 }
 
 /// Condition: check if a predicate is a BSON operator filter.

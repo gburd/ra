@@ -21,6 +21,7 @@ use egg::{rewrite, Id, Rewrite, Subst, Var};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+use crate::parse_var;
 
 // ------------------------------------------------------------------
 // XPath axis types
@@ -1126,12 +1127,12 @@ pub fn xml_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("xml-filter-through-join-left";
             "(filter ?pred (join inner ?cond ?left ?right))" =>
             "(join inner ?cond (filter ?pred ?left) ?right)"
-            if is_xml_function_filter(var("?pred"))
+            if is_xml_function_filter(parse_var("?pred"))
         ),
         rewrite!("xml-filter-through-join-right";
             "(filter ?pred (join inner ?cond ?left ?right))" =>
             "(join inner ?cond ?left (filter ?pred ?right))"
-            if is_xml_function_filter(var("?pred"))
+            if is_xml_function_filter(parse_var("?pred"))
         ),
         // Rule 2: Push XML filter below projection.
         //
@@ -1140,7 +1141,7 @@ pub fn xml_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("xml-filter-below-project";
             "(filter ?pred (project ?cols ?input))" =>
             "(project ?cols (filter ?pred ?input))"
-            if is_xml_function_filter(var("?pred"))
+            if is_xml_function_filter(parse_var("?pred"))
         ),
         // Rule 3: Split conjunctive XML filters.
         //
@@ -1150,7 +1151,7 @@ pub fn xml_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("xml-split-conjunctive-filter";
             "(filter (and ?p1 ?p2) ?input)" =>
             "(filter ?p1 (filter ?p2 ?input))"
-            if is_xml_function_filter(var("?p1"))
+            if is_xml_function_filter(parse_var("?p1"))
         ),
         // Rule 4: Merge adjacent XML filters.
         //
@@ -1159,8 +1160,8 @@ pub fn xml_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("xml-merge-adjacent-filters";
             "(filter ?p1 (filter ?p2 ?input))" =>
             "(filter (and ?p1 ?p2) ?input)"
-            if is_xml_function_filter(var("?p1"))
-            if is_xml_function_filter(var("?p2"))
+            if is_xml_function_filter(parse_var("?p1"))
+            if is_xml_function_filter(parse_var("?p2"))
         ),
         // Rule 5: XML filter below aggregate.
         //
@@ -1169,7 +1170,7 @@ pub fn xml_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("xml-filter-below-aggregate";
             "(filter ?pred (aggregate ?groups ?aggs ?input))" =>
             "(aggregate ?groups ?aggs (filter ?pred ?input))"
-            if is_xml_function_filter(var("?pred"))
+            if is_xml_function_filter(parse_var("?pred"))
         ),
         // Rule 6: XML filter through union branches.
         //
@@ -1177,7 +1178,7 @@ pub fn xml_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("xml-filter-through-union";
             "(filter ?pred (union ?all ?left ?right))" =>
             "(union ?all (filter ?pred ?left) (filter ?pred ?right))"
-            if is_xml_function_filter(var("?pred"))
+            if is_xml_function_filter(parse_var("?pred"))
         ),
         // Rule 7: Push XML filter through left outer join (left side).
         //
@@ -1186,13 +1187,9 @@ pub fn xml_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("xml-filter-through-left-join";
             "(filter ?pred (join left-outer ?cond ?left ?right))" =>
             "(join left-outer ?cond (filter ?pred ?left) ?right)"
-            if is_xml_function_filter(var("?pred"))
+            if is_xml_function_filter(parse_var("?pred"))
         ),
     ]
-}
-
-fn var(s: &str) -> Var {
-    s.parse().unwrap_or_else(|_| panic!("bad var: {s}"))
 }
 
 /// Condition: check if a predicate involves an XML function.

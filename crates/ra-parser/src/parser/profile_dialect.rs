@@ -29,7 +29,12 @@ impl ProfileDialect {
 impl Dialect for ProfileDialect {
     fn is_delimited_identifier_start(&self, ch: char) -> bool {
         // Support backticks for MySQL compatibility if in profile
-        if self.profile.syntax.get("backticks").map_or(false, |v| v == "true") {
+        if self
+            .profile
+            .syntax
+            .get("backticks")
+            .map_or(false, |v| v == "true")
+        {
             ch == '`' || self.base_dialect.is_delimited_identifier_start(ch)
         } else {
             self.base_dialect.is_delimited_identifier_start(ch)
@@ -69,10 +74,16 @@ impl Dialect for ProfileDialect {
 
     fn supports_connect_by(&self) -> bool {
         // Enable for Oracle dialect
-        self.profile.vendor.as_ref().map_or(false, |v| v == "oracle")
+        self.profile
+            .vendor
+            .as_ref()
+            .map_or(false, |v| v == "oracle")
     }
 
-    fn parse_prefix(&self, parser: &mut sqlparser::parser::Parser) -> Option<Result<sqlparser::ast::Expr, sqlparser::parser::ParserError>> {
+    fn parse_prefix(
+        &self,
+        parser: &mut sqlparser::parser::Parser,
+    ) -> Option<Result<sqlparser::ast::Expr, sqlparser::parser::ParserError>> {
         // Check for custom operators from profile
         let token = parser.peek_token();
 
@@ -89,11 +100,19 @@ impl Dialect for ProfileDialect {
         self.base_dialect.parse_prefix(parser)
     }
 
-    fn parse_infix(&self, parser: &mut sqlparser::parser::Parser, expr: &sqlparser::ast::Expr, precedence: u8) -> Option<Result<sqlparser::ast::Expr, sqlparser::parser::ParserError>> {
+    fn parse_infix(
+        &self,
+        parser: &mut sqlparser::parser::Parser,
+        expr: &sqlparser::ast::Expr,
+        precedence: u8,
+    ) -> Option<Result<sqlparser::ast::Expr, sqlparser::parser::ParserError>> {
         self.base_dialect.parse_infix(parser, expr, precedence)
     }
 
-    fn get_next_precedence(&self, parser: &sqlparser::parser::Parser) -> Option<Result<u8, sqlparser::parser::ParserError>> {
+    fn get_next_precedence(
+        &self,
+        parser: &sqlparser::parser::Parser,
+    ) -> Option<Result<u8, sqlparser::parser::ParserError>> {
         // Check if next token is a custom operator from profile
         let token = parser.peek_token();
         let token_str = token.to_string();
@@ -102,15 +121,15 @@ impl Dialect for ProfileDialect {
         if self.profile.operators.iter().any(|op| *op == token_str) {
             // Vector distance operators (<->, <#>, <=>) - same precedence as comparison
             if token_str == "<->" || token_str == "<#>" || token_str == "<=>" {
-                return Some(Ok(20));  // Comparison precedence
+                return Some(Ok(20)); // Comparison precedence
             }
             // JSONB/Array operators (@>, <@, etc.)
             if token_str.starts_with('@') || token_str.starts_with('<') {
-                return Some(Ok(20));  // Comparison precedence
+                return Some(Ok(20)); // Comparison precedence
             }
             // Text search operator (@@)
             if token_str == "@@" {
-                return Some(Ok(20));  // Comparison precedence
+                return Some(Ok(20)); // Comparison precedence
             }
         }
 
@@ -131,7 +150,9 @@ mod tests {
     #[test]
     fn test_backtick_support() {
         let mut profile = ParserProfile::universal();
-        profile.syntax.insert("backticks".to_string(), "true".to_string());
+        profile
+            .syntax
+            .insert("backticks".to_string(), "true".to_string());
 
         let dialect = ProfileDialect::new(profile);
         assert!(dialect.is_delimited_identifier_start('`'));

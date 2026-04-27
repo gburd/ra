@@ -331,7 +331,9 @@ fn read_phrase(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<Strin
     Ok(phrase)
 }
 
-fn read_group(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<Vec<BooleanToken>, String> {
+fn read_group(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+) -> Result<Vec<BooleanToken>, String> {
     let mut group_str = String::new();
     let mut depth = 1;
 
@@ -387,7 +389,10 @@ mod tests {
         let tokens = parse_boolean_query("+database +optimization").unwrap();
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], BooleanToken::MustHave("database".to_string()));
-        assert_eq!(tokens[1], BooleanToken::MustHave("optimization".to_string()));
+        assert_eq!(
+            tokens[1],
+            BooleanToken::MustHave("optimization".to_string())
+        );
     }
 
     #[test]
@@ -395,7 +400,10 @@ mod tests {
         let tokens = parse_boolean_query("-slow -deprecated").unwrap();
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], BooleanToken::MustNotHave("slow".to_string()));
-        assert_eq!(tokens[1], BooleanToken::MustNotHave("deprecated".to_string()));
+        assert_eq!(
+            tokens[1],
+            BooleanToken::MustNotHave("deprecated".to_string())
+        );
     }
 
     #[test]
@@ -418,7 +426,10 @@ mod tests {
     fn test_parse_boolean_phrase() {
         let tokens = parse_boolean_query(r#""high performance""#).unwrap();
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0], BooleanToken::Phrase("high performance".to_string()));
+        assert_eq!(
+            tokens[0],
+            BooleanToken::Phrase("high performance".to_string())
+        );
     }
 
     #[test]
@@ -426,14 +437,20 @@ mod tests {
         let tokens = parse_boolean_query(r#"+database "query optimization""#).unwrap();
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], BooleanToken::MustHave("database".to_string()));
-        assert_eq!(tokens[1], BooleanToken::Phrase("query optimization".to_string()));
+        assert_eq!(
+            tokens[1],
+            BooleanToken::Phrase("query optimization".to_string())
+        );
     }
 
     #[test]
     fn test_parse_boolean_rank_modifiers() {
         let tokens = parse_boolean_query(">important <less ~negate").unwrap();
         assert_eq!(tokens.len(), 3);
-        assert_eq!(tokens[0], BooleanToken::IncreaseRank("important".to_string()));
+        assert_eq!(
+            tokens[0],
+            BooleanToken::IncreaseRank("important".to_string())
+        );
         assert_eq!(tokens[1], BooleanToken::DecreaseRank("less".to_string()));
         assert_eq!(tokens[2], BooleanToken::Negate("negate".to_string()));
     }
@@ -501,10 +518,14 @@ mod tests {
 
     #[test]
     fn test_parse_boolean_complex_query() {
-        let tokens = parse_boolean_query(r#"+database +"query optimization" -slow optim* >fast"#).unwrap();
+        let tokens =
+            parse_boolean_query(r#"+database +"query optimization" -slow optim* >fast"#).unwrap();
         assert_eq!(tokens.len(), 5);
         assert_eq!(tokens[0], BooleanToken::MustHave("database".to_string()));
-        assert_eq!(tokens[1], BooleanToken::Phrase("query optimization".to_string()));
+        assert_eq!(
+            tokens[1],
+            BooleanToken::Phrase("query optimization".to_string())
+        );
         assert_eq!(tokens[2], BooleanToken::MustNotHave("slow".to_string()));
         assert_eq!(tokens[3], BooleanToken::Wildcard("optim*".to_string()));
         assert_eq!(tokens[4], BooleanToken::IncreaseRank("fast".to_string()));
@@ -542,7 +563,10 @@ mod tests {
     fn test_parse_boolean_phrase_with_special_chars() {
         let tokens = parse_boolean_query(r#""query-optimization-2024""#).unwrap();
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0], BooleanToken::Phrase("query-optimization-2024".to_string()));
+        assert_eq!(
+            tokens[0],
+            BooleanToken::Phrase("query-optimization-2024".to_string())
+        );
     }
 
     #[test]
@@ -557,8 +581,14 @@ mod tests {
     fn test_parse_boolean_operators_with_phrases() {
         let tokens = parse_boolean_query(r#"+"required phrase" -"excluded phrase""#).unwrap();
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0], BooleanToken::Phrase("required phrase".to_string()));
-        assert_eq!(tokens[1], BooleanToken::Phrase("excluded phrase".to_string()));
+        assert_eq!(
+            tokens[0],
+            BooleanToken::Phrase("required phrase".to_string())
+        );
+        assert_eq!(
+            tokens[1],
+            BooleanToken::Phrase("excluded phrase".to_string())
+        );
     }
 
     #[test]
@@ -566,7 +596,10 @@ mod tests {
         let tokens = parse_boolean_query(">import* <trivial*").unwrap();
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], BooleanToken::IncreaseRank("import*".to_string()));
-        assert_eq!(tokens[1], BooleanToken::DecreaseRank("trivial*".to_string()));
+        assert_eq!(
+            tokens[1],
+            BooleanToken::DecreaseRank("trivial*".to_string())
+        );
     }
 
     #[test]
@@ -592,12 +625,17 @@ mod tests {
 
     #[test]
     fn test_parse_boolean_all_operators() {
-        let tokens = parse_boolean_query("+must -exclude >rank_up <rank_down ~negate optional wild*").unwrap();
+        let tokens =
+            parse_boolean_query("+must -exclude >rank_up <rank_down ~negate optional wild*")
+                .unwrap();
         assert_eq!(tokens.len(), 7);
         assert_eq!(tokens[0], BooleanToken::MustHave("must".to_string()));
         assert_eq!(tokens[1], BooleanToken::MustNotHave("exclude".to_string()));
         assert_eq!(tokens[2], BooleanToken::IncreaseRank("rank_up".to_string()));
-        assert_eq!(tokens[3], BooleanToken::DecreaseRank("rank_down".to_string()));
+        assert_eq!(
+            tokens[3],
+            BooleanToken::DecreaseRank("rank_down".to_string())
+        );
         assert_eq!(tokens[4], BooleanToken::Negate("negate".to_string()));
         assert_eq!(tokens[5], BooleanToken::Optional("optional".to_string()));
         assert_eq!(tokens[6], BooleanToken::Wildcard("wild*".to_string()));
@@ -607,7 +645,10 @@ mod tests {
     fn test_parse_boolean_unicode_terms() {
         let tokens = parse_boolean_query("+データベース -遅い").unwrap();
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0], BooleanToken::MustHave("データベース".to_string()));
+        assert_eq!(
+            tokens[0],
+            BooleanToken::MustHave("データベース".to_string())
+        );
         assert_eq!(tokens[1], BooleanToken::MustNotHave("遅い".to_string()));
     }
 
@@ -625,7 +666,10 @@ mod tests {
         let tokens = parse_boolean_query("+full-text -real-time").unwrap();
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], BooleanToken::MustHave("full-text".to_string()));
-        assert_eq!(tokens[1], BooleanToken::MustNotHave("real-time".to_string()));
+        assert_eq!(
+            tokens[1],
+            BooleanToken::MustNotHave("real-time".to_string())
+        );
     }
 
     #[test]

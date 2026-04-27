@@ -34,7 +34,7 @@ struct ProfileMetadata {
     #[serde(default)]
     inherits_from: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)]  // Metadata field for documentation purposes
+    #[allow(dead_code)] // Metadata field for documentation purposes
     description: Option<String>,
 }
 
@@ -118,16 +118,22 @@ impl ProfileLoader {
         let toml: ProfileToml = toml::from_str(&contents)?;
 
         // Extract operators and functions from TOML
-        let operators = toml.operators.values()
+        let operators = toml
+            .operators
+            .values()
             .flat_map(|ops| ops.iter().cloned())
             .collect();
 
-        let functions = toml.functions.values()
+        let functions = toml
+            .functions
+            .values()
             .flat_map(|funcs| funcs.iter().cloned())
             .collect();
 
         // Convert syntax HashMap<String, toml::Value> to HashMap<String, String>
-        let syntax = toml.syntax.into_iter()
+        let syntax = toml
+            .syntax
+            .into_iter()
             .map(|(k, v)| (k, v.to_string()))
             .collect();
 

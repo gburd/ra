@@ -61,13 +61,13 @@ impl GrammarExtension for DocumentDBExtension {
     fn operators(&self) -> Vec<&str> {
         vec![
             // BSON comparison operators
-            "@=",   // BSON exact match (KEY OPERATOR - fixes the issue!)
-            "@>",   // BSON contains
-            "@<",   // BSON contained by
-            "@>=",  // BSON contains or equals
-            "@<=",  // BSON contained by or equals
-            "@?",   // BSON path exists
-            "@!",   // BSON path does not exist
+            "@=",  // BSON exact match (KEY OPERATOR - fixes the issue!)
+            "@>",  // BSON contains
+            "@<",  // BSON contained by
+            "@>=", // BSON contains or equals
+            "@<=", // BSON contained by or equals
+            "@?",  // BSON path exists
+            "@!",  // BSON path does not exist
         ]
     }
 

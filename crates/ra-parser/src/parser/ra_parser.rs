@@ -75,8 +75,8 @@ impl RaParser {
     ///
     /// Returns `InvalidProfile` if the profile name is not found.
     pub fn with_profile(name: &str) -> Result<Self> {
-        let profile = ParserProfile::load(name)
-            .map_err(|e| ParserError::InvalidProfile(e.to_string()))?;
+        let profile =
+            ParserProfile::load(name).map_err(|e| ParserError::InvalidProfile(e.to_string()))?;
         Ok(Self { profile })
     }
 
@@ -93,8 +93,8 @@ impl RaParser {
     ///
     /// Returns a parser configured for the detected dialect with a confidence score.
     pub fn auto_detect(sql: &str) -> Result<(Self, f64)> {
-        let (profile, confidence) = ParserProfile::infer(sql)
-            .map_err(|e| ParserError::InvalidProfile(e.to_string()))?;
+        let (profile, confidence) =
+            ParserProfile::infer(sql).map_err(|e| ParserError::InvalidProfile(e.to_string()))?;
         Ok((Self { profile }, confidence))
     }
 
@@ -114,8 +114,7 @@ impl RaParser {
     pub fn parse(&self, sql: &str) -> Result<RelExpr> {
         // TODO: Implement actual parsing with profile support
         // For now, delegate to existing sql_to_relexpr
-        crate::sql_to_relexpr(sql)
-            .map_err(|e| ParserError::ParseError(e.to_string()))
+        crate::sql_to_relexpr(sql).map_err(|e| ParserError::ParseError(e.to_string()))
     }
 
     /// Parse SQL text into sqlparser AST with profile-specific grammar.
@@ -129,8 +128,7 @@ impl RaParser {
 
         // Use profile-aware dialect that supports custom operators
         let dialect = ProfileDialect::new(self.profile.clone());
-        Parser::parse_sql(&dialect, sql)
-            .map_err(|e| ParserError::ParseError(e.to_string()))
+        Parser::parse_sql(&dialect, sql).map_err(|e| ParserError::ParseError(e.to_string()))
     }
 
     /// Get the current profile being used by this parser.

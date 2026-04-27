@@ -7,8 +7,7 @@
 use ra_core::algebra::{RelExpr, SortKey};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::row_pattern::{
-    MatchMode, PatternDefine, PatternExpr, PatternMeasure,
-    Quantifier, SkipMode,
+    MatchMode, PatternDefine, PatternExpr, PatternMeasure, Quantifier, SkipMode,
 };
 use thiserror::Error;
 
@@ -42,15 +41,13 @@ pub enum MatchRecognizeError {
 ///
 /// Returns error if the pattern string has unmatched parens,
 /// empty groups, or invalid quantifiers.
-pub fn parse_pattern(
-    input: &str,
-) -> Result<PatternExpr, MatchRecognizeError> {
+pub fn parse_pattern(input: &str) -> Result<PatternExpr, MatchRecognizeError> {
     let tokens = tokenize_pattern(input)?;
     let (expr, rest) = parse_alternation(&tokens)?;
     if !rest.is_empty() {
-        return Err(MatchRecognizeError::InvalidPattern(
-            format!("unexpected tokens after pattern: {rest:?}"),
-        ));
+        return Err(MatchRecognizeError::InvalidPattern(format!(
+            "unexpected tokens after pattern: {rest:?}"
+        )));
     }
     Ok(expr)
 }
@@ -94,8 +91,7 @@ pub fn build_row_pattern(
         defines,
         measures,
         mode: mode.unwrap_or(MatchMode::OneRowPerMatch),
-        skip_mode: skip_mode
-            .unwrap_or(SkipMode::PastLastRow),
+        skip_mode: skip_mode.unwrap_or(SkipMode::PastLastRow),
     })
 }
 
@@ -107,16 +103,13 @@ pub fn build_row_pattern(
 /// # Errors
 ///
 /// Returns error if the expression syntax is not recognized.
-pub fn parse_define_condition(
-    input: &str,
-) -> Result<Expr, MatchRecognizeError> {
+pub fn parse_define_condition(input: &str) -> Result<Expr, MatchRecognizeError> {
     let input = input.trim();
 
     // Handle AND-joined conditions
     if let Some(and_pos) = find_top_level_and(input) {
         let left = parse_define_condition(&input[..and_pos])?;
-        let right =
-            parse_define_condition(&input[and_pos + 3..])?;
+        let right = parse_define_condition(&input[and_pos + 3..])?;
         return Ok(Expr::BinOp {
             op: BinOp::And,
             left: Box::new(left),
@@ -127,8 +120,7 @@ pub fn parse_define_condition(
     // Handle OR-joined conditions
     if let Some(or_pos) = find_top_level_or(input) {
         let left = parse_define_condition(&input[..or_pos])?;
-        let right =
-            parse_define_condition(&input[or_pos + 2..])?;
+        let right = parse_define_condition(&input[or_pos + 2..])?;
         return Ok(Expr::BinOp {
             op: BinOp::Or,
             left: Box::new(left),
@@ -146,11 +138,8 @@ pub fn parse_define_condition(
         ("=", BinOp::Eq),
     ] {
         if let Some(pos) = find_comparison_op(input, op_str) {
-            let left =
-                parse_simple_expr(&input[..pos].trim())?;
-            let right = parse_simple_expr(
-                &input[pos + op_str.len()..].trim(),
-            )?;
+            let left = parse_simple_expr(&input[..pos].trim())?;
+            let right = parse_simple_expr(&input[pos + op_str.len()..].trim())?;
             return Ok(Expr::BinOp {
                 op: *op,
                 left: Box::new(left),
@@ -168,9 +157,7 @@ pub fn parse_define_condition(
 /// # Errors
 ///
 /// Returns error if expression syntax is not recognized.
-pub fn parse_measure_expr(
-    input: &str,
-) -> Result<Expr, MatchRecognizeError> {
+pub fn parse_measure_expr(input: &str) -> Result<Expr, MatchRecognizeError> {
     parse_simple_expr(input.trim())
 }
 
@@ -191,9 +178,7 @@ enum PatternToken {
     Number(usize),
 }
 
-fn tokenize_pattern(
-    input: &str,
-) -> Result<Vec<PatternToken>, MatchRecognizeError> {
+fn tokenize_pattern(input: &str) -> Result<Vec<PatternToken>, MatchRecognizeError> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
 
@@ -249,9 +234,7 @@ fn tokenize_pattern(
                     }
                 }
                 let n: usize = num.parse().map_err(|_| {
-                    MatchRecognizeError::InvalidPattern(
-                        format!("invalid number: {num}"),
-                    )
+                    MatchRecognizeError::InvalidPattern(format!("invalid number: {num}"))
                 })?;
                 tokens.push(PatternToken::Number(n));
             }
@@ -268,9 +251,9 @@ fn tokenize_pattern(
                 tokens.push(PatternToken::Ident(ident));
             }
             other => {
-                return Err(MatchRecognizeError::InvalidPattern(
-                    format!("unexpected character: {other}"),
-                ));
+                return Err(MatchRecognizeError::InvalidPattern(format!(
+                    "unexpected character: {other}"
+                )));
             }
         }
     }
@@ -280,8 +263,7 @@ fn tokenize_pattern(
 
 fn parse_alternation<'a>(
     tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError>
-{
+) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
     let (first, mut rest) = parse_sequence(tokens)?;
     let mut branches = vec![first];
 
@@ -300,15 +282,13 @@ fn parse_alternation<'a>(
 
 fn parse_sequence<'a>(
     tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError>
-{
+) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
     let mut parts = Vec::new();
     let mut rest = tokens;
 
     while !rest.is_empty() {
         // Stop at pipe or RParen (those belong to outer contexts)
-        if rest.first() == Some(&PatternToken::Pipe)
-            || rest.first() == Some(&PatternToken::RParen)
+        if rest.first() == Some(&PatternToken::Pipe) || rest.first() == Some(&PatternToken::RParen)
         {
             break;
         }
@@ -333,8 +313,7 @@ fn parse_sequence<'a>(
 
 fn parse_quantified<'a>(
     tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError>
-{
+) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
     let (base, rest) = parse_atom(tokens)?;
     parse_optional_quantifier(base, rest)
 }
@@ -342,45 +321,27 @@ fn parse_quantified<'a>(
 fn parse_optional_quantifier<'a>(
     base: PatternExpr,
     tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError>
-{
+) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
     if tokens.is_empty() {
         return Ok((base, tokens));
     }
 
     match tokens.first() {
         Some(PatternToken::Plus) => Ok((
-            PatternExpr::Quantified(
-                Box::new(base),
-                Quantifier::OneOrMore,
-            ),
+            PatternExpr::Quantified(Box::new(base), Quantifier::OneOrMore),
             &tokens[1..],
         )),
         Some(PatternToken::Star) => Ok((
-            PatternExpr::Quantified(
-                Box::new(base),
-                Quantifier::ZeroOrMore,
-            ),
+            PatternExpr::Quantified(Box::new(base), Quantifier::ZeroOrMore),
             &tokens[1..],
         )),
         Some(PatternToken::Question) => Ok((
-            PatternExpr::Quantified(
-                Box::new(base),
-                Quantifier::ZeroOrOne,
-            ),
+            PatternExpr::Quantified(Box::new(base), Quantifier::ZeroOrOne),
             &tokens[1..],
         )),
         Some(PatternToken::LBrace) => {
-            let (quant, rest) = parse_brace_quantifier(
-                &tokens[1..],
-            )?;
-            Ok((
-                PatternExpr::Quantified(
-                    Box::new(base),
-                    quant,
-                ),
-                rest,
-            ))
+            let (quant, rest) = parse_brace_quantifier(&tokens[1..])?;
+            Ok((PatternExpr::Quantified(Box::new(base), quant), rest))
         }
         _ => Ok((base, tokens)),
     }
@@ -388,8 +349,7 @@ fn parse_optional_quantifier<'a>(
 
 fn parse_brace_quantifier<'a>(
     tokens: &'a [PatternToken],
-) -> Result<(Quantifier, &'a [PatternToken]), MatchRecognizeError>
-{
+) -> Result<(Quantifier, &'a [PatternToken]), MatchRecognizeError> {
     // Expect: Number [, Number?] }
     let Some(PatternToken::Number(min)) = tokens.first() else {
         return Err(MatchRecognizeError::InvalidPattern(
@@ -412,10 +372,7 @@ fn parse_brace_quantifier<'a>(
     let rest = &rest[1..]; // skip comma
 
     if rest.first() == Some(&PatternToken::RBrace) {
-        return Ok((
-            Quantifier::Range(*min, None),
-            &rest[1..],
-        ));
+        return Ok((Quantifier::Range(*min, None), &rest[1..]));
     }
 
     let Some(PatternToken::Number(max)) = rest.first() else {
@@ -431,16 +388,12 @@ fn parse_brace_quantifier<'a>(
         ));
     }
 
-    Ok((
-        Quantifier::Range(*min, Some(*max)),
-        &rest[1..],
-    ))
+    Ok((Quantifier::Range(*min, Some(*max)), &rest[1..]))
 }
 
 fn parse_atom<'a>(
     tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError>
-{
+) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
     if tokens.is_empty() {
         return Err(MatchRecognizeError::InvalidPattern(
             "unexpected end of pattern".to_owned(),
@@ -448,27 +401,19 @@ fn parse_atom<'a>(
     }
 
     match &tokens[0] {
-        PatternToken::Ident(name) => {
-            Ok((PatternExpr::Var(name.clone()), &tokens[1..]))
-        }
+        PatternToken::Ident(name) => Ok((PatternExpr::Var(name.clone()), &tokens[1..])),
         PatternToken::LParen => {
-            let (inner, rest) =
-                parse_alternation(&tokens[1..])?;
+            let (inner, rest) = parse_alternation(&tokens[1..])?;
             if rest.first() != Some(&PatternToken::RParen) {
-                return Err(
-                    MatchRecognizeError::InvalidPattern(
-                        "unmatched '('".to_owned(),
-                    ),
-                );
+                return Err(MatchRecognizeError::InvalidPattern(
+                    "unmatched '('".to_owned(),
+                ));
             }
-            Ok((
-                PatternExpr::Group(Box::new(inner)),
-                &rest[1..],
-            ))
+            Ok((PatternExpr::Group(Box::new(inner)), &rest[1..]))
         }
-        other => Err(MatchRecognizeError::InvalidPattern(
-            format!("unexpected token: {other:?}"),
-        )),
+        other => Err(MatchRecognizeError::InvalidPattern(format!(
+            "unexpected token: {other:?}"
+        ))),
     }
 }
 
@@ -482,10 +427,7 @@ fn find_top_level_or(input: &str) -> Option<usize> {
     find_top_level_keyword(input, " OR ")
 }
 
-fn find_top_level_keyword(
-    input: &str,
-    keyword: &str,
-) -> Option<usize> {
+fn find_top_level_keyword(input: &str, keyword: &str) -> Option<usize> {
     let upper = input.to_uppercase();
     let mut depth = 0i32;
     let bytes = upper.as_bytes();
@@ -496,19 +438,14 @@ fn find_top_level_keyword(
             b')' => depth -= 1,
             _ => {}
         }
-        if depth == 0
-            && upper[i..].starts_with(keyword)
-        {
+        if depth == 0 && upper[i..].starts_with(keyword) {
             return Some(i);
         }
     }
     None
 }
 
-fn find_comparison_op(
-    input: &str,
-    op: &str,
-) -> Option<usize> {
+fn find_comparison_op(input: &str, op: &str) -> Option<usize> {
     let mut depth = 0i32;
 
     for i in 0..input.len() {
@@ -519,19 +456,13 @@ fn find_comparison_op(
         }
         if depth == 0 && input[i..].starts_with(op) {
             // Avoid matching <= when looking for <, etc.
-            if op == "<"
-                && input[i..].starts_with("<=")
-            {
+            if op == "<" && input[i..].starts_with("<=") {
                 continue;
             }
-            if op == ">"
-                && input[i..].starts_with(">=")
-            {
+            if op == ">" && input[i..].starts_with(">=") {
                 continue;
             }
-            if op == "!"
-                && input[i..].starts_with("!=")
-            {
+            if op == "!" && input[i..].starts_with("!=") {
                 continue;
             }
             return Some(i);
@@ -540,9 +471,7 @@ fn find_comparison_op(
     None
 }
 
-fn parse_simple_expr(
-    input: &str,
-) -> Result<Expr, MatchRecognizeError> {
+fn parse_simple_expr(input: &str) -> Result<Expr, MatchRecognizeError> {
     let input = input.trim();
 
     if input.is_empty() {
@@ -604,30 +533,19 @@ fn parse_simple_expr(
     if let Some(dot_pos) = input.find('.') {
         let table = &input[..dot_pos];
         let column = &input[dot_pos + 1..];
-        return Ok(Expr::Column(ColumnRef::qualified(
-            table, column,
-        )));
+        return Ok(Expr::Column(ColumnRef::qualified(table, column)));
     }
 
     // Unqualified column
     Ok(Expr::Column(ColumnRef::new(input)))
 }
 
-fn parse_prev_next(
-    inner: &str,
-    is_prev: bool,
-) -> Result<Expr, MatchRecognizeError> {
-    let parts: Vec<&str> =
-        inner.splitn(2, ',').collect();
+fn parse_prev_next(inner: &str, is_prev: bool) -> Result<Expr, MatchRecognizeError> {
+    let parts: Vec<&str> = inner.splitn(2, ',').collect();
     let col_str = parts[0].trim();
     let offset: usize = if parts.len() > 1 {
         parts[1].trim().parse().map_err(|_| {
-            MatchRecognizeError::ParseError(
-                format!(
-                    "invalid offset: {}",
-                    parts[1].trim()
-                ),
-            )
+            MatchRecognizeError::ParseError(format!("invalid offset: {}", parts[1].trim()))
         })?
     } else {
         1
@@ -642,18 +560,13 @@ fn parse_prev_next(
     }
 }
 
-fn parse_first_last(
-    inner: &str,
-    is_first: bool,
-) -> Result<Expr, MatchRecognizeError> {
+fn parse_first_last(inner: &str, is_first: bool) -> Result<Expr, MatchRecognizeError> {
     let inner = inner.trim();
     // Expect var.column
     let Some(dot_pos) = inner.find('.') else {
-        return Err(MatchRecognizeError::ParseError(
-            format!(
-                "FIRST/LAST requires var.column syntax, got: {inner}"
-            ),
-        ));
+        return Err(MatchRecognizeError::ParseError(format!(
+            "FIRST/LAST requires var.column syntax, got: {inner}"
+        )));
     };
 
     let var = &inner[..dot_pos];
@@ -661,15 +574,9 @@ fn parse_first_last(
     let col_expr = Expr::Column(ColumnRef::new(column));
 
     if is_first {
-        Ok(Expr::PatternFirst(
-            Box::new(col_expr),
-            var.to_owned(),
-        ))
+        Ok(Expr::PatternFirst(Box::new(col_expr), var.to_owned()))
     } else {
-        Ok(Expr::PatternLast(
-            Box::new(col_expr),
-            var.to_owned(),
-        ))
+        Ok(Expr::PatternLast(Box::new(col_expr), var.to_owned()))
     }
 }
 
@@ -688,8 +595,7 @@ mod tests {
 
     #[test]
     fn parse_sequence() {
-        let p =
-            parse_pattern("A B C").expect("should parse");
+        let p = parse_pattern("A B C").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Sequence(vec![
@@ -702,8 +608,7 @@ mod tests {
 
     #[test]
     fn parse_alternation() {
-        let p =
-            parse_pattern("A | B").expect("should parse");
+        let p = parse_pattern("A | B").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Alternation(vec![
@@ -715,8 +620,7 @@ mod tests {
 
     #[test]
     fn parse_quantifier_plus() {
-        let p =
-            parse_pattern("A+").expect("should parse");
+        let p = parse_pattern("A+").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Quantified(
@@ -728,8 +632,7 @@ mod tests {
 
     #[test]
     fn parse_quantifier_star() {
-        let p =
-            parse_pattern("A*").expect("should parse");
+        let p = parse_pattern("A*").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Quantified(
@@ -741,8 +644,7 @@ mod tests {
 
     #[test]
     fn parse_quantifier_question() {
-        let p =
-            parse_pattern("A?").expect("should parse");
+        let p = parse_pattern("A?").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Quantified(
@@ -754,8 +656,7 @@ mod tests {
 
     #[test]
     fn parse_quantifier_exactly() {
-        let p =
-            parse_pattern("A{3}").expect("should parse");
+        let p = parse_pattern("A{3}").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Quantified(
@@ -767,8 +668,7 @@ mod tests {
 
     #[test]
     fn parse_quantifier_range() {
-        let p = parse_pattern("A{2,5}")
-            .expect("should parse");
+        let p = parse_pattern("A{2,5}").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Quantified(
@@ -780,8 +680,7 @@ mod tests {
 
     #[test]
     fn parse_quantifier_range_unbounded() {
-        let p = parse_pattern("A{2,}")
-            .expect("should parse");
+        let p = parse_pattern("A{2,}").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Quantified(
@@ -793,17 +692,14 @@ mod tests {
 
     #[test]
     fn parse_group() {
-        let p = parse_pattern("(A B)+")
-            .expect("should parse");
+        let p = parse_pattern("(A B)+").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Quantified(
-                Box::new(PatternExpr::Group(Box::new(
-                    PatternExpr::Sequence(vec![
-                        PatternExpr::Var("A".to_owned()),
-                        PatternExpr::Var("B".to_owned()),
-                    ])
-                ))),
+                Box::new(PatternExpr::Group(Box::new(PatternExpr::Sequence(vec![
+                    PatternExpr::Var("A".to_owned()),
+                    PatternExpr::Var("B".to_owned()),
+                ])))),
                 Quantifier::OneOrMore,
             )
         );
@@ -811,27 +707,20 @@ mod tests {
 
     #[test]
     fn parse_complex_v_pattern() {
-        let p = parse_pattern("A+ B{2,5} C+")
-            .expect("should parse");
+        let p = parse_pattern("A+ B{2,5} C+").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Sequence(vec![
                 PatternExpr::Quantified(
-                    Box::new(PatternExpr::Var(
-                        "A".to_owned()
-                    )),
+                    Box::new(PatternExpr::Var("A".to_owned())),
                     Quantifier::OneOrMore,
                 ),
                 PatternExpr::Quantified(
-                    Box::new(PatternExpr::Var(
-                        "B".to_owned()
-                    )),
+                    Box::new(PatternExpr::Var("B".to_owned())),
                     Quantifier::Range(2, Some(5)),
                 ),
                 PatternExpr::Quantified(
-                    Box::new(PatternExpr::Var(
-                        "C".to_owned()
-                    )),
+                    Box::new(PatternExpr::Var("C".to_owned())),
                     Quantifier::OneOrMore,
                 ),
             ])
@@ -840,8 +729,7 @@ mod tests {
 
     #[test]
     fn parse_alternation_with_sequence() {
-        let p = parse_pattern("A B | C D")
-            .expect("should parse");
+        let p = parse_pattern("A B | C D").expect("should parse");
         assert_eq!(
             p,
             PatternExpr::Alternation(vec![
@@ -859,15 +747,11 @@ mod tests {
 
     #[test]
     fn parse_nested_groups() {
-        let p = parse_pattern("(A (B | C))+")
-            .expect("should parse");
+        let p = parse_pattern("(A (B | C))+").expect("should parse");
         if let PatternExpr::Quantified(inner, q) = &p {
             assert_eq!(*q, Quantifier::OneOrMore);
             if let PatternExpr::Group(group) = inner.as_ref() {
-                assert!(matches!(
-                    group.as_ref(),
-                    PatternExpr::Sequence(_)
-                ));
+                assert!(matches!(group.as_ref(), PatternExpr::Sequence(_)));
             } else {
                 panic!("expected Group");
             }
@@ -892,15 +776,11 @@ mod tests {
 
     #[test]
     fn parse_simple_comparison() {
-        let expr = parse_define_condition("price < PREV(price)")
-            .expect("should parse");
+        let expr = parse_define_condition("price < PREV(price)").expect("should parse");
         if let Expr::BinOp { op, left, right } = &expr {
             assert_eq!(*op, BinOp::Lt);
             assert!(matches!(left.as_ref(), Expr::Column(_)));
-            assert!(matches!(
-                right.as_ref(),
-                Expr::PatternPrev(_, 1)
-            ));
+            assert!(matches!(right.as_ref(), Expr::PatternPrev(_, 1)));
         } else {
             panic!("expected BinOp");
         }
@@ -908,14 +788,9 @@ mod tests {
 
     #[test]
     fn parse_prev_with_offset() {
-        let expr =
-            parse_define_condition("price < PREV(price, 2)")
-                .expect("should parse");
+        let expr = parse_define_condition("price < PREV(price, 2)").expect("should parse");
         if let Expr::BinOp { right, .. } = &expr {
-            assert!(matches!(
-                right.as_ref(),
-                Expr::PatternPrev(_, 2)
-            ));
+            assert!(matches!(right.as_ref(), Expr::PatternPrev(_, 2)));
         } else {
             panic!("expected BinOp");
         }
@@ -923,29 +798,16 @@ mod tests {
 
     #[test]
     fn parse_and_condition() {
-        let expr = parse_define_condition(
-            "price < PREV(price) AND volume > 1000000",
-        )
-        .expect("should parse");
-        assert!(matches!(
-            expr,
-            Expr::BinOp {
-                op: BinOp::And,
-                ..
-            }
-        ));
+        let expr = parse_define_condition("price < PREV(price) AND volume > 1000000")
+            .expect("should parse");
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::And, .. }));
     }
 
     #[test]
     fn parse_next_expr() {
-        let expr =
-            parse_define_condition("price > NEXT(price)")
-                .expect("should parse");
+        let expr = parse_define_condition("price > NEXT(price)").expect("should parse");
         if let Expr::BinOp { right, .. } = &expr {
-            assert!(matches!(
-                right.as_ref(),
-                Expr::PatternNext(_, 1)
-            ));
+            assert!(matches!(right.as_ref(), Expr::PatternNext(_, 1)));
         } else {
             panic!("expected BinOp");
         }
@@ -955,8 +817,7 @@ mod tests {
 
     #[test]
     fn parse_first_measure() {
-        let expr = parse_measure_expr("FIRST(A.price)")
-            .expect("should parse");
+        let expr = parse_measure_expr("FIRST(A.price)").expect("should parse");
         if let Expr::PatternFirst(inner, var) = &expr {
             assert_eq!(var, "A");
             assert!(matches!(inner.as_ref(), Expr::Column(_)));
@@ -967,8 +828,7 @@ mod tests {
 
     #[test]
     fn parse_last_measure() {
-        let expr = parse_measure_expr("LAST(B.price)")
-            .expect("should parse");
+        let expr = parse_measure_expr("LAST(B.price)").expect("should parse");
         if let Expr::PatternLast(inner, var) = &expr {
             assert_eq!(var, "B");
             assert!(matches!(inner.as_ref(), Expr::Column(_)));
@@ -979,15 +839,13 @@ mod tests {
 
     #[test]
     fn parse_classifier_expr() {
-        let expr = parse_measure_expr("CLASSIFIER()")
-            .expect("should parse");
+        let expr = parse_measure_expr("CLASSIFIER()").expect("should parse");
         assert_eq!(expr, Expr::PatternClassifier);
     }
 
     #[test]
     fn parse_match_number_expr() {
-        let expr = parse_measure_expr("MATCH_NUMBER()")
-            .expect("should parse");
+        let expr = parse_measure_expr("MATCH_NUMBER()").expect("should parse");
         assert_eq!(expr, Expr::PatternMatchNumber);
     }
 
@@ -1001,8 +859,7 @@ mod tests {
             direction: SortDirection::Asc,
             nulls: NullOrdering::Last,
         }];
-        let pattern = parse_pattern("A+ B+ C+")
-            .expect("should parse");
+        let pattern = parse_pattern("A+ B+ C+").expect("should parse");
         let defines = vec![
             PatternDefine {
                 variable: "A".to_owned(),
@@ -1079,18 +936,13 @@ mod tests {
     #[test]
     fn build_row_pattern_with_all_options() {
         let input = RelExpr::scan("events");
-        let partition_by = vec![Expr::Column(
-            ColumnRef::new("category"),
-        )];
+        let partition_by = vec![Expr::Column(ColumnRef::new("category"))];
         let order_by = vec![SortKey {
-            expr: Expr::Column(
-                ColumnRef::new("event_time"),
-            ),
+            expr: Expr::Column(ColumnRef::new("event_time")),
             direction: SortDirection::Asc,
             nulls: NullOrdering::Last,
         }];
-        let pattern = parse_pattern("A+ B?")
-            .expect("should parse");
+        let pattern = parse_pattern("A+ B?").expect("should parse");
         let defines = vec![
             PatternDefine {
                 variable: "A".to_owned(),
@@ -1103,9 +955,7 @@ mod tests {
         ];
         let measures = vec![PatternMeasure {
             expr: Expr::PatternFirst(
-                Box::new(Expr::Column(
-                    ColumnRef::new("value"),
-                )),
+                Box::new(Expr::Column(ColumnRef::new("value"))),
                 "A".to_owned(),
             ),
             alias: "start_value".to_owned(),
@@ -1123,8 +973,9 @@ mod tests {
         );
         assert!(result.is_ok());
 
-        if let RelExpr::RowPattern { mode, skip_mode, .. } =
-            result.expect("already checked")
+        if let RelExpr::RowPattern {
+            mode, skip_mode, ..
+        } = result.expect("already checked")
         {
             assert_eq!(mode, MatchMode::AllRowsPerMatch);
             assert_eq!(skip_mode, SkipMode::ToNextRow);

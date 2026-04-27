@@ -68,11 +68,11 @@ impl GrammarExtension for PgTrgmExtension {
 
     fn operators(&self) -> Vec<&str> {
         vec![
-            "%",     // Similarity operator (text1 % text2 returns true if similar)
-            "<->",   // Distance operator (lower = more similar)
-            "<%",    // Word similarity (text % pattern)
-            "<->>",  // Word distance
-            "<<->",  // Strict word similarity
+            "%",      // Similarity operator (text1 % text2 returns true if similar)
+            "<->",    // Distance operator (lower = more similar)
+            "<%",     // Word similarity (text % pattern)
+            "<->>",   // Word distance
+            "<<->",   // Strict word similarity
             "<<<->>", // Strict word distance
         ]
     }
@@ -126,9 +126,9 @@ mod tests {
         let ext = PgTrgmExtension;
         let operators = ext.operators();
 
-        assert!(operators.contains(&"%"));     // Similarity
-        assert!(operators.contains(&"<->"));   // Distance
-        assert!(operators.contains(&"<%"));    // Word similarity
+        assert!(operators.contains(&"%")); // Similarity
+        assert!(operators.contains(&"<->")); // Distance
+        assert!(operators.contains(&"<%")); // Word similarity
     }
 
     #[test]

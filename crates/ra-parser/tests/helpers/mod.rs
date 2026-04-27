@@ -32,12 +32,8 @@ pub fn rules_dir() -> PathBuf {
 /// Panics if the fixture file cannot be read.
 pub fn load_fixture(name: &str) -> String {
     let path = fixtures_dir().join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!(
-            "failed to read fixture {}: {e}",
-            path.display()
-        )
-    })
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
 }
 
 /// Recursively collect all `.rra` files under `dir`.
@@ -60,10 +56,7 @@ fn walk_rra(dir: &Path, out: &mut Vec<PathBuf>) {
                 continue;
             }
             walk_rra(&path, out);
-        } else if path
-            .extension()
-            .is_some_and(|ext| ext == "rra")
-        {
+        } else if path.extension().is_some_and(|ext| ext == "rra") {
             out.push(path);
         }
     }

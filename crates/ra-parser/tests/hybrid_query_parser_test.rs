@@ -36,9 +36,9 @@ mod postgres {
             LIMIT 20;
         "#;
 
-        assert!(query.contains("@@"));  // FTS match operator
+        assert!(query.contains("@@")); // FTS match operator
         assert!(query.contains("<=>")); // RUM distance operator
-        assert!(query.contains("<->"));  // pgvector distance operator
+        assert!(query.contains("<->")); // pgvector distance operator
     }
 
     #[test]
@@ -251,7 +251,8 @@ mod translation {
     #[test]
     fn test_sqlserver_to_postgres_translation() {
         let sqlserver_query = "SELECT TOP 10 * FROM docs WHERE CONTAINS(content, 'search')";
-        let postgres_expected = "SELECT * FROM docs WHERE content_tsvector @@ to_tsquery('search') LIMIT 10";
+        let postgres_expected =
+            "SELECT * FROM docs WHERE content_tsvector @@ to_tsquery('search') LIMIT 10";
 
         assert!(sqlserver_query.contains("CONTAINS"));
         assert!(postgres_expected.contains("@@"));
