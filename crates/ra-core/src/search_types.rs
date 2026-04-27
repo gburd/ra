@@ -188,12 +188,7 @@ mod tests {
         let parser = FullTextParser::Custom {
             name: "my_parser".to_string(),
         };
-        match parser {
-            FullTextParser::Custom { name } => {
-                assert_eq!(name, "my_parser");
-            }
-            _ => panic!("Expected Custom variant"),
-        }
+        assert!(matches!(parser, FullTextParser::Custom { ref name } if name == "my_parser"));
     }
 
     #[test]

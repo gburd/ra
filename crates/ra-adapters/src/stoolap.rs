@@ -118,8 +118,7 @@ impl FactsProvider for StoolapFacts {
     }
 
     fn sql_dialect(&self) -> SqlDialect {
-        // Stoolap is PostgreSQL-compatible
-        SqlDialect::Postgres
+        SqlDialect::Generic
     }
 
     fn memory_limit(&self) -> Option<u64> {
@@ -842,8 +841,7 @@ impl DatabaseAdapter for StoolapAdapter {
     }
 
     fn sql_dialect(&self) -> SqlDialect {
-        // Stoolap is PostgreSQL-compatible
-        SqlDialect::Postgres
+        SqlDialect::Generic
     }
 
     fn database_name(&self) -> &'static str {

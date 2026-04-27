@@ -697,7 +697,9 @@ impl RelExpr {
             | Self::Distinct { input, .. }
             | Self::RowPattern { input, .. }
             | Self::ParallelAggregate { input, .. }
-            | Self::Gather { input, .. } => vec![input],
+            | Self::Gather { input, .. }
+            | Self::TopK { input, .. }
+            | Self::VectorFilter { input, .. } => vec![input],
             Self::Join { left, right, .. }
             | Self::Union { left, right, .. }
             | Self::Intersect { left, right, .. }
@@ -720,7 +722,6 @@ impl RelExpr {
                 inputs.iter().map(std::convert::AsRef::as_ref).collect()
             }
             Self::BitmapHeapScan { bitmap, .. } => vec![bitmap],
-            Self::TopK { input, .. } | Self::VectorFilter { input, .. } => vec![input],
         }
     }
 
@@ -923,12 +924,8 @@ impl RelExpr {
                 vector_expr,
                 query_vector,
                 ..
-            } => {
-                collect_expr_columns(vector_expr, out);
-                collect_expr_columns(query_vector, out);
-                input.collect_columns(out);
             }
-            Self::VectorFilter {
+            | Self::VectorFilter {
                 input,
                 vector_expr,
                 query_vector,
@@ -963,7 +960,9 @@ impl RelExpr {
             | Self::IncrementalSort { input, .. }
             | Self::RowPattern { input, .. }
             | Self::ParallelAggregate { input, .. }
-            | Self::Gather { input, .. } => {
+            | Self::Gather { input, .. }
+            | Self::TopK { input, .. }
+            | Self::VectorFilter { input, .. } => {
                 input.references_cte(cte_name)
             }
             Self::Join { left, right, .. }
@@ -1003,9 +1002,6 @@ impl RelExpr {
             }
             Self::BitmapHeapScan { bitmap, table, .. } => {
                 table == cte_name || bitmap.references_cte(cte_name)
-            }
-            Self::TopK { input, .. } | Self::VectorFilter { input, .. } => {
-                input.references_cte(cte_name)
             }
         }
     }

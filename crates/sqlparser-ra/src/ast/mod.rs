@@ -4306,9 +4306,9 @@ impl fmt::Display for Statement {
                     "{hivevar}{name} = {l_paren}{value}{r_paren}",
                     hivevar = if *hivevar { "HIVEVAR:" } else { "" },
                     name = variables,
-                    l_paren = parenthesized.then_some("(").unwrap_or_default(),
+                    l_paren = if parenthesized { "(" } else { Default::default() },
                     value = display_comma_separated(value),
-                    r_paren = parenthesized.then_some(")").unwrap_or_default(),
+                    r_paren = if parenthesized { ")" } else { Default::default() },
                 )
             }
             Statement::SetTimeZone { local, value } => {
@@ -6274,7 +6274,7 @@ impl fmt::Display for CopyTarget {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use CopyTarget::*;
         match self {
-            Stdin { .. } => write!(f, "STDIN"),
+            Stdin => write!(f, "STDIN"),
             Stdout => write!(f, "STDOUT"),
             File { filename } => write!(f, "'{}'", value::escape_single_quote_string(filename)),
             Program { command } => write!(
