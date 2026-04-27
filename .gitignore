@@ -59,6 +59,9 @@ tla/states/
 *.diff~
 *.merge_file_*
 
+# External repositories (should not be committed as gitlinks)
+/django/
+
 # Agent working files (status, progress tracking)
 /agent/
 **/TASK*_PROGRESS.md
