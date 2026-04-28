@@ -45,6 +45,7 @@
 
 pub mod backends;
 pub mod dialect;
+pub mod emitter;
 pub mod error;
 pub mod functions;
 pub mod matrix;

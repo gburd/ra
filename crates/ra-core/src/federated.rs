@@ -464,9 +464,9 @@ pub enum ExecutionLocation {
     /// results, then finish execution locally.
     Hybrid {
         /// The subquery to push down to the remote.
-        remote_subquery: RelExpr,
+        remote_subquery: Box<RelExpr>,
         /// The local operations on the intermediate results.
-        local_operations: RelExpr,
+        local_operations: Box<RelExpr>,
         /// Which remote to push the subquery to.
         target: RemoteConnection,
     },
@@ -870,8 +870,8 @@ mod tests {
         assert!(display.contains("full scan"));
 
         let hybrid = ExecutionLocation::Hybrid {
-            remote_subquery: RelExpr::scan("t"),
-            local_operations: RelExpr::scan("t"),
+            remote_subquery: Box::new(RelExpr::scan("t")),
+            local_operations: Box::new(RelExpr::scan("t")),
             target: sample_connection(),
         };
         let display = format!("{hybrid}");
@@ -989,8 +989,8 @@ mod tests {
     #[test]
     fn serialize_roundtrip_execution_location() {
         let loc = ExecutionLocation::Hybrid {
-            remote_subquery: RelExpr::scan("r"),
-            local_operations: RelExpr::scan("l"),
+            remote_subquery: Box::new(RelExpr::scan("r")),
+            local_operations: Box::new(RelExpr::scan("l")),
             target: sample_connection(),
         };
         let json = serde_json::to_string(&loc)

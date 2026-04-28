@@ -908,8 +908,8 @@ fn federated_query_json_roundtrip() {
 #[test]
 fn execution_location_json_roundtrip() {
     let loc = ExecutionLocation::Hybrid {
-        remote_subquery: RelExpr::scan("r"),
-        local_operations: RelExpr::scan("l"),
+        remote_subquery: Box::new(RelExpr::scan("r")),
+        local_operations: Box::new(RelExpr::scan("l")),
         target: pg_connection(),
     };
     let json = serde_json::to_string(&loc).expect("serialize");

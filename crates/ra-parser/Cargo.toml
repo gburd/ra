@@ -22,6 +22,9 @@ tracing = { workspace = true }
 [features]
 bigdecimal = ["sqlparser/bigdecimal"]
 
+[build-dependencies]
+cc = "1.2"
+
 [lints]
 workspace = true
 

@@ -606,8 +606,8 @@ mod tests {
         let model = FederatedCostModel::new();
         let query = sample_query();
         let location = ExecutionLocation::Hybrid {
-            remote_subquery: RelExpr::scan("orders"),
-            local_operations: RelExpr::scan("orders"),
+            remote_subquery: Box::new(RelExpr::scan("orders")),
+            local_operations: Box::new(RelExpr::scan("orders")),
             target: sample_connection(),
         };
 

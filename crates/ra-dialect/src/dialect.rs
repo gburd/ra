@@ -214,22 +214,6 @@ impl Dialect {
         Self::Dune,
     ];
 
-    /// Returns the `sqlparser` dialect implementation for
-    /// parsing.
-    #[must_use]
-    pub fn sqlparser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
-        match self {
-            Self::PostgreSql => Box::new(sqlparser::dialect::PostgreSqlDialect {}),
-            Self::MySql => Box::new(sqlparser::dialect::MySqlDialect {}),
-            Self::Sqlite => Box::new(sqlparser::dialect::SQLiteDialect {}),
-            Self::DuckDb => Box::new(sqlparser::dialect::DuckDbDialect {}),
-            Self::MsSql => Box::new(sqlparser::dialect::MsSqlDialect {}),
-            Self::Oracle => Box::new(sqlparser::dialect::GenericDialect {}),
-            #[cfg(feature = "polyglot-backend")]
-            _ => Box::new(sqlparser::dialect::GenericDialect {}), // Use generic for extended dialects
-        }
-    }
-
     /// Returns the identifier quoting style for this dialect.
     #[must_use]
     pub fn quote_style(self) -> char {

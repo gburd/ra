@@ -134,9 +134,9 @@ pub enum Expr {
     /// Full-text search match expression.
     ///
     /// Represents vendor-specific full-text search operations:
-    /// - MySQL: MATCH(columns) AGAINST('query' [mode])
-    /// - SQL Server: CONTAINS(column, 'query')
-    /// - PostgreSQL: to_tsvector(column) @@ to_tsquery('query')
+    /// - `MySQL`: `MATCH(columns) AGAINST('query' [mode])`
+    /// - `SQL Server`: `CONTAINS(column, 'query')`
+    /// - `PostgreSQL`: `to_tsvector(column) @@ to_tsquery('query')`
     FullTextMatch {
         /// Vendor/dialect identifier (mysql, sqlserver, postgres).
         vendor: String,
@@ -155,7 +155,7 @@ pub enum Expr {
     /// - pgvector: embedding <#> '[1,2,3]' (inner product)
     /// - pgvector: embedding <=> '[1,2,3]' (cosine distance)
     VectorDistance {
-        /// Distance metric (l2, inner_product, cosine).
+        /// Distance metric (`l2`, `inner_product`, `cosine`).
         metric: String,
         /// Vector column.
         column: Box<Expr>,

@@ -151,8 +151,8 @@ impl FederatedOptimizer {
                     self.plan_hybrid(&query.plan, capabilities, name)
                 {
                     strategies.push(ExecutionLocation::Hybrid {
-                        remote_subquery: remote_sub,
-                        local_operations: local_ops,
+                        remote_subquery: Box::new(remote_sub),
+                        local_operations: Box::new(local_ops),
                         target: connection.clone(),
                     });
                 }

@@ -26,7 +26,6 @@ use crate::facts::DataType;
 /// implementations can be stored in collections.
 pub trait FileFormat: Send + Sync + std::fmt::Debug {
     /// Format name (e.g., "parquet", "orc", "`arrow_ipc`").
-    #[expect(clippy::unnecessary_literal_bound)]
     fn name(&self) -> &str;
 
     /// Read schema without scanning data.

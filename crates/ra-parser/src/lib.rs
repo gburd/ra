@@ -10,9 +10,11 @@
 
 pub mod ddl_parser;
 pub mod extractor;
+pub mod ffi;
 pub mod formatter;
 pub mod grammar;
 pub mod lexer;
+pub mod lime_parser;
 pub mod match_recognize;
 pub mod parser;
 pub mod profile;

@@ -8,7 +8,7 @@ use std::fmt;
 pub enum TranslationError {
     /// SQL parsing failed.
     #[error("failed to parse SQL: {0}")]
-    Parse(#[from] sqlparser::parser::ParserError),
+    Parse(String),
 
     /// A feature required by the source SQL is not supported
     /// by the target dialect.
@@ -109,8 +109,7 @@ mod tests {
 
     #[test]
     fn parse_error_conversion() {
-        let pe = sqlparser::parser::ParserError::ParserError("bad sql".into());
-        let te: TranslationError = pe.into();
+        let te = TranslationError::Parse("bad sql".into());
         assert!(te.to_string().contains("bad sql"));
     }
 }
