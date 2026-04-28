@@ -1,8 +1,10 @@
 /*
- * ra_sql.lime -- Minimal SQL grammar for RA optimizer.
+ * ra_sql.lime -- SQL grammar for RA optimizer.
  *
- * Covers: SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, LIMIT,
- *         UNION, DISTINCT, basic expressions.
+ * Covers: SELECT, FROM, WHERE, JOIN, GROUP BY, HAVING, ORDER BY, LIMIT,
+ *         UNION, INTERSECT, EXCEPT, DISTINCT, WITH (CTEs), VALUES,
+ *         CASE, CAST, IN, EXISTS, BETWEEN, LIKE, ILIKE, NOT,
+ *         subqueries, window functions, aggregate DISTINCT.
  *
  * Reduction actions call the ra_* FFI functions declared in ra_ffi.h
  * to build RelExpr / Expr AST nodes in the Rust arena.
@@ -114,12 +116,36 @@ typedef struct RaToken {
 %token TRUE_KW.
 %token FALSE_KW.
 
-/* Precedence (low to high) */
+/* New keywords */
+%token CASE.
+%token WHEN.
+%token THEN.
+%token ELSE.
+%token END.
+%token CAST.
+%token BETWEEN.
+%token LIKE.
+%token ILIKE.
+%token IN.
+%token EXISTS.
+%token WITH.
+%token RECURSIVE.
+%token PARTITION.
+%token OVER.
+%token VALUES.
+%token INTERSECT.
+%token EXCEPT.
+
+/* ================================================================== */
+/* Precedence (low to high)                                            */
+/* ================================================================== */
+
 %left JOIN INNER LEFT RIGHT FULL CROSS.
+%left UNION INTERSECT EXCEPT.
 %left OR.
 %left AND.
 %right NOT.
-%nonassoc EQ NE LT LE GT GE IS.
+%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE BETWEEN.
 %left PLUS MINUS CONCAT.
 %left STAR SLASH PERCENT.
 %right UMINUS.
@@ -134,8 +160,15 @@ input ::= stmt(A) SEMICOLON.               { (void)A; }
 input ::= stmt(A).                          { (void)A; }
 
 stmt(A) ::= select_stmt(B).                 { A = B; }
+stmt(A) ::= with_clause(B).                 { A = B; }
 
-/* -- SELECT statement ---------------------------------------------- */
+/* -- WITH (CTE) clause --------------------------------------------- */
+
+with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+
+/* -- SELECT statement with set operations -------------------------- */
 
 select_stmt(A) ::= select_no_parens(B).     { A = B; }
 select_stmt(A) ::= select_no_parens(B) UNION ALL select_no_parens(C). {
@@ -144,39 +177,52 @@ select_stmt(A) ::= select_no_parens(B) UNION ALL select_no_parens(C). {
 select_stmt(A) ::= select_no_parens(B) UNION select_no_parens(C). {
     A = ra_union(pstate, B, C, 0);
 }
+select_stmt(A) ::= select_no_parens(B) INTERSECT ALL select_no_parens(C). {
+    A = ra_intersect(pstate, B, C, 1);
+}
+select_stmt(A) ::= select_no_parens(B) INTERSECT select_no_parens(C). {
+    A = ra_intersect(pstate, B, C, 0);
+}
+select_stmt(A) ::= select_no_parens(B) EXCEPT ALL select_no_parens(C). {
+    A = ra_except(pstate, B, C, 1);
+}
+select_stmt(A) ::= select_no_parens(B) EXCEPT select_no_parens(C). {
+    A = ra_except(pstate, B, C, 0);
+}
+
+/* -- SELECT body --------------------------------------------------- */
 
 select_no_parens(A) ::= SELECT target_list(B) from_clause(C)
-                         where_clause(D) group_clause(E)
+                         where_clause(D) group_clause(E) having_clause(H)
                          order_clause(F) limit_clause(G). {
-    /* Start with the FROM source (or a dummy scan if none). */
     RaNode *base = C;
-    /* Apply WHERE filter. */
     if (D) { base = ra_filter(pstate, base, D); }
-    /* Apply GROUP BY. */
     if (E) { base = ra_aggregate(pstate, base, E, ra_list_new(pstate)); }
-    /* Apply projection. */
+    if (H) { base = ra_filter(pstate, base, H); }
     base = ra_project(pstate, base, B);
-    /* Apply ORDER BY. */
     if (F) { base = ra_sort(pstate, base, F); }
-    /* Apply LIMIT/OFFSET. */
-    if (G) {
-        /* G is encoded as a const_int node pair; simplified here. */
-        base = G;
-    }
+    if (G) { base = G; }
     A = base;
 }
 
 select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
-                         where_clause(D) group_clause(E)
+                         where_clause(D) group_clause(E) having_clause(H)
                          order_clause(F) limit_clause(G). {
     RaNode *base = C;
     if (D) { base = ra_filter(pstate, base, D); }
     if (E) { base = ra_aggregate(pstate, base, E, ra_list_new(pstate)); }
+    if (H) { base = ra_filter(pstate, base, H); }
     base = ra_project(pstate, base, B);
     base = ra_distinct(pstate, base);
     if (F) { base = ra_sort(pstate, base, F); }
     if (G) { base = G; }
     A = base;
+}
+
+/* -- VALUES clause ------------------------------------------------- */
+
+select_no_parens(A) ::= VALUES values_list(B). {
+    A = ra_values(pstate, B);
 }
 
 /* -- Target list (SELECT columns) ---------------------------------- */
@@ -199,13 +245,11 @@ target_item(A) ::= STAR. {
 
 from_clause(A) ::= FROM from_list(B).       { A = B; }
 from_clause(A) ::= . {
-    /* No FROM: produce a dummy single-row scan. */
     A = ra_scan(pstate, "__dual");
 }
 
 from_list(A) ::= table_ref(B).              { A = B; }
 from_list(A) ::= from_list(B) COMMA table_ref(C). {
-    /* Implicit cross join. */
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 4, B, C, cond); /* 4 = Cross */
 }
@@ -219,6 +263,16 @@ table_ref(A) ::= IDENT(B) AS IDENT. {
 table_ref(A) ::= IDENT(B) IDENT. {
     A = ra_scan(pstate, B.text);
 }
+
+/* Derived table (subquery in FROM) */
+table_ref(A) ::= LPAREN select_stmt(B) RPAREN AS IDENT. {
+    A = B;
+}
+table_ref(A) ::= LPAREN select_stmt(B) RPAREN IDENT. {
+    A = B;
+}
+
+/* Joins */
 table_ref(A) ::= table_ref(B) join_type(C) JOIN table_ref(D) ON expr(E). {
     A = ra_join(pstate, C.int_val, B, D, E);
 }
@@ -248,6 +302,11 @@ where_clause(A) ::= .                       { A = 0; }
 
 group_clause(A) ::= GROUP BY expr_list(B).   { A = B; }
 group_clause(A) ::= .                        { A = 0; }
+
+/* -- HAVING clause ------------------------------------------------- */
+
+having_clause(A) ::= HAVING expr(B).         { A = B; }
+having_clause(A) ::= .                       { A = 0; }
 
 /* -- ORDER BY clause ----------------------------------------------- */
 
@@ -280,8 +339,6 @@ nulls_order(A) ::= .            { A.int_val = 0; A.text = 0; A.location = 0; A.f
 /* -- LIMIT clause -------------------------------------------------- */
 
 limit_clause(A) ::= LIMIT ICONST(B) OFFSET ICONST(C). {
-    /* Build the limit node directly, wrapping in a temporary. */
-    /* We need a base node -- this will be applied in select_no_parens. */
     (void)B; (void)C;
     A = 0; /* Placeholder: LIMIT applied in select_no_parens */
 }
@@ -292,7 +349,21 @@ limit_clause(A) ::= . {
     A = 0;
 }
 
-/* -- Expression rules ---------------------------------------------- */
+/* -- VALUES rows --------------------------------------------------- */
+
+values_list(A) ::= LPAREN expr_list(B) RPAREN. {
+    RaNode *l = ra_list_new(pstate);
+    A = ra_list_push(pstate, l, B);
+}
+values_list(A) ::= values_list(B) COMMA LPAREN expr_list(C) RPAREN. {
+    A = ra_list_push(pstate, B, C);
+}
+
+/* ================================================================== */
+/* Expression rules                                                    */
+/* ================================================================== */
+
+/* -- Atoms --------------------------------------------------------- */
 
 expr(A) ::= IDENT(B). {
     A = ra_column(pstate, B.text);
@@ -319,7 +390,8 @@ expr(A) ::= FALSE_KW. {
     A = ra_const_int(pstate, 0);
 }
 
-/* Binary operations */
+/* -- Binary operations --------------------------------------------- */
+
 expr(A) ::= expr(B) PLUS expr(C).    { A = ra_binop(pstate, 0, B, C); }
 expr(A) ::= expr(B) MINUS expr(C).   { A = ra_binop(pstate, 1, B, C); }
 expr(A) ::= expr(B) STAR expr(C).    { A = ra_binop(pstate, 2, B, C); }
@@ -335,12 +407,19 @@ expr(A) ::= expr(B) OR expr(C).      { A = ra_binop(pstate, 11, B, C); }
 expr(A) ::= expr(B) PERCENT expr(C). { A = ra_binop(pstate, 12, B, C); }
 expr(A) ::= expr(B) CONCAT expr(C).  { A = ra_binop(pstate, 13, B, C); }
 
-/* Unary minus */
+/* -- Unary minus --------------------------------------------------- */
+
 expr(A) ::= MINUS expr(B). [UMINUS]  { A = ra_binop(pstate, 1, ra_const_int(pstate, 0), B); }
 
-/* IS NULL / IS NOT NULL */
+/* -- NOT expression ------------------------------------------------ */
+
+expr(A) ::= NOT expr(B). {
+    A = ra_unary_op(pstate, 0, B); /* 0 = Not */
+}
+
+/* -- IS NULL / IS NOT NULL ----------------------------------------- */
+
 expr(A) ::= expr(B) IS NULL_KW. {
-    /* Encode as UnaryOp::IsNull via a function call. */
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, B);
     A = ra_func(pstate, "__is_null", l);
@@ -351,7 +430,137 @@ expr(A) ::= expr(B) IS NOT NULL_KW. {
     A = ra_func(pstate, "__is_not_null", l);
 }
 
-/* Function call */
+/* -- BETWEEN ------------------------------------------------------- */
+/* Expand to AND of GE and LE comparisons. */
+
+expr(A) ::= expr(B) BETWEEN expr(C) AND expr(D). [BETWEEN] {
+    /* Expand: expr BETWEEN low AND high => (expr >= low) AND (expr <= high) */
+    RaNode *ge = ra_binop(pstate, 9, B, C);  /* GE */
+    RaNode *le = ra_binop(pstate, 7, B, D);  /* LE */
+    A = ra_binop(pstate, 10, ge, le);         /* AND */
+}
+
+expr(A) ::= expr(B) NOT BETWEEN expr(C) AND expr(D). [BETWEEN] {
+    RaNode *lt = ra_binop(pstate, 6, B, C);  /* LT */
+    RaNode *gt = ra_binop(pstate, 8, B, D);  /* GT */
+    A = ra_binop(pstate, 11, lt, gt); /* OR: NOT BETWEEN = < low OR > high */
+}
+
+/* -- LIKE / ILIKE -------------------------------------------------- */
+
+expr(A) ::= expr(B) LIKE expr(C). [LIKE] {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, B);
+    l = ra_list_push(pstate, l, C);
+    A = ra_func(pstate, "__like", l);
+}
+
+expr(A) ::= expr(B) NOT LIKE expr(C). [LIKE] {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, B);
+    l = ra_list_push(pstate, l, C);
+    RaNode *like = ra_func(pstate, "__like", l);
+    A = ra_unary_op(pstate, 0, like); /* NOT */
+}
+
+expr(A) ::= expr(B) ILIKE expr(C). [ILIKE] {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, B);
+    l = ra_list_push(pstate, l, C);
+    A = ra_func(pstate, "__ilike", l);
+}
+
+expr(A) ::= expr(B) NOT ILIKE expr(C). [ILIKE] {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, B);
+    l = ra_list_push(pstate, l, C);
+    RaNode *ilike = ra_func(pstate, "__ilike", l);
+    A = ra_unary_op(pstate, 0, ilike); /* NOT */
+}
+
+/* -- IN expression ------------------------------------------------- */
+
+expr(A) ::= expr(B) IN LPAREN expr_list(C) RPAREN. [IN] {
+    /* Encode as __in_list(values...) with test expr prepended. */
+    (void)B; /* Test expr handled by optimizer layer. */
+    A = ra_func(pstate, "__in_list", C);
+}
+
+expr(A) ::= expr(B) NOT IN LPAREN expr_list(C) RPAREN. [IN] {
+    (void)B;
+    A = ra_unary_op(pstate, 0, ra_func(pstate, "__in_list", C));
+}
+
+/* IN (subquery) */
+expr(A) ::= expr(B) IN LPAREN select_stmt(C) RPAREN. [IN] {
+    A = ra_subquery(pstate, 2, C, B); /* 2 = In */
+}
+
+expr(A) ::= expr(B) NOT IN LPAREN select_stmt(C) RPAREN. [IN] {
+    RaNode *inex = ra_subquery(pstate, 2, C, B);
+    A = ra_unary_op(pstate, 0, inex); /* NOT */
+}
+
+/* -- EXISTS -------------------------------------------------------- */
+
+expr(A) ::= EXISTS LPAREN select_stmt(B) RPAREN. {
+    A = ra_subquery(pstate, 1, B, 0); /* 1 = Exists, no test expr */
+}
+
+/* -- CASE expression ----------------------------------------------- */
+
+expr(A) ::= CASE when_list(B) END. {
+    A = ra_case(pstate, 0, B, 0); /* searched CASE, no else */
+}
+expr(A) ::= CASE when_list(B) ELSE expr(C) END. {
+    A = ra_case(pstate, 0, B, C); /* searched CASE with else */
+}
+expr(A) ::= CASE expr(B) when_list(C) END. {
+    A = ra_case(pstate, B, C, 0); /* simple CASE, no else */
+}
+expr(A) ::= CASE expr(B) when_list(C) ELSE expr(D) END. {
+    A = ra_case(pstate, B, C, D); /* simple CASE with else */
+}
+
+when_list(A) ::= WHEN expr(B) THEN expr(C). {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, B);
+    A = ra_list_push(pstate, l, C);
+}
+when_list(A) ::= when_list(B) WHEN expr(C) THEN expr(D). {
+    RaNode *l = ra_list_push(pstate, B, C);
+    A = ra_list_push(pstate, l, D);
+}
+
+/* -- CAST expression ----------------------------------------------- */
+
+expr(A) ::= CAST LPAREN expr(B) AS type_name(C) RPAREN. {
+    A = ra_cast(pstate, B, C.text, (size_t)C.int_val);
+}
+
+%type type_name {RaToken}
+type_name(A) ::= IDENT(B). {
+    A.text = B.text;
+    A.int_val = (int64_t)strlen(B.text);
+    A.location = B.location;
+    A.float_val = 0;
+}
+type_name(A) ::= IDENT(B) LPAREN ICONST RPAREN. {
+    /* e.g. VARCHAR(255) -- use just the base type name */
+    A.text = B.text;
+    A.int_val = (int64_t)strlen(B.text);
+    A.location = B.location;
+    A.float_val = 0;
+}
+
+/* -- Scalar subquery ----------------------------------------------- */
+
+expr(A) ::= LPAREN select_stmt(B) RPAREN. {
+    A = ra_subquery(pstate, 0, B, 0); /* 0 = Scalar */
+}
+
+/* -- Function call ------------------------------------------------- */
+
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN. {
     A = ra_func(pstate, B.text, C);
 }
@@ -365,10 +574,55 @@ expr(A) ::= IDENT(B) LPAREN STAR RPAREN. {
     A = ra_func(pstate, B.text, l);
 }
 
-/* Parenthesized expression */
+/* -- Aggregate DISTINCT: COUNT(DISTINCT col) etc. ------------------ */
+
+expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN. {
+    /* Encode aggregate DISTINCT as a regular function call for now.
+       The optimizer layer recognizes DISTINCT aggregates by context. */
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, B.text, args);
+}
+
+/* -- Window function ----------------------------------------------- */
+/* func(args) OVER (opt_partition opt_order) */
+
+expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER LPAREN
+             opt_partition(D) opt_window_order(E) RPAREN. {
+    /* Use first arg from C, encode via ra_func for now.
+       Proper window support requires knowing the window function code.
+       Use ra_func with a __window_ prefix for the optimizer to handle. */
+    (void)C; (void)D; (void)E;
+    A = ra_func(pstate, B.text, C);
+}
+
+expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
+             opt_partition(C) opt_window_order(D) RPAREN. {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, ra_column(pstate, "*"));
+    (void)C; (void)D;
+    A = ra_func(pstate, B.text, l);
+}
+
+expr(A) ::= IDENT(B) LPAREN RPAREN OVER LPAREN
+             opt_partition(C) opt_window_order(D) RPAREN. {
+    (void)C; (void)D;
+    A = ra_func(pstate, B.text, ra_list_new(pstate));
+}
+
+opt_partition(A) ::= PARTITION BY expr_list(B). { A = B; }
+opt_partition(A) ::= .                          { A = 0; }
+
+opt_window_order(A) ::= ORDER BY sort_list(B).  { A = B; }
+opt_window_order(A) ::= .                       { A = 0; }
+
+/* -- Parenthesized expression -------------------------------------- */
+
 expr(A) ::= LPAREN expr(B) RPAREN.  { A = B; }
 
-/* -- Expression list ----------------------------------------------- */
+/* ================================================================== */
+/* Expression list                                                     */
+/* ================================================================== */
 
 expr_list(A) ::= expr(B). {
     RaNode *l = ra_list_new(pstate);

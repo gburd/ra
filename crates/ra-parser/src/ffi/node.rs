@@ -4,14 +4,14 @@
 //! Each callback receives `*mut RaParseState` and returns `*mut RaNode`.
 //!
 //! `RaNode` is a zero-sized opaque type; the pointer itself encodes both the
-//! arena index and the node kind via tag bits in the low 2 bits:
+//! arena index and the node kind via tag bits in the low 3 bits:
 //!
 //! ```text
-//! | 63 ..................... 2 | 1  0 |
-//! |       arena index          | tag  |
+//! | 63 ..................... 3 | 2  1  0 |
+//! |       arena index          |   tag   |
 //! ```
 
-use ra_core::algebra::{RelExpr, SortKey};
+use ra_core::algebra::{AggregateExpr, RelExpr, SortKey, WindowExpr};
 use ra_core::expr::Expr;
 
 /// Opaque node handle returned to the Lime parser. Never dereferenced.
@@ -22,17 +22,21 @@ pub enum RaNode {}
 #[repr(u8)]
 pub enum NodeTag {
     /// A relational expression node.
-    Rel = 0b00,
+    Rel = 0b000,
     /// A scalar expression node.
-    Expr = 0b01,
+    Expr = 0b001,
     /// A list of arena indices.
-    List = 0b10,
+    List = 0b010,
     /// A sort key node.
-    SortKey = 0b11,
+    SortKey = 0b011,
+    /// An aggregate expression node.
+    Agg = 0b100,
+    /// A window expression node.
+    Window = 0b101,
 }
 
 /// Number of bits used for the tag.
-const TAG_BITS: usize = 2;
+const TAG_BITS: usize = 3;
 /// Mask to extract the tag from a tagged pointer.
 const TAG_MASK: usize = (1 << TAG_BITS) - 1;
 
@@ -73,6 +77,18 @@ pub fn encode_sort_key(index: usize) -> *mut RaNode {
     encode(index, NodeTag::SortKey)
 }
 
+/// Encode an aggregate expression arena index.
+#[must_use]
+pub fn encode_agg(index: usize) -> *mut RaNode {
+    encode(index, NodeTag::Agg)
+}
+
+/// Encode a window expression arena index.
+#[must_use]
+pub fn encode_window(index: usize) -> *mut RaNode {
+    encode(index, NodeTag::Window)
+}
+
 /// Decode a tagged pointer into its tag and arena index.
 ///
 /// Returns `None` if the pointer is null.
@@ -90,11 +106,12 @@ pub fn decode(ptr: *mut RaNode) -> Option<(NodeTag, usize)> {
     }
     let index = offset_index - 1;
     let tag = match tag_raw {
-        0b00 => NodeTag::Rel,
-        0b01 => NodeTag::Expr,
-        0b10 => NodeTag::List,
-        0b11 => NodeTag::SortKey,
-        // All 2-bit patterns are covered above; this is unreachable.
+        0b000 => NodeTag::Rel,
+        0b001 => NodeTag::Expr,
+        0b010 => NodeTag::List,
+        0b011 => NodeTag::SortKey,
+        0b100 => NodeTag::Agg,
+        0b101 => NodeTag::Window,
         _ => return None,
     };
     Some((tag, index))
@@ -115,6 +132,10 @@ pub struct RaParseState {
     sort_keys: Vec<SortKey>,
     /// Arena for generic lists (stores indices into other arenas).
     lists: Vec<Vec<usize>>,
+    /// Arena for aggregate expression nodes.
+    agg_exprs: Vec<AggregateExpr>,
+    /// Arena for window expression nodes.
+    window_exprs: Vec<WindowExpr>,
     /// Accumulated parse errors.
     errors: Vec<String>,
 }
@@ -128,6 +149,8 @@ impl RaParseState {
             expr_nodes: Vec::new(),
             sort_keys: Vec::new(),
             lists: Vec::new(),
+            agg_exprs: Vec::new(),
+            window_exprs: Vec::new(),
             errors: Vec::new(),
         }
     }
@@ -158,6 +181,20 @@ impl RaParseState {
         let index = self.lists.len();
         self.lists.push(Vec::new());
         encode_list(index)
+    }
+
+    /// Push an aggregate expression and return its tagged pointer.
+    pub fn push_agg_expr(&mut self, agg: AggregateExpr) -> *mut RaNode {
+        let index = self.agg_exprs.len();
+        self.agg_exprs.push(agg);
+        encode_agg(index)
+    }
+
+    /// Push a window expression and return its tagged pointer.
+    pub fn push_window_expr(&mut self, win: WindowExpr) -> *mut RaNode {
+        let index = self.window_exprs.len();
+        self.window_exprs.push(win);
+        encode_window(index)
     }
 
     /// Append an item index to an existing list.
@@ -219,6 +256,18 @@ impl RaParseState {
         self.lists.get(index).map(Vec::as_slice)
     }
 
+    /// Take (clone) an aggregate expression by arena index.
+    #[must_use]
+    pub fn take_agg_expr(&self, index: usize) -> Option<AggregateExpr> {
+        self.agg_exprs.get(index).cloned()
+    }
+
+    /// Take (clone) a window expression by arena index.
+    #[must_use]
+    pub fn take_window_expr(&self, index: usize) -> Option<WindowExpr> {
+        self.window_exprs.get(index).cloned()
+    }
+
     /// Consume the parse state and return the final result.
     ///
     /// On success (no errors and at least one rel node), returns the last
@@ -246,9 +295,15 @@ impl Default for RaParseState {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "test code uses expect for unwrapping"
+)]
 mod tests {
     use super::*;
-    use ra_core::algebra::{NullOrdering, SortDirection};
+    use ra_core::algebra::{
+        AggregateFunction, NullOrdering, SortDirection, WindowFunction,
+    };
     use ra_core::expr::{ColumnRef, Const};
 
     #[test]
@@ -281,6 +336,22 @@ mod tests {
         let (tag, idx) = decode(ptr).expect("should decode");
         assert_eq!(tag, NodeTag::SortKey);
         assert_eq!(idx, 3);
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_agg() {
+        let ptr = encode_agg(5);
+        let (tag, idx) = decode(ptr).expect("should decode");
+        assert_eq!(tag, NodeTag::Agg);
+        assert_eq!(idx, 5);
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_window() {
+        let ptr = encode_window(9);
+        let (tag, idx) = decode(ptr).expect("should decode");
+        assert_eq!(tag, NodeTag::Window);
+        assert_eq!(idx, 9);
     }
 
     #[test]
@@ -370,5 +441,39 @@ mod tests {
         assert_eq!(tag, NodeTag::SortKey);
         let retrieved = state.take_sort_key(idx).expect("should exist");
         assert_eq!(retrieved, key);
+    }
+
+    #[test]
+    fn parse_state_push_and_take_agg_expr() {
+        let mut state = RaParseState::new();
+        let agg = AggregateExpr {
+            function: AggregateFunction::Sum,
+            arg: Some(Expr::Column(ColumnRef::new("amount"))),
+            distinct: false,
+            alias: None,
+        };
+        let ptr = state.push_agg_expr(agg.clone());
+        let (tag, idx) = decode(ptr).expect("should decode");
+        assert_eq!(tag, NodeTag::Agg);
+        let retrieved = state.take_agg_expr(idx).expect("should exist");
+        assert_eq!(retrieved, agg);
+    }
+
+    #[test]
+    fn parse_state_push_and_take_window_expr() {
+        let mut state = RaParseState::new();
+        let win = WindowExpr {
+            function: WindowFunction::RowNumber,
+            arg: None,
+            partition_by: vec![],
+            order_by: vec![],
+            frame: None,
+            alias: Some("rn".to_owned()),
+        };
+        let ptr = state.push_window_expr(win.clone());
+        let (tag, idx) = decode(ptr).expect("should decode");
+        assert_eq!(tag, NodeTag::Window);
+        let retrieved = state.take_window_expr(idx).expect("should exist");
+        assert_eq!(retrieved, win);
     }
 }

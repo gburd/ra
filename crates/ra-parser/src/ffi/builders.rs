@@ -16,7 +16,7 @@ use ra_core::algebra::{
     ProjectionColumn, RelExpr, SortDirection, SortKey, WindowExpr,
     WindowFunction,
 };
-use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
 use super::node::{decode, NodeTag, RaNode, RaParseState};
 
@@ -54,6 +54,24 @@ unsafe fn c_str_to_string(ptr: *const c_char) -> String {
         .to_str()
         .unwrap_or("")
         .to_owned()
+}
+
+/// Convert a C string with explicit length to a Rust `String`.
+///
+/// # Safety
+/// `ptr` must point to at least `len` valid UTF-8 bytes (no NUL required).
+unsafe fn c_str_len_to_string(
+    ptr: *const c_char,
+    len: usize,
+) -> String {
+    if ptr.is_null() || len == 0 {
+        return String::new();
+    }
+    // SAFETY: caller guarantees ptr points to at least len bytes
+    let slice = unsafe {
+        std::slice::from_raw_parts(ptr.cast::<u8>(), len)
+    };
+    String::from_utf8_lossy(slice).into_owned()
 }
 
 /// Decode a tagged pointer as a `RelExpr`, cloning it out of the arena.
@@ -379,6 +397,163 @@ pub unsafe extern "C" fn ra_union(
     })
 }
 
+/// Build an `Intersect` node.
+///
+/// `all`: 0 = INTERSECT (dedup), nonzero = INTERSECT ALL.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `left` and `right` must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_intersect(
+    state: *mut RaParseState,
+    left: *mut RaNode,
+    right: *mut RaNode,
+    all: u32,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(left_rel) = decode_rel(st, left) else {
+        st.push_error("ra_intersect: invalid left node".to_owned());
+        return std::ptr::null_mut();
+    };
+    let Some(right_rel) = decode_rel(st, right) else {
+        st.push_error(
+            "ra_intersect: invalid right node".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    st.push_rel(RelExpr::Intersect {
+        all: all != 0,
+        left: Box::new(left_rel),
+        right: Box::new(right_rel),
+    })
+}
+
+/// Build an `Except` node.
+///
+/// `all`: 0 = EXCEPT (dedup), nonzero = EXCEPT ALL.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `left` and `right` must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_except(
+    state: *mut RaParseState,
+    left: *mut RaNode,
+    right: *mut RaNode,
+    all: u32,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(left_rel) = decode_rel(st, left) else {
+        st.push_error("ra_except: invalid left node".to_owned());
+        return std::ptr::null_mut();
+    };
+    let Some(right_rel) = decode_rel(st, right) else {
+        st.push_error("ra_except: invalid right node".to_owned());
+        return std::ptr::null_mut();
+    };
+    st.push_rel(RelExpr::Except {
+        all: all != 0,
+        left: Box::new(left_rel),
+        right: Box::new(right_rel),
+    })
+}
+
+/// Build a `Values` node.
+///
+/// `rows_list` is a tagged list of tagged lists. Each inner list contains
+/// `Expr` indices representing one row of values.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `rows_list` must be a valid tagged pointer or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_values(
+    state: *mut RaParseState,
+    rows_list: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(row_indices) = decode_list(st, rows_list) else {
+        st.push_error("ra_values: invalid rows list".to_owned());
+        return std::ptr::null_mut();
+    };
+    let mut rows = Vec::with_capacity(row_indices.len());
+    for row_idx in row_indices {
+        let Some(col_indices) =
+            st.get_list(row_idx).map(<[usize]>::to_vec)
+        else {
+            st.push_error(format!(
+                "ra_values: invalid row list index {row_idx}"
+            ));
+            return std::ptr::null_mut();
+        };
+        let mut row = Vec::with_capacity(col_indices.len());
+        for col_idx in col_indices {
+            let Some(expr) = st.take_expr(col_idx) else {
+                st.push_error(format!(
+                    "ra_values: invalid expr index {col_idx}"
+                ));
+                return std::ptr::null_mut();
+            };
+            row.push(expr);
+        }
+        rows.push(row);
+    }
+    st.push_rel(RelExpr::Values { rows })
+}
+
+/// Build a `RecursiveCTE` node.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `name` must point to at least `name_len` valid bytes.
+/// - `base`, `recursive`, `body` must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_recursive_cte(
+    state: *mut RaParseState,
+    name: *const c_char,
+    name_len: usize,
+    base: *mut RaNode,
+    recursive: *mut RaNode,
+    body: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let cte_name = unsafe { c_str_len_to_string(name, name_len) };
+    let Some(base_rel) = decode_rel(st, base) else {
+        st.push_error(
+            "ra_recursive_cte: invalid base node".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    let Some(recursive_rel) = decode_rel(st, recursive) else {
+        st.push_error(
+            "ra_recursive_cte: invalid recursive node".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    let Some(body_rel) = decode_rel(st, body) else {
+        st.push_error(
+            "ra_recursive_cte: invalid body node".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    st.push_rel(RelExpr::RecursiveCTE {
+        name: cte_name,
+        base_case: Box::new(base_rel),
+        recursive_case: Box::new(recursive_rel),
+        body: Box::new(body_rel),
+        cycle_detection: None,
+    })
+}
+
 /// Build a `CTE` node.
 ///
 /// # Safety
@@ -574,6 +749,23 @@ pub unsafe extern "C" fn ra_const_null(
     st.push_expr(Expr::Const(Const::Null))
 }
 
+/// Build a boolean constant expression.
+///
+/// `value`: 0 = false, nonzero = true.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+#[no_mangle]
+pub unsafe extern "C" fn ra_const_bool(
+    state: *mut RaParseState,
+    value: u32,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    st.push_expr(Expr::Const(Const::Bool(value != 0)))
+}
+
 /// Build a binary operation expression.
 ///
 /// `op` encoding: 0=Add, 1=Sub, 2=Mul, 3=Div, 4=Eq, 5=Ne, 6=Lt, 7=Le,
@@ -630,6 +822,216 @@ pub unsafe extern "C" fn ra_binop(
     })
 }
 
+/// Build a unary operation expression.
+///
+/// `op_code` encoding: 0=Not, 1=IsNull, 2=IsNotNull, 3=Neg.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `operand` must be a valid tagged pointer or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_unary_op(
+    state: *mut RaParseState,
+    op_code: u32,
+    operand: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let op = match op_code {
+        0 => UnaryOp::Not,
+        1 => UnaryOp::IsNull,
+        2 => UnaryOp::IsNotNull,
+        3 => UnaryOp::Neg,
+        other => {
+            st.push_error(format!(
+                "ra_unary_op: unknown operator {other}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+    let Some(operand_expr) = decode_expr(st, operand) else {
+        st.push_error(
+            "ra_unary_op: invalid operand node".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    st.push_expr(Expr::UnaryOp {
+        op,
+        operand: Box::new(operand_expr),
+    })
+}
+
+/// Build a CASE expression.
+///
+/// `operand` is nullable (null for searched CASE, non-null for simple CASE).
+/// `when_list` is a tagged list of alternating condition/result `Expr` nodes
+/// (must contain an even number of elements).
+/// `else_expr` is nullable (null for no ELSE clause).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `operand`, `when_list`, `else_expr` must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_case(
+    state: *mut RaParseState,
+    operand: *mut RaNode,
+    when_list: *mut RaNode,
+    else_expr: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let case_operand = if operand.is_null() {
+        None
+    } else {
+        let Some(expr) = decode_expr(st, operand) else {
+            st.push_error(
+                "ra_case: invalid operand node".to_owned(),
+            );
+            return std::ptr::null_mut();
+        };
+        Some(Box::new(expr))
+    };
+    let Some(indices) = decode_list(st, when_list) else {
+        st.push_error("ra_case: invalid when list".to_owned());
+        return std::ptr::null_mut();
+    };
+    if indices.len() % 2 != 0 {
+        st.push_error(
+            "ra_case: when list must have even length".to_owned(),
+        );
+        return std::ptr::null_mut();
+    }
+    let mut when_clauses =
+        Vec::with_capacity(indices.len() / 2);
+    let mut iter = indices.into_iter();
+    while let Some(cond_idx) = iter.next() {
+        let Some(result_idx) = iter.next() else {
+            st.push_error(
+                "ra_case: when list truncated".to_owned(),
+            );
+            return std::ptr::null_mut();
+        };
+        let Some(cond) = st.take_expr(cond_idx) else {
+            st.push_error(format!(
+                "ra_case: invalid condition index {cond_idx}"
+            ));
+            return std::ptr::null_mut();
+        };
+        let Some(result) = st.take_expr(result_idx) else {
+            st.push_error(format!(
+                "ra_case: invalid result index {result_idx}"
+            ));
+            return std::ptr::null_mut();
+        };
+        when_clauses.push((cond, result));
+    }
+    let else_result = if else_expr.is_null() {
+        None
+    } else {
+        let Some(expr) = decode_expr(st, else_expr) else {
+            st.push_error(
+                "ra_case: invalid else expression".to_owned(),
+            );
+            return std::ptr::null_mut();
+        };
+        Some(Box::new(expr))
+    };
+    st.push_expr(Expr::Case {
+        operand: case_operand,
+        when_clauses,
+        else_result,
+    })
+}
+
+/// Build a CAST expression.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `expr` must be a valid tagged pointer or null.
+/// - `type_str` must point to at least `type_len` valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn ra_cast(
+    state: *mut RaParseState,
+    expr: *mut RaNode,
+    type_str: *const c_char,
+    type_len: usize,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(inner_expr) = decode_expr(st, expr) else {
+        st.push_error(
+            "ra_cast: invalid expression node".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    let target_type =
+        unsafe { c_str_len_to_string(type_str, type_len) };
+    st.push_expr(Expr::Cast {
+        expr: Box::new(inner_expr),
+        target_type,
+    })
+}
+
+/// Build a `SubQuery` expression.
+///
+/// `type_code` encoding: 0=Scalar, 1=Exists, 2=In, 3=Any, 4=All.
+/// `rel_node` is the subquery `RelExpr`.
+/// `test_expr` is nullable (the left-hand expression for IN/ANY/ALL).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `rel_node` must be a valid tagged Rel pointer or null.
+/// - `test_expr` must be a valid tagged Expr pointer or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_subquery(
+    state: *mut RaParseState,
+    type_code: u32,
+    rel_node: *mut RaNode,
+    test_expr: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let subquery_type = match type_code {
+        0 => SubQueryType::Scalar,
+        1 => SubQueryType::Exists,
+        2 => SubQueryType::In,
+        3 => SubQueryType::Any,
+        4 => SubQueryType::All,
+        other => {
+            st.push_error(format!(
+                "ra_subquery: unknown type code {other}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+    let Some(query_rel) = decode_rel(st, rel_node) else {
+        st.push_error(
+            "ra_subquery: invalid rel node".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    let test = if test_expr.is_null() {
+        None
+    } else {
+        let Some(expr) = decode_expr(st, test_expr) else {
+            st.push_error(
+                "ra_subquery: invalid test expression".to_owned(),
+            );
+            return std::ptr::null_mut();
+        };
+        Some(Box::new(expr))
+    };
+    st.push_expr(Expr::SubQuery {
+        subquery_type,
+        query: Box::new(query_rel),
+        test_expr: test,
+    })
+}
+
 /// Build a function call expression.
 ///
 /// `args_list` is a tagged list of `Expr` indices.
@@ -652,6 +1054,233 @@ pub unsafe extern "C" fn ra_func(
     st.push_expr(Expr::Function {
         name: func_name,
         args,
+    })
+}
+
+/// Build an Array constructor expression.
+///
+/// `elem_list` is a tagged list of `Expr` indices.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `elem_list` must be a valid tagged pointer or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_array(
+    state: *mut RaParseState,
+    elem_list: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let elements = collect_exprs(st, elem_list);
+    st.push_expr(Expr::Array(elements))
+}
+
+/// Build an `ArrayIndex` expression (e.g., `arr[2]`).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `array_expr` and `index_expr` must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_array_index(
+    state: *mut RaParseState,
+    array_expr: *mut RaNode,
+    index_expr: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(array) = decode_expr(st, array_expr) else {
+        st.push_error(
+            "ra_array_index: invalid array expression".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    let Some(index) = decode_expr(st, index_expr) else {
+        st.push_error(
+            "ra_array_index: invalid index expression".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    st.push_expr(Expr::ArrayIndex(Box::new(array), Box::new(index)))
+}
+
+/// Build a `FieldAccess` expression (e.g., `(row).field_name`).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `expr` must be a valid tagged pointer or null.
+/// - `field_name` must point to at least `field_len` valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn ra_field_access(
+    state: *mut RaParseState,
+    expr: *mut RaNode,
+    field_name: *const c_char,
+    field_len: usize,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(base_expr) = decode_expr(st, expr) else {
+        st.push_error(
+            "ra_field_access: invalid expression node".to_owned(),
+        );
+        return std::ptr::null_mut();
+    };
+    let name =
+        unsafe { c_str_len_to_string(field_name, field_len) };
+    st.push_expr(Expr::FieldAccess {
+        expr: Box::new(base_expr),
+        field_name: name,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate and window expression builders
+// ---------------------------------------------------------------------------
+
+/// Build an `AggregateExpr` node.
+///
+/// `func_code` encoding: 0=Count, 1=Sum, 2=Avg, 3=Min, 4=Max, 5=StdDev,
+/// 6=Variance, 7=StringAgg, 8=ArrayAgg.
+/// `arg` is nullable (null for COUNT(*) with no argument).
+/// `distinct`: 0 = no DISTINCT, nonzero = DISTINCT.
+/// `alias`/`alias_len`: optional output alias (null/0 for none).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `arg` must be a valid tagged Expr pointer or null.
+/// - `alias` must point to at least `alias_len` valid bytes, or be null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_agg_expr(
+    state: *mut RaParseState,
+    func_code: u32,
+    arg: *mut RaNode,
+    distinct: u32,
+    alias: *const c_char,
+    alias_len: usize,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let function = match func_code {
+        0 => AggregateFunction::Count,
+        1 => AggregateFunction::Sum,
+        2 => AggregateFunction::Avg,
+        3 => AggregateFunction::Min,
+        4 => AggregateFunction::Max,
+        5 => AggregateFunction::StdDev,
+        6 => AggregateFunction::Variance,
+        7 => AggregateFunction::StringAgg,
+        8 => AggregateFunction::ArrayAgg,
+        other => {
+            st.push_error(format!(
+                "ra_agg_expr: unknown function code {other}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+    let arg_expr = if arg.is_null() {
+        None
+    } else {
+        let Some(expr) = decode_expr(st, arg) else {
+            st.push_error(
+                "ra_agg_expr: invalid arg expression".to_owned(),
+            );
+            return std::ptr::null_mut();
+        };
+        Some(expr)
+    };
+    let alias_str = unsafe { c_str_len_to_string(alias, alias_len) };
+    let alias_opt = if alias_str.is_empty() {
+        None
+    } else {
+        Some(alias_str)
+    };
+    st.push_agg_expr(AggregateExpr {
+        function,
+        arg: arg_expr,
+        distinct: distinct != 0,
+        alias: alias_opt,
+    })
+}
+
+/// Build a `WindowExpr` node.
+///
+/// `func_code` encoding: 0=Avg, 1=Sum, 2=Count, 3=Min, 4=Max,
+/// 5=RowNumber, 6=Rank, 7=DenseRank, 8=PercentRank, 9=Ntile,
+/// 10=Lag, 11=Lead, 12=FirstValue, 13=LastValue, 14=NthValue.
+/// `arg` is nullable.
+/// `partition_list` is a tagged list of `Expr` indices for PARTITION BY.
+/// `order_list` is a tagged list of `SortKey` indices for ORDER BY.
+/// `alias`/`alias_len`: optional output alias.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `arg`, `partition_list`, `order_list` must be valid tagged ptrs or null.
+/// - `alias` must point to at least `alias_len` valid bytes, or be null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_window_expr(
+    state: *mut RaParseState,
+    func_code: u32,
+    arg: *mut RaNode,
+    partition_list: *mut RaNode,
+    order_list: *mut RaNode,
+    alias: *const c_char,
+    alias_len: usize,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let function = match func_code {
+        0 => WindowFunction::Avg,
+        1 => WindowFunction::Sum,
+        2 => WindowFunction::Count,
+        3 => WindowFunction::Min,
+        4 => WindowFunction::Max,
+        5 => WindowFunction::RowNumber,
+        6 => WindowFunction::Rank,
+        7 => WindowFunction::DenseRank,
+        8 => WindowFunction::PercentRank,
+        9 => WindowFunction::Ntile,
+        10 => WindowFunction::Lag,
+        11 => WindowFunction::Lead,
+        12 => WindowFunction::FirstValue,
+        13 => WindowFunction::LastValue,
+        14 => WindowFunction::NthValue,
+        other => {
+            st.push_error(format!(
+                "ra_window_expr: unknown function code {other}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+    let arg_expr = if arg.is_null() {
+        None
+    } else {
+        let Some(expr) = decode_expr(st, arg) else {
+            st.push_error(
+                "ra_window_expr: invalid arg expression".to_owned(),
+            );
+            return std::ptr::null_mut();
+        };
+        Some(expr)
+    };
+    let partition_by = collect_exprs(st, partition_list);
+    let order_by = collect_sort_keys(st, order_list);
+    let alias_str = unsafe { c_str_len_to_string(alias, alias_len) };
+    let alias_opt = if alias_str.is_empty() {
+        None
+    } else {
+        Some(alias_str)
+    };
+    st.push_window_expr(WindowExpr {
+        function,
+        arg: arg_expr,
+        partition_by,
+        order_by,
+        frame: None,
+        alias: alias_opt,
     })
 }
 
@@ -772,7 +1401,32 @@ fn collect_exprs(
     result
 }
 
+/// Collect `SortKey` values from a tagged list pointer.
+///
+/// Returns an empty vec if the pointer is null or not a valid list.
+fn collect_sort_keys(
+    state: &RaParseState,
+    list_ptr: *mut RaNode,
+) -> Vec<SortKey> {
+    let Some(indices) = decode_list(state, list_ptr) else {
+        return vec![];
+    };
+    let mut result = Vec::with_capacity(indices.len());
+    for idx in indices {
+        if let Some(key) = state.take_sort_key(idx) {
+            result.push(key);
+        }
+    }
+    result
+}
+
 #[cfg(test)]
+#[expect(
+    clippy::panic,
+    clippy::expect_used,
+    clippy::approx_constant,
+    reason = "test code uses panic for assertions and expect for unwrapping"
+)]
 mod tests {
     use super::*;
 
@@ -788,6 +1442,10 @@ mod tests {
     unsafe fn free_state(state: *mut RaParseState) -> RaParseState {
         unsafe { *Box::from_raw(state) }
     }
+
+    // -----------------------------------------------------------------------
+    // Existing builder tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn null_state_returns_null() {
@@ -831,7 +1489,6 @@ mod tests {
         let left = unsafe { ra_scan(st, c"a".as_ptr()) };
         let right = unsafe { ra_scan(st, c"b".as_ptr()) };
         let cond = unsafe { ra_const_int(st, 1) };
-        // 1 for Expr -> we need a bool-ish constant for the condition
         let join = unsafe { ra_join(st, 0, left, right, cond) };
         assert!(!join.is_null());
 
@@ -1037,5 +1694,970 @@ mod tests {
         let state = unsafe { free_state(st) };
         let errs = state.take_result().expect_err("should have errors");
         assert!(errs[0].contains("unknown operator"));
+    }
+
+    // -----------------------------------------------------------------------
+    // New builder tests: Priority 1 Expr builders
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn const_bool_true() {
+        let st = new_state();
+        let node = unsafe { ra_const_bool(st, 1) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        assert_eq!(expr, Expr::Const(Const::Bool(true)));
+    }
+
+    #[test]
+    fn const_bool_false() {
+        let st = new_state();
+        let node = unsafe { ra_const_bool(st, 0) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        assert_eq!(expr, Expr::Const(Const::Bool(false)));
+    }
+
+    #[test]
+    fn const_bool_null_state() {
+        let result =
+            unsafe { ra_const_bool(std::ptr::null_mut(), 1) };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn unary_op_not() {
+        let st = new_state();
+        let inner = unsafe { ra_const_bool(st, 1) };
+        let node = unsafe { ra_unary_op(st, 0, inner) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        assert!(matches!(
+            expr,
+            Expr::UnaryOp { op: UnaryOp::Not, .. }
+        ));
+    }
+
+    #[test]
+    fn unary_op_is_null() {
+        let st = new_state();
+        let col = unsafe { ra_column(st, c"x".as_ptr()) };
+        let node = unsafe { ra_unary_op(st, 1, col) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        assert!(matches!(
+            expr,
+            Expr::UnaryOp { op: UnaryOp::IsNull, .. }
+        ));
+    }
+
+    #[test]
+    fn unary_op_is_not_null() {
+        let st = new_state();
+        let col = unsafe { ra_column(st, c"x".as_ptr()) };
+        let node = unsafe { ra_unary_op(st, 2, col) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        assert!(matches!(
+            expr,
+            Expr::UnaryOp { op: UnaryOp::IsNotNull, .. }
+        ));
+    }
+
+    #[test]
+    fn unary_op_neg() {
+        let st = new_state();
+        let val = unsafe { ra_const_int(st, 42) };
+        let node = unsafe { ra_unary_op(st, 3, val) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        assert!(matches!(
+            expr,
+            Expr::UnaryOp { op: UnaryOp::Neg, .. }
+        ));
+    }
+
+    #[test]
+    fn unary_op_invalid_code() {
+        let st = new_state();
+        let val = unsafe { ra_const_int(st, 1) };
+        let node = unsafe { ra_unary_op(st, 99, val) };
+        assert!(node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let errs = state.take_result().expect_err("should have errors");
+        assert!(errs[0].contains("unknown operator"));
+    }
+
+    #[test]
+    fn unary_op_null_state() {
+        let result = unsafe {
+            ra_unary_op(std::ptr::null_mut(), 0, std::ptr::null_mut())
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn case_searched() {
+        let st = new_state();
+        // CASE WHEN x > 0 THEN 'positive' ELSE 'non-positive' END
+        let col = unsafe { ra_column(st, c"x".as_ptr()) };
+        let zero = unsafe { ra_const_int(st, 0) };
+        let cond = unsafe { ra_binop(st, 8, col, zero) }; // Gt
+        let result = unsafe { ra_const_str(st, c"positive".as_ptr()) };
+        let else_val =
+            unsafe { ra_const_str(st, c"non-positive".as_ptr()) };
+
+        let when_list = unsafe { ra_list_new(st) };
+        let when_list =
+            unsafe { ra_list_push(st, when_list, cond) };
+        let when_list =
+            unsafe { ra_list_push(st, when_list, result) };
+
+        let node = unsafe {
+            ra_case(st, std::ptr::null_mut(), when_list, else_val)
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        if let Expr::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } = &expr
+        {
+            assert!(operand.is_none());
+            assert_eq!(when_clauses.len(), 1);
+            assert!(else_result.is_some());
+        } else {
+            panic!("expected Case variant");
+        }
+    }
+
+    #[test]
+    fn case_simple_with_operand() {
+        let st = new_state();
+        // CASE x WHEN 1 THEN 'one' END
+        let operand = unsafe { ra_column(st, c"x".as_ptr()) };
+        let when_val = unsafe { ra_const_int(st, 1) };
+        let result = unsafe { ra_const_str(st, c"one".as_ptr()) };
+
+        let when_list = unsafe { ra_list_new(st) };
+        let when_list =
+            unsafe { ra_list_push(st, when_list, when_val) };
+        let when_list =
+            unsafe { ra_list_push(st, when_list, result) };
+
+        let node = unsafe {
+            ra_case(st, operand, when_list, std::ptr::null_mut())
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        if let Expr::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } = &expr
+        {
+            assert!(operand.is_some());
+            assert_eq!(when_clauses.len(), 1);
+            assert!(else_result.is_none());
+        } else {
+            panic!("expected Case variant");
+        }
+    }
+
+    #[test]
+    fn case_odd_when_list_records_error() {
+        let st = new_state();
+        let val = unsafe { ra_const_int(st, 1) };
+        let when_list = unsafe { ra_list_new(st) };
+        let when_list =
+            unsafe { ra_list_push(st, when_list, val) };
+        let node = unsafe {
+            ra_case(
+                st,
+                std::ptr::null_mut(),
+                when_list,
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let errs = state.take_result().expect_err("should have errors");
+        assert!(errs[0].contains("even length"));
+    }
+
+    #[test]
+    fn case_null_state() {
+        let result = unsafe {
+            ra_case(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn cast_builds_correctly() {
+        let st = new_state();
+        let val = unsafe { ra_const_int(st, 42) };
+        let type_name = b"VARCHAR";
+        let node = unsafe {
+            ra_cast(
+                st,
+                val,
+                type_name.as_ptr().cast::<c_char>(),
+                type_name.len(),
+            )
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        if let Expr::Cast {
+            target_type, expr: inner, ..
+        } = &expr
+        {
+            assert_eq!(target_type, "VARCHAR");
+            assert_eq!(*inner, Box::new(Expr::Const(Const::Int(42))));
+        } else {
+            panic!("expected Cast variant");
+        }
+    }
+
+    #[test]
+    fn cast_null_state() {
+        let result = unsafe {
+            ra_cast(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                0,
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn subquery_scalar() {
+        let st = new_state();
+        let scan = unsafe { ra_scan(st, c"t".as_ptr()) };
+        let node = unsafe {
+            ra_subquery(st, 0, scan, std::ptr::null_mut())
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        if let Expr::SubQuery {
+            subquery_type,
+            test_expr,
+            ..
+        } = &expr
+        {
+            assert_eq!(*subquery_type, SubQueryType::Scalar);
+            assert!(test_expr.is_none());
+        } else {
+            panic!("expected SubQuery variant");
+        }
+    }
+
+    #[test]
+    fn subquery_exists() {
+        let st = new_state();
+        let scan = unsafe { ra_scan(st, c"t".as_ptr()) };
+        let node = unsafe {
+            ra_subquery(st, 1, scan, std::ptr::null_mut())
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        assert!(matches!(
+            expr,
+            Expr::SubQuery { subquery_type: SubQueryType::Exists, .. }
+        ));
+    }
+
+    #[test]
+    fn subquery_in_with_test_expr() {
+        let st = new_state();
+        let scan = unsafe { ra_scan(st, c"t".as_ptr()) };
+        let test = unsafe { ra_column(st, c"x".as_ptr()) };
+        let node = unsafe { ra_subquery(st, 2, scan, test) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        if let Expr::SubQuery {
+            subquery_type,
+            test_expr,
+            ..
+        } = &expr
+        {
+            assert_eq!(*subquery_type, SubQueryType::In);
+            assert!(test_expr.is_some());
+        } else {
+            panic!("expected SubQuery variant");
+        }
+    }
+
+    #[test]
+    fn subquery_invalid_type_records_error() {
+        let st = new_state();
+        let scan = unsafe { ra_scan(st, c"t".as_ptr()) };
+        let node = unsafe {
+            ra_subquery(st, 99, scan, std::ptr::null_mut())
+        };
+        assert!(node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let errs = state.take_result().expect_err("should have errors");
+        assert!(errs[0].contains("unknown type code"));
+    }
+
+    #[test]
+    fn subquery_null_state() {
+        let result = unsafe {
+            ra_subquery(
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    // -----------------------------------------------------------------------
+    // New builder tests: Priority 1 RelExpr builders
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn intersect_builds_correctly() {
+        let st = new_state();
+        let left = unsafe { ra_scan(st, c"a".as_ptr()) };
+        let right = unsafe { ra_scan(st, c"b".as_ptr()) };
+        let node = unsafe { ra_intersect(st, left, right, 0) };
+        assert!(!node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let rel = state.take_result().expect("should succeed");
+        assert!(matches!(
+            rel,
+            RelExpr::Intersect { all: false, .. }
+        ));
+    }
+
+    #[test]
+    fn intersect_all_builds_correctly() {
+        let st = new_state();
+        let left = unsafe { ra_scan(st, c"a".as_ptr()) };
+        let right = unsafe { ra_scan(st, c"b".as_ptr()) };
+        let node = unsafe { ra_intersect(st, left, right, 1) };
+        assert!(!node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let rel = state.take_result().expect("should succeed");
+        assert!(matches!(
+            rel,
+            RelExpr::Intersect { all: true, .. }
+        ));
+    }
+
+    #[test]
+    fn intersect_null_state() {
+        let result = unsafe {
+            ra_intersect(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn except_builds_correctly() {
+        let st = new_state();
+        let left = unsafe { ra_scan(st, c"a".as_ptr()) };
+        let right = unsafe { ra_scan(st, c"b".as_ptr()) };
+        let node = unsafe { ra_except(st, left, right, 0) };
+        assert!(!node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let rel = state.take_result().expect("should succeed");
+        assert!(matches!(
+            rel,
+            RelExpr::Except { all: false, .. }
+        ));
+    }
+
+    #[test]
+    fn except_all_builds_correctly() {
+        let st = new_state();
+        let left = unsafe { ra_scan(st, c"a".as_ptr()) };
+        let right = unsafe { ra_scan(st, c"b".as_ptr()) };
+        let node = unsafe { ra_except(st, left, right, 1) };
+        assert!(!node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let rel = state.take_result().expect("should succeed");
+        assert!(matches!(
+            rel,
+            RelExpr::Except { all: true, .. }
+        ));
+    }
+
+    #[test]
+    fn except_null_state() {
+        let result = unsafe {
+            ra_except(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn values_builds_correctly() {
+        let st = new_state();
+        // VALUES (1, 'a'), (2, 'b')
+        let v1 = unsafe { ra_const_int(st, 1) };
+        let v2 = unsafe { ra_const_str(st, c"a".as_ptr()) };
+        let row1 = unsafe { ra_list_new(st) };
+        let row1 = unsafe { ra_list_push(st, row1, v1) };
+        let row1 = unsafe { ra_list_push(st, row1, v2) };
+
+        let v3 = unsafe { ra_const_int(st, 2) };
+        let v4 = unsafe { ra_const_str(st, c"b".as_ptr()) };
+        let row2 = unsafe { ra_list_new(st) };
+        let row2 = unsafe { ra_list_push(st, row2, v3) };
+        let row2 = unsafe { ra_list_push(st, row2, v4) };
+
+        let rows = unsafe { ra_list_new(st) };
+        let rows = unsafe { ra_list_push(st, rows, row1) };
+        let rows = unsafe { ra_list_push(st, rows, row2) };
+
+        let node = unsafe { ra_values(st, rows) };
+        assert!(!node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let rel = state.take_result().expect("should succeed");
+        if let RelExpr::Values { rows } = &rel {
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].len(), 2);
+            assert_eq!(rows[1].len(), 2);
+        } else {
+            panic!("expected Values variant");
+        }
+    }
+
+    #[test]
+    fn values_null_state() {
+        let result = unsafe {
+            ra_values(std::ptr::null_mut(), std::ptr::null_mut())
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn recursive_cte_builds_correctly() {
+        let st = new_state();
+        let base = unsafe { ra_scan(st, c"edges".as_ptr()) };
+        let recursive =
+            unsafe { ra_scan(st, c"edges".as_ptr()) };
+        let body =
+            unsafe { ra_scan(st, c"reachable".as_ptr()) };
+        let name = b"reachable";
+        let node = unsafe {
+            ra_recursive_cte(
+                st,
+                name.as_ptr().cast::<c_char>(),
+                name.len(),
+                base,
+                recursive,
+                body,
+            )
+        };
+        assert!(!node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let rel = state.take_result().expect("should succeed");
+        if let RelExpr::RecursiveCTE {
+            name,
+            cycle_detection,
+            ..
+        } = &rel
+        {
+            assert_eq!(name, "reachable");
+            assert!(cycle_detection.is_none());
+        } else {
+            panic!("expected RecursiveCTE variant");
+        }
+    }
+
+    #[test]
+    fn recursive_cte_null_state() {
+        let result = unsafe {
+            ra_recursive_cte(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    // -----------------------------------------------------------------------
+    // New builder tests: AggregateExpr and WindowExpr
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn agg_expr_count_star() {
+        let st = new_state();
+        let node = unsafe {
+            ra_agg_expr(
+                st,
+                0,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+                0,
+            )
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Agg);
+        let state = unsafe { free_state(st) };
+        let agg = state.take_agg_expr(idx).expect("should exist");
+        assert_eq!(agg.function, AggregateFunction::Count);
+        assert!(agg.arg.is_none());
+        assert!(!agg.distinct);
+        assert!(agg.alias.is_none());
+    }
+
+    #[test]
+    fn agg_expr_sum_distinct_with_alias() {
+        let st = new_state();
+        let col = unsafe { ra_column(st, c"amount".as_ptr()) };
+        let alias = b"total";
+        let node = unsafe {
+            ra_agg_expr(
+                st,
+                1,
+                col,
+                1,
+                alias.as_ptr().cast::<c_char>(),
+                alias.len(),
+            )
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Agg);
+        let state = unsafe { free_state(st) };
+        let agg = state.take_agg_expr(idx).expect("should exist");
+        assert_eq!(agg.function, AggregateFunction::Sum);
+        assert!(agg.arg.is_some());
+        assert!(agg.distinct);
+        assert_eq!(agg.alias.as_deref(), Some("total"));
+    }
+
+    #[test]
+    fn agg_expr_all_functions() {
+        let st = new_state();
+        let expected = [
+            (0_u32, AggregateFunction::Count),
+            (1, AggregateFunction::Sum),
+            (2, AggregateFunction::Avg),
+            (3, AggregateFunction::Min),
+            (4, AggregateFunction::Max),
+            (5, AggregateFunction::StdDev),
+            (6, AggregateFunction::Variance),
+            (7, AggregateFunction::StringAgg),
+            (8, AggregateFunction::ArrayAgg),
+        ];
+        for (code, func) in expected {
+            let node = unsafe {
+                ra_agg_expr(
+                    st,
+                    code,
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null(),
+                    0,
+                )
+            };
+            assert!(!node.is_null());
+            let (tag, idx) = decode(node).expect("should decode");
+            assert_eq!(tag, NodeTag::Agg);
+            let agg = unsafe { &*st }
+                .take_agg_expr(idx)
+                .expect("should exist");
+            assert_eq!(agg.function, func);
+        }
+        unsafe { free_state(st) };
+    }
+
+    #[test]
+    fn agg_expr_invalid_function_records_error() {
+        let st = new_state();
+        let node = unsafe {
+            ra_agg_expr(
+                st,
+                99,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+                0,
+            )
+        };
+        assert!(node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let errs = state.take_result().expect_err("should have errors");
+        assert!(errs[0].contains("unknown function code"));
+    }
+
+    #[test]
+    fn agg_expr_null_state() {
+        let result = unsafe {
+            ra_agg_expr(
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+                0,
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn window_expr_row_number() {
+        let st = new_state();
+        let alias = b"rn";
+        let node = unsafe {
+            ra_window_expr(
+                st,
+                5,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                alias.as_ptr().cast::<c_char>(),
+                alias.len(),
+            )
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Window);
+        let state = unsafe { free_state(st) };
+        let win = state.take_window_expr(idx).expect("should exist");
+        assert_eq!(win.function, WindowFunction::RowNumber);
+        assert!(win.arg.is_none());
+        assert!(win.partition_by.is_empty());
+        assert!(win.order_by.is_empty());
+        assert_eq!(win.alias.as_deref(), Some("rn"));
+    }
+
+    #[test]
+    fn window_expr_sum_with_partition_and_order() {
+        let st = new_state();
+        let arg = unsafe { ra_column(st, c"amount".as_ptr()) };
+
+        let part_col =
+            unsafe { ra_column(st, c"dept".as_ptr()) };
+        let part_list = unsafe { ra_list_new(st) };
+        let part_list =
+            unsafe { ra_list_push(st, part_list, part_col) };
+
+        let ord_col =
+            unsafe { ra_column(st, c"date".as_ptr()) };
+        let sk = unsafe { ra_sort_key(st, ord_col, 1, 0) };
+        let ord_list = unsafe { ra_list_new(st) };
+        let ord_list =
+            unsafe { ra_list_push(st, ord_list, sk) };
+
+        let node = unsafe {
+            ra_window_expr(
+                st,
+                1,
+                arg,
+                part_list,
+                ord_list,
+                std::ptr::null(),
+                0,
+            )
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Window);
+        let state = unsafe { free_state(st) };
+        let win = state.take_window_expr(idx).expect("should exist");
+        assert_eq!(win.function, WindowFunction::Sum);
+        assert!(win.arg.is_some());
+        assert_eq!(win.partition_by.len(), 1);
+        assert_eq!(win.order_by.len(), 1);
+        assert!(win.alias.is_none());
+    }
+
+    #[test]
+    fn window_expr_all_functions() {
+        let st = new_state();
+        let expected = [
+            (0_u32, WindowFunction::Avg),
+            (1, WindowFunction::Sum),
+            (2, WindowFunction::Count),
+            (3, WindowFunction::Min),
+            (4, WindowFunction::Max),
+            (5, WindowFunction::RowNumber),
+            (6, WindowFunction::Rank),
+            (7, WindowFunction::DenseRank),
+            (8, WindowFunction::PercentRank),
+            (9, WindowFunction::Ntile),
+            (10, WindowFunction::Lag),
+            (11, WindowFunction::Lead),
+            (12, WindowFunction::FirstValue),
+            (13, WindowFunction::LastValue),
+            (14, WindowFunction::NthValue),
+        ];
+        for (code, func) in expected {
+            let node = unsafe {
+                ra_window_expr(
+                    st,
+                    code,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    0,
+                )
+            };
+            assert!(!node.is_null());
+            let (tag, idx) = decode(node).expect("should decode");
+            assert_eq!(tag, NodeTag::Window);
+            let win = unsafe { &*st }
+                .take_window_expr(idx)
+                .expect("should exist");
+            assert_eq!(win.function, func);
+        }
+        unsafe { free_state(st) };
+    }
+
+    #[test]
+    fn window_expr_invalid_function_records_error() {
+        let st = new_state();
+        let node = unsafe {
+            ra_window_expr(
+                st,
+                99,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                0,
+            )
+        };
+        assert!(node.is_null());
+
+        let state = unsafe { free_state(st) };
+        let errs = state.take_result().expect_err("should have errors");
+        assert!(errs[0].contains("unknown function code"));
+    }
+
+    #[test]
+    fn window_expr_null_state() {
+        let result = unsafe {
+            ra_window_expr(
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                0,
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    // -----------------------------------------------------------------------
+    // New builder tests: Priority 2 Expr builders
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn array_builds_correctly() {
+        let st = new_state();
+        let v1 = unsafe { ra_const_int(st, 1) };
+        let v2 = unsafe { ra_const_int(st, 2) };
+        let v3 = unsafe { ra_const_int(st, 3) };
+        let list = unsafe { ra_list_new(st) };
+        let list = unsafe { ra_list_push(st, list, v1) };
+        let list = unsafe { ra_list_push(st, list, v2) };
+        let list = unsafe { ra_list_push(st, list, v3) };
+        let node = unsafe { ra_array(st, list) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        if let Expr::Array(elements) = &expr {
+            assert_eq!(elements.len(), 3);
+        } else {
+            panic!("expected Array variant");
+        }
+    }
+
+    #[test]
+    fn array_empty() {
+        let st = new_state();
+        let list = unsafe { ra_list_new(st) };
+        let node = unsafe { ra_array(st, list) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        if let Expr::Array(elements) = &expr {
+            assert!(elements.is_empty());
+        } else {
+            panic!("expected Array variant");
+        }
+    }
+
+    #[test]
+    fn array_null_state() {
+        let result = unsafe {
+            ra_array(std::ptr::null_mut(), std::ptr::null_mut())
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn array_index_builds_correctly() {
+        let st = new_state();
+        let arr = unsafe { ra_column(st, c"arr".as_ptr()) };
+        let idx_expr = unsafe { ra_const_int(st, 2) };
+        let node = unsafe { ra_array_index(st, arr, idx_expr) };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        assert!(matches!(expr, Expr::ArrayIndex(_, _)));
+    }
+
+    #[test]
+    fn array_index_null_state() {
+        let result = unsafe {
+            ra_array_index(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn field_access_builds_correctly() {
+        let st = new_state();
+        let base = unsafe { ra_column(st, c"row_val".as_ptr()) };
+        let field = b"name";
+        let node = unsafe {
+            ra_field_access(
+                st,
+                base,
+                field.as_ptr().cast::<c_char>(),
+                field.len(),
+            )
+        };
+        assert!(!node.is_null());
+
+        let (tag, idx) = decode(node).expect("should decode");
+        assert_eq!(tag, NodeTag::Expr);
+        let state = unsafe { free_state(st) };
+        let expr = state.take_expr(idx).expect("should exist");
+        if let Expr::FieldAccess {
+            field_name,
+            ..
+        } = &expr
+        {
+            assert_eq!(field_name, "name");
+        } else {
+            panic!("expected FieldAccess variant");
+        }
+    }
+
+    #[test]
+    fn field_access_null_state() {
+        let result = unsafe {
+            ra_field_access(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                0,
+            )
+        };
+        assert!(result.is_null());
     }
 }
