@@ -17,21 +17,6 @@
 //! - `11`: all ones (not stored)
 //! - `10`: mixed (stored explicitly)
 //! - `01`: unused (for capacity management)
-//!
-//! # Example
-//!
-//! ```
-//! use sparsemap::SparseMap;
-//!
-//! let mut map = SparseMap::new();
-//! map.set(42);
-//! map.set(1000);
-//! map.set(1_000_000);
-//!
-//! assert!(map.is_set(42));
-//! assert!(!map.is_set(43));
-//! assert_eq!(map.count(), 3);
-//! ```
 
 use std::fmt;
 

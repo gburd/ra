@@ -12,13 +12,13 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```rust,no_run
 //! use ra_engine::lazy_rules::{LazyQueryPattern, LazyRuleCompiler};
+//! use ra_core::algebra::RelExpr;
 //!
-//! // Analyze query structure
+//! let expr = RelExpr::scan("users");
 //! let pattern = LazyQueryPattern::analyze(&expr);
 //!
-//! // Load only relevant rules
 //! let compiler = LazyRuleCompiler::new();
 //! let rules = compiler.compile(&pattern);
 //! ```

@@ -11,7 +11,7 @@
 //! - Only enabled when `--rules` flag is passed (CLI) or `track_rules` is set (API)
 //! - Zero overhead in production (PostgreSQL, Stoolap) when disabled
 
-use sparsemap::SparseMap;
+use crate::sparsemap::SparseMap;
 use std::sync::OnceLock;
 
 /// Rule ID type (supports up to 65,536 rules).
@@ -274,8 +274,11 @@ pub fn registry() -> &'static RuleRegistry {
 ///
 /// # Example
 /// ```
+/// # fn main() -> Result<(), anyhow::Error> {
 /// use ra_engine::rule_id;
 /// let id = rule_id!("and-true-left")?;
+/// # Ok(())
+/// # }
 /// ```
 #[macro_export]
 macro_rules! rule_id {

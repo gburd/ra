@@ -17,14 +17,11 @@ ra-cache = { workspace = true }
 ra-adaptive = { workspace = true }
 ra-config = { workspace = true }
 ra-parser = { workspace = true }
-ra-engine = { workspace = true }
+ra-engine = { workspace = true, features = ["timeline"] }
 ra-hardware = { workspace = true }
 ra-metadata = { workspace = true }
 ra-dialect = { workspace = true }
 ra-stats = { workspace = true }
-ra-tui = { workspace = true }
-ra-pg-monitor = { workspace = true }
-ra-regression = { path = "../ra-regression" }
 ra-ml = { path = "../ra-ml" }
 clap = { workspace = true }
 clap_complete = { workspace = true }

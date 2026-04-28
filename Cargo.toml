@@ -5,43 +5,23 @@ members = [
     "crates/ra-parser",
     "crates/ra-compiler",
     "crates/ra-engine",
-    "crates/ra-codegen",
     "crates/ra-dialect",
     "crates/ra-cli",
-    "crates/ra-web",
-    "crates/ra-wasm",
-    "crates/ra-wasm-docs",
-    "crates/ra-isolation",
     "crates/ra-adaptive",
-    "crates/ra-synthesis",
-    "crates/ra-discovery",
     "crates/ra-ml",
     "crates/ra-hardware",
-    "crates/ra-multimodel",
     "crates/ra-stats",
     "crates/ra-metadata",
-    "crates/ra-catalog",
-    "crates/ra-tui",
     "crates/ra-config",
     "crates/ra-cache",
     "crates/ra-adapters",
-    "crates/ra-pg-monitor",
-    "crates/ra-pg-advisor",
-    "crates/ra-advisor",
     "crates/ra-test-utils",
-    "crates/ra-regression",
-    "crates/ra-wire",
-    "crates/ra-pooler",
-    "crates/sparsemap",
     "crates/sqlparser-ra",
-    "xtask",
 ]
-# Excluded from workspace build (require special setup or need fixes):
+# Excluded from workspace build (require special setup):
 # - ra-pg-extension: requires pg_config and PostgreSQL headers
-# - ra-pg-quic: requires pg_config and PostgreSQL headers (pgrx bgworker)
 exclude = [
     "crates/ra-pg-extension",
-    "crates/ra-pg-quic",
 ]
 
 [workspace.package]
@@ -72,23 +52,13 @@ egg = "0.9"
 timely = "0.12"
 differential-dataflow = "0.12"
 
-# Code generation
-cranelift = "0.110"
-cranelift-codegen = "0.110"
-cranelift-frontend = "0.110"
-cranelift-module = "0.110"
-cranelift-native = "0.110"
-wasmtime = "25.0"
-
 # CLI
 clap = { version = "4.5", features = ["derive", "cargo"] }
 clap_complete = "4.6"
 colored = "2.1"
 libc = "0.2"
 
-# Web
-rocket = { version = "0.5", features = ["json"] }
-rocket_ws = "0.1"
+# Async
 tokio = { version = "1", features = ["full"] }
 
 # Testing
@@ -103,57 +73,31 @@ chrono = "0.4"
 # Utilities
 regex = "1.10"
 
-# Wire protocol / networking
-quinn = "0.11"
-rustls = { version = "0.23", features = ["ring"] }
-bincode = "1.3"
-bitflags = "2.11"
-bytes = "1.11"
-zstd = "0.13"
-rcgen = "0.14"
-
 # File formats
 parquet = "53.4"
 
-# Data structures
-indexmap = "2.8"
-
 # Random number generation
 rand = { version = "0.8", features = ["getrandom"] }
-getrandom = { version = "0.2", features = ["js"] }
+getrandom = "0.2"
 
 # Workspace crates
 ra-core = { path = "crates/ra-core" }
 ra-parser = { path = "crates/ra-parser" }
 ra-compiler = { path = "crates/ra-compiler" }
 ra-engine = { path = "crates/ra-engine" }
-ra-codegen = { path = "crates/ra-codegen" }
 ra-dialect = { path = "crates/ra-dialect" }
-ra-wasm = { path = "crates/ra-wasm" }
-ra-isolation = { path = "crates/ra-isolation" }
 ra-adaptive = { path = "crates/ra-adaptive" }
-ra-synthesis = { path = "crates/ra-synthesis" }
-ra-discovery = { path = "crates/ra-discovery" }
 ra-ml = { path = "crates/ra-ml" }
 ra-hardware = { path = "crates/ra-hardware" }
-ra-multimodel = { path = "crates/ra-multimodel" }
 ra-stats = { path = "crates/ra-stats" }
 ra-metadata = { path = "crates/ra-metadata" }
-ra-catalog = { path = "crates/ra-catalog" }
-ra-tui = { path = "crates/ra-tui" }
 ra-config = { path = "crates/ra-config" }
 ra-cache = { path = "crates/ra-cache" }
 ra-adapters = { path = "crates/ra-adapters" }
-ra-pg-monitor = { path = "crates/ra-pg-monitor" }
-ra-pg-advisor = { path = "crates/ra-pg-advisor" }
 ra-test-utils = { path = "crates/ra-test-utils" }
-ra-wire = { path = "crates/ra-wire" }
-ra-pooler = { path = "crates/ra-pooler" }
 postgres = "0.19"
 stoolap = "0.3"
 toml = "0.8"
-crossterm = "0.29"
-ratatui = "0.30"
 
 [profile.release]
 lto = "thin"

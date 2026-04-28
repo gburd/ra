@@ -20,7 +20,6 @@ ra-core = { workspace = true }
 ra-hardware = { workspace = true }
 ra-metadata = { workspace = true, optional = true }
 ra-ml = { workspace = true }
-sparsemap = { path = "../sparsemap" }
 ra-stats = { workspace = true }
 egg = { workspace = true }
 serde = { workspace = true }

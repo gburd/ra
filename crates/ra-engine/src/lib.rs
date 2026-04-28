@@ -88,6 +88,7 @@ pub mod rule_knowledge;
 pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;
+pub(crate) mod sparsemap;
 pub mod shortcuts;
 pub mod stats_cache;
 // Phase 6: Timeline system (deferred)
