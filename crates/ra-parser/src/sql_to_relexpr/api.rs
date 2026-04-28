@@ -1,32 +1,21 @@
 use ra_core::algebra::RelExpr;
-use sqlparser::ast::Statement;
-use sqlparser::parser::Parser;
-
-use crate::parser::ProfileDialect;
-use crate::profile::ParserProfile;
 
 use super::error::SqlConversionError;
-use super::query::convert_query;
-
-/// Create an enhanced parser profile with common PostgreSQL extensions.
-fn create_enhanced_profile() -> ParserProfile {
-    ParserProfile::load("postgresql-17+pgvector+pg_trgm+pg_textsearch")
-        .unwrap_or_else(|_| ParserProfile::universal())
-}
+use crate::lime_parser;
 
 /// Parse multiple SQL statements and convert each to a `RelExpr`.
 ///
-/// Splits on semicolons. Non-SELECT statements are returned
-/// as errors for the individual entry.
+/// Splits on semicolons. Non-SELECT statements produce errors for that entry.
 ///
 /// # Errors
 ///
-/// Returns error if SQL parsing fails entirely.
+/// Returns error if SQL parsing fails entirely or no statements are found.
 pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
-    let profile = create_enhanced_profile();
-    let dialect = ProfileDialect::new(profile);
-    let statements = Parser::parse_sql(&dialect, sql)
-        .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
+    let statements: Vec<&str> = sql
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
 
     if statements.is_empty() {
         return Err(SqlConversionError::InvalidSql(
@@ -36,25 +25,27 @@ pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
 
     statements
         .iter()
-        .map(|stmt| match stmt {
-            Statement::Query(query) => convert_query(query),
-            _ => Err(SqlConversionError::UnsupportedFeature(
-                "only SELECT queries are supported".to_owned(),
-            )),
+        .map(|stmt| {
+            lime_parser::parse_sql(stmt)
+                .map_err(|errs| SqlConversionError::ParseError(errs.join("; ")))
         })
         .collect()
 }
 
 /// Parse SQL and convert to RelExpr.
 ///
+/// If multiple semicolon-separated statements are provided, returns
+/// the first one that successfully parses as a query.
+///
 /// # Errors
 ///
 /// Returns error if SQL is invalid or contains unsupported features.
 pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
-    let profile = create_enhanced_profile();
-    let dialect = ProfileDialect::new(profile);
-    let statements = Parser::parse_sql(&dialect, sql)
-        .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
+    let statements: Vec<&str> = sql
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
 
     if statements.is_empty() {
         return Err(SqlConversionError::InvalidSql(
@@ -62,13 +53,20 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
         ));
     }
 
+    // Try each statement; return the first successful parse.
+    let mut last_err = None;
     for stmt in &statements {
-        if let Statement::Query(query) = stmt {
-            return convert_query(query);
+        match lime_parser::parse_sql(stmt) {
+            Ok(rel) => return Ok(rel),
+            Err(errs) => {
+                last_err = Some(errs);
+            }
         }
     }
 
-    Err(SqlConversionError::UnsupportedFeature(
-        "only SELECT queries are supported".to_owned(),
+    Err(SqlConversionError::ParseError(
+        last_err
+            .map(|e| e.join("; "))
+            .unwrap_or_else(|| "no SQL statement found".to_owned()),
     ))
 }

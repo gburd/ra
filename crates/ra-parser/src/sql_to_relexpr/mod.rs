@@ -1,4 +1,4 @@
-//! SQL to RelExpr converter using sqlparser.
+//! SQL to RelExpr converter using the Lime LALR(1) parser.
 //!
 //! Supports SQL constructs:
 //! - SELECT with projection list, DISTINCT
@@ -14,16 +14,10 @@
 
 mod api;
 mod error;
-mod expr;
-mod groupby;
-mod helpers;
-mod operators;
-mod query;
-mod select;
-mod window;
 
 pub use api::{sql_to_relexpr, sql_to_relexprs};
 pub use error::SqlConversionError;
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests;
