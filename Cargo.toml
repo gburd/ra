@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/lime-sys",
+    "crates/lime-rs",
     "crates/ra-core",
     "crates/ra-parser",
     "crates/ra-compiler",
@@ -95,6 +97,8 @@ ra-config = { path = "crates/ra-config" }
 ra-cache = { path = "crates/ra-cache" }
 ra-adapters = { path = "crates/ra-adapters" }
 ra-test-utils = { path = "crates/ra-test-utils" }
+lime-sys = { path = "crates/lime-sys" }
+lime-rs = { path = "crates/lime-rs" }
 postgres = "0.19"
 stoolap = "0.3"
 toml = "0.8"
