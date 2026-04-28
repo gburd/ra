@@ -374,8 +374,8 @@ mod capabilities {
     #[test]
     fn test_stoolap_sql_dialect() {
         let adapter = StoolapAdapter::new();
-        // Stoolap uses PostgreSQL-compatible dialect
-        assert!(matches!(adapter.sql_dialect(), SqlDialect::Postgres));
+        // Stoolap is its own embedded database with a generic SQL dialect
+        assert!(matches!(adapter.sql_dialect(), SqlDialect::Generic));
     }
 
     #[test]
@@ -462,10 +462,10 @@ mod integration_workflow {
         // Compare database names
         assert_ne!(pg.database_name(), st.database_name());
 
-        // Both should support similar dialects
+        // Each adapter reports its own dialect
         use ra_core::SqlDialect;
         assert!(matches!(pg.sql_dialect(), SqlDialect::Postgres));
-        assert!(matches!(st.sql_dialect(), SqlDialect::Postgres));
+        assert!(matches!(st.sql_dialect(), SqlDialect::Generic));
     }
 }
 

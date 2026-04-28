@@ -155,6 +155,7 @@ fn compile_generated_parser(
         .include(lime_root.join("include"))
         .include(out_dir)
         .std("c11")
-        .warnings(false)
+        .warnings(true)
+        .extra_warnings(true)
         .compile("ra_sql_parser");
 }
