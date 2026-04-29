@@ -86,7 +86,7 @@ impl Updatability {
 /// An Oracle JSON Relational Duality view definition.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DualityView {
-    /// View name (e.g. "orders_dv").
+    /// View name (e.g. "`orders_dv`").
     pub name: String,
     /// Root table that anchors the document.
     pub root_table: String,
@@ -234,7 +234,7 @@ impl Default for DualityCostParams {
 /// search index exists). The scan cost covers all rows; the
 /// extraction cost covers only matching rows.
 ///
-/// Cost = total_rows * pred_eval + matching * (fetch + extract)
+/// Cost = `total_rows` * `pred_eval` + matching * (fetch + extract)
 #[must_use]
 pub fn estimate_document_cost(
     total_rows: f64,
@@ -260,7 +260,7 @@ pub fn estimate_document_cost(
 
 /// Estimate the cost of the relational decomposition path.
 ///
-/// Cost = sum(table_scans) + join_overhead + assembly_per_row
+/// Cost = `sum(table_scans)` + `join_overhead` + `assembly_per_row`
 ///
 /// The join overhead scales with the number of result rows (after
 /// applying selectivity) rather than the full table size, because
@@ -296,7 +296,7 @@ pub fn estimate_relational_cost(
 /// Estimate the cost of updating through a duality view.
 ///
 /// Each updated JSON field may fan out to multiple base table rows.
-/// Cost = n_affected_tables * fanout_cost * affected_rows
+/// Cost = `n_affected_tables` * `fanout_cost` * `affected_rows`
 #[must_use]
 pub fn estimate_update_cost(
     n_affected_tables: u32,
@@ -311,6 +311,7 @@ pub fn estimate_update_cost(
 /// Compares document fetch cost vs relational decomposition cost
 /// and returns the cheaper option.
 #[must_use]
+#[expect(clippy::implicit_hasher, reason = "always uses default hasher")]
 pub fn choose_access_path(
     view: &DualityView,
     table_row_counts: &HashMap<String, f64>,
@@ -377,7 +378,7 @@ pub struct AccessPathDecision {
     pub document_cost: f64,
     /// Estimated relational path cost.
     pub relational_cost: f64,
-    /// Ratio: document_cost / relational_cost.
+    /// Ratio: `document_cost` / `relational_cost`.
     /// < 1.0 means document is cheaper.
     pub cost_ratio: f64,
 }
@@ -411,6 +412,7 @@ pub fn eliminable_joins(view: &DualityView, accessed_fields: &[String]) -> Vec<S
 
 /// Cost savings from eliminating unnecessary joins.
 #[must_use]
+#[expect(clippy::implicit_hasher, reason = "always uses default hasher")]
 pub fn join_elimination_savings(
     eliminated_tables: &[String],
     table_row_counts: &HashMap<String, f64>,
@@ -449,17 +451,13 @@ pub enum PredicateTarget {
 pub fn predicate_target(
     view: &DualityView,
     field_path: &str,
-    has_index_on_column: bool,
+    _has_index_on_column: bool,
 ) -> PredicateTarget {
     for field in &view.fields {
         if field.json_path == field_path {
             return match &field.mapping {
                 DualityFieldMapping::Column { .. } => {
-                    if has_index_on_column {
-                        PredicateTarget::RelationalColumn
-                    } else {
-                        PredicateTarget::RelationalColumn
-                    }
+                    PredicateTarget::RelationalColumn
                 }
                 DualityFieldMapping::Nested { .. } | DualityFieldMapping::Array { .. } => {
                     PredicateTarget::JsonPath
@@ -583,14 +581,9 @@ fn contains_json_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, dep
             | RelLang::Lt([l, r])
             | RelLang::Le([l, r])
             | RelLang::Gt([l, r])
-            | RelLang::Ge([l, r]) => {
-                if contains_json_pattern(egraph, *l, depth - 1)
-                    || contains_json_pattern(egraph, *r, depth - 1)
-                {
-                    return true;
-                }
-            }
-            RelLang::And([l, r]) | RelLang::Or([l, r]) => {
+            | RelLang::Ge([l, r])
+            | RelLang::And([l, r])
+            | RelLang::Or([l, r]) => {
                 if contains_json_pattern(egraph, *l, depth - 1)
                     || contains_json_pattern(egraph, *r, depth - 1)
                 {
@@ -660,8 +653,9 @@ pub fn duality_document_scan_cost_factor() -> f64 {
 
 /// Compare document vs relational access for a workload pattern.
 ///
-/// Returns (document_cost, relational_cost, speedup_ratio).
+/// Returns (`document_cost`, `relational_cost`, `speedup_ratio`).
 #[must_use]
+#[expect(clippy::implicit_hasher, reason = "always uses default hasher")]
 pub fn benchmark_access_patterns(
     view: &DualityView,
     table_row_counts: &HashMap<String, f64>,
@@ -693,7 +687,7 @@ pub fn benchmark_access_patterns(
 // ------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::egraph::{to_rec_expr, RelLang};
@@ -1232,8 +1226,10 @@ mod tests {
     fn high_doc_cost_favors_relational() {
         let view = sample_orders_view();
         let counts = sample_row_counts();
-        let mut params = DualityCostParams::default();
-        params.document_fetch_cost = 50.0;
+        let params = DualityCostParams {
+            document_fetch_cost: 50.0,
+            ..DualityCostParams::default()
+        };
 
         let decision = choose_access_path(&view, &counts, 0.01, 3, 1, &params);
 
@@ -1248,8 +1244,10 @@ mod tests {
     fn high_join_cost_favors_document() {
         let view = sample_orders_view();
         let counts = sample_row_counts();
-        let mut params = DualityCostParams::default();
-        params.relational_join_cost = 100.0;
+        let params = DualityCostParams {
+            relational_join_cost: 100.0,
+            ..DualityCostParams::default()
+        };
 
         let decision = choose_access_path(&view, &counts, 1.0, 6, 0, &params);
 

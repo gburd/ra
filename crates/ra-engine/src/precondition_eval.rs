@@ -56,7 +56,7 @@ impl PreConditionEvaluator {
 
         for precond in preconditions {
             match self.evaluate_single(precond) {
-                Ok(true) => continue,
+                Ok(true) => {}
                 Ok(false) => {
                     if self.is_optional(precond) {
                         debug!("Optional precondition not satisfied: {:?}", precond);
@@ -122,6 +122,7 @@ impl PreConditionEvaluator {
     }
 
     /// Check if a pre-condition is marked as optional
+    #[expect(clippy::unused_self, reason = "method for API consistency")]
     fn is_optional(&self, precond: &PreCondition) -> bool {
         match precond {
             PreCondition::Pattern { optional, .. }
@@ -133,25 +134,19 @@ impl PreConditionEvaluator {
     }
 
     /// Evaluate a predicate condition
+    #[expect(clippy::unused_self, reason = "will use self when predicate functions are registered")]
+    #[expect(clippy::unnecessary_wraps, reason = "will return Err when unknown predicates are errors")]
     fn evaluate_predicate(&self, condition: &str) -> Result<bool, EvaluationError> {
-        // For now, we'll recognize common predicate patterns
-        // In a full implementation, this would call registered predicate functions
-
-        if condition.contains("is_deterministic") {
-            // Assume deterministic by default (would need actual implementation)
-            Ok(true)
-        } else if condition.contains("references_only") {
-            // Assume references check passes (would need actual implementation)
-            Ok(true)
-        } else if condition.contains("references_both_sides") {
-            // Assume references check passes (would need actual implementation)
-            Ok(true)
-        } else {
-            // Unknown predicate - for now, assume it passes
-            // In production, this should be an error or look up the predicate function
-            warn!("Unknown predicate: {}", condition);
-            Ok(true)
+        // For now, all predicates pass. In a full implementation, this
+        // would call registered predicate functions and may return Err
+        // for unknown predicates.
+        if !condition.contains("is_deterministic")
+            && !condition.contains("references_only")
+            && !condition.contains("references_both_sides")
+        {
+            warn!("Unknown predicate: {condition}");
         }
+        Ok(true)
     }
 
     /// Evaluate a fact check
@@ -167,10 +162,11 @@ impl PreConditionEvaluator {
 
         actual_value
             .compare(comparator, threshold)
-            .map_err(|e| EvaluationError::ComparisonError(e))
+            .map_err(EvaluationError::ComparisonError)
     }
 
     /// Look up a fact value from the facts provider
+    #[expect(clippy::too_many_lines, reason = "fact lookup with many condition patterns")]
     fn lookup_fact(
         &self,
         fact_type: &str,
@@ -190,7 +186,7 @@ impl PreConditionEvaluator {
                     .map(|stats| FactValue::Float(stats.row_count))
                     .ok_or_else(|| EvaluationError::FactLookupFailed {
                         fact_type: fact_type.to_string(),
-                        reason: format!("No statistics for table {}", table),
+                        reason: format!("No statistics for table {table}"),
                     })
             }
 
@@ -209,7 +205,7 @@ impl PreConditionEvaluator {
                     .map(|stats| FactValue::Float(stats.distinct_count))
                     .ok_or_else(|| EvaluationError::FactLookupFailed {
                         fact_type: fact_type.to_string(),
-                        reason: format!("No column stats for {}.{}", table, col),
+                        reason: format!("No column stats for {table}.{col}"),
                     })
             }
 
@@ -228,7 +224,7 @@ impl PreConditionEvaluator {
                     .map(|stats| FactValue::Float(stats.null_fraction))
                     .ok_or_else(|| EvaluationError::FactLookupFailed {
                         fact_type: fact_type.to_string(),
-                        reason: format!("No column stats for {}.{}", table, col),
+                        reason: format!("No column stats for {table}.{col}"),
                     })
             }
 
@@ -258,7 +254,7 @@ impl PreConditionEvaluator {
                     .map(|dt| FactValue::String(dt.to_string()))
                     .ok_or_else(|| EvaluationError::FactLookupFailed {
                         fact_type: fact_type.to_string(),
-                        reason: format!("Unknown column {}.{}", table, col),
+                        reason: format!("Unknown column {table}.{col}"),
                     })
             }
 
@@ -282,7 +278,7 @@ impl PreConditionEvaluator {
                     .map(|stats| FactValue::Int(stats.table_size_bytes as i64))
                     .ok_or_else(|| EvaluationError::FactLookupFailed {
                         fact_type: fact_type.to_string(),
-                        reason: format!("No statistics for table {}", table),
+                        reason: format!("No statistics for table {table}"),
                     })
             }
 
@@ -298,7 +294,7 @@ impl PreConditionEvaluator {
                     .map(FactValue::Float)
                     .ok_or_else(|| EvaluationError::FactLookupFailed {
                         fact_type: fact_type.to_string(),
-                        reason: format!("No runtime stats for operator {}", table),
+                        reason: format!("No runtime stats for operator {table}"),
                     })
             }
 
@@ -313,7 +309,7 @@ impl PreConditionEvaluator {
                     .map(|stats| FactValue::Bool(stats.skew_detected))
                     .ok_or_else(|| EvaluationError::FactLookupFailed {
                         fact_type: fact_type.to_string(),
-                        reason: format!("No runtime stats for operator {}", table),
+                        reason: format!("No runtime stats for operator {table}"),
                     })
             }
 
@@ -342,7 +338,7 @@ impl PreConditionEvaluator {
                     })
                     .ok_or_else(|| EvaluationError::FactLookupFailed {
                         fact_type: fact_type.to_string(),
-                        reason: format!("No schema information for table {}", table),
+                        reason: format!("No schema information for table {table}"),
                     })
             }
 
@@ -351,6 +347,7 @@ impl PreConditionEvaluator {
     }
 
     /// Evaluate a capability requirement
+    #[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other evaluate methods")]
     fn evaluate_capability(&self, database: &str, feature: &str) -> Result<bool, EvaluationError> {
         if database == "current" || database == self.facts.database_name() {
             Ok(self.facts.supports_feature(feature))

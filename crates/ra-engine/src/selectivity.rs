@@ -92,7 +92,7 @@ fn estimate_unary_selectivity(op: UnaryOp, operand: &Expr, stats: &ColumnStats) 
         UnaryOp::Not => 1.0 - estimate_selectivity(operand, stats),
         UnaryOp::IsNull => stats.null_fraction,
         UnaryOp::IsNotNull => 1.0 - stats.null_fraction,
-        _ => DEFAULT_SELECTIVITY,
+        UnaryOp::Neg => DEFAULT_SELECTIVITY,
     }
 }
 
@@ -114,8 +114,7 @@ fn estimate_function_selectivity(name: &str, args: &[Expr], stats: &ColumnStats)
 /// 3. Otherwise, use `1 / distinct_count`
 fn estimate_equality_selectivity(left: &Expr, right: &Expr, stats: &ColumnStats) -> f64 {
     let value = match (left, right) {
-        (Expr::Column(_), Expr::Const(c)) => Some(c),
-        (Expr::Const(c), Expr::Column(_)) => Some(c),
+        (Expr::Column(_), Expr::Const(c)) | (Expr::Const(c), Expr::Column(_)) => Some(c),
         _ => None,
     };
 
@@ -154,11 +153,9 @@ fn estimate_range_selectivity(
         _ => None,
     };
 
-    if const_val.is_none() {
+    let Some(const_val) = const_val else {
         return DEFAULT_RANGE_SELECTIVITY;
-    }
-
-    let const_val = const_val.unwrap();
+    };
 
     if let Some(histogram) = &stats.histogram {
         let bound_str = const_to_string(const_val);
@@ -316,14 +313,13 @@ fn bucket_overlap_fraction(
     range_lower: Option<&str>,
     range_upper: Option<&str>,
 ) -> f64 {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+
     let try_numeric = |a: Option<&str>, b: Option<&str>| -> Option<std::cmp::Ordering> {
-        match (a, b) {
-            (Some(a_str), Some(b_str)) => {
-                if let (Ok(a_num), Ok(b_num)) = (a_str.parse::<f64>(), b_str.parse::<f64>()) {
-                    return Some(a_num.total_cmp(&b_num));
-                }
+        if let (Some(a_str), Some(b_str)) = (a, b) {
+            if let (Ok(a_num), Ok(b_num)) = (a_str.parse::<f64>(), b_str.parse::<f64>()) {
+                return Some(a_num.total_cmp(&b_num));
             }
-            _ => {}
         }
         None
     };
@@ -339,8 +335,6 @@ fn bucket_overlap_fraction(
             (Some(a_str), Some(b_str)) => a_str.cmp(b_str),
         }
     };
-
-    use std::cmp::Ordering::*;
 
     if bucket_upper.is_some() && range_lower.is_some() {
         let bucket_end_cmp_range_start = cmp(bucket_upper, range_lower);

@@ -1,11 +1,11 @@
-//! DocumentDB (MongoDB-compatible) SQL extension for PostgreSQL.
+//! `DocumentDB` (MongoDB-compatible) SQL extension for `PostgreSQL`.
 //!
-//! Amazon DocumentDB provides MongoDB-compatible APIs with SQL query support.
+//! Amazon `DocumentDB` provides MongoDB-compatible APIs with SQL query support.
 //! The key issue this extension solves is the `@=` operator used for exact BSON matching.
 //!
 //! # Problem Statement
 //!
-//! DocumentDB queries use MongoDB-style operators that aren't recognized by standard SQL parsers:
+//! `DocumentDB` queries use MongoDB-style operators that aren't recognized by standard SQL parsers:
 //!
 //! ```sql
 //! SELECT document
@@ -13,7 +13,7 @@
 //! WHERE document @= '{"status": "active"}';
 //! ```
 //!
-//! The `@=` operator means "BSON equals" and is not part of standard PostgreSQL.
+//! The `@=` operator means "BSON equals" and is not part of standard `PostgreSQL`.
 //!
 //! # Solution
 //!
@@ -33,7 +33,7 @@
 //!
 //! # Functions
 //!
-//! - `documentdb_api.collection(database, collection)` - Access DocumentDB collection
+//! - `documentdb_api.collection(database, collection)` - Access `DocumentDB` collection
 //! - `documentdb_api.insert(collection, document)` - Insert document
 //! - `documentdb_api.update(collection, filter, update)` - Update documents
 //! - `documentdb_api.delete(collection, filter)` - Delete documents
@@ -43,11 +43,11 @@ use std::error::Error;
 
 use crate::grammar::extension::GrammarExtension;
 
-/// DocumentDB (MongoDB-compatible) extension.
+/// `DocumentDB` (MongoDB-compatible) extension.
 pub struct DocumentDBExtension;
 
 impl GrammarExtension for DocumentDBExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "documentdb"
     }
 
@@ -154,8 +154,7 @@ mod tests {
         for op in expected_operators {
             assert!(
                 operators.contains(&op),
-                "DocumentDB should support {} operator",
-                op
+                "DocumentDB should support {op} operator",
             );
         }
     }

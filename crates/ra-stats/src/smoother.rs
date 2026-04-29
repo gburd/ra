@@ -111,8 +111,7 @@ impl SmootherSet {
     pub fn add(&mut self, name: impl Into<String>) {
         let name = name.into();
         if !self.smoothers.iter().any(|(n, _)| n == &name) {
-            self.smoothers
-                .push((name, Ewma::new(self.alpha)));
+            self.smoothers.push((name, Ewma::new(self.alpha)));
         }
     }
 
@@ -156,8 +155,11 @@ impl SmootherSet {
     }
 }
 
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic stats tests"
+)]
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -260,10 +262,7 @@ mod tests {
         }
         let val = ewma.value().expect("val");
         // After half_life steps of 0.0, the original should decay to ~0.5
-        assert!(
-            (val - 0.5).abs() < 0.15,
-            "expected ~0.5, got {val}"
-        );
+        assert!((val - 0.5).abs() < 0.15, "expected ~0.5, got {val}");
     }
 
     // ---- SmootherSet ----

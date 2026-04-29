@@ -51,6 +51,7 @@ fn convert_const_float(nodes: &[RelLang], val_id: Id) -> Result<ra_core::expr::E
     Ok(ra_core::expr::Expr::Const(ra_core::expr::Const::Float(f)))
 }
 
+#[expect(clippy::too_many_lines, reason = "match over all scalar operator variants")]
 fn convert_scalar_operator(
     nodes: &[RelLang],
     idx: usize,
@@ -92,7 +93,10 @@ fn convert_scalar_operator(
     if let RelLang::FtsMatch([vendor_id, cols_id, query_id, mode_id]) = node {
         let vendor = get_symbol(nodes, id(*vendor_id))?;
         let cols_str = get_symbol(nodes, id(*cols_id))?;
-        let columns = cols_str.split(',').map(|s| s.to_string()).collect();
+        let columns = cols_str
+            .split(',')
+            .map(std::string::ToString::to_string)
+            .collect();
         let query = get_symbol(nodes, id(*query_id))?;
         let mode_str = get_symbol(nodes, id(*mode_id))?;
         let mode = if mode_str.is_empty() {
@@ -113,7 +117,7 @@ fn convert_scalar_operator(
         let algo = get_symbol(nodes, id(*algo_id))?;
         // FTS rank is represented as a function call in Expr
         return Ok(Expr::Function {
-            name: format!("ts_rank_{}", algo),
+            name: format!("ts_rank_{algo}"),
             args: vec![col, query],
         });
     }

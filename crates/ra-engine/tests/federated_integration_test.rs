@@ -1,7 +1,8 @@
+#![expect(clippy::expect_used, clippy::float_cmp, reason = "test code")]
 //! Integration tests for federated query optimization.
 //!
-//! Tests cover: FederatedQuery model, FederatedCostModel,
-//! FederatedOptimizer strategy selection, and end-to-end analysis.
+//! Tests cover: `FederatedQuery` model, `FederatedCostModel`,
+//! `FederatedOptimizer` strategy selection, and end-to-end analysis.
 
 use std::collections::HashMap;
 

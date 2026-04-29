@@ -22,6 +22,7 @@ pub fn rec_expr_to_rel_expr(rec: &egg::RecExpr<RelLang>) -> Result<RelExpr, EGra
     convert_node(nodes, nodes.len() - 1)
 }
 
+#[expect(clippy::too_many_lines, reason = "match over all RelLang variants")]
 pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
     match &nodes[idx] {
         RelLang::Scan([table_id]) => {
@@ -111,7 +112,7 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
         }
         RelLang::Values(row_ids) => {
             let mut rows = Vec::with_capacity(row_ids.len());
-            for &row_id in row_ids.iter() {
+            for &row_id in row_ids {
                 rows.push(convert_values_row(nodes, id(row_id))?);
             }
             Ok(RelExpr::Values { rows })
@@ -171,14 +172,14 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
         }
         RelLang::BitmapAnd(input_ids) => {
             let mut inputs = Vec::with_capacity(input_ids.len());
-            for &input_id in input_ids.iter() {
+            for &input_id in input_ids {
                 inputs.push(Box::new(convert_node(nodes, id(input_id))?));
             }
             Ok(RelExpr::BitmapAnd { inputs })
         }
         RelLang::BitmapOr(input_ids) => {
             let mut inputs = Vec::with_capacity(input_ids.len());
-            for &input_id in input_ids.iter() {
+            for &input_id in input_ids {
                 inputs.push(Box::new(convert_node(nodes, id(input_id))?));
             }
             Ok(RelExpr::BitmapOr { inputs })
@@ -186,8 +187,7 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
         RelLang::BitmapHeapScan([table_id, bitmap_id, recheck_id]) => {
             let table = get_symbol(nodes, id(*table_id))?;
             let bitmap = convert_node(nodes, id(*bitmap_id))?;
-            let recheck_cond = if get_symbol(nodes, id(*recheck_id)).map_or(false, |s| s.is_empty())
-            {
+            let recheck_cond = if get_symbol(nodes, id(*recheck_id)).is_ok_and(|s| s.is_empty()) {
                 None
             } else {
                 Some(convert_scalar(nodes, id(*recheck_id))?)
@@ -395,18 +395,17 @@ fn convert_func_as_relational(nodes: &[RelLang], ids: &[Id]) -> Result<RelExpr, 
             for &arg_id in &ids[1..] {
                 // Try to convert as scalar; if that fails,
                 // the remaining child may be a relational input.
-                match convert_scalar(nodes, id(arg_id)) {
-                    Ok(expr) => args.push(expr),
-                    Err(_) => {
-                        // Assume it's a relational input
-                        let input = convert_node(nodes, id(arg_id))?;
-                        return Ok(RelExpr::TableFunction {
-                            name,
-                            args,
-                            columns: vec![],
-                            input: Some(Box::new(input)),
-                        });
-                    }
+                if let Ok(expr) = convert_scalar(nodes, id(arg_id)) {
+                    args.push(expr);
+                } else {
+                    // Assume it's a relational input
+                    let input = convert_node(nodes, id(arg_id))?;
+                    return Ok(RelExpr::TableFunction {
+                        name,
+                        args,
+                        columns: vec![],
+                        input: Some(Box::new(input)),
+                    });
                 }
             }
             Ok(RelExpr::TableFunction {

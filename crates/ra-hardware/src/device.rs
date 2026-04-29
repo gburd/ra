@@ -110,7 +110,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip() {
         let path = TransferPath {
             from: Device::Cpu,

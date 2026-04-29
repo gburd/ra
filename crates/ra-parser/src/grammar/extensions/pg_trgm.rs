@@ -1,6 +1,6 @@
-//! pg_trgm extension for PostgreSQL - Trigram text search and similarity.
+//! `pg_trgm` extension for `PostgreSQL` - Trigram text search and similarity.
 //!
-//! pg_trgm provides text similarity measurement and fast text search using
+//! `pg_trgm` provides text similarity measurement and fast text search using
 //! trigram matching. Useful for fuzzy text search, typo tolerance, and
 //! autocomplete features.
 //!
@@ -50,11 +50,11 @@ use std::error::Error;
 
 use crate::grammar::extension::GrammarExtension;
 
-/// pg_trgm extension for trigram text search.
+/// `pg_trgm` extension for trigram text search.
 pub struct PgTrgmExtension;
 
 impl GrammarExtension for PgTrgmExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "pg_trgm"
     }
 

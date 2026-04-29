@@ -60,6 +60,7 @@ pub fn compute_priority(complexity: ComplexityClass, benefit: BenefitRange) -> f
 /// get a default middle-of-the-road priority so they still
 /// participate in optimization.
 #[must_use]
+#[expect(clippy::too_many_lines, reason = "priority table for 100+ rules")]
 pub fn default_rule_priorities() -> HashMap<&'static str, (ComplexityClass, BenefitRange)> {
     let mut m = HashMap::with_capacity(120);
 
@@ -265,6 +266,7 @@ pub const DEFAULT_BENEFIT: BenefitRange = BenefitRange { min: 0.2, max: 0.5 };
 ///
 /// This is backwards-compatible: rules without metadata are
 /// still included, just with default ordering.
+#[must_use]
 pub fn sort_rules_by_priority(
     rules: Vec<Rewrite<RelLang, RelAnalysis>>,
 ) -> Vec<Rewrite<RelLang, RelAnalysis>> {
@@ -307,7 +309,7 @@ pub fn rule_score(name: &str) -> f64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[expect(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

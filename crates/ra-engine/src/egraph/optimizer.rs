@@ -17,9 +17,9 @@ use crate::rewrite::all_rules;
 use super::config::OptimizerConfig;
 use super::errors::EGraphError;
 use super::lang::RelLang;
-use super::result::{OptimizationResult, OptimizationStatus};
 #[cfg(feature = "timeline")]
 use super::result::IncrementalStats;
+use super::result::{OptimizationResult, OptimizationStatus};
 use super::to_rec::to_rec_expr;
 use super::tracking::{
     build_detailed_tracking, build_detailed_tracking_with_steps, IntermediateStep, RuleApplication,
@@ -99,7 +99,7 @@ impl Optimizer {
     #[must_use]
     pub fn cache_stats(&self) -> Option<PlanCacheStats> {
         self.plan_cache.as_ref().map(|m| {
-            let cache = m.lock().unwrap_or_else(|e| e.into_inner());
+            let cache = m.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.stats().clone()
         })
     }
@@ -107,7 +107,7 @@ impl Optimizer {
     /// Clear the plan cache.
     pub fn clear_cache(&self) {
         if let Some(m) = self.plan_cache.as_ref() {
-            let mut cache = m.lock().unwrap_or_else(|e| e.into_inner());
+            let mut cache = m.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.clear();
         }
     }
@@ -118,7 +118,7 @@ impl Optimizer {
     #[must_use]
     pub fn advisor_stats(&self) -> Option<crate::rule_advisor::AdvisorStats> {
         self.rule_advisor.as_ref().map(|m| {
-            let advisor = m.lock().unwrap_or_else(|e| e.into_inner());
+            let advisor = m.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             advisor.stats().clone()
         })
     }
@@ -130,7 +130,9 @@ impl Optimizer {
     /// advisor when it is configured.
     fn load_rules(&self, expr: &RelExpr) -> Vec<Rewrite<RelLang, RelAnalysis>> {
         if let Some(ref advisor_mutex) = self.rule_advisor {
-            let mut advisor = advisor_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            let mut advisor = advisor_mutex
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             advisor.select_rules(expr)
         } else if self.config.use_lazy_rules {
             let pattern = crate::lazy_rules::LazyQueryPattern::analyze(expr);
@@ -184,6 +186,7 @@ impl Optimizer {
     ///
     /// Returns an error if the expression cannot be converted to
     /// the e-graph representation or if extraction fails.
+    #[expect(clippy::too_many_lines, reason = "core optimization pipeline")]
     pub fn optimize(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
         use std::time::Instant;
         use tracing::{debug, info};
@@ -195,7 +198,9 @@ impl Optimizer {
         let fingerprint = if self.plan_cache.is_some() {
             let fp = QueryFingerprint::from_rel_expr(expr);
             if let Some(ref mutex) = self.plan_cache {
-                let mut cache = mutex.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cache = mutex
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(hit) = cache.lookup(&fp) {
                     info!(
                         "Plan cache hit ({:?}, similarity={:.2}) \
@@ -229,7 +234,7 @@ impl Optimizer {
                         "Left-deep optimization completed in {:?}",
                         total_start.elapsed()
                     );
-                    self.insert_into_cache(&fingerprint, &optimized);
+                    self.insert_into_cache(fingerprint.as_ref(), &optimized);
                     return Ok(optimized);
                 }
                 Err(e) => {
@@ -242,32 +247,29 @@ impl Optimizer {
         let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
 
         if table_count >= self.config.large_join_threshold {
-            match &self.config.large_join_strategy {
-                crate::large_join::LargeJoinStrategy::EGraph => {
-                    // Continue with standard e-graph optimization
-                }
-                _ => {
-                    // Use large join optimizer
-                    let cost_model: Arc<dyn ra_core::cost::CostModel> =
-                        Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
-                    let stats_provider = Arc::new(TableStatsProvider {
-                        stats: self.table_stats.clone(),
-                    });
+            if let crate::large_join::LargeJoinStrategy::EGraph = &self.config.large_join_strategy {
+                // Continue with standard e-graph optimization
+            } else {
+                // Use large join optimizer
+                let cost_model: Arc<dyn ra_core::cost::CostModel> =
+                    Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
+                let stats_provider = Arc::new(TableStatsProvider {
+                    stats: self.table_stats.clone(),
+                });
 
-                    let large_optimizer = crate::large_join::LargeJoinOptimizer::new(
-                        self.config.large_join_strategy.clone(),
-                        cost_model,
-                        stats_provider,
-                    );
+                let large_optimizer = crate::large_join::LargeJoinOptimizer::new(
+                    self.config.large_join_strategy.clone(),
+                    cost_model,
+                    stats_provider,
+                );
 
-                    let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
-                    if !joins.is_empty() {
-                        let result = large_optimizer
-                            .optimize(joins)
-                            .map_err(|e| EGraphError::ExtractionError(e.to_string()))?;
-                        self.insert_into_cache(&fingerprint, &result);
-                        return Ok(result);
-                    }
+                let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
+                if !joins.is_empty() {
+                    let result = large_optimizer
+                        .optimize(joins)
+                        .map_err(|e| EGraphError::ExtractionError(e.to_string()))?;
+                    self.insert_into_cache(fingerprint.as_ref(), &result);
+                    return Ok(result);
                 }
             }
         }
@@ -331,14 +333,11 @@ impl Optimizer {
         };
 
         // Create beam search tracker (if enabled)
-        let mut beam_search_tracker = if let Some(ref beam_config) = self.config.beam_search_config
-        {
-            Some(crate::beam_search::BeamSearchTracker::new(
-                beam_config.clone(),
-            ))
-        } else {
-            None
-        };
+        let mut beam_search_tracker = self
+            .config
+            .beam_search_config
+            .as_ref()
+            .map(|beam_config| crate::beam_search::BeamSearchTracker::new(beam_config.clone()));
 
         // Build join graph (if enabled)
         if self.config.use_join_graph_filtering {
@@ -538,15 +537,17 @@ impl Optimizer {
             total_elapsed, to_rec_elapsed, runner_elapsed, extract_elapsed
         );
 
-        self.insert_into_cache(&fingerprint, &result);
+        self.insert_into_cache(fingerprint.as_ref(), &result);
         Ok(result)
     }
 
     /// Insert a plan into the cache if caching is enabled.
-    fn insert_into_cache(&self, fingerprint: &Option<QueryFingerprint>, plan: &RelExpr) {
+    fn insert_into_cache(&self, fingerprint: Option<&QueryFingerprint>, plan: &RelExpr) {
         if let Some(fp) = fingerprint {
             if let Some(ref mutex) = self.plan_cache {
-                let mut cache = mutex.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cache = mutex
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 cache.insert(fp.clone(), plan.clone());
             }
         }
@@ -816,6 +817,7 @@ impl Optimizer {
     /// Returns an error if expression conversion fails, or if the
     /// overflow strategy is `OverflowStrategy::Fail` and the budget
     /// is exceeded before any plan is extracted.
+    #[expect(clippy::too_many_lines, reason = "optimization pipeline with verbose tracing")]
     pub fn optimize_with_tracking_verbose(
         &self,
         expr: &RelExpr,
@@ -887,7 +889,7 @@ impl Optimizer {
                     .with_egraph(egraph)
                     .with_node_limit(node_limit)
                     .with_iter_limit(1)
-                    .run(&[rule.clone()]);
+                    .run(std::slice::from_ref(rule));
 
                 egraph = runner.egraph;
                 let nodes_after = egraph.total_number_of_nodes();
@@ -917,7 +919,7 @@ impl Optimizer {
                             if let Some(before) = plan_before {
                                 step_number += 1;
                                 let reason = if let Some(improvement) = cost_improvement {
-                                    format!("Cost improvement: {:.4}", improvement)
+                                    format!("Cost improvement: {improvement:.4}")
                                 } else {
                                     "Pattern matched, exploring alternatives".to_string()
                                 };
@@ -1027,7 +1029,7 @@ impl Optimizer {
             // Scale iterations by change magnitude.
             let pct = stats_delta.row_count_change_pct();
             let fraction = (pct / 100.0).clamp(0.05, 1.0);
-            #[allow(
+            #[expect(
                 clippy::cast_precision_loss,
                 clippy::cast_possible_truncation,
                 clippy::cast_sign_loss

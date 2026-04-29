@@ -118,7 +118,7 @@ impl IntegratedCostModel {
     pub fn should_refresh(&self, table: &str) -> bool {
         self.adapter
             .get_table_stats(table)
-            .map_or(true, |m| self.adapter.should_reject(&m.state))
+            .is_none_or(|m| self.adapter.should_reject(&m.state))
     }
 
     /// Get quality metrics for a table's statistics.
@@ -410,7 +410,7 @@ impl IntegratedCostModel {
     /// columns with `prefix_ndv` distinct values. Only the suffix
     /// columns within each group need sorting.
     ///
-    /// Cost = groups * (group_size * log(group_size)) * per_row_factor.
+    /// Cost = groups * (`group_size` * `log(group_size)`) * `per_row_factor`.
     #[must_use]
     pub fn incremental_sort_cost(&self, table: &str, prefix_ndv: f64) -> f64 {
         let stats = self.effective_statistics(table);
@@ -624,9 +624,9 @@ impl IntegratedCostModel {
         cost.total() * disc
     }
 
-    /// Estimate cost for a vector similarity search using IVFFlat index.
+    /// Estimate cost for a vector similarity search using `IVFFlat` index.
     ///
-    /// IVFFlat provides constant-factor speedup with tunable recall.
+    /// `IVFFlat` provides constant-factor speedup with tunable recall.
     /// Target: 5-50x speedup vs sequential scan.
     #[must_use]
     pub fn vector_ivfflat_cost(
@@ -713,7 +713,7 @@ impl IntegratedCostModel {
 
     /// Apply staleness penalty to base cost estimate.
     ///
-    /// Returns (adjusted_cost, staleness_factor, should_warn)
+    /// Returns (`adjusted_cost`, `staleness_factor`, `should_warn`)
     #[must_use]
     fn apply_staleness_penalty(
         &self,
@@ -726,12 +726,12 @@ impl IntegratedCostModel {
         let base_factor = staleness_factor(staleness);
 
         let operation_multiplier = match operation_type {
-            OperationType::IndexScan => 2.0, // Most sensitive to bad selectivity
-            OperationType::NestedLoop => 2.0, // Cardinality errors compound
-            OperationType::HashJoin => 1.5,  // Hash table sizing matters
-            OperationType::SeqScan => 1.0,   // Most robust
+            // Most sensitive to bad selectivity / cardinality errors compound
+            OperationType::IndexScan | OperationType::NestedLoop => 2.0,
+            OperationType::HashJoin => 1.5, // Hash table sizing matters
+            OperationType::SeqScan => 1.0,  // Most robust
             OperationType::Aggregate => 1.3, // Group count estimation
-            OperationType::Sort => 1.2,      // Memory allocation
+            OperationType::Sort => 1.2,     // Memory allocation
         };
 
         // Apply the operation multiplier only to the excess
@@ -980,7 +980,7 @@ impl IntegratedCostModel {
 enum OperationType {
     SeqScan,
     IndexScan,
-    #[allow(dead_code)] // Reserved for future nested loop join cost model
+    #[expect(dead_code)] // Reserved for future nested loop join cost model
     NestedLoop,
     HashJoin,
     Aggregate,
@@ -989,7 +989,7 @@ enum OperationType {
 
 /// Extract a table name from an operator description like
 /// `SeqScan on lineitem` or `Index Scan on orders`.
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "timeline"), expect(dead_code, reason = "only used with timeline feature"))]
 fn extract_table_from_operator(operator: &str) -> Option<String> {
     let lower = operator.to_lowercase();
     if let Some(pos) = lower.find(" on ") {
@@ -1008,7 +1008,7 @@ fn extract_table_from_operator(operator: &str) -> Option<String> {
 }
 
 /// Extract the first table name from a SQL query's FROM clause.
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "timeline"), expect(dead_code, reason = "only used with timeline feature"))]
 fn extract_table_from_query(query: &str) -> Option<String> {
     let lower = query.to_lowercase();
     let from_pos = lower.find(" from ")?;
@@ -1039,7 +1039,11 @@ pub fn from_core_statistics<S: BuildHasher>(
     let mut model = IntegratedCostModel::new(profile, hardware.clone());
 
     for (name, stats) in table_stats {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "legacy allow"
+        )]
         let row_count = stats.row_count as u64;
 
         let managed = ManagedTableStats {
@@ -1289,7 +1293,6 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 // index traversal plus heap access overhead).
                 120.0 * self.calibration.rand_page_cost()
             }
-            RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => 0.1,
             RelLang::BitmapHeapScan(_) => 50.0 * self.calibration.seq_page_cost(),
             RelLang::MetadataLookup(_) => {
                 // O(1) metadata lookup, cheaper than any scan
@@ -1325,7 +1328,7 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::float_cmp)]
+#[expect(clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
     use ra_hardware::HardwareProfile;

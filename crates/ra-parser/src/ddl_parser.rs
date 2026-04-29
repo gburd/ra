@@ -46,7 +46,8 @@ pub struct DdlParser {
 }
 
 impl DdlParser {
-    /// Create a new DDL parser with PostgreSQL dialect.
+    /// Create a new DDL parser with `PostgreSQL` dialect.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             dialect: PostgreSqlDialect {},
@@ -76,7 +77,7 @@ impl DdlParser {
 
                 // Extract columns
                 for column_def in &create_table.columns {
-                    let column = self.convert_column_def(column_def);
+                    let column = Self::convert_column_def(column_def);
                     columns.push(column);
 
                     // Check for PRIMARY KEY in column options
@@ -148,10 +149,10 @@ impl DdlParser {
 
         match statement {
             Statement::CreateIndex(create_index) => {
-                let name = create_index
-                    .name
-                    .as_ref()
-                    .map_or_else(|| "unnamed_index".to_string(), |n| n.to_string());
+                let name = create_index.name.as_ref().map_or_else(
+                    || "unnamed_index".to_string(),
+                    std::string::ToString::to_string,
+                );
 
                 let table_name = extract_table_name(&create_index.table_name)?;
 
@@ -216,9 +217,9 @@ impl DdlParser {
                             column_def,
                             column_position: _,
                         } => {
-                            changes.push(AlterOperation::AddColumn(
-                                self.convert_column_def(column_def),
-                            ));
+                            changes.push(AlterOperation::AddColumn(Self::convert_column_def(
+                                column_def,
+                            )));
                         }
                         AlterTableOperation::DropColumn {
                             column_name,
@@ -242,10 +243,10 @@ impl DdlParser {
         }
     }
 
-    /// Convert a sqlparser ColumnDef to our ColumnDefinition.
-    fn convert_column_def(&self, column_def: &ColumnDef) -> ColumnDefinition {
+    /// Convert a sqlparser `ColumnDef` to our `ColumnDefinition`.
+    fn convert_column_def(column_def: &ColumnDef) -> ColumnDefinition {
         let name = column_def.name.value.clone();
-        let data_type = self.convert_data_type(&column_def.data_type);
+        let data_type = Self::convert_data_type(&column_def.data_type);
         let nullable = !column_def.options.iter().any(|opt| {
             matches!(
                 opt.option,
@@ -264,8 +265,8 @@ impl DdlParser {
         }
     }
 
-    /// Convert sqlparser DataType to simple string representation.
-    fn convert_data_type(&self, data_type: &SqlDataType) -> String {
+    /// Convert sqlparser `DataType` to simple string representation.
+    fn convert_data_type(data_type: &SqlDataType) -> String {
         match data_type {
             SqlDataType::TinyInt(_)
             | SqlDataType::SmallInt(_)
@@ -310,7 +311,7 @@ impl DdlParser {
                 ArrayElemTypeDef::SquareBracket(inner, _)
                 | ArrayElemTypeDef::AngleBracket(inner)
                 | ArrayElemTypeDef::Parenthesis(inner) => {
-                    format!("array[{}]", self.convert_data_type(inner))
+                    format!("array[{}]", Self::convert_data_type(inner))
                 }
             },
             SqlDataType::Custom(name, _) => {
@@ -332,7 +333,7 @@ impl Default for DdlParser {
     }
 }
 
-/// Extract table name from ObjectName.
+/// Extract table name from `ObjectName`.
 fn extract_table_name(name: &ObjectName) -> Result<String, DdlParseError> {
     name.0
         .last()
@@ -416,6 +417,7 @@ pub enum AlterOperation {
     DropConstraint(String),
 }
 
+#[expect(clippy::unwrap_used, clippy::panic, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,7 +440,7 @@ mod tests {
     #[test]
     fn parse_create_table_with_types() {
         let parser = DdlParser::new();
-        let sql = r#"
+        let sql = r"
         CREATE TABLE users (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
@@ -448,7 +450,7 @@ mod tests {
             is_active BOOLEAN,
             created_at TIMESTAMP
         )
-        "#;
+        ";
         let table = parser.parse_create_table(sql).unwrap();
 
         assert_eq!(table.name, "users");
@@ -525,13 +527,13 @@ mod tests {
     #[test]
     fn parse_foreign_key() {
         let parser = DdlParser::new();
-        let sql = r#"
+        let sql = r"
         CREATE TABLE orders (
             order_id INTEGER PRIMARY KEY,
             customer_id INTEGER NOT NULL,
             FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
         )
-        "#;
+        ";
         let table = parser.parse_create_table(sql).unwrap();
 
         assert_eq!(table.foreign_keys.len(), 1);

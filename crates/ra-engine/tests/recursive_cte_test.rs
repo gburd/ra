@@ -1,9 +1,14 @@
+#![expect(
+    clippy::panic,
+    clippy::approx_constant,
+    reason = "test code"
+)]
 //! Comprehensive tests for recursive CTE support across ra-engine.
 //!
 //! Covers: e-graph round-trip, pattern matching, memo table hashing,
 //! cost model, and fixpoint execution.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![expect(clippy::unwrap_used, clippy::expect_used)]
 
 mod helpers;
 
@@ -69,7 +74,7 @@ fn egraph_roundtrip_simple_recursive_cte() {
     );
 
     // RecExpr should be non-empty
-    assert!(rec_expr.as_ref().len() > 0, "RecExpr should have nodes");
+    assert!(!rec_expr.as_ref().is_empty(), "RecExpr should have nodes");
 }
 
 #[test]

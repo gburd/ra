@@ -2,7 +2,7 @@
 //!
 //! Models the full range of index types found in modern database systems,
 //! including B-tree variants, specialized indexes (full-text, spatial,
-//! columnstore), and PostgreSQL-specific types (GIN, GiST, BRIN).
+//! columnstore), and ``PostgreSQL``-specific types (`GIN`, `GiST`, `BRIN`).
 //!
 //! Each index type carries cost factors that the optimizer uses to compare
 //! access paths and choose the cheapest plan.
@@ -55,7 +55,7 @@ pub enum IndexType {
         /// Textual representation of the filter predicate.
         filter_predicate: String,
     },
-    /// R-tree / GiST index for geometric or geographic data.
+    /// R-tree / `GiST` index for geometric or geographic data.
     Spatial {
         /// Indexed geometry column.
         column: String,
@@ -72,36 +72,36 @@ pub enum IndexType {
         /// Indexed columns.
         columns: Vec<String>,
     },
-    /// PostgreSQL Generalized Inverted Index for composite values.
+    /// `PostgreSQL` Generalized Inverted Index for composite values.
     GIN {
         /// Indexed column (typically array, jsonb, or tsvector).
         column: String,
-        /// Operator class (e.g. "jsonb_ops", "gin_trgm_ops").
+        /// Operator class (e.g. `"jsonb_ops"`, `"gin_trgm_ops"`).
         opclass: String,
     },
-    /// PostgreSQL Generalized Search Tree for spatial/range types.
+    /// `PostgreSQL` Generalized Search Tree for spatial/range types.
     GiST {
         /// Indexed column.
         column: String,
-        /// Operator class (e.g. "gist_geometry_ops_2d").
+        /// Operator class (e.g. `"gist_geometry_ops_2d"`).
         opclass: String,
     },
-    /// PostgreSQL Block Range Index for large, naturally ordered tables.
+    /// `PostgreSQL` Block Range Index for large, naturally ordered tables.
     BRIN {
         /// Indexed column.
         column: String,
         /// Number of pages summarized per range entry.
         pages_per_range: u32,
     },
-    /// PostgreSQL RUM index (GIN extension with distance ordering).
+    /// `PostgreSQL` RUM index (GIN extension with distance ordering).
     RUM {
         /// Indexed column (typically tsvector).
         column: String,
-        /// Operator class (e.g. "rum_tsvector_ops",
-        /// "rum_tsvector_addon_ops").
+        /// Operator class (e.g. `"rum_tsvector_ops"`,
+        /// `"rum_tsvector_addon_ops"`).
         opclass: String,
         /// Optional addon column for combined ordering
-        /// (used with rum_tsvector_addon_ops).
+        /// (used with `rum_tsvector_addon_ops`).
         addon_column: Option<String>,
     },
     /// Bitmap index for low-cardinality columns.
@@ -116,7 +116,7 @@ pub enum IndexType {
         /// Underlying index structure.
         backing_type: Box<IndexType>,
     },
-    /// IVFFlat vector index (inverted file with flat compression).
+    /// `IVFFlat` vector index (inverted file with flat compression).
     IVFFlat {
         /// Indexed vector column.
         column: String,
@@ -136,7 +136,7 @@ pub enum IndexType {
         /// Distance metric for similarity search.
         distance_metric: DistanceMetric,
     },
-    /// MySQL full-text index.
+    /// `MySQL` full-text index.
     MySQLFullText {
         /// Columns covered by the full-text index.
         columns: Vec<String>,
@@ -152,14 +152,14 @@ pub enum IndexType {
         /// Language for word breakers and stemmers.
         language: String,
     },
-    /// SQLite FTS5 full-text index.
+    /// `SQLite` `FTS5` full-text index.
     SQLiteFTS5 {
         /// Columns covered by the full-text index.
         columns: Vec<String>,
         /// Tokenizer configuration.
         tokenizer: FullTextParser,
     },
-    /// SQLite vector extension index.
+    /// `SQLite` vector extension index.
     SQLiteVec {
         /// Indexed vector column.
         column: String,
@@ -191,12 +191,8 @@ impl IndexType {
             | Self::RUM { column, .. }
             | Self::IVFFlat { column, .. }
             | Self::HNSW { column, .. }
-            | Self::SQLiteVec { column, .. } => {
-                std::slice::from_ref(column)
-            }
-            Self::Expression { backing_type, .. } => {
-                backing_type.key_columns()
-            }
+            | Self::SQLiteVec { column, .. } => std::slice::from_ref(column),
+            Self::Expression { backing_type, .. } => backing_type.key_columns(),
         }
     }
 
@@ -284,7 +280,7 @@ impl IndexType {
 /// Full metadata for a table index, including statistics and cost factors.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IndexMetadata {
-    /// Index name (e.g. "idx_orders_date").
+    /// Index name (e.g. `idx_orders_date`).
     pub name: String,
     /// The kind of index and its structural parameters.
     pub index_type: IndexType,
@@ -374,9 +370,9 @@ impl IndexCostFactors {
         }
     }
 
-    /// Default cost factors for an IVFFlat vector index.
+    /// Default cost factors for an `IVFFlat` vector index.
     ///
-    /// IVFFlat uses inverted file structure with flat compression.
+    /// `IVFFlat` uses inverted file structure with flat compression.
     /// Lookup cost is moderate (cluster selection + scan), range scan
     /// is relatively expensive as it requires visiting multiple clusters.
     pub fn ivfflat_default() -> Self {
@@ -416,7 +412,7 @@ impl IndexCostFactors {
         }
     }
 
-    /// Default cost factors for SQLite vector extension.
+    /// Default cost factors for `SQLite` vector extension.
     ///
     /// SQLite-vec provides exact k-NN search with brute force scan.
     /// Lookup cost is low but range scan is expensive (linear scan).
@@ -460,9 +456,7 @@ impl IndexMetadata {
             return false;
         }
         // A prefix of the key columns must match the predicate columns.
-        predicate_columns
-            .iter()
-            .all(|pc| keys.contains(pc))
+        predicate_columns.iter().all(|pc| keys.contains(pc))
     }
 
     /// Whether the leading key column matches the given column.
@@ -474,8 +468,11 @@ impl IndexMetadata {
     }
 }
 
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic stats tests"
+)]
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -734,8 +731,7 @@ mod tests {
             cost_factors: IndexCostFactors::gin_default(),
         };
         let json = serde_json::to_string(&meta).expect("serialize");
-        let back: IndexMetadata =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: IndexMetadata = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(meta, back);
     }
 
@@ -1093,8 +1089,7 @@ mod tests {
             cost_factors: IndexCostFactors::hnsw_default(),
         };
         let json = serde_json::to_string(&meta).expect("serialize");
-        let back: IndexMetadata =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: IndexMetadata = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(meta, back);
     }
 
@@ -1111,8 +1106,7 @@ mod tests {
             cost_factors: IndexCostFactors::fulltext_default(),
         };
         let json = serde_json::to_string(&meta).expect("serialize");
-        let back: IndexMetadata =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: IndexMetadata = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(meta, back);
     }
 }

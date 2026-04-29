@@ -4,7 +4,7 @@
 //! validly joined. Only explores join combinations that have connecting predicates,
 //! reducing the search space by 40-60% for complex queries.
 //!
-//! Inspired by PostgreSQL's join graph and Apache Calcite's join enumeration.
+//! Inspired by `PostgreSQL`'s join graph and Apache Calcite's join enumeration.
 
 use ra_core::algebra::RelExpr;
 use ra_core::expr::{BinOp, Expr};
@@ -22,6 +22,7 @@ pub struct JoinGraph {
 
 impl JoinGraph {
     /// Create an empty join graph.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             edges: HashMap::new(),
@@ -32,6 +33,7 @@ impl JoinGraph {
     /// Build a join graph from a relational expression.
     ///
     /// Analyzes the query to find all base tables and join predicates.
+    #[must_use]
     pub fn from_expr(expr: &RelExpr) -> Self {
         let mut graph = Self::new();
         graph.analyze_expr(expr);
@@ -99,7 +101,7 @@ impl JoinGraph {
     /// Extract join predicates from an expression.
     fn extract_join_predicates(&mut self, expr: &Expr) {
         match expr {
-            Expr::BinOp { op, left, right } if matches!(op, BinOp::Eq) => {
+            Expr::BinOp { op: BinOp::Eq, left, right } => {
                 // Look for column = column (equi-join)
                 if let (Some(left_table), Some(right_table)) = (
                     Self::extract_table_from_expr(left),
@@ -110,7 +112,7 @@ impl JoinGraph {
                     }
                 }
             }
-            Expr::BinOp { op, left, right } if matches!(op, BinOp::And) => {
+            Expr::BinOp { op: BinOp::And, left, right } => {
                 // Recursively process AND clauses
                 self.extract_join_predicates(left);
                 self.extract_join_predicates(right);
@@ -140,6 +142,7 @@ impl JoinGraph {
     }
 
     /// Check if two tables can be joined (have a connecting edge).
+    #[must_use]
     pub fn can_join(&self, table1: &str, table2: &str) -> bool {
         let (t1, t2) = if table1 < table2 {
             (table1.to_string(), table2.to_string())
@@ -151,6 +154,7 @@ impl JoinGraph {
     }
 
     /// Get join predicates between two tables.
+    #[must_use]
     pub fn get_join_predicates(&self, table1: &str, table2: &str) -> Option<&[Expr]> {
         let (t1, t2) = if table1 < table2 {
             (table1.to_string(), table2.to_string())
@@ -158,12 +162,13 @@ impl JoinGraph {
             (table2.to_string(), table1.to_string())
         };
 
-        self.edges.get(&(t1, t2)).map(|v| v.as_slice())
+        self.edges.get(&(t1, t2)).map(std::vec::Vec::as_slice)
     }
 
     /// Check if a set of tables forms a connected component.
     ///
     /// Returns true if all tables are reachable from each other via join edges.
+    #[must_use]
     pub fn is_connected(&self, tables: &[String]) -> bool {
         if tables.len() <= 1 {
             return true;
@@ -180,10 +185,11 @@ impl JoinGraph {
 
             // Find all neighbors
             for other_table in tables {
-                if other_table != &table && !visited.contains(other_table) {
-                    if self.can_join(&table, other_table) {
-                        stack.push(other_table.clone());
-                    }
+                if other_table != &table
+                    && !visited.contains(other_table)
+                    && self.can_join(&table, other_table)
+                {
+                    stack.push(other_table.clone());
                 }
             }
         }
@@ -192,16 +198,19 @@ impl JoinGraph {
     }
 
     /// Get all tables in the query.
+    #[must_use]
     pub fn tables(&self) -> &HashSet<String> {
         &self.tables
     }
 
     /// Get the number of edges (join predicates) in the graph.
+    #[must_use]
     pub fn edge_count(&self) -> usize {
         self.edges.len()
     }
 
     /// Get statistics about the join graph.
+    #[must_use]
     pub fn stats(&self) -> JoinGraphStats {
         let mut total_predicates = 0;
         let mut max_predicates = 0;
@@ -250,8 +259,9 @@ pub struct JoinGraphStats {
 impl JoinGraphStats {
     /// Calculate the join graph density (percentage of possible edges that exist).
     ///
-    /// Density = actual_edges / possible_edges
-    /// where possible_edges = n * (n-1) / 2 for n tables
+    /// Density = `actual_edges` / `possible_edges`
+    /// where `possible_edges` = n * (n-1) / 2 for n tables
+    #[must_use]
     pub fn density(&self) -> f64 {
         if self.table_count <= 1 {
             return 1.0;
@@ -264,6 +274,7 @@ impl JoinGraphStats {
     /// Estimate search space reduction factor.
     ///
     /// Sparse graphs (low density) benefit more from join filtering.
+    #[must_use]
     pub fn estimated_reduction_factor(&self) -> f64 {
         let density = self.density();
 
@@ -275,6 +286,7 @@ impl JoinGraphStats {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use ra_core::algebra::JoinType;

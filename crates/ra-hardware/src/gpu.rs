@@ -499,7 +499,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "Exact float equality needed for unified memory test"
+    )]
     fn unified_memory_no_transfer() {
         let unified = TransferCharacteristics::unified_memory();
         assert!(unified.unified_memory);
@@ -557,7 +560,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip() {
         let gpu = GpuModel::nvidia_a100_80gb();
         let json = serde_json::to_string(&gpu).expect("serialization should succeed");

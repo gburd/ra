@@ -1,3 +1,4 @@
+#![expect(clippy::print_stdout, reason = "example binary uses stdout")]
 //! Example demonstrating predicate selectivity estimation.
 //!
 //! This example shows how to use histogram and MCV data to estimate
@@ -35,7 +36,7 @@ fn equality_example() {
         selectivity,
         selectivity * 100.0
     );
-    println!("Expected rows: {:.0}", selectivity * 1000000.0);
+    println!("Expected rows: {:.0}", selectivity * 1_000_000.0);
 }
 
 fn range_example() {
@@ -133,8 +134,7 @@ fn mcv_example() {
     let selectivity_rare = estimate_predicate_selectivity(&predicate_rare, &stats);
     println!("\nPredicate: status = 'Deleted' (not in MCV)");
     println!(
-        "Estimated selectivity: {:.4} (1/NDV fallback)",
-        selectivity_rare
+        "Estimated selectivity: {selectivity_rare:.4} (1/NDV fallback)",
     );
     println!(
         "Improvement over MCV: {:.1}x more accurate for common values",

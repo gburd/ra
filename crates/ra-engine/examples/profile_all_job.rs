@@ -1,9 +1,14 @@
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "example binary uses stdout/stderr"
+)]
 //! Profile all 113 JOB queries and output timing data as CSV.
 //!
 //! Run with:
-//!   cargo run --release --example profile_all_job 2>/dev/null
+//!   `cargo run --release --example profile_all_job 2>/dev/null`
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use ra_core::statistics::Statistics;
 use ra_engine::Optimizer;
@@ -79,10 +84,10 @@ fn main() {
 
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .expect("cannot read queries dir")
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "sql"))
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
         .collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     println!("query,tables,parse_us,optimize_us,status,tables_parsed");
 

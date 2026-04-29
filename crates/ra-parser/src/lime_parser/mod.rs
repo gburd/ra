@@ -38,25 +38,11 @@ use lexer::RaToken;
 // and is never dereferenced by the generated C code.
 #[expect(improper_ctypes)]
 extern "C" {
-    fn raAlloc(
-        alloc: Option<
-            unsafe extern "C" fn(usize) -> *mut c_void,
-        >,
-    ) -> *mut c_void;
+    fn raAlloc(alloc: Option<unsafe extern "C" fn(usize) -> *mut c_void>) -> *mut c_void;
 
-    fn raFree(
-        parser: *mut c_void,
-        free_fn: Option<
-            unsafe extern "C" fn(*mut c_void),
-        >,
-    );
+    fn raFree(parser: *mut c_void, free_fn: Option<unsafe extern "C" fn(*mut c_void)>);
 
-    fn ra(
-        parser: *mut c_void,
-        token_type: c_int,
-        token_value: RaToken,
-        state: *mut RaParseState,
-    );
+    fn ra(parser: *mut c_void, token_type: c_int, token_value: RaToken, state: *mut RaParseState);
 }
 
 extern "C" {
@@ -90,9 +76,7 @@ pub fn parse_sql(sql: &str) -> Result<RelExpr, Vec<String>> {
     // SAFETY: parser_malloc is a valid allocation function.
     let parser = unsafe { raAlloc(Some(parser_malloc)) };
     if parser.is_null() {
-        return Err(vec![
-            "failed to allocate parser".to_owned()
-        ]);
+        return Err(vec!["failed to allocate parser".to_owned()]);
     }
 
     let mut state = RaParseState::new();
@@ -101,24 +85,14 @@ pub fn parse_sql(sql: &str) -> Result<RelExpr, Vec<String>> {
     for tok in &tokens {
         // SAFETY: parser is a valid raAlloc handle, state is valid.
         unsafe {
-            ra(
-                parser,
-                tok.code,
-                tok.value.clone(),
-                &raw mut state,
-            );
+            ra(parser, tok.code, tok.value.clone(), &raw mut state);
         }
     }
 
     // Feed EOF (token code 0) to finalize parsing.
     // SAFETY: same as above.
     unsafe {
-        ra(
-            parser,
-            0,
-            RaToken::default(),
-            &raw mut state,
-        );
+        ra(parser, 0, RaToken::default(), &raw mut state);
     }
 
     // Free the parser.
@@ -138,13 +112,8 @@ mod tests {
 
     /// Helper: parse SQL and assert it produces the expected
     /// top-level `RelExpr` variant.
-    fn assert_parses_as(
-        sql: &str,
-        check: fn(&RelExpr) -> bool,
-        label: &str,
-    ) {
-        let rel = parse_sql(sql)
-            .unwrap_or_else(|errs| panic!("{label}: {errs:?}"));
+    fn assert_parses_as(sql: &str, check: fn(&RelExpr) -> bool, label: &str) {
+        let rel = parse_sql(sql).unwrap_or_else(|errs| panic!("{label}: {errs:?}"));
         assert!(check(&rel), "expected {label}, got {rel:?}");
     }
 
@@ -188,8 +157,7 @@ mod tests {
     fn parse_order_by_limit() {
         // Grammar currently has LIMIT as a placeholder;
         // just verify it doesn't error.
-        parse_sql("SELECT * FROM t ORDER BY id LIMIT 10")
-            .expect("should parse");
+        parse_sql("SELECT * FROM t ORDER BY id LIMIT 10").expect("should parse");
     }
 
     #[test]
@@ -228,9 +196,7 @@ mod tests {
     fn parse_intersect() {
         assert_parses_as(
             "SELECT id FROM a INTERSECT SELECT id FROM b",
-            |r| {
-                matches!(r, RelExpr::Intersect { all: false, .. })
-            },
+            |r| matches!(r, RelExpr::Intersect { all: false, .. }),
             "Intersect",
         );
     }
@@ -239,9 +205,7 @@ mod tests {
     fn parse_intersect_all() {
         assert_parses_as(
             "SELECT id FROM a INTERSECT ALL SELECT id FROM b",
-            |r| {
-                matches!(r, RelExpr::Intersect { all: true, .. })
-            },
+            |r| matches!(r, RelExpr::Intersect { all: true, .. }),
             "Intersect All",
         );
     }
@@ -250,9 +214,7 @@ mod tests {
     fn parse_except() {
         assert_parses_as(
             "SELECT id FROM a EXCEPT SELECT id FROM b",
-            |r| {
-                matches!(r, RelExpr::Except { all: false, .. })
-            },
+            |r| matches!(r, RelExpr::Except { all: false, .. }),
             "Except",
         );
     }
@@ -261,19 +223,15 @@ mod tests {
     fn parse_except_all() {
         assert_parses_as(
             "SELECT id FROM a EXCEPT ALL SELECT id FROM b",
-            |r| {
-                matches!(r, RelExpr::Except { all: true, .. })
-            },
+            |r| matches!(r, RelExpr::Except { all: true, .. }),
             "Except All",
         );
     }
 
     #[test]
     fn parse_case_searched() {
-        parse_sql(
-            "SELECT CASE WHEN x > 0 THEN 1 ELSE 0 END FROM t",
-        )
-        .expect("searched CASE should parse");
+        parse_sql("SELECT CASE WHEN x > 0 THEN 1 ELSE 0 END FROM t")
+            .expect("searched CASE should parse");
     }
 
     #[test]
@@ -289,16 +247,13 @@ mod tests {
 
     #[test]
     fn parse_case_no_else() {
-        parse_sql(
-            "SELECT CASE WHEN x = 1 THEN 'one' END FROM t",
-        )
-        .expect("CASE without ELSE should parse");
+        parse_sql("SELECT CASE WHEN x = 1 THEN 'one' END FROM t")
+            .expect("CASE without ELSE should parse");
     }
 
     #[test]
     fn parse_cast() {
-        parse_sql("SELECT CAST(x AS integer) FROM t")
-            .expect("CAST should parse");
+        parse_sql("SELECT CAST(x AS integer) FROM t").expect("CAST should parse");
     }
 
     #[test]
@@ -309,64 +264,43 @@ mod tests {
 
     #[test]
     fn parse_not_expr() {
-        parse_sql("SELECT * FROM t WHERE NOT active")
-            .expect("NOT expression should parse");
+        parse_sql("SELECT * FROM t WHERE NOT active").expect("NOT expression should parse");
     }
 
     #[test]
     fn parse_between() {
-        parse_sql(
-            "SELECT * FROM t WHERE x BETWEEN 1 AND 10",
-        )
-        .expect("BETWEEN should parse");
+        parse_sql("SELECT * FROM t WHERE x BETWEEN 1 AND 10").expect("BETWEEN should parse");
     }
 
     #[test]
     fn parse_not_between() {
-        parse_sql(
-            "SELECT * FROM t WHERE x NOT BETWEEN 1 AND 10",
-        )
-        .expect("NOT BETWEEN should parse");
+        parse_sql("SELECT * FROM t WHERE x NOT BETWEEN 1 AND 10")
+            .expect("NOT BETWEEN should parse");
     }
 
     #[test]
     fn parse_like() {
-        parse_sql(
-            "SELECT * FROM t WHERE name LIKE '%foo%'",
-        )
-        .expect("LIKE should parse");
+        parse_sql("SELECT * FROM t WHERE name LIKE '%foo%'").expect("LIKE should parse");
     }
 
     #[test]
     fn parse_not_like() {
-        parse_sql(
-            "SELECT * FROM t WHERE name NOT LIKE '%bar%'",
-        )
-        .expect("NOT LIKE should parse");
+        parse_sql("SELECT * FROM t WHERE name NOT LIKE '%bar%'").expect("NOT LIKE should parse");
     }
 
     #[test]
     fn parse_ilike() {
-        parse_sql(
-            "SELECT * FROM t WHERE name ILIKE '%foo%'",
-        )
-        .expect("ILIKE should parse");
+        parse_sql("SELECT * FROM t WHERE name ILIKE '%foo%'").expect("ILIKE should parse");
     }
 
     #[test]
     fn parse_in_list() {
-        parse_sql(
-            "SELECT * FROM t WHERE id IN (1, 2, 3)",
-        )
-        .expect("IN (list) should parse");
+        parse_sql("SELECT * FROM t WHERE id IN (1, 2, 3)").expect("IN (list) should parse");
     }
 
     #[test]
     fn parse_not_in_list() {
-        parse_sql(
-            "SELECT * FROM t WHERE id NOT IN (1, 2, 3)",
-        )
-        .expect("NOT IN (list) should parse");
+        parse_sql("SELECT * FROM t WHERE id NOT IN (1, 2, 3)").expect("NOT IN (list) should parse");
     }
 
     #[test]
@@ -398,10 +332,8 @@ mod tests {
 
     #[test]
     fn parse_scalar_subquery() {
-        parse_sql(
-            "SELECT (SELECT COUNT(*) FROM other) FROM t",
-        )
-        .expect("scalar subquery should parse");
+        parse_sql("SELECT (SELECT COUNT(*) FROM other) FROM t")
+            .expect("scalar subquery should parse");
     }
 
     #[test]
@@ -470,29 +402,23 @@ mod tests {
 
     #[test]
     fn parse_window_empty_over() {
-        parse_sql(
-            "SELECT id, COUNT(*) OVER () FROM t",
-        )
-        .expect("window with empty OVER should parse");
+        parse_sql("SELECT id, COUNT(*) OVER () FROM t")
+            .expect("window with empty OVER should parse");
     }
 
     #[test]
     fn parse_union_distinct() {
         assert_parses_as(
             "SELECT id FROM a UNION SELECT id FROM b",
-            |r| {
-                matches!(r, RelExpr::Union { all: false, .. })
-            },
+            |r| matches!(r, RelExpr::Union { all: false, .. }),
             "Union distinct",
         );
     }
 
     #[test]
     fn parse_aggregate_distinct() {
-        parse_sql(
-            "SELECT COUNT(DISTINCT name) FROM users",
-        )
-        .expect("aggregate DISTINCT should parse");
+        parse_sql("SELECT COUNT(DISTINCT name) FROM users")
+            .expect("aggregate DISTINCT should parse");
     }
 
     #[test]

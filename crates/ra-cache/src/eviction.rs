@@ -8,9 +8,7 @@ use crate::key::QueryKey;
 use crate::plan::CachedPlan;
 
 /// Cache eviction strategy.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EvictionPolicy {
     /// Least Recently Used: evicts the entry accessed longest ago.
     Lru,
@@ -22,10 +20,7 @@ pub enum EvictionPolicy {
 }
 
 impl std::fmt::Display for EvictionPolicy {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Lru => write!(f, "LRU"),
             Self::Lfu => write!(f, "LFU"),
@@ -35,9 +30,7 @@ impl std::fmt::Display for EvictionPolicy {
 }
 
 /// Find the LRU victim (oldest `last_accessed`).
-pub(crate) fn find_lru_victim(
-    entries: &HashMap<QueryKey, CachedPlan>,
-) -> Option<QueryKey> {
+pub(crate) fn find_lru_victim(entries: &HashMap<QueryKey, CachedPlan>) -> Option<QueryKey> {
     entries
         .iter()
         .min_by_key(|(_, plan)| plan.last_accessed)
@@ -45,9 +38,7 @@ pub(crate) fn find_lru_victim(
 }
 
 /// Find the LFU victim (lowest `use_count`, tie-break by LRU).
-pub(crate) fn find_lfu_victim(
-    entries: &HashMap<QueryKey, CachedPlan>,
-) -> Option<QueryKey> {
+pub(crate) fn find_lfu_victim(entries: &HashMap<QueryKey, CachedPlan>) -> Option<QueryKey> {
     entries
         .iter()
         .min_by(|(_, a), (_, b)| {
@@ -62,9 +53,7 @@ pub(crate) fn find_lfu_victim(
 ///
 /// Entries with a low score (infrequent access, long since
 /// optimization) are evicted first.
-pub(crate) fn find_adaptive_victim(
-    entries: &HashMap<QueryKey, CachedPlan>,
-) -> Option<QueryKey> {
+pub(crate) fn find_adaptive_victim(entries: &HashMap<QueryKey, CachedPlan>) -> Option<QueryKey> {
     entries
         .iter()
         .min_by(|(_, a), (_, b)| {
@@ -95,7 +84,7 @@ fn adaptive_score(plan: &CachedPlan) -> f64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[expect(clippy::unwrap_used, clippy::expect_used, reason = "legacy allow")]
 mod tests {
     use super::*;
     use ra_core::algebra::RelExpr;
@@ -104,10 +93,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Instant;
 
-    fn make_entry(
-        use_count: u64,
-        age_ms: u64,
-    ) -> CachedPlan {
+    fn make_entry(use_count: u64, age_ms: u64) -> CachedPlan {
         let now = Instant::now();
         let accessed = now
             .checked_sub(std::time::Duration::from_millis(age_ms))
@@ -134,34 +120,20 @@ mod tests {
     #[test]
     fn lru_picks_oldest() {
         let mut entries = HashMap::new();
-        entries.insert(
-            make_key("new"),
-            make_entry(1, 10),
-        );
-        entries.insert(
-            make_key("old"),
-            make_entry(1, 1000),
-        );
+        entries.insert(make_key("new"), make_entry(1, 10));
+        entries.insert(make_key("old"), make_entry(1, 1000));
 
-        let victim = find_lru_victim(&entries)
-            .expect("should find victim");
+        let victim = find_lru_victim(&entries).expect("should find victim");
         assert_eq!(victim.sql, "old");
     }
 
     #[test]
     fn lfu_picks_least_used() {
         let mut entries = HashMap::new();
-        entries.insert(
-            make_key("hot"),
-            make_entry(100, 10),
-        );
-        entries.insert(
-            make_key("cold"),
-            make_entry(1, 10),
-        );
+        entries.insert(make_key("hot"), make_entry(100, 10));
+        entries.insert(make_key("cold"), make_entry(1, 10));
 
-        let victim = find_lfu_victim(&entries)
-            .expect("should find victim");
+        let victim = find_lfu_victim(&entries).expect("should find victim");
         assert_eq!(victim.sql, "cold");
     }
 
@@ -169,9 +141,6 @@ mod tests {
     fn eviction_policy_display() {
         assert_eq!(EvictionPolicy::Lru.to_string(), "LRU");
         assert_eq!(EvictionPolicy::Lfu.to_string(), "LFU");
-        assert_eq!(
-            EvictionPolicy::Adaptive.to_string(),
-            "Adaptive"
-        );
+        assert_eq!(EvictionPolicy::Adaptive.to_string(), "Adaptive");
     }
 }

@@ -349,16 +349,7 @@ impl DistributedOptimizer {
                 left,
                 right,
             } => self.annotate_join(*join_type, condition, left, right, plan),
-            RelExpr::Filter { input, .. } => {
-                let child = self.annotate(input)?;
-                Ok(DistributedRelExpr {
-                    plan: plan.clone(),
-                    distribution: child.distribution,
-                    node_assignment: child.node_assignment,
-                    input_strategy: None,
-                })
-            }
-            RelExpr::Project { input, .. } => {
+            RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
                 let child = self.annotate(input)?;
                 Ok(DistributedRelExpr {
                     plan: plan.clone(),
@@ -378,6 +369,7 @@ impl DistributedOptimizer {
     }
 
     /// Annotate a scan node.
+    #[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other annotate methods")]
     fn annotate_scan(
         &self,
         table: &str,
@@ -434,8 +426,7 @@ impl DistributedOptimizer {
                     .partial_cmp(&b.total())
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .map(|(s, _)| s)
-            .unwrap_or(DistributionStrategy::CoLocated);
+            .map_or(DistributionStrategy::CoLocated, |(s, _)| s);
 
         // Determine output distribution.
         let output_dist = match &best {
@@ -588,7 +579,7 @@ impl DistributedOptimizer {
     ///
     /// Inserts a local pre-aggregation before the shuffle, then a
     /// global finalization after the shuffle.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(clippy::unnecessary_wraps, reason = "legacy allow")]
     fn build_two_phase_plan(
         &self,
         plan: &RelExpr,
@@ -637,7 +628,7 @@ impl DistributedOptimizer {
     ///
     /// Hot keys are routed separately from normal keys. The output
     /// uses the same hash distribution on group-by keys.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(clippy::unnecessary_wraps, reason = "legacy allow")]
     fn build_skew_aware_plan(
         &self,
         plan: &RelExpr,
@@ -674,7 +665,7 @@ impl DistributedOptimizer {
     }
 
     /// Build a single-phase (centralized) aggregate plan.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(clippy::unnecessary_wraps, reason = "legacy allow")]
     fn build_single_phase_plan(
         &self,
         plan: &RelExpr,
@@ -787,7 +778,7 @@ impl DistributedOptimizer {
 
     /// Build a `DistributedAggConfig` from the optimizer's
     /// settings and cluster topology.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation, reason = "legacy allow")]
     fn make_agg_config(&self) -> DistributedAggConfig {
         DistributedAggConfig {
             num_nodes: self.topology.nodes.len() as u32,
@@ -798,7 +789,11 @@ impl DistributedOptimizer {
     }
 
     /// Estimate the row count for a plan.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "legacy allow"
+    )]
     fn estimate_row_count(&self, plan: &RelExpr) -> u64 {
         match plan {
             RelExpr::Scan { table, .. } => {
@@ -838,8 +833,7 @@ impl DistributedOptimizer {
     /// is included as an additional candidate (converted to
     /// `ra_core`'s `DistributionStrategy`).
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_arguments, reason = "legacy allow")]
     pub fn enumerate_strategies(
         &self,
         left_dist: &DataDistribution,
@@ -896,10 +890,10 @@ impl DistributedOptimizer {
 
         // Strategy 4: Shuffle both sides.
         let source = nodes.first().copied().unwrap_or(NodeId(0));
-        let keys = if !join_keys_left.is_empty() {
-            join_keys_left.to_vec()
-        } else {
+        let keys = if join_keys_left.is_empty() {
             join_keys_right.to_vec()
+        } else {
+            join_keys_left.to_vec()
         };
         if !keys.is_empty() {
             strategies.push(DistributionStrategy::Shuffle {
@@ -1037,7 +1031,10 @@ impl DistributedOptimizer {
             DistributionStrategy::CoLocated | DistributionStrategy::PartitionWise { .. } => {
                 Cost::ZERO
             }
-            DistributionStrategy::Broadcast { source, targets } => {
+            DistributionStrategy::Broadcast { source, targets }
+            | DistributionStrategy::PartialBroadcast {
+                source, targets, ..
+            } => {
                 let small_bytes = left_bytes.min(right_bytes);
                 let mut total_network = 0.0;
                 for &target in targets {
@@ -1069,21 +1066,6 @@ impl DistributedOptimizer {
                     0.0,
                     total_network * self.config.network_weight,
                     per_node,
-                )
-            }
-            DistributionStrategy::PartialBroadcast {
-                source, targets, ..
-            } => {
-                let small_bytes = left_bytes.min(right_bytes);
-                let mut total_network = 0.0;
-                for &target in targets {
-                    total_network += self.topology.transfer_time_ms(*source, target, small_bytes);
-                }
-                Cost::new(
-                    0.0,
-                    0.0,
-                    total_network * self.config.network_weight,
-                    small_bytes * targets.len() as u64,
                 )
             }
             DistributionStrategy::RangePartition { ranges, .. } => {
@@ -1148,7 +1130,7 @@ fn is_broadcast_compatible(join_type: JoinType, broadcast_left: bool) -> bool {
 
 /// Extract equi-join key pairs from a join condition.
 ///
-/// Returns pairs of (left_key, right_key) for equality predicates.
+/// Returns pairs of (`left_key`, `right_key`) for equality predicates.
 fn extract_equi_join_keys(condition: &Expr) -> Vec<(Expr, Expr)> {
     let mut keys = Vec::new();
     collect_equi_keys(condition, &mut keys);
@@ -1177,6 +1159,8 @@ fn collect_equi_keys(expr: &Expr, keys: &mut Vec<(Expr, Expr)>) {
 }
 
 #[cfg(test)]
+#[expect(clippy::panic, reason = "test assertions")]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use ra_core::algebra::{AggregateExpr, AggregateFunction};

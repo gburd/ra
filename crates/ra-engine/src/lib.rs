@@ -26,6 +26,15 @@
 #![allow(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+// Query optimization fundamentally requires converting between integer
+// row counts/sizes and floating-point costs. These casts are safe because
+// realistic table sizes and cardinalities never approach 2^52.
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_possible_wrap)]
+// Test code legitimately uses expect/unwrap for assertions and setup.
+#![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
 pub mod adaptive_calibration;
 pub mod analysis;
@@ -88,8 +97,8 @@ pub mod rule_knowledge;
 pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;
-pub(crate) mod sparsemap;
 pub mod shortcuts;
+pub(crate) mod sparsemap;
 pub mod stats_cache;
 // Phase 6: Timeline system (deferred)
 pub mod hybrid_search;
@@ -304,8 +313,12 @@ pub use xml_optimizer::{
 /// Parse a string into an egg [`Var`] for use in e-graph rewrite patterns.
 ///
 /// Only call with known-valid pattern variable literals (e.g. `"?x"`).
+///
+/// # Panics
+///
 /// Panics on invalid input since these are programmer-controlled constants.
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
+#[must_use]
 pub fn parse_var(s: &str) -> egg::Var {
     s.parse()
         .expect("invalid egg::Var literal; pattern variables must start with '?'")

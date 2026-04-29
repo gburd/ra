@@ -9,8 +9,8 @@ use ra_parser::sql_to_relexpr;
 
 use crate::display::format_plan_tree;
 use crate::helpers::{hardware_profile_from_def, load_hardware_profile};
-use crate::output::print_header;
 use crate::output::errors::format_sql_error;
+use crate::output::print_header;
 
 pub fn cmd_explain(
     query: &str,

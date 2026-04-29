@@ -78,23 +78,17 @@ impl ConfigLoader {
     pub fn load(&self) -> Result<RaConfig, ConfigError> {
         let mut config = RaConfig::default();
 
-        if let Some(layer) =
-            load_optional_file(&self.system)?
-        {
+        if let Some(layer) = load_optional_file(&self.system)? {
             config.merge(&layer);
         }
 
         if let Some(ref user) = self.user {
-            if let Some(layer) =
-                load_optional_file(user)?
-            {
+            if let Some(layer) = load_optional_file(user)? {
                 config.merge(&layer);
             }
         }
 
-        if let Some(layer) =
-            load_optional_file(&self.local)?
-        {
+        if let Some(layer) = load_optional_file(&self.local)? {
             config.merge(&layer);
         }
 
@@ -112,20 +106,14 @@ impl ConfigLoader {
     /// Returns [`ConfigError::WriteFile`] if the directory cannot be
     /// created or the file cannot be written, or
     /// [`ConfigError::SerializeToml`] if serialization fails.
-    pub fn save_user(
-        &self,
-        config: &RaConfig,
-    ) -> Result<(), ConfigError> {
-        let path = self
-            .user
-            .as_deref()
-            .ok_or_else(|| ConfigError::WriteFile {
-                path: "~/.config/ra/config.toml".to_owned(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "could not determine home directory",
-                ),
-            })?;
+    pub fn save_user(&self, config: &RaConfig) -> Result<(), ConfigError> {
+        let path = self.user.as_deref().ok_or_else(|| ConfigError::WriteFile {
+            path: "~/.config/ra/config.toml".to_owned(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "could not determine home directory",
+            ),
+        })?;
 
         save_config(config, path)
     }
@@ -139,10 +127,7 @@ impl ConfigLoader {
     /// Returns [`ConfigError::WriteFile`] if the directory cannot be
     /// created or the file cannot be written, or
     /// [`ConfigError::SerializeToml`] if serialization fails.
-    pub fn save_local(
-        &self,
-        config: &RaConfig,
-    ) -> Result<(), ConfigError> {
+    pub fn save_local(&self, config: &RaConfig) -> Result<(), ConfigError> {
         save_config(config, &self.local)
     }
 }
@@ -154,52 +139,38 @@ impl Default for ConfigLoader {
 }
 
 /// Load a config file if it exists, return None if missing.
-fn load_optional_file(
-    path: &Path,
-) -> Result<Option<RaConfig>, ConfigError> {
+fn load_optional_file(path: &Path) -> Result<Option<RaConfig>, ConfigError> {
     if !path.is_file() {
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(path).map_err(|e| {
-        ConfigError::ReadFile {
-            path: path.display().to_string(),
-            source: e,
-        }
+    let content = std::fs::read_to_string(path).map_err(|e| ConfigError::ReadFile {
+        path: path.display().to_string(),
+        source: e,
     })?;
 
-    let config: RaConfig =
-        toml::from_str(&content).map_err(|e| {
-            ConfigError::ParseToml {
-                path: path.display().to_string(),
-                source: e,
-            }
-        })?;
+    let config: RaConfig = toml::from_str(&content).map_err(|e| ConfigError::ParseToml {
+        path: path.display().to_string(),
+        source: e,
+    })?;
 
     Ok(Some(config))
 }
 
 /// Save config to a file, creating parent dirs as needed.
-fn save_config(
-    config: &RaConfig,
-    path: &Path,
-) -> Result<(), ConfigError> {
+fn save_config(config: &RaConfig, path: &Path) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            ConfigError::WriteFile {
-                path: parent.display().to_string(),
-                source: e,
-            }
+        std::fs::create_dir_all(parent).map_err(|e| ConfigError::WriteFile {
+            path: parent.display().to_string(),
+            source: e,
         })?;
     }
 
     let toml_str = config.to_toml()?;
 
-    std::fs::write(path, toml_str).map_err(|e| {
-        ConfigError::WriteFile {
-            path: path.display().to_string(),
-            source: e,
-        }
+    std::fs::write(path, toml_str).map_err(|e| ConfigError::WriteFile {
+        path: path.display().to_string(),
+        source: e,
     })
 }
 
@@ -218,15 +189,9 @@ mod tests {
 
     fn loader_with_no_files_returns_defaults() {
         let loader = ConfigLoader::new()
-            .with_system(PathBuf::from(
-                "/nonexistent/system",
-            ))
-            .with_user(PathBuf::from(
-                "/nonexistent/user",
-            ))
-            .with_local(PathBuf::from(
-                "/nonexistent/local",
-            ));
+            .with_system(PathBuf::from("/nonexistent/system"))
+            .with_user(PathBuf::from("/nonexistent/user"))
+            .with_local(PathBuf::from("/nonexistent/local"));
 
         let config = loader.load().expect("load");
         assert_eq!(config, RaConfig::default());
@@ -237,11 +202,7 @@ mod tests {
     fn loader_reads_toml_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
-        std::fs::write(
-            &path,
-            "[editor]\nmode = \"vi\"\n",
-        )
-        .expect("write");
+        std::fs::write(&path, "[editor]\nmode = \"vi\"\n").expect("write");
 
         let loader = ConfigLoader::new()
             .with_system(PathBuf::from("/nonexistent"))
@@ -258,18 +219,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
 
         let user = dir.path().join("user.toml");
-        std::fs::write(
-            &user,
-            "[editor]\nmode = \"vi\"\n",
-        )
-        .expect("write user");
+        std::fs::write(&user, "[editor]\nmode = \"vi\"\n").expect("write user");
 
         let local = dir.path().join("local.toml");
-        std::fs::write(
-            &local,
-            "[editor]\nmode = \"nano\"\n",
-        )
-        .expect("write local");
+        std::fs::write(&local, "[editor]\nmode = \"nano\"\n").expect("write local");
 
         let loader = ConfigLoader::new()
             .with_system(PathBuf::from("/nonexistent"))
@@ -292,8 +245,7 @@ mod tests {
 
         save_config(&config, &path).expect("save");
 
-        let loaded =
-            load_optional_file(&path).expect("load");
+        let loaded = load_optional_file(&path).expect("load");
         assert_eq!(loaded, Some(config));
     }
 
@@ -301,8 +253,7 @@ mod tests {
 
     fn save_creates_parent_dirs() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path =
-            dir.path().join("deep").join("nested").join("config.toml");
+        let path = dir.path().join("deep").join("nested").join("config.toml");
 
         let config = RaConfig::default();
         save_config(&config, &path).expect("save");
@@ -321,8 +272,7 @@ mod tests {
     fn load_invalid_toml() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("bad.toml");
-        std::fs::write(&path, "not [valid toml {{{}}")
-            .expect("write");
+        std::fs::write(&path, "not [valid toml {{{}}").expect("write");
 
         let loader = ConfigLoader::new()
             .with_system(PathBuf::from("/nonexistent"))

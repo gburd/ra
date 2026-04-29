@@ -69,7 +69,7 @@ pub fn min_max_index_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::analysis::RelAnalysis;

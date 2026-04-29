@@ -1,3 +1,4 @@
+#![expect(clippy::print_stdout, reason = "CLI output")]
 //! CLI commands for statistics timeline interaction.
 //!
 //! Provides three subcommands:
@@ -352,7 +353,7 @@ fn feedback_table(
             rows.push(row);
         }
 
-        let header_refs = headers.to_vec();
+        let header_refs = headers.clone();
         eprintln!("{}", render_ascii_table(&header_refs, &rows));
 
         // Show batch statistics
@@ -1108,7 +1109,7 @@ mod tests {
     fn load_timeline_not_found() {
         let result = load_timeline("/nonexistent/path.toml");
         assert!(result.is_err());
-        let msg = format!("{}", result.err().expect("should fail"));
+        let msg = format!("{}", result.expect_err("should fail"));
         assert!(msg.contains("not found"));
     }
 

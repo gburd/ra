@@ -90,6 +90,7 @@ pub struct StitchResult {
 /// and we re-optimize after Scan(A) produced its rows, the stitched
 /// plan becomes:
 ///   `Project -> NewJoin -> (MaterializedA, Scan(B))`
+#[must_use]
 pub fn stitch_plans(
     materialized_input: &RelExpr,
     reoptimized_suffix: &RelExpr,
@@ -246,6 +247,7 @@ pub fn verify_join_order_equivalence(old_plan: &RelExpr, new_plan: &RelExpr) -> 
 /// is described by a `(materialized, kind, state)` triple. Points
 /// are applied bottom-up so that inner stitches take effect before
 /// outer ones.
+#[must_use]
 pub fn stitch_multi(
     reoptimized: &RelExpr,
     points: &[(RelExpr, StitchPointKind, OperatorState)],
@@ -283,8 +285,9 @@ pub fn count_stitch_points(plan: &RelExpr) -> usize {
         RelExpr::Join { left, right, .. } => {
             1 + count_stitch_points(left) + count_stitch_points(right)
         }
-        RelExpr::Aggregate { input, .. } => 1 + count_stitch_points(input),
-        RelExpr::Sort { input, .. } => 1 + count_stitch_points(input),
+        RelExpr::Aggregate { input, .. } | RelExpr::Sort { input, .. } => {
+            1 + count_stitch_points(input)
+        }
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Distinct { input, .. }
@@ -301,6 +304,7 @@ pub fn count_stitch_points(plan: &RelExpr) -> usize {
 /// Replace the first subtree matching `target` with `replacement`.
 /// Returns the modified plan and `true` if a replacement was made.
 #[must_use]
+#[expect(clippy::too_many_lines, reason = "match over all RelExpr variants for recursive replacement")]
 pub fn replace_subtree(plan: &RelExpr, target: &RelExpr, replacement: &RelExpr) -> (RelExpr, bool) {
     if plan == target {
         return (replacement.clone(), true);
@@ -471,6 +475,7 @@ pub fn find_deepest_join(plan: &RelExpr) -> Option<&RelExpr> {
 }
 
 #[cfg(test)]
+#[expect(clippy::panic, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use ra_core::algebra::{

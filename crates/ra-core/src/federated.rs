@@ -25,10 +25,7 @@ pub struct FederatedQuery {
 impl FederatedQuery {
     /// Create a new federated query with the given plan and sources.
     #[must_use]
-    pub fn new(
-        plan: RelExpr,
-        sources: HashMap<String, DataSource>,
-    ) -> Self {
+    pub fn new(plan: RelExpr, sources: HashMap<String, DataSource>) -> Self {
         Self { plan, sources }
     }
 
@@ -70,8 +67,7 @@ impl FederatedQuery {
         let mut endpoints: Vec<&str> = Vec::new();
         for source in self.sources.values() {
             if let DataSource::Remote { connection, .. } = source {
-                if !endpoints.contains(&connection.endpoint.as_str())
-                {
+                if !endpoints.contains(&connection.endpoint.as_str()) {
                     endpoints.push(&connection.endpoint);
                 }
             }
@@ -106,10 +102,7 @@ pub enum DataSource {
 impl DataSource {
     /// Create a local data source.
     #[must_use]
-    pub fn local(
-        table: impl Into<String>,
-        statistics: Statistics,
-    ) -> Self {
+    pub fn local(table: impl Into<String>, statistics: Statistics) -> Self {
         Self::Local {
             table: table.into(),
             statistics,
@@ -205,9 +198,7 @@ impl RemoteConnection {
 }
 
 /// Supported remote database types.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DatabaseType {
     /// `PostgreSQL`.
     PostgreSQL,
@@ -278,10 +269,7 @@ impl DatabaseType {
                 "VARIANCE".into(),
                 "APPROX_COUNT_DISTINCT".into(),
             ],
-            Self::SparkSQL => vec![
-                "COLLECT_LIST".into(),
-                "COLLECT_SET".into(),
-            ],
+            Self::SparkSQL => vec!["COLLECT_LIST".into(), "COLLECT_SET".into()],
             Self::DuckDB => vec![
                 "STRING_AGG".into(),
                 "LIST".into(),
@@ -489,7 +477,10 @@ impl fmt::Display for ExecutionLocation {
                 )
             }
             Self::ShipData {
-                source, table, predicate, ..
+                source,
+                table,
+                predicate,
+                ..
             } => {
                 let filter_note = if predicate.is_some() {
                     " (with filter pushdown)"
@@ -546,9 +537,7 @@ impl FederatedCostBreakdown {
         if alternative_total_ms <= 0.0 {
             return 0.0;
         }
-        ((alternative_total_ms - self.total_ms)
-            / alternative_total_ms)
-            * 100.0
+        ((alternative_total_ms - self.total_ms) / alternative_total_ms) * 100.0
     }
 }
 
@@ -568,15 +557,12 @@ pub struct FederatedPlan {
 impl FederatedPlan {
     /// Return the best alternative (cheapest non-chosen strategy).
     #[must_use]
-    pub fn best_alternative(&self) -> Option<&FederatedCostBreakdown>
-    {
-        self.alternatives
-            .iter()
-            .min_by(|a, b| {
-                a.total_ms
-                    .partial_cmp(&b.total_ms)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+    pub fn best_alternative(&self) -> Option<&FederatedCostBreakdown> {
+        self.alternatives.iter().min_by(|a, b| {
+            a.total_ms
+                .partial_cmp(&b.total_ms)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     }
 }
 
@@ -595,18 +581,17 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
-#[expect(clippy::float_cmp, reason = "exact float equality needed for deterministic network transfer tests")]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic network transfer tests"
+)]
 mod tests {
     use super::*;
 
     fn sample_connection() -> RemoteConnection {
-        RemoteConnection::new(
-            DatabaseType::PostgreSQL,
-            "db.example.com:5432",
-            10,
-            100,
-        )
+        RemoteConnection::new(DatabaseType::PostgreSQL, "db.example.com:5432", 10, 100)
     }
 
     fn sample_stats() -> Statistics {
@@ -633,32 +618,22 @@ mod tests {
             ),
         );
 
-        let query = FederatedQuery::new(
-            RelExpr::scan("local_table"),
-            sources,
-        );
+        let query = FederatedQuery::new(RelExpr::scan("local_table"), sources);
         assert!(query.is_distributed());
     }
 
     #[test]
     fn federated_query_not_distributed() {
         let mut sources = HashMap::new();
-        sources.insert(
-            "t".into(),
-            DataSource::local("t", sample_stats()),
-        );
-        let query =
-            FederatedQuery::new(RelExpr::scan("t"), sources);
+        sources.insert("t".into(), DataSource::local("t", sample_stats()));
+        let query = FederatedQuery::new(RelExpr::scan("t"), sources);
         assert!(!query.is_distributed());
     }
 
     #[test]
     fn remote_sources_listed() {
         let mut sources = HashMap::new();
-        sources.insert(
-            "local".into(),
-            DataSource::local("local", sample_stats()),
-        );
+        sources.insert("local".into(), DataSource::local("local", sample_stats()));
         sources.insert(
             "remote".into(),
             DataSource::remote(
@@ -668,8 +643,7 @@ mod tests {
                 QueryCapabilities::minimal(),
             ),
         );
-        let query =
-            FederatedQuery::new(RelExpr::scan("local"), sources);
+        let query = FederatedQuery::new(RelExpr::scan("local"), sources);
         let remotes = query.remote_sources();
         assert_eq!(remotes.len(), 1);
         assert_eq!(remotes[0].0, "remote");
@@ -678,16 +652,9 @@ mod tests {
     #[test]
     fn local_sources_listed() {
         let mut sources = HashMap::new();
-        sources.insert(
-            "a".into(),
-            DataSource::local("a", sample_stats()),
-        );
-        sources.insert(
-            "b".into(),
-            DataSource::local("b", sample_stats()),
-        );
-        let query =
-            FederatedQuery::new(RelExpr::scan("a"), sources);
+        sources.insert("a".into(), DataSource::local("a", sample_stats()));
+        sources.insert("b".into(), DataSource::local("b", sample_stats()));
+        let query = FederatedQuery::new(RelExpr::scan("a"), sources);
         let locals = query.local_sources();
         assert_eq!(locals.len(), 2);
     }
@@ -698,12 +665,7 @@ mod tests {
         sources.insert(
             "r1".into(),
             DataSource::remote(
-                RemoteConnection::new(
-                    DatabaseType::PostgreSQL,
-                    "host1:5432",
-                    5,
-                    100,
-                ),
+                RemoteConnection::new(DatabaseType::PostgreSQL, "host1:5432", 5, 100),
                 "r1",
                 None,
                 QueryCapabilities::full(),
@@ -712,12 +674,7 @@ mod tests {
         sources.insert(
             "r2".into(),
             DataSource::remote(
-                RemoteConnection::new(
-                    DatabaseType::MySQL,
-                    "host2:3306",
-                    10,
-                    50,
-                ),
+                RemoteConnection::new(DatabaseType::MySQL, "host2:3306", 10, 50),
                 "r2",
                 None,
                 QueryCapabilities::full(),
@@ -726,19 +683,13 @@ mod tests {
         sources.insert(
             "r3".into(),
             DataSource::remote(
-                RemoteConnection::new(
-                    DatabaseType::PostgreSQL,
-                    "host1:5432",
-                    5,
-                    100,
-                ),
+                RemoteConnection::new(DatabaseType::PostgreSQL, "host1:5432", 5, 100),
                 "r3",
                 None,
                 QueryCapabilities::full(),
             ),
         );
-        let query =
-            FederatedQuery::new(RelExpr::scan("r1"), sources);
+        let query = FederatedQuery::new(RelExpr::scan("r1"), sources);
         assert_eq!(query.remote_endpoint_count(), 2);
     }
 
@@ -761,12 +712,7 @@ mod tests {
 
     #[test]
     fn transfer_time_zero_bandwidth() {
-        let conn = RemoteConnection::new(
-            DatabaseType::MySQL,
-            "host:3306",
-            5,
-            0,
-        );
+        let conn = RemoteConnection::new(DatabaseType::MySQL, "host:3306", 5, 0);
         assert_eq!(conn.transfer_time_ms(1000), f64::MAX);
     }
 
@@ -779,10 +725,7 @@ mod tests {
         assert_eq!(DatabaseType::BigQuery.to_string(), "BigQuery");
         assert_eq!(DatabaseType::SparkSQL.to_string(), "SparkSQL");
         assert_eq!(DatabaseType::DuckDB.to_string(), "DuckDB");
-        assert_eq!(
-            DatabaseType::GenericJdbc.to_string(),
-            "GenericJDBC"
-        );
+        assert_eq!(DatabaseType::GenericJdbc.to_string(), "GenericJDBC");
     }
 
     #[test]
@@ -820,32 +763,21 @@ mod tests {
 
     #[test]
     fn data_source_statistics() {
-        let local =
-            DataSource::local("t", Statistics::new(100.0));
+        let local = DataSource::local("t", Statistics::new(100.0));
         assert!(local.statistics().is_some());
 
-        let remote = DataSource::remote(
-            sample_connection(),
-            "t",
-            None,
-            QueryCapabilities::full(),
-        );
+        let remote = DataSource::remote(sample_connection(), "t", None, QueryCapabilities::full());
         assert!(remote.statistics().is_none());
     }
 
     #[test]
     fn data_source_capabilities() {
-        let local =
-            DataSource::local("t", Statistics::new(100.0));
+        let local = DataSource::local("t", Statistics::new(100.0));
         let caps = local.capabilities();
         assert!(caps.supports_join_pushdown);
 
-        let remote = DataSource::remote(
-            sample_connection(),
-            "t",
-            None,
-            QueryCapabilities::minimal(),
-        );
+        let remote =
+            DataSource::remote(sample_connection(), "t", None, QueryCapabilities::minimal());
         let caps = remote.capabilities();
         assert!(!caps.supports_join_pushdown);
     }
@@ -950,9 +882,7 @@ mod tests {
                     rows_transferred: 10_000,
                 },
             ],
-            steps: vec![
-                "Execute locally".into(),
-            ],
+            steps: vec!["Execute locally".into()],
         };
         let best = plan.best_alternative().expect("should have alternative");
         assert_eq!(best.strategy, "ship_query");
@@ -961,28 +891,20 @@ mod tests {
     #[test]
     fn serialize_roundtrip_federated_query() {
         let mut sources = HashMap::new();
-        sources.insert(
-            "t".into(),
-            DataSource::local("t", Statistics::new(100.0)),
-        );
-        let query =
-            FederatedQuery::new(RelExpr::scan("t"), sources);
-        let json = serde_json::to_string(&query)
-            .expect("serialization should succeed");
+        sources.insert("t".into(), DataSource::local("t", Statistics::new(100.0)));
+        let query = FederatedQuery::new(RelExpr::scan("t"), sources);
+        let json = serde_json::to_string(&query).expect("serialization should succeed");
         let deserialized: FederatedQuery =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(query, deserialized);
     }
 
     #[test]
     fn serialize_roundtrip_remote_connection() {
         let conn = sample_connection();
-        let json = serde_json::to_string(&conn)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&conn).expect("serialization should succeed");
         let deserialized: RemoteConnection =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(conn, deserialized);
     }
 
@@ -993,11 +915,9 @@ mod tests {
             local_operations: Box::new(RelExpr::scan("l")),
             target: sample_connection(),
         };
-        let json = serde_json::to_string(&loc)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&loc).expect("serialization should succeed");
         let deserialized: ExecutionLocation =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(loc, deserialized);
     }
 }

@@ -20,8 +20,7 @@ impl Backend for NativeBackend {
         _source: Dialect,
         target: Dialect,
     ) -> Result<TranslationResult, TranslationError> {
-        let rel_exprs = sql_to_relexprs(sql)
-            .map_err(|e| TranslationError::Parse(e.to_string()))?;
+        let rel_exprs = sql_to_relexprs(sql).map_err(|e| TranslationError::Parse(e.to_string()))?;
 
         let mut all_warnings = Vec::new();
         let mut translated_stmts = Vec::new();

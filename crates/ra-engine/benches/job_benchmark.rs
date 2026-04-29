@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    clippy::print_stderr,
+    reason = "benchmark diagnostic output"
+)]
 //! Join Order Benchmark (JOB) optimizer benchmarks.
 //!
 //! All 113 JOB queries from the IMDB dataset, parsed from SQL files
@@ -7,9 +12,9 @@
 //! Reference: "How Good Are Query Optimizers, Really?" (Leis et al.)
 //!
 //! Run with:
-//!   cargo bench --package ra-engine --bench job_benchmark
+//!   `cargo bench --package ra-engine --bench job_benchmark`
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::RelExpr;
@@ -71,10 +76,10 @@ fn load_queries() -> Vec<(String, RelExpr)> {
     let dir = queries_dir();
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "sql"))
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
         .collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     entries
         .into_iter()
@@ -125,7 +130,7 @@ fn bench_job_by_category(c: &mut Criterion) {
         .filter(|(n, _)| {
             let num: u32 = n
                 .chars()
-                .take_while(|c| c.is_ascii_digit())
+                .take_while(char::is_ascii_digit)
                 .collect::<String>()
                 .parse()
                 .unwrap_or(0);
@@ -138,7 +143,7 @@ fn bench_job_by_category(c: &mut Criterion) {
         .filter(|(n, _)| {
             let num: u32 = n
                 .chars()
-                .take_while(|c| c.is_ascii_digit())
+                .take_while(char::is_ascii_digit)
                 .collect::<String>()
                 .parse()
                 .unwrap_or(0);
@@ -151,7 +156,7 @@ fn bench_job_by_category(c: &mut Criterion) {
         .filter(|(n, _)| {
             let num: u32 = n
                 .chars()
-                .take_while(|c| c.is_ascii_digit())
+                .take_while(char::is_ascii_digit)
                 .collect::<String>()
                 .parse()
                 .unwrap_or(0);

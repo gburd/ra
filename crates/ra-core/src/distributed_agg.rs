@@ -188,9 +188,7 @@ impl AggregationStrategy {
     /// Returns `None` for non-decomposable functions like `StdDev`
     /// or `StringAgg`.
     #[must_use]
-    pub fn decompose_aggregate(
-        func: AggregateFunction,
-    ) -> Option<AggDecomposition> {
+    pub fn decompose_aggregate(func: AggregateFunction) -> Option<AggDecomposition> {
         match func {
             AggregateFunction::Count => Some(AggDecomposition {
                 local_function: AggregateFunction::Count,
@@ -198,12 +196,10 @@ impl AggregationStrategy {
             }),
             // AVG decomposes the same as SUM here; the full
             // AVG decomposition (SUM + COUNT) is in decompose_avg().
-            AggregateFunction::Sum | AggregateFunction::Avg => {
-                Some(AggDecomposition {
-                    local_function: AggregateFunction::Sum,
-                    global_function: AggregateFunction::Sum,
-                })
-            }
+            AggregateFunction::Sum | AggregateFunction::Avg => Some(AggDecomposition {
+                local_function: AggregateFunction::Sum,
+                global_function: AggregateFunction::Sum,
+            }),
             AggregateFunction::Min => Some(AggDecomposition {
                 local_function: AggregateFunction::Min,
                 global_function: AggregateFunction::Min,
@@ -295,14 +291,12 @@ impl AggregationStrategy {
         let num_nodes = f64::from(config.num_nodes);
         let shuffle_fraction = (num_nodes - 1.0) / num_nodes;
 
-        let cost_single =
-            input_rows as f64 * config.avg_row_bytes * shuffle_fraction
-                / config.network_bandwidth_bps;
+        let cost_single = input_rows as f64 * config.avg_row_bytes * shuffle_fraction
+            / config.network_bandwidth_bps;
 
         let partial_rows = distinct_groups as f64 * num_nodes;
         let cost_two_phase =
-            partial_rows * config.avg_row_bytes * shuffle_fraction
-                / config.network_bandwidth_bps;
+            partial_rows * config.avg_row_bytes * shuffle_fraction / config.network_bandwidth_bps;
 
         if cost_single <= 0.0 {
             return 0.0;
@@ -326,18 +320,15 @@ impl AggregationStrategy {
         let num_nodes = f64::from(config.num_nodes);
         let shuffle_fraction = (num_nodes - 1.0) / num_nodes;
 
-        let dedup_rows_per_node =
-            (distinct_values as f64).min(input_rows as f64 / num_nodes);
+        let dedup_rows_per_node = (distinct_values as f64).min(input_rows as f64 / num_nodes);
         let dedup_rows = dedup_rows_per_node * num_nodes;
 
-        let shuffle_1 = dedup_rows * config.avg_row_bytes
-            * shuffle_fraction
-            / config.network_bandwidth_bps;
+        let shuffle_1 =
+            dedup_rows * config.avg_row_bytes * shuffle_fraction / config.network_bandwidth_bps;
 
         let key_bytes = 16.0;
-        let shuffle_2 = groups as f64 * num_nodes * key_bytes
-            * shuffle_fraction
-            / config.network_bandwidth_bps;
+        let shuffle_2 =
+            groups as f64 * num_nodes * key_bytes * shuffle_fraction / config.network_bandwidth_bps;
 
         shuffle_1 + shuffle_2
     }
@@ -400,9 +391,7 @@ pub fn all_decomposable(aggs: &[AggregateExpr]) -> bool {
 /// Returns pairs of (`local_agg`, `global_agg`) for each input aggregate,
 /// or `None` if any aggregate is not decomposable.
 #[must_use]
-pub fn decompose_all(
-    aggs: &[AggregateExpr],
-) -> Option<Vec<(AggregateExpr, AggregateExpr)>> {
+pub fn decompose_all(aggs: &[AggregateExpr]) -> Option<Vec<(AggregateExpr, AggregateExpr)>> {
     let mut result = Vec::with_capacity(aggs.len());
 
     for agg in aggs {
@@ -443,17 +432,13 @@ pub fn decompose_all(
                 },
             ));
         } else {
-            let decomp =
-                AggregationStrategy::decompose_aggregate(agg.function)?;
+            let decomp = AggregationStrategy::decompose_aggregate(agg.function)?;
             result.push((
                 AggregateExpr {
                     function: decomp.local_function,
                     arg: agg.arg.clone(),
                     distinct: false,
-                    alias: Some(format!(
-                        "partial_{}",
-                        agg.alias.as_deref().unwrap_or("col")
-                    )),
+                    alias: Some(format!("partial_{}", agg.alias.as_deref().unwrap_or("col"))),
                 },
                 AggregateExpr {
                     function: decomp.global_function,
@@ -496,8 +481,12 @@ pub fn is_two_phase_worthwhile(
     ratio > 0.5
 }
 
+#[expect(clippy::expect_used, clippy::unwrap_used, reason = "test code")]
 #[cfg(test)]
-#[expect(clippy::float_cmp, reason = "exact float equality needed for deterministic cost model tests")]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic cost model tests"
+)]
 mod tests {
     use super::*;
 
@@ -506,18 +495,10 @@ mod tests {
         assert!(AggregationStrategy::is_decomposable(
             AggregateFunction::Count
         ));
-        assert!(AggregationStrategy::is_decomposable(
-            AggregateFunction::Sum
-        ));
-        assert!(AggregationStrategy::is_decomposable(
-            AggregateFunction::Min
-        ));
-        assert!(AggregationStrategy::is_decomposable(
-            AggregateFunction::Max
-        ));
-        assert!(AggregationStrategy::is_decomposable(
-            AggregateFunction::Avg
-        ));
+        assert!(AggregationStrategy::is_decomposable(AggregateFunction::Sum));
+        assert!(AggregationStrategy::is_decomposable(AggregateFunction::Min));
+        assert!(AggregationStrategy::is_decomposable(AggregateFunction::Max));
+        assert!(AggregationStrategy::is_decomposable(AggregateFunction::Avg));
     }
 
     #[test]
@@ -538,76 +519,54 @@ mod tests {
 
     #[test]
     fn decompose_count() {
-        let d = AggregationStrategy::decompose_aggregate(
-            AggregateFunction::Count,
-        )
-        .expect("COUNT should be decomposable");
+        let d = AggregationStrategy::decompose_aggregate(AggregateFunction::Count)
+            .expect("Count should be decomposable");
         assert_eq!(d.local_function, AggregateFunction::Count);
         assert_eq!(d.global_function, AggregateFunction::Sum);
     }
 
     #[test]
     fn decompose_sum() {
-        let d = AggregationStrategy::decompose_aggregate(
-            AggregateFunction::Sum,
-        )
-        .expect("SUM should be decomposable");
+        let d = AggregationStrategy::decompose_aggregate(AggregateFunction::Sum).unwrap();
         assert_eq!(d.local_function, AggregateFunction::Sum);
         assert_eq!(d.global_function, AggregateFunction::Sum);
     }
 
     #[test]
     fn decompose_min() {
-        let d = AggregationStrategy::decompose_aggregate(
-            AggregateFunction::Min,
-        )
-        .expect("MIN should be decomposable");
+        let d = AggregationStrategy::decompose_aggregate(AggregateFunction::Min).unwrap();
         assert_eq!(d.local_function, AggregateFunction::Min);
         assert_eq!(d.global_function, AggregateFunction::Min);
     }
 
     #[test]
     fn decompose_max() {
-        let d = AggregationStrategy::decompose_aggregate(
-            AggregateFunction::Max,
-        )
-        .expect("MAX should be decomposable");
+        let d = AggregationStrategy::decompose_aggregate(AggregateFunction::Max).unwrap();
         assert_eq!(d.local_function, AggregateFunction::Max);
         assert_eq!(d.global_function, AggregateFunction::Max);
     }
 
     #[test]
     fn decompose_avg_returns_sum() {
-        let d = AggregationStrategy::decompose_aggregate(
-            AggregateFunction::Avg,
-        )
-        .expect("AVG should be decomposable (via SUM)");
+        let d = AggregationStrategy::decompose_aggregate(AggregateFunction::Avg)
+            .expect("AVG should be decomposable (via SUM)");
         assert_eq!(d.local_function, AggregateFunction::Sum);
         assert_eq!(d.global_function, AggregateFunction::Sum);
     }
 
     #[test]
     fn decompose_stddev_returns_none() {
-        assert!(AggregationStrategy::decompose_aggregate(
-            AggregateFunction::StdDev
-        )
-        .is_none());
+        assert!(AggregationStrategy::decompose_aggregate(AggregateFunction::StdDev).is_none());
     }
 
     #[test]
     fn decompose_variance_returns_none() {
-        assert!(AggregationStrategy::decompose_aggregate(
-            AggregateFunction::Variance
-        )
-        .is_none());
+        assert!(AggregationStrategy::decompose_aggregate(AggregateFunction::Variance).is_none());
     }
 
     #[test]
     fn decompose_string_agg_returns_none() {
-        assert!(AggregationStrategy::decompose_aggregate(
-            AggregateFunction::StringAgg
-        )
-        .is_none());
+        assert!(AggregationStrategy::decompose_aggregate(AggregateFunction::StringAgg).is_none());
     }
 
     #[test]
@@ -630,13 +589,8 @@ mod tests {
     #[test]
     fn choose_single_phase_small_data() {
         let config = DistributedAggConfig::default();
-        let strategy = AggregationStrategy::choose_strategy(
-            AggregateFunction::Sum,
-            1000,
-            10,
-            false,
-            &config,
-        );
+        let strategy =
+            AggregationStrategy::choose_strategy(AggregateFunction::Sum, 1000, 10, false, &config);
         assert_eq!(strategy, AggregationStrategy::SinglePhase);
     }
 
@@ -663,10 +617,7 @@ mod tests {
             true,
             &config,
         );
-        assert!(matches!(
-            strategy,
-            AggregationStrategy::ThreePhase { .. }
-        ));
+        assert!(matches!(strategy, AggregationStrategy::ThreePhase { .. }));
     }
 
     #[test]
@@ -688,11 +639,7 @@ mod tests {
             num_nodes: 100,
             ..DistributedAggConfig::default()
         };
-        let benefit = AggregationStrategy::estimated_benefit(
-            1_000_000_000,
-            10_000,
-            &config,
-        );
+        let benefit = AggregationStrategy::estimated_benefit(1_000_000_000, 10_000, &config);
         assert!(benefit > 0.99, "Expected >99% benefit, got {benefit}");
     }
 
@@ -702,11 +649,7 @@ mod tests {
             num_nodes: 100,
             ..DistributedAggConfig::default()
         };
-        let benefit = AggregationStrategy::estimated_benefit(
-            1000,
-            1000,
-            &config,
-        );
+        let benefit = AggregationStrategy::estimated_benefit(1000, 1000, &config);
         assert!(
             benefit < 0.1,
             "Expected low benefit with no reduction, got {benefit}"
@@ -719,19 +662,14 @@ mod tests {
             num_nodes: 1,
             ..DistributedAggConfig::default()
         };
-        let benefit = AggregationStrategy::estimated_benefit(
-            1_000_000,
-            100,
-            &config,
-        );
+        let benefit = AggregationStrategy::estimated_benefit(1_000_000, 100, &config);
         assert_eq!(benefit, 0.0);
     }
 
     #[test]
     fn estimated_benefit_zero_rows() {
         let config = DistributedAggConfig::default();
-        let benefit =
-            AggregationStrategy::estimated_benefit(0, 0, &config);
+        let benefit = AggregationStrategy::estimated_benefit(0, 0, &config);
         assert_eq!(benefit, 0.0);
     }
 
@@ -741,12 +679,7 @@ mod tests {
             num_nodes: 10,
             ..DistributedAggConfig::default()
         };
-        let cost = AggregationStrategy::three_phase_cost(
-            1_000_000_000,
-            1_000_000,
-            100,
-            &config,
-        );
+        let cost = AggregationStrategy::three_phase_cost(1_000_000_000, 1_000_000, 100, &config);
         assert!(cost > 0.0);
     }
 
@@ -756,9 +689,7 @@ mod tests {
             num_nodes: 1,
             ..DistributedAggConfig::default()
         };
-        let cost = AggregationStrategy::three_phase_cost(
-            1_000_000, 10_000, 100, &config,
-        );
+        let cost = AggregationStrategy::three_phase_cost(1_000_000, 10_000, 100, &config);
         assert_eq!(cost, 0.0);
     }
 
@@ -847,10 +778,7 @@ mod tests {
     #[test]
     fn reduction_ratio_high() {
         let ratio = reduction_ratio(1_000_000, 100);
-        assert!(
-            (ratio - 0.9999).abs() < 0.001,
-            "Expected ~1.0, got {ratio}"
-        );
+        assert!((ratio - 0.9999).abs() < 0.001, "Expected ~1.0, got {ratio}");
     }
 
     #[test]
@@ -885,9 +813,7 @@ mod tests {
     #[test]
     fn two_phase_not_worthwhile_low_reduction() {
         let config = DistributedAggConfig::default();
-        assert!(!is_two_phase_worthwhile(
-            2_000_000, 1_500_000, &config
-        ));
+        assert!(!is_two_phase_worthwhile(2_000_000, 1_500_000, &config));
     }
 
     #[test]
@@ -901,26 +827,25 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::approx_constant, reason = "3.14 is test data, not mathematical constant")]
+    #[expect(
+        clippy::approx_constant,
+        reason = "3.14 is test data, not mathematical constant"
+    )]
     fn agg_value_display_float() {
         assert_eq!(AggValue::Float(3.14).to_string(), "3.14");
     }
 
     #[test]
     fn agg_value_display_string() {
-        assert_eq!(
-            AggValue::String("hello".to_owned()).to_string(),
-            "'hello'"
-        );
+        assert_eq!(AggValue::String("hello".to_owned()).to_string(), "'hello'");
     }
 
     #[test]
     fn strategy_serialize_roundtrip_single() {
         let s = AggregationStrategy::SinglePhase;
-        let json = serde_json::to_string(&s)
-            .expect("serialize should succeed");
-        let d: AggregationStrategy = serde_json::from_str(&json)
-            .expect("deserialize should succeed");
+        let json = serde_json::to_string(&s).expect("serialize should succeed");
+        let d: AggregationStrategy =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(s, d);
     }
 
@@ -940,23 +865,17 @@ mod tests {
                 alias: Some("final".to_owned()),
             },
         };
-        let json = serde_json::to_string(&s)
-            .expect("serialize should succeed");
-        let d: AggregationStrategy = serde_json::from_str(&json)
-            .expect("deserialize should succeed");
+        let json = serde_json::to_string(&s).expect("serialize should succeed");
+        let d: AggregationStrategy =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(s, d);
     }
 
     #[test]
     fn strategy_serialize_roundtrip_skew_aware() {
         let s = AggregationStrategy::SkewAware {
-            hot_keys: vec![
-                AggValue::String("UNKNOWN".to_owned()),
-                AggValue::Null,
-            ],
-            hot_key_strategy: Box::new(
-                AggregationStrategy::SinglePhase,
-            ),
+            hot_keys: vec![AggValue::String("UNKNOWN".to_owned()), AggValue::Null],
+            hot_key_strategy: Box::new(AggregationStrategy::SinglePhase),
             normal_strategy: Box::new(AggregationStrategy::TwoPhase {
                 local_agg: AggregateExpr {
                     function: AggregateFunction::Sum,
@@ -972,10 +891,9 @@ mod tests {
                 },
             }),
         };
-        let json = serde_json::to_string(&s)
-            .expect("serialize should succeed");
-        let d: AggregationStrategy = serde_json::from_str(&json)
-            .expect("deserialize should succeed");
+        let json = serde_json::to_string(&s).expect("serialize should succeed");
+        let d: AggregationStrategy =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(s, d);
     }
 
@@ -1077,16 +995,8 @@ mod tests {
             num_nodes: 10,
             ..DistributedAggConfig::default()
         };
-        let benefit_few = AggregationStrategy::estimated_benefit(
-            1_000_000,
-            100,
-            &config,
-        );
-        let benefit_many = AggregationStrategy::estimated_benefit(
-            1_000_000,
-            500_000,
-            &config,
-        );
+        let benefit_few = AggregationStrategy::estimated_benefit(1_000_000, 100, &config);
+        let benefit_many = AggregationStrategy::estimated_benefit(1_000_000, 500_000, &config);
         assert!(
             benefit_few >= benefit_many,
             "Fewer groups => higher benefit: few={benefit_few}, many={benefit_many}"

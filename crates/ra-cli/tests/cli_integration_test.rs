@@ -475,8 +475,7 @@ fn optimize_quiet_produces_no_output() {
     let stderr_str = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr_str.is_empty() || !stderr_str.contains("Query Optimization"),
-        "quiet optimize should suppress verbose output, got: {}",
-        stderr_str
+        "quiet optimize should suppress verbose output, got: {stderr_str}",
     );
 }
 

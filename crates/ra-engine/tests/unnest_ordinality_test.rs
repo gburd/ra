@@ -3,7 +3,7 @@
 //! Verifies correct behavior for empty arrays, NULL elements,
 //! and multi-argument unnest with ordinality.
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use ra_core::expr::{Const, Expr};
 use ra_engine::executors::unnest::{MultiUnnestExecutor, UnnestExecutor};

@@ -50,7 +50,7 @@ pulldown-cmark = "0.9"
 sqlparser = { path = "crates/sqlparser-ra", version = "0.52" }
 
 # Optimization
-egg = "0.9"
+egg = "0.11"
 timely = "0.12"
 differential-dataflow = "0.12"
 
@@ -111,6 +111,7 @@ strip = true
 [profile.dev]
 opt-level = 0
 debug = true
+split-debuginfo = "unpacked"
 
 [profile.bench]
 inherits = "release"

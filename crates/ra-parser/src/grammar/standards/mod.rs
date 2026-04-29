@@ -13,8 +13,8 @@
 //! - **SQL:2006**: XML amendments
 //! - **SQL:2008**: MERGE statement, enhanced datetime, TRUNCATE
 //! - **SQL:2011**: Temporal tables (system-versioned, application-time)
-//! - **SQL:2016**: JSON support (JSON_TABLE, JSON_QUERY, JSON_VALUE)
-//! - **SQL:2023**: Property Graph Queries (GRAPH_TABLE, MATCH patterns)
+//! - **SQL:2016**: JSON support (`JSON_TABLE`, `JSON_QUERY`, `JSON_VALUE`)
+//! - **SQL:2023**: Property Graph Queries (`GRAPH_TABLE`, MATCH patterns)
 //!
 //! # Architecture
 //!
@@ -25,7 +25,7 @@
 //! - New built-in functions
 //! - Statement parsing for new constructs
 //!
-//! Profiles can enable specific standards (e.g., PostgreSQL 17 supports SQL:1999, SQL:2003, SQL:2016).
+//! Profiles can enable specific standards (e.g., `PostgreSQL` 17 supports SQL:1999, SQL:2003, SQL:2016).
 
 pub mod sql_1999;
 pub mod sql_2003;

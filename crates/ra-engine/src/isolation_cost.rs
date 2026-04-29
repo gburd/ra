@@ -2,13 +2,13 @@
 //!
 //! Computes penalty costs based on transaction isolation context:
 //! - **Lock penalty**: penalizes wide scan footprints under SSI
-//!   or MySQL SERIALIZABLE to reduce SIRead/shared lock contention.
+//!   or `MySQL` SERIALIZABLE to reduce SIRead/shared lock contention.
 //! - **Bloat penalty**: penalizes long-running plans when a
 //!   transaction-level snapshot pins dead tuples.
-//! - **SubXID penalty**: penalizes plans with many visibility checks
-//!   when subtransaction depth exceeds PostgreSQL's 64-entry cache.
-//! - **MultiXact penalty**: penalizes plans that acquire many shared
-//!   row locks under high MultiXact pressure.
+//! - **`SubXID` penalty**: penalizes plans with many visibility checks
+//!   when subtransaction depth exceeds `PostgreSQL`'s 64-entry cache.
+//! - **`MultiXact` penalty**: penalizes plans that acquire many shared
+//!   row locks under high `MultiXact` pressure.
 //!
 //! See RFC 0058 for the full design rationale.
 
@@ -18,22 +18,22 @@ use ra_core::isolation::{BackendKind, IsolationLevel, MultiXactPressure, Transac
 /// Tunable weights for isolation-aware cost penalties.
 ///
 /// All weights default to empirically reasonable values derived
-/// from PostgreSQL internals benchmarks. Use
+/// from `PostgreSQL` internals benchmarks. Use
 /// [`IsolationCostConfig::default`] unless you have workload-specific
 /// calibration data.
 #[derive(Debug, Clone)]
 pub struct IsolationCostConfig {
     /// Base cost per page accessed under predicate locking.
-    /// Represents the overhead of acquiring and managing SIRead locks.
+    /// Represents the overhead of acquiring and managing `SIRead` locks.
     pub lock_base_cost: f64,
     /// Multiplier for bloat penalty, applied to estimated runtime
     /// when snapshot age exceeds the threshold.
     pub bloat_weight: f64,
     /// Snapshot age threshold (ms) above which bloat penalty kicks in.
     pub bloat_snapshot_threshold_ms: u64,
-    /// Weight per visibility check when SubXID cache overflows.
+    /// Weight per visibility check when `SubXID` cache overflows.
     pub subxid_weight: f64,
-    /// Weight per shared lock when MultiXact pressure is elevated.
+    /// Weight per shared lock when `MultiXact` pressure is elevated.
     pub multixact_weight: f64,
     /// Estimated dead tuple rate (tuples/ms) for bloat calculations.
     pub dead_tuple_rate: f64,
@@ -124,7 +124,7 @@ impl PlanEstimates {
 /// Compute the total isolation-aware cost adjustment.
 ///
 /// Returns a `Cost` representing the sum of all applicable penalties
-/// (lock, bloat, SubXID, MultiXact) for the given plan under the
+/// (lock, bloat, `SubXID`, `MultiXact`) for the given plan under the
 /// given transaction context. The caller adds this to the base cost.
 ///
 /// If `txn` is `None`, returns `Cost::ZERO` (no adjustment).
@@ -148,8 +148,8 @@ pub fn isolation_cost_adjustment(
 
 /// Lock footprint penalty.
 ///
-/// Under PostgreSQL SSI, every page accessed acquires an SIRead lock.
-/// Under MySQL SERIALIZABLE, every read becomes SELECT ... FOR SHARE.
+/// Under `PostgreSQL` SSI, every page accessed acquires an `SIRead` lock.
+/// Under `MySQL` SERIALIZABLE, every read becomes SELECT ... FOR SHARE.
 /// Plans that access fewer pages reduce lock contention and abort rate.
 fn compute_lock_penalty(
     txn: &TransactionContext,
@@ -161,13 +161,7 @@ fn compute_lock_penalty(
             if !txn.uses_ssi {
                 return 0.0;
             }
-            // Index-only scans touch fewer pages -> lower lock footprint
-            let pages = if plan.is_index_only {
-                plan.pages_accessed
-            } else {
-                plan.pages_accessed
-            };
-            config.lock_base_cost * pages
+            config.lock_base_cost * plan.pages_accessed
         }
         BackendKind::MySQLInnoDB => {
             match txn.isolation_level {
@@ -182,17 +176,10 @@ fn compute_lock_penalty(
                 _ => 0.0,
             }
         }
-        BackendKind::Oracle => {
-            // Oracle uses optimistic conflict detection; no lock penalty.
-            // Under SERIALIZABLE, prefer shorter execution to reduce
-            // undo retention pressure, but that's the bloat penalty.
-            0.0
-        }
-        BackendKind::SQLite | BackendKind::DuckDB => {
-            // SQLite: single writer, no per-row locks.
-            // DuckDB: optimistic MVCC, no lock concerns for reads.
-            0.0
-        }
+        // Oracle: optimistic conflict detection, no lock penalty.
+        // SQLite: single writer, no per-row locks.
+        // DuckDB: optimistic MVCC, no lock concerns for reads.
+        BackendKind::Oracle | BackendKind::SQLite | BackendKind::DuckDB => 0.0,
     }
 }
 
@@ -232,9 +219,9 @@ fn compute_bloat_penalty(
     }
 }
 
-/// SubXID overflow penalty.
+/// `SubXID` overflow penalty.
 ///
-/// PostgreSQL stores subtransaction IDs in a 64-entry process-local
+/// `PostgreSQL` stores subtransaction IDs in a 64-entry process-local
 /// cache. When depth exceeds 64, every `XidInMVCCSnapshot` check
 /// degrades from O(1) to O(n) where n is the subtransaction count.
 /// Plans with many visibility checks (seq scans) are penalized.
@@ -255,10 +242,10 @@ fn compute_subxid_penalty(
     plan.visibility_checks * f64::from(overflow_depth) * config.subxid_weight
 }
 
-/// MultiXact avoidance penalty.
+/// `MultiXact` avoidance penalty.
 ///
-/// Under high MultiXact pressure, plans that acquire many shared row
-/// locks generate MultiXactId entries that can stall vacuuming. Prefer
+/// Under high `MultiXact` pressure, plans that acquire many shared row
+/// locks generate `MultiXactId` entries that can stall vacuuming. Prefer
 /// plans that touch fewer tuples.
 fn compute_multixact_penalty(
     txn: &TransactionContext,
@@ -279,7 +266,7 @@ fn compute_multixact_penalty(
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::float_cmp, reason = "legacy allow")]
 mod tests {
     use super::*;
 

@@ -117,10 +117,7 @@ impl Default for RaToken {
 }
 
 impl std::fmt::Debug for RaToken {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RaToken")
             .field("text", &self.text)
             .field("location", &self.location)
@@ -157,14 +154,9 @@ fn simple_token(code: i32, location: usize) -> LexToken {
 }
 
 /// Create a token backed by a C string.
-fn text_token(
-    code: i32,
-    location: usize,
-    text: &str,
-) -> Result<LexToken, String> {
-    let cstr = CString::new(text).map_err(|e| {
-        format!("invalid text at position {location}: {e}")
-    })?;
+fn text_token(code: i32, location: usize, text: &str) -> Result<LexToken, String> {
+    let cstr =
+        CString::new(text).map_err(|e| format!("invalid text at position {location}: {e}"))?;
     let ptr = cstr.as_ptr();
     Ok(LexToken {
         code,
@@ -335,9 +327,7 @@ fn skip_trivia(cur: &mut Cursor<'_>) -> Result<bool, String> {
             if cur.peek() == b'/' && cur.peek_next() == Some(b'*') {
                 depth += 1;
                 cur.advance_by(2);
-            } else if cur.peek() == b'*'
-                && cur.peek_next() == Some(b'/')
-            {
+            } else if cur.peek() == b'*' && cur.peek_next() == Some(b'/') {
                 depth -= 1;
                 cur.advance_by(2);
             } else {
@@ -379,9 +369,8 @@ fn lex_string(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
         value.push(char::from(cur.peek()));
         cur.advance();
     }
-    let cstr = CString::new(value).map_err(|e| {
-        format!("invalid string at position {start}: {e}")
-    })?;
+    let cstr =
+        CString::new(value).map_err(|e| format!("invalid string at position {start}: {e}"))?;
     let ptr = cstr.as_ptr();
     Ok(LexToken {
         code: token::SCONST,
@@ -401,21 +390,16 @@ fn lex_number(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
     while !cur.at_end() && cur.peek().is_ascii_digit() {
         cur.advance();
     }
-    let is_float = !cur.at_end()
-        && cur.peek() == b'.'
-        && cur.peek_next().is_some_and(|b| b.is_ascii_digit());
+    let is_float =
+        !cur.at_end() && cur.peek() == b'.' && cur.peek_next().is_some_and(|b| b.is_ascii_digit());
     if is_float {
         cur.advance(); // skip '.'
         while !cur.at_end() && cur.peek().is_ascii_digit() {
             cur.advance();
         }
-        if !cur.at_end()
-            && (cur.peek() == b'e' || cur.peek() == b'E')
-        {
+        if !cur.at_end() && (cur.peek() == b'e' || cur.peek() == b'E') {
             cur.advance();
-            if !cur.at_end()
-                && (cur.peek() == b'+' || cur.peek() == b'-')
-            {
+            if !cur.at_end() && (cur.peek() == b'+' || cur.peek() == b'-') {
                 cur.advance();
             }
             while !cur.at_end() && cur.peek().is_ascii_digit() {
@@ -464,9 +448,7 @@ fn lex_number(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
 fn lex_word(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
     let start = cur.pos;
     cur.advance();
-    while !cur.at_end()
-        && (cur.peek().is_ascii_alphanumeric() || cur.peek() == b'_')
-    {
+    while !cur.at_end() && (cur.peek().is_ascii_alphanumeric() || cur.peek() == b'_') {
         cur.advance();
     }
     let word = cur.slice(start, cur.pos);
@@ -478,9 +460,7 @@ fn lex_word(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
 }
 
 /// Lex a double-quoted identifier.
-fn lex_quoted_ident(
-    cur: &mut Cursor<'_>,
-) -> Result<LexToken, String> {
+fn lex_quoted_ident(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
     let start = cur.pos;
     cur.advance(); // skip opening '"'
     let content_start = cur.pos;
@@ -526,9 +506,7 @@ pub fn tokenize(sql: &str) -> Result<Vec<LexToken>, String> {
             tokens.push(lex_word(&mut cur)?);
         } else if b == b'"' {
             tokens.push(lex_quoted_ident(&mut cur)?);
-        } else if let Some(code) =
-            match_two_char_op(cur.sql, cur.pos)
-        {
+        } else if let Some(code) = match_two_char_op(cur.sql, cur.pos) {
             tokens.push(simple_token(code, cur.pos));
             cur.advance_by(2);
         } else if let Some(code) = match_single_char_op(b) {
@@ -553,8 +531,7 @@ mod tests {
 
     #[test]
     fn tokenize_simple_select() {
-        let tokens = tokenize("SELECT * FROM users")
-            .expect("should tokenize");
+        let tokens = tokenize("SELECT * FROM users").expect("should tokenize");
         assert_eq!(tokens.len(), 4);
         assert_eq!(tokens[0].code, token::SELECT);
         assert_eq!(tokens[1].code, token::STAR);
@@ -564,8 +541,7 @@ mod tests {
 
     #[test]
     fn tokenize_integer_literal() {
-        let tokens =
-            tokenize("42").expect("should tokenize");
+        let tokens = tokenize("42").expect("should tokenize");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].code, token::ICONST);
         assert_eq!(tokens[0].value.int_val, 42);
@@ -573,8 +549,7 @@ mod tests {
 
     #[test]
     fn tokenize_float_literal() {
-        let tokens =
-            tokenize("1.25").expect("should tokenize");
+        let tokens = tokenize("1.25").expect("should tokenize");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].code, token::FCONST);
         assert!((tokens[0].value.float_val - 1.25).abs() < f64::EPSILON);
@@ -582,8 +557,7 @@ mod tests {
 
     #[test]
     fn tokenize_string_literal() {
-        let tokens =
-            tokenize("'hello'").expect("should tokenize");
+        let tokens = tokenize("'hello'").expect("should tokenize");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].code, token::SCONST);
         assert!(tokens[0].text_backing.is_some());
@@ -591,8 +565,7 @@ mod tests {
 
     #[test]
     fn tokenize_escaped_string() {
-        let tokens =
-            tokenize("'it''s'").expect("should tokenize");
+        let tokens = tokenize("'it''s'").expect("should tokenize");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].code, token::SCONST);
         let backing = tokens[0]
@@ -604,8 +577,7 @@ mod tests {
 
     #[test]
     fn tokenize_two_char_operators() {
-        let tokens =
-            tokenize("<> <= >= != ||").expect("should tokenize");
+        let tokens = tokenize("<> <= >= != ||").expect("should tokenize");
         assert_eq!(tokens.len(), 5);
         assert_eq!(tokens[0].code, token::NE);
         assert_eq!(tokens[1].code, token::LE);
@@ -616,8 +588,7 @@ mod tests {
 
     #[test]
     fn tokenize_keywords_case_insensitive() {
-        let tokens =
-            tokenize("select FROM Where").expect("should tokenize");
+        let tokens = tokenize("select FROM Where").expect("should tokenize");
         assert_eq!(tokens.len(), 3);
         assert_eq!(tokens[0].code, token::SELECT);
         assert_eq!(tokens[1].code, token::FROM);
@@ -648,16 +619,13 @@ mod tests {
 
     #[test]
     fn tokenize_whitespace_only() {
-        let tokens =
-            tokenize("   \t\n  ").expect("should tokenize");
+        let tokens = tokenize("   \t\n  ").expect("should tokenize");
         assert!(tokens.is_empty());
     }
 
     #[test]
     fn tokenize_single_line_comment() {
-        let tokens =
-            tokenize("SELECT -- a comment\n* FROM t")
-                .expect("should tokenize");
+        let tokens = tokenize("SELECT -- a comment\n* FROM t").expect("should tokenize");
         assert_eq!(tokens.len(), 4);
         assert_eq!(tokens[0].code, token::SELECT);
         assert_eq!(tokens[1].code, token::STAR);
@@ -665,9 +633,7 @@ mod tests {
 
     #[test]
     fn tokenize_block_comment() {
-        let tokens =
-            tokenize("SELECT /* block */ * FROM t")
-                .expect("should tokenize");
+        let tokens = tokenize("SELECT /* block */ * FROM t").expect("should tokenize");
         assert_eq!(tokens.len(), 4);
         assert_eq!(tokens[0].code, token::SELECT);
         assert_eq!(tokens[1].code, token::STAR);
@@ -675,24 +641,19 @@ mod tests {
 
     #[test]
     fn tokenize_quoted_identifier() {
-        let tokens =
-            tokenize("\"my table\"").expect("should tokenize");
+        let tokens = tokenize("\"my table\"").expect("should tokenize");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].code, token::IDENT);
         let backing = tokens[0]
             .text_backing
             .as_ref()
             .expect("should have backing");
-        assert_eq!(
-            backing.to_str().expect("valid utf8"),
-            "my table"
-        );
+        assert_eq!(backing.to_str().expect("valid utf8"), "my table");
     }
 
     #[test]
     fn tokenize_locations_tracked() {
-        let tokens =
-            tokenize("SELECT id").expect("should tokenize");
+        let tokens = tokenize("SELECT id").expect("should tokenize");
         assert_eq!(tokens[0].value.location, 0);
         assert_eq!(tokens[1].value.location, 7);
     }
@@ -704,19 +665,18 @@ mod tests {
              ORDER BY name ASC",
         )
         .expect("should tokenize");
-        let codes: Vec<i32> =
-            tokens.iter().map(|t| t.code).collect();
+        let codes: Vec<i32> = tokens.iter().map(|t| t.code).collect();
         assert_eq!(
             codes,
             vec![
                 token::SELECT,
-                token::IDENT,  // id
+                token::IDENT, // id
                 token::COMMA,
-                token::IDENT,  // name
+                token::IDENT, // name
                 token::FROM,
-                token::IDENT,  // users
+                token::IDENT, // users
                 token::WHERE,
-                token::IDENT,  // age
+                token::IDENT, // age
                 token::GT,
                 token::ICONST, // 21
                 token::ORDER,

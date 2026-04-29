@@ -101,7 +101,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQLServerFTSExtension;
 
 impl GrammarExtension for SQLServerFTSExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sqlserver_fts"
     }
 
@@ -226,6 +226,10 @@ pub enum FormsOfType {
 /// let query = parse_contains_query("database AND performance");
 /// // Returns: And(Term("database"), Term("performance"))
 /// ```
+///
+/// # Errors
+///
+/// Returns an error if the query is empty or contains invalid syntax.
 pub fn parse_contains_query(query: &str) -> Result<ContainsQuery, String> {
     let query = query.trim();
 
@@ -304,9 +308,7 @@ fn parse_near(query: &str) -> Result<ContainsQuery, String> {
     // Find the closing parenthesis of the terms list
     // Pattern: NEAR((term1, term2, ...), distance, ordered)
     // or:      NEAR((term1, term2, ...))
-    let terms_end = if let Some(pos) = inner.find(')') {
-        pos
-    } else {
+    let Some(terms_end) = inner.find(')') else {
         return Err("Missing closing parenthesis for terms list".to_string());
     };
 
@@ -334,7 +336,7 @@ fn parse_near(query: &str) -> Result<ContainsQuery, String> {
     if terms_end + 1 < inner.len() {
         let params_str = &inner[terms_end + 1..].trim_start_matches(',').trim();
         if !params_str.is_empty() {
-            let param_parts: Vec<&str> = params_str.split(',').map(|s| s.trim()).collect();
+            let param_parts: Vec<&str> = params_str.split(',').map(str::trim).collect();
 
             if !param_parts.is_empty() {
                 if let Ok(d) = param_parts[0].parse::<u32>() {
@@ -419,7 +421,7 @@ fn parse_formsof(query: &str) -> Result<ContainsQuery, String> {
 }
 
 fn split_by_operator_case_insensitive(query: &str, operator: &str) -> Vec<String> {
-    let operator_with_spaces = format!(" {} ", operator);
+    let operator_with_spaces = format!(" {operator} ");
     let upper_query = query.to_uppercase();
     let upper_op = operator_with_spaces.to_uppercase();
 
@@ -474,59 +476,7 @@ fn split_by_operator_case_insensitive(query: &str, operator: &str) -> Vec<String
     }
 }
 
-#[allow(dead_code)]
-fn split_by_operator(query: &str, operator: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0;
-    let mut in_quotes = false;
-
-    let chars: Vec<char> = query.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        let ch = chars[i];
-
-        if ch == '"' {
-            in_quotes = !in_quotes;
-            current.push(ch);
-            i += 1;
-            continue;
-        }
-
-        if !in_quotes {
-            if ch == '(' {
-                depth += 1;
-            } else if ch == ')' {
-                depth -= 1;
-            }
-
-            if depth == 0 && i + operator.len() <= chars.len() {
-                let slice: String = chars[i..i + operator.len()].iter().collect();
-                if slice == operator {
-                    parts.push(current.clone());
-                    current.clear();
-                    i += operator.len();
-                    continue;
-                }
-            }
-        }
-
-        current.push(ch);
-        i += 1;
-    }
-
-    if !current.is_empty() {
-        parts.push(current);
-    }
-
-    if parts.is_empty() {
-        vec![query.to_string()]
-    } else {
-        parts
-    }
-}
-
+#[expect(clippy::unwrap_used, clippy::panic, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

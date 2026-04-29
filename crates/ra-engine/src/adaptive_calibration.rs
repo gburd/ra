@@ -421,7 +421,7 @@ pub fn feedback_from_timeline(
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::float_cmp, reason = "legacy allow")]
 mod tests {
     use super::*;
 
@@ -599,7 +599,7 @@ mod tests {
             .state
             .operators
             .get(&OperatorKind::Scan)
-            .map_or(false, |c| c.bias_detected));
+            .is_some_and(|c| c.bias_detected));
     }
 
     #[test]

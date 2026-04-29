@@ -12,7 +12,7 @@
 //! - ✗ `has_gin_index_on(table, col)` (hardcoded index type)
 //!
 //! This allows:
-//! 1. Rules to work across databases (PostgreSQL GIN, DocumentDB RUM fork)
+//! 1. Rules to work across databases (``PostgreSQL`` GIN, ``DocumentDB`` RUM fork)
 //! 2. New index types to be added without changing rules
 //! 3. Cost models to be database-specific without affecting rule logic
 //!
@@ -38,35 +38,35 @@ use crate::types::IndexStats;
 /// Database-agnostic index access method taxonomy.
 ///
 /// This enum abstracts over different database implementations of
-/// similar index structures (e.g., PostgreSQL GIN vs DocumentDB RUM).
+/// similar index structures (e.g., `PostgreSQL` GIN vs `DocumentDB` RUM).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum IndexAccessMethod {
     /// B-tree or B+ tree (ordered, range scans).
     BTree,
     /// Hash index (equality only, no range scans).
     Hash,
-    /// Generalized Inverted Index (PostgreSQL GIN).
+    /// Generalized Inverted Index (`PostgreSQL` GIN).
     /// Used for arrays, JSONB, full-text.
     GIN,
-    /// GIN extension with distance ordering (PostgreSQL RUM).
+    /// GIN extension with distance ordering (`PostgreSQL` RUM).
     RUM,
-    /// DocumentDB's RUM fork (BSON-specific).
+    /// `DocumentDB`'s RUM fork (BSON-specific).
     DocumentDBRUM,
-    /// Generalized Search Tree (PostgreSQL GiST).
+    /// Generalized Search Tree (`PostgreSQL` `GiST`).
     /// Used for spatial, range types, nearest-neighbor.
     GiST,
-    /// Block Range Index (PostgreSQL BRIN).
+    /// Block Range Index (`PostgreSQL` BRIN).
     /// For large, naturally ordered tables.
     BRIN,
     /// Bloom filter index.
     Bloom,
-    /// R-tree for spatial data (MySQL, SQL Server).
+    /// R-tree for spatial data (`MySQL`, `SQL Server`).
     RTree,
     /// Column-oriented storage index.
     Columnstore,
     /// Bitmap index for low-cardinality columns.
     Bitmap,
-    /// Full-text search index (SQL Server, MySQL).
+    /// Full-text search index (`SQL Server`, `MySQL`).
     FullText,
 }
 
@@ -115,12 +115,7 @@ impl IndexAccessMethod {
     pub fn supports_bitmap_scan(self) -> bool {
         matches!(
             self,
-            Self::GIN
-                | Self::RUM
-                | Self::DocumentDBRUM
-                | Self::GiST
-                | Self::BRIN
-                | Self::Bitmap
+            Self::GIN | Self::RUM | Self::DocumentDBRUM | Self::GiST | Self::BRIN | Self::Bitmap
         )
     }
 
@@ -176,13 +171,13 @@ pub enum IndexOperation {
     ArrayContainment,
     /// JSONB/JSON containment operators (@>, ?).
     JsonContainment,
-    /// Full-text search (@@, to_tsquery).
+    /// Full-text search (`@@`, `to_tsquery`).
     FullTextSearch,
     /// Phrase search with positions (<->).
     PhraseSearch,
-    /// Spatial containment (ST_Contains, ST_Within).
+    /// Spatial containment (`ST_Contains`, `ST_Within`).
     SpatialContainment,
-    /// Spatial intersection (ST_Intersects, &&).
+    /// Spatial intersection (`ST_Intersects`, `&&`).
     SpatialIntersection,
     /// Geospatial distance ordering (<->).
     GeospatialDistance,
@@ -227,8 +222,12 @@ impl std::fmt::Display for IndexOperation {
 /// Capabilities of an index for a specific access method and operator family.
 ///
 /// This struct encodes what operations an index can perform, independent
-/// of the specific index type name (GIN vs RUM vs DocumentDB RUM).
+/// of the specific index type name (GIN vs RUM vs `DocumentDB` RUM).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Index capabilities are naturally boolean flags"
+)]
 pub struct IndexCapabilities {
     /// Ordered scans (supports ORDER BY).
     pub supports_ordered_scan: bool,
@@ -259,15 +258,19 @@ pub struct IndexCapabilities {
 impl IndexCapabilities {
     /// Create capabilities from an access method and operator family.
     ///
-    /// This maps (access_method, opfamily) → capabilities, encoding
+    /// This maps (`access_method`, `opfamily`) → capabilities, encoding
     /// knowledge about what different index types can do.
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Large mapping function for index access methods, breaking up would reduce clarity"
+    )]
     pub fn from_access_method_and_opfamily(
         access_method: IndexAccessMethod,
         opfamily: &str,
     ) -> Self {
         match (access_method, opfamily) {
-            // PostgreSQL GIN indexes
+            // `PostgreSQL` GIN indexes
             (IndexAccessMethod::GIN, "array_ops") => Self {
                 supports_ordered_scan: false,
                 supports_bitmap_scan: true,
@@ -311,7 +314,7 @@ impl IndexCapabilities {
                 properties: HashMap::new(),
             },
 
-            // PostgreSQL RUM indexes
+            // `PostgreSQL` RUM indexes
             (IndexAccessMethod::RUM, "rum_tsvector_ops") => Self {
                 supports_ordered_scan: true,
                 supports_bitmap_scan: true,
@@ -359,7 +362,7 @@ impl IndexCapabilities {
                 properties: HashMap::new(),
             },
 
-            // DocumentDB RUM (BSON-specific)
+            // `DocumentDB` RUM (BSON-specific)
             (IndexAccessMethod::DocumentDBRUM, "bson_extended_rum_single_path_ops") => Self {
                 supports_ordered_scan: true,
                 supports_bitmap_scan: true,
@@ -482,19 +485,24 @@ impl IndexCapabilities {
     #[must_use]
     pub fn supports_operation(&self, op: &IndexOperation) -> bool {
         match op {
-            IndexOperation::ArrayContainment => self.supports_containment,
+            IndexOperation::ArrayContainment | IndexOperation::RangeContainment => {
+                self.supports_containment
+            }
             IndexOperation::JsonContainment => self.supports_containment || self.supports_json_path,
-            IndexOperation::FullTextSearch => self.supports_full_text,
+            IndexOperation::FullTextSearch | IndexOperation::PatternMatching => {
+                self.supports_full_text
+            }
             IndexOperation::PhraseSearch => self.supports_phrase_search,
-            IndexOperation::SpatialContainment => self.supports_spatial,
-            IndexOperation::SpatialIntersection => self.supports_spatial,
-            IndexOperation::GeospatialDistance => self.supports_distance_ordering && self.supports_spatial,
+            IndexOperation::SpatialContainment | IndexOperation::SpatialIntersection => {
+                self.supports_spatial
+            }
+            IndexOperation::GeospatialDistance => {
+                self.supports_distance_ordering && self.supports_spatial
+            }
             IndexOperation::KNNSearch => self.supports_distance_ordering,
             IndexOperation::JsonPath => self.supports_json_path,
-            IndexOperation::RangeContainment => self.supports_containment,
             IndexOperation::ScalarEquality => self.supports_point_lookup,
             IndexOperation::ScalarRange => self.supports_range_scan,
-            IndexOperation::PatternMatching => self.supports_full_text,
         }
     }
 }
@@ -509,7 +517,7 @@ impl IndexCapabilities {
 /// capabilities and statistics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IndexMetadata {
-    /// Index name (e.g., "idx_articles_tags").
+    /// Index name (e.g., `"idx_articles_tags"`).
     pub name: String,
     /// Table the index belongs to.
     pub table: String,
@@ -517,7 +525,7 @@ pub struct IndexMetadata {
     pub columns: Vec<String>,
     /// Access method (btree, gin, rum, etc.).
     pub access_method: IndexAccessMethod,
-    /// Operator family (e.g., "jsonb_ops", "rum_tsvector_ops").
+    /// Operator family (e.g., `"jsonb_ops"`, `"rum_tsvector_ops"`).
     pub operator_family: String,
     /// Discovered capabilities.
     pub capabilities: IndexCapabilities,
@@ -539,12 +547,7 @@ impl IndexMetadata {
     /// - Selectivity
     /// - Heap fetch costs (covering vs non-covering)
     #[must_use]
-    pub fn estimate_scan_cost(
-        &self,
-        selectivity: f64,
-        table_rows: u64,
-        limit: Option<u64>,
-    ) -> f64 {
+    pub fn estimate_scan_cost(&self, selectivity: f64, table_rows: u64, limit: Option<u64>) -> f64 {
         let matching_rows = (table_rows as f64 * selectivity).max(1.0);
         let effective_rows = match limit {
             Some(k) => (k as f64 * 1.2).min(matching_rows),
@@ -553,7 +556,7 @@ impl IndexMetadata {
 
         match self.access_method {
             IndexAccessMethod::BTree => {
-                let tree_traversal = self.statistics.levels as f64 * 4.0;
+                let tree_traversal = f64::from(self.statistics.levels) * 4.0;
                 let scan = effective_rows * self.capabilities.cost_factors.range_scan_cost;
                 let fetch = if self.capabilities.cost_factors.covering {
                     0.0
@@ -583,7 +586,7 @@ impl IndexMetadata {
                 self.capabilities.cost_factors.lookup_cost + posting_scan + fetch
             }
             IndexAccessMethod::GiST => {
-                let tree_traversal = self.statistics.levels as f64 * 2.0;
+                let tree_traversal = f64::from(self.statistics.levels) * 2.0;
                 let node_checks = effective_rows * 0.5; // Bounding box checks
                 let recheck = effective_rows * 5.0; // Exact geometry tests
                 tree_traversal + node_checks + recheck
@@ -610,9 +613,7 @@ impl IndexMetadata {
             return false;
         }
         // Leading column must match
-        predicate_columns
-            .iter()
-            .all(|pc| self.columns.contains(pc))
+        predicate_columns.iter().all(|pc| self.columns.contains(pc))
     }
 
     /// Map to the old `IndexMetadata` type for backward compatibility.
@@ -628,11 +629,7 @@ impl IndexMetadata {
             IndexAccessMethod::RUM => IndexType::RUM {
                 column: self.columns.first().cloned().unwrap_or_default(),
                 opclass: self.operator_family.clone(),
-                addon_column: self
-                    .capabilities
-                    .properties
-                    .get("addon_column")
-                    .cloned(),
+                addon_column: self.capabilities.properties.get("addon_column").cloned(),
             },
             IndexAccessMethod::GiST => IndexType::GiST {
                 column: self.columns.first().cloned().unwrap_or_default(),
@@ -675,7 +672,7 @@ impl IndexMetadata {
 /// This is a placeholder for actual catalog queries. In production, this
 /// would query `pg_index`, `pg_class`, `pg_am`, `pg_opfamily`, etc.
 ///
-/// # Example (PostgreSQL)
+/// # Example (`PostgreSQL`)
 ///
 /// ```sql
 /// SELECT
@@ -696,10 +693,7 @@ impl IndexMetadata {
 /// GROUP BY i.relname, t.relname, a.amname, opf.opfname;
 /// ```
 #[must_use]
-pub fn discover_indexes_for_table(
-    _connection_string: &str,
-    table: &str,
-) -> Vec<IndexMetadata> {
+pub fn discover_indexes_for_table(_connection_string: &str, table: &str) -> Vec<IndexMetadata> {
     // Placeholder: in production, this would query the catalog
     let _ = table;
     vec![]
@@ -735,14 +729,12 @@ pub fn find_indexes_supporting(
     discover_indexes_for_table(connection_string, table)
         .into_iter()
         .filter(|idx| {
-            idx.columns.contains(&column.to_string())
-                && idx.supports_operation(operation)
+            idx.columns.contains(&column.to_string()) && idx.supports_operation(operation)
         })
         .collect()
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -786,10 +778,8 @@ mod tests {
 
     #[test]
     fn gin_array_ops_capabilities() {
-        let caps = IndexCapabilities::from_access_method_and_opfamily(
-            IndexAccessMethod::GIN,
-            "array_ops",
-        );
+        let caps =
+            IndexCapabilities::from_access_method_and_opfamily(IndexAccessMethod::GIN, "array_ops");
         assert!(caps.supports_containment);
         assert!(!caps.supports_ordered_scan);
         assert!(!caps.supports_distance_ordering);
@@ -839,10 +829,7 @@ mod tests {
 
     #[test]
     fn btree_capabilities() {
-        let caps = IndexCapabilities::from_access_method_and_opfamily(
-            IndexAccessMethod::BTree,
-            "",
-        );
+        let caps = IndexCapabilities::from_access_method_and_opfamily(IndexAccessMethod::BTree, "");
         assert!(caps.supports_ordered_scan);
         assert!(caps.supports_point_lookup);
         assert!(caps.supports_range_scan);
@@ -853,10 +840,7 @@ mod tests {
 
     #[test]
     fn hash_capabilities() {
-        let caps = IndexCapabilities::from_access_method_and_opfamily(
-            IndexAccessMethod::Hash,
-            "",
-        );
+        let caps = IndexCapabilities::from_access_method_and_opfamily(IndexAccessMethod::Hash, "");
         assert!(caps.supports_point_lookup);
         assert!(!caps.supports_ordered_scan);
         assert!(!caps.supports_range_scan);

@@ -49,7 +49,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQLServerExtension;
 
 impl GrammarExtension for SQLServerExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sqlserver"
     }
 

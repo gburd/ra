@@ -180,9 +180,7 @@ impl BenchmarkConfig {
 /// per process lifetime. Uses default config.
 #[must_use]
 pub fn get_measurements() -> &'static HardwareMeasurements {
-    CACHED_MEASUREMENTS.get_or_init(|| {
-        run_benchmarks(&BenchmarkConfig::default())
-    })
+    CACHED_MEASUREMENTS.get_or_init(|| run_benchmarks(&BenchmarkConfig::default()))
 }
 
 /// Run all hardware microbenchmarks with the given config.
@@ -193,29 +191,14 @@ pub fn get_measurements() -> &'static HardwareMeasurements {
 pub fn run_benchmarks(config: &BenchmarkConfig) -> HardwareMeasurements {
     if !config.enabled {
         debug!("hardware benchmarks disabled, using NVMe defaults");
-        return apply_overrides(
-            HardwareMeasurements::default_nvme(),
-            config,
-        );
+        return apply_overrides(HardwareMeasurements::default_nvme(), config);
     }
 
     let deadline = Instant::now() + config.timeout;
 
-    let sequential_read_mbps = benchmark_with_deadline(
-        deadline,
-        benchmark_sequential_io,
-        3500.0,
-    );
-    let random_read_mbps = benchmark_with_deadline(
-        deadline,
-        benchmark_random_io,
-        3000.0,
-    );
-    let cpu_tuple_cost_ns = benchmark_with_deadline(
-        deadline,
-        benchmark_cpu_tuple,
-        10.0,
-    );
+    let sequential_read_mbps = benchmark_with_deadline(deadline, benchmark_sequential_io, 3500.0);
+    let random_read_mbps = benchmark_with_deadline(deadline, benchmark_random_io, 3000.0);
+    let cpu_tuple_cost_ns = benchmark_with_deadline(deadline, benchmark_cpu_tuple, 10.0);
     let (l1, l2, l3, dram) = benchmark_cache_hierarchy(deadline);
 
     let measurements = HardwareMeasurements {
@@ -240,10 +223,7 @@ pub fn run_benchmarks(config: &BenchmarkConfig) -> HardwareMeasurements {
 }
 
 /// Apply manual overrides from config to measurements.
-fn apply_overrides(
-    mut m: HardwareMeasurements,
-    config: &BenchmarkConfig,
-) -> HardwareMeasurements {
+fn apply_overrides(mut m: HardwareMeasurements, config: &BenchmarkConfig) -> HardwareMeasurements {
     if let Some(v) = config.override_sequential_io {
         m.sequential_read_mbps = v;
     }
@@ -257,11 +237,7 @@ fn apply_overrides(
 }
 
 /// Run a benchmark function, returning fallback if deadline exceeded.
-fn benchmark_with_deadline<F: FnOnce() -> f64>(
-    deadline: Instant,
-    f: F,
-    fallback: f64,
-) -> f64 {
+fn benchmark_with_deadline<F: FnOnce() -> f64>(deadline: Instant, f: F, fallback: f64) -> f64 {
     if Instant::now() >= deadline {
         return fallback;
     }
@@ -308,9 +284,7 @@ fn benchmark_sequential_io() -> f64 {
 
         if elapsed.as_nanos() > 0 && total_read > 0 {
             #[expect(clippy::cast_precision_loss)]
-            let mbps = total_read as f64
-                / (1024.0 * 1024.0)
-                / elapsed.as_secs_f64();
+            let mbps = total_read as f64 / (1024.0 * 1024.0) / elapsed.as_secs_f64();
             results.push(mbps);
         }
     }
@@ -335,16 +309,14 @@ fn benchmark_random_io() -> f64 {
     let mut buf = vec![0u8; RANDOM_IO_BLOCK_SIZE];
 
     // Simple LCG for deterministic pseudo-random offsets
-    let max_offset =
-        (IO_BENCHMARK_FILE_SIZE - RANDOM_IO_BLOCK_SIZE) as u64;
+    let max_offset = (IO_BENCHMARK_FILE_SIZE - RANDOM_IO_BLOCK_SIZE) as u64;
 
     for iter in 0..BENCHMARK_ITERATIONS {
         let Ok(mut file) = std::fs::File::open(&path) else {
             continue;
         };
 
-        let mut rng_state: u64 = 0x0005_DEEC_E66D_u64
-            .wrapping_add(iter as u64);
+        let mut rng_state: u64 = 0x0005_DEEC_E66D_u64.wrapping_add(iter as u64);
 
         let start = Instant::now();
         let mut total_read = 0usize;
@@ -368,9 +340,7 @@ fn benchmark_random_io() -> f64 {
 
         if elapsed.as_nanos() > 0 && total_read > 0 {
             #[expect(clippy::cast_precision_loss)]
-            let mbps = total_read as f64
-                / (1024.0 * 1024.0)
-                / elapsed.as_secs_f64();
+            let mbps = total_read as f64 / (1024.0 * 1024.0) / elapsed.as_secs_f64();
             results.push(mbps);
         }
     }
@@ -405,8 +375,7 @@ fn benchmark_cpu_tuple() -> f64 {
         let elapsed = start.elapsed();
 
         #[expect(clippy::cast_precision_loss)]
-        let ns_per_tuple =
-            elapsed.as_nanos() as f64 / CPU_TUPLE_COUNT as f64;
+        let ns_per_tuple = elapsed.as_nanos() as f64 / CPU_TUPLE_COUNT as f64;
         results.push(ns_per_tuple);
     }
 
@@ -495,10 +464,7 @@ fn cache_latency_ns(working_set_bytes: usize) -> f64 {
 }
 
 /// Create a temporary file filled with deterministic data.
-fn create_benchmark_file(
-    path: &std::path::Path,
-    size: usize,
-) -> std::io::Result<()> {
+fn create_benchmark_file(path: &std::path::Path, size: usize) -> std::io::Result<()> {
     let mut file = std::fs::File::create(path)?;
     let chunk = vec![0xABu8; 1024 * 1024]; // 1 MB chunks
     let mut written = 0;
@@ -518,7 +484,7 @@ fn median(values: &mut [f64]) -> Option<f64> {
     }
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         Some(values[mid - 1].midpoint(values[mid]))
     } else {
         Some(values[mid])
@@ -659,11 +625,9 @@ mod tests {
     #[test]
     fn measurements_serialization_roundtrip() {
         let m = HardwareMeasurements::default_nvme();
-        let json = serde_json::to_string(&m)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&m).expect("serialization should succeed");
         let deserialized: HardwareMeasurements =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(m, deserialized);
     }
 }

@@ -289,7 +289,7 @@ pub enum TriggerEvent {
     Update,
     /// DELETE operation.
     Delete,
-    /// TRUNCATE operation (PostgreSQL).
+    /// TRUNCATE operation (`PostgreSQL`).
     Truncate,
 }
 
@@ -404,6 +404,7 @@ pub struct ColumnStatistics {
     pub histogram_bounds: Vec<String>,
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -887,7 +888,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(clippy::expect_used, reason = "test code")]
     fn table_stats_serialize_roundtrip() {
         let stats = TableStats {
             table_name: "test".to_owned(),
@@ -903,7 +904,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(clippy::expect_used, reason = "test code")]
     fn column_info_serialize_roundtrip() {
         let col = ColumnInfo {
             name: "email".to_owned(),

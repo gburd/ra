@@ -65,7 +65,6 @@ fn aggregate(input: RelExpr, group_by: Vec<String>, aggs: Vec<(String, String)>)
             .into_iter()
             .map(|(col, func)| {
                 let function = match func.as_str() {
-                    "Count" => AggregateFunction::Count,
                     "Sum" => AggregateFunction::Sum,
                     "Avg" => AggregateFunction::Avg,
                     "Min" => AggregateFunction::Min,
@@ -215,8 +214,8 @@ fn test_exa002_late_materialization_with_aggregation() {
         filter(
             scan("sales"),
             and_pred(
-                gt_pred("sale_date", 20240101),
-                gt_pred("sale_date", 20240131),
+                gt_pred("sale_date", 20_240_101),
+                gt_pred("sale_date", 20_240_131),
             ),
         ),
         vec!["region".to_string()],
@@ -278,8 +277,8 @@ fn test_exa003_column_filter_pushdown_range() {
         filter(
             scan("sales"),
             and_pred(
-                gt_pred("sale_date", 20240115),
-                gt_pred("sale_date", 20240120),
+                gt_pred("sale_date", 20_240_115),
+                gt_pred("sale_date", 20_240_120),
             ),
         ),
         vec![
@@ -536,7 +535,7 @@ fn test_integration_tpch_q1() {
     // WHERE l_shipdate <= '1998-09-01'
     // GROUP BY l_returnflag, l_linestatus
     let plan = aggregate(
-        filter(scan("lineitem"), gt_pred("l_shipdate", 19980901)),
+        filter(scan("lineitem"), gt_pred("l_shipdate", 19_980_901)),
         vec!["l_returnflag".to_string(), "l_linestatus".to_string()],
         vec![
             ("l_quantity".to_string(), "Sum".to_string()),
@@ -604,8 +603,8 @@ fn test_integration_tpch_q6() {
             scan("lineitem"),
             and_pred(
                 and_pred(
-                    gt_pred("l_shipdate", 19940101),
-                    gt_pred("l_shipdate", 19941231),
+                    gt_pred("l_shipdate", 19_940_101),
+                    gt_pred("l_shipdate", 19_941_231),
                 ),
                 and_pred(
                     gt_pred("l_discount", 5),

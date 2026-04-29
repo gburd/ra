@@ -106,44 +106,32 @@ fn evaluate_against_stats(pred: &PushdownPredicate, stats: &FileColumnStats) -> 
         CompareOp::Gt => {
             // col > val: prune when max <= val
             if let Some(max) = &stats.max {
-                match max.partial_cmp_value(val) {
-                    Some(Ordering::Less | Ordering::Equal) => {
-                        return RowGroupMatch::Pruned;
-                    }
-                    _ => {}
+                if let Some(Ordering::Less | Ordering::Equal) = max.partial_cmp_value(val) {
+                    return RowGroupMatch::Pruned;
                 }
             }
         }
         CompareOp::Ge => {
             // col >= val: prune when max < val
             if let Some(max) = &stats.max {
-                match max.partial_cmp_value(val) {
-                    Some(Ordering::Less) => {
-                        return RowGroupMatch::Pruned;
-                    }
-                    _ => {}
+                if let Some(Ordering::Less) = max.partial_cmp_value(val) {
+                    return RowGroupMatch::Pruned;
                 }
             }
         }
         CompareOp::Lt => {
             // col < val: prune when min >= val
             if let Some(min) = &stats.min {
-                match min.partial_cmp_value(val) {
-                    Some(Ordering::Greater | Ordering::Equal) => {
-                        return RowGroupMatch::Pruned;
-                    }
-                    _ => {}
+                if let Some(Ordering::Greater | Ordering::Equal) = min.partial_cmp_value(val) {
+                    return RowGroupMatch::Pruned;
                 }
             }
         }
         CompareOp::Le => {
             // col <= val: prune when min > val
             if let Some(min) = &stats.min {
-                match min.partial_cmp_value(val) {
-                    Some(Ordering::Greater) => {
-                        return RowGroupMatch::Pruned;
-                    }
-                    _ => {}
+                if let Some(Ordering::Greater) = min.partial_cmp_value(val) {
+                    return RowGroupMatch::Pruned;
                 }
             }
         }
@@ -278,7 +266,7 @@ impl ParquetMetadataRegistry {
 ///
 /// - `true` if the table uses `StorageFormat::Parquet`
 /// - `true` if the storage format is `StorageFormat::Unknown` (conservative)
-/// - `false` for all other formats (RowBased, Columnar, Orc, ArrowIpc, etc.)
+/// - `false` for all other formats (`RowBased`, Columnar, Orc, `ArrowIpc`, etc.)
 ///
 /// If the table cannot be found in the schema, returns `true` (conservative).
 pub fn is_parquet_storage(table_name: &str, facts: &dyn ra_core::facts::FactsProvider) -> bool {

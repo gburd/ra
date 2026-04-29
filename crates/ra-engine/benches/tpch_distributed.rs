@@ -1,10 +1,10 @@
+#![expect(clippy::panic, reason = "benchmark assertions")]
 //! TPC-H distributed query benchmarks.
 //!
 //! Measures distributed optimizer strategy selection and costing
 //! for TPC-H queries across four network topology profiles:
 //! single-node, single-DC, multi-DC, and cloud federation.
 
-#![allow(clippy::expect_used)]
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::cast_precision_loss)]
 
@@ -134,7 +134,7 @@ fn single_dc_optimizer() -> DistributedOptimizer {
             table,
             NodeId(0),
             DataDistribution::HashPartitioned {
-                keys: vec![col(&format!("{}_key", table))],
+                keys: vec![col(&format!("{table}_key"))],
                 partition_count: 4,
             },
         );
@@ -191,7 +191,7 @@ fn multi_dc_optimizer() -> DistributedOptimizer {
             table,
             NodeId(0),
             DataDistribution::HashPartitioned {
-                keys: vec![col(&format!("{}_key", table))],
+                keys: vec![col(&format!("{table}_key"))],
                 partition_count: 6,
             },
         );
@@ -247,7 +247,7 @@ fn cloud_federation_optimizer() -> DistributedOptimizer {
             table,
             NodeId(0),
             DataDistribution::HashPartitioned {
-                keys: vec![col(&format!("{}_key", table))],
+                keys: vec![col(&format!("{table}_key"))],
                 partition_count: 6,
             },
         );
@@ -319,6 +319,7 @@ fn bench_strategy_selection(c: &mut Criterion) {
 fn bench_cost_estimation(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpch_cost_estimation");
 
+    #[expect(clippy::type_complexity, reason = "benchmark setup tuple")]
     let topologies: &[(&str, fn() -> DistributedOptimizer)] = &[
         ("single_node", single_node_optimizer as fn() -> _),
         ("single_dc", single_dc_optimizer),
@@ -365,7 +366,7 @@ fn bench_cost_estimation(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new(format!("{topo_name}/{strat_name}"), ""),
                 &(),
-                |b, _| {
+                |b, ()| {
                     b.iter(|| {
                         black_box(opt.cost_strategy(&strat, *left_bytes, *right_bytes));
                     });

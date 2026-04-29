@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// All bandwidth values are in GB/s, latencies in nanoseconds unless
 /// otherwise noted, and memory sizes in bytes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 pub struct HardwareProfile {
     /// Human-readable name for this profile.
     pub name: String,
@@ -248,7 +248,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip() {
         let profile = HardwareProfile::gpu_server();
         let json = serde_json::to_string(&profile).expect("serialization should succeed");

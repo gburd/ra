@@ -49,10 +49,7 @@ pub fn parse_explain_format(s: &str) -> Result<ExplainOutputFormat> {
 }
 
 /// Generate and print EXPLAIN output for an optimized plan.
-pub fn print_explain_output(
-    plan: &ra_core::algebra::RelExpr,
-    format_str: &str,
-) -> Result<()> {
+pub fn print_explain_output(plan: &ra_core::algebra::RelExpr, format_str: &str) -> Result<()> {
     let format = parse_explain_format(format_str)?;
 
     let output = match format {
@@ -64,15 +61,9 @@ pub fn print_explain_output(
             let _ = cost_params;
             let explain_node = ra_metadata::relexpr_to_explain_node(plan);
             match database {
-                DatabaseTextFormat::Postgres => {
-                    ra_metadata::format_postgres_explain(&explain_node)
-                }
-                DatabaseTextFormat::Mysql => {
-                    ra_metadata::format_mysql_explain(&explain_node)
-                }
-                DatabaseTextFormat::Sqlite => {
-                    ra_metadata::format_sqlite_explain(&explain_node)
-                }
+                DatabaseTextFormat::Postgres => ra_metadata::format_postgres_explain(&explain_node),
+                DatabaseTextFormat::Mysql => ra_metadata::format_mysql_explain(&explain_node),
+                DatabaseTextFormat::Sqlite => ra_metadata::format_sqlite_explain(&explain_node),
             }
         }
     };
@@ -143,15 +134,14 @@ pub fn print_optimization_header(
 
     eprintln!();
 
-    let formatted_query =
-        match ra_parser::formatter::SqlFormatter::default_style().format(query) {
-            Ok(formatted) => formatted
-                .lines()
-                .map(|line| format!("    {line}"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            Err(_) => format!("    {query}"),
-        };
+    let formatted_query = match ra_parser::formatter::SqlFormatter::default_style().format(query) {
+        Ok(formatted) => formatted
+            .lines()
+            .map(|line| format!("    {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Err(_) => format!("    {query}"),
+    };
 
     eprintln!("  {}:", "SQL".bold());
     eprintln!("{formatted_query}");
@@ -159,10 +149,7 @@ pub fn print_optimization_header(
 }
 
 /// Display resource usage from a bounded optimization result.
-pub fn print_resource_usage(
-    result: &ra_engine::OptimizationResult,
-    verbose: bool,
-) {
+pub fn print_resource_usage(result: &ra_engine::OptimizationResult, verbose: bool) {
     let usage = &result.resource_usage;
     let status = match result.status {
         ra_engine::OptimizationStatus::Complete => {
@@ -201,9 +188,7 @@ pub fn print_resource_usage(
     }
 }
 
-pub fn print_optimization_stats(
-    usage: &ra_engine::ResourceUsageReport,
-) {
+pub fn print_optimization_stats(usage: &ra_engine::ResourceUsageReport) {
     eprintln!("{}", "Optimization Statistics:".bold());
     eprintln!(
         "  {}: {:.1}ms",
@@ -232,15 +217,10 @@ pub fn print_unbounded_stats(elapsed: std::time::Duration) {
     );
 }
 
-pub fn print_rule_tracking(
-    result: &ra_engine::OptimizationResult,
-    mode: RuleDisplayMode,
-) {
+pub fn print_rule_tracking(result: &ra_engine::OptimizationResult, mode: RuleDisplayMode) {
     let Some(tracking) = &result.rule_tracking else {
         eprintln!("{}", "Rule tracking not available".yellow());
-        eprintln!(
-            "This should not happen - tracking was requested but not populated"
-        );
+        eprintln!("This should not happen - tracking was requested but not populated");
         return;
     };
 
@@ -285,18 +265,14 @@ pub fn print_intermediate_steps(
         let mut grouped_steps = vec![step];
         let mut j = i + 1;
         while j < steps.len()
-            && rule_explanations::should_group_with_previous(
-                &steps[j].rule_name,
-                &step.rule_name,
-            )
+            && rule_explanations::should_group_with_previous(&steps[j].rule_name, &step.rule_name)
         {
             grouped_steps.push(&steps[j]);
             j += 1;
         }
 
         if grouped_steps.len() > 1 {
-            let step_numbers: Vec<_> =
-                grouped_steps.iter().map(|s| s.step_number).collect();
+            let step_numbers: Vec<_> = grouped_steps.iter().map(|s| s.step_number).collect();
             let step_range = if step_numbers.len() == 2 {
                 format!("{} and {}", step_numbers[0], step_numbers[1])
             } else {
@@ -339,11 +315,10 @@ pub fn print_intermediate_steps(
 
         eprintln!("  {}", "Impact:".bold().cyan());
         for line in explanation.impact.lines() {
-            eprintln!("    {}", line);
+            eprintln!("    {line}");
         }
 
-        if let (Some(before), Some(after)) =
-            (explanation.before_example, explanation.after_example)
+        if let (Some(before), Some(after)) = (explanation.before_example, explanation.after_example)
         {
             eprintln!();
             eprintln!("  {}", "Example transformation:".bold());
@@ -356,17 +331,12 @@ pub fn print_intermediate_steps(
             eprintln!(
                 "  {}: {}",
                 "Cost Impact".bold().yellow(),
-                format_impact(
-                    improvement,
-                    &step.plan_before,
-                    &step.plan_after,
-                )
+                format_impact(improvement, &step.plan_before, &step.plan_after,)
             );
         } else if let Some(reason) = explanation.why_no_cost_change {
             eprintln!(
-                "  {}: {}",
+                "  {}: No measurable change ({reason})",
                 "Cost Impact".bold().yellow(),
-                format!("No measurable change ({})", reason)
             );
         } else {
             eprintln!(
@@ -377,21 +347,20 @@ pub fn print_intermediate_steps(
 
         eprintln!();
 
-        let last_step = grouped_steps.last().unwrap();
+        let Some(last_step) = grouped_steps.last() else {
+            continue;
+        };
         let before_tree = format_plan_tree(&last_step.plan_before);
         let after_tree = format_plan_tree(&last_step.plan_after);
 
-        if before_tree != after_tree {
-            eprintln!("  {}:", "Plan Changes".bold());
-            print_plan_with_changes_inline(
-                &last_step.plan_after,
-                &last_step.plan_before,
-            );
-        } else {
+        if before_tree == after_tree {
             eprintln!(
                 "  {}: Plan structure unchanged (added to search space)",
                 "Plan Changes".bold().dimmed()
             );
+        } else {
+            eprintln!("  {}:", "Plan Changes".bold());
+            print_plan_with_changes_inline(&last_step.plan_after, &last_step.plan_before);
         }
 
         eprintln!();
@@ -419,33 +388,26 @@ fn format_impact(
     ));
 
     let cost_type = identify_cost_change_type(plan_before, plan_after);
-    if !cost_type.is_empty()
-        && cost_type != "Cost model refinement based on updated statistics"
-    {
+    if !cost_type.is_empty() && cost_type != "Cost model refinement based on updated statistics" {
         impacts.push(cost_type);
     }
 
     if has_scan_upgrade(plan_before, plan_after) {
-        impacts.push(
-            "Eliminated full table scan, using index instead".to_string(),
-        );
+        impacts.push("Eliminated full table scan, using index instead".to_string());
     }
 
-    if let Some(scan_change) = detect_scan_optimization(plan_before, plan_after)
-    {
+    if let Some(scan_change) = detect_scan_optimization(plan_before, plan_after) {
         impacts.push(scan_change);
     }
 
-    if let Some(strategy_change) =
-        detect_strategy_change(plan_before, plan_after)
-    {
+    if let Some(strategy_change) = detect_strategy_change(plan_before, plan_after) {
         impacts.push(strategy_change);
     }
 
     if has_operator_elimination(plan_before, plan_after) {
         let diff = count_operators(plan_before) - count_operators(plan_after);
         if diff > 0 {
-            impacts.push(format!("Removed {} redundant operator(s)", diff));
+            impacts.push(format!("Removed {diff} redundant operator(s)"));
         }
     }
 
@@ -465,8 +427,7 @@ fn identify_cost_change_type(
     match (plan_before, plan_after) {
         (RelExpr::Scan { .. }, RelExpr::IndexOnlyScan { .. })
         | (RelExpr::Scan { .. }, RelExpr::BitmapIndexScan { .. }) => {
-            "I/O cost reduced (index access instead of sequential scan)"
-                .to_string()
+            "I/O cost reduced (index access instead of sequential scan)".to_string()
         }
         (RelExpr::Join { .. }, RelExpr::ParallelHashJoin { .. }) => {
             "CPU cost optimized (parallel execution)".to_string()
@@ -475,11 +436,8 @@ fn identify_cost_change_type(
             "CPU and Memory cost reduced (incremental sort)".to_string()
         }
         _ => {
-            if has_filter_near_scan(plan_after)
-                && !has_filter_near_scan(plan_before)
-            {
-                "CPU cost reduced (filter pushdown reduces processing)"
-                    .to_string()
+            if has_filter_near_scan(plan_after) && !has_filter_near_scan(plan_before) {
+                "CPU cost reduced (filter pushdown reduces processing)".to_string()
             } else {
                 "Cost model refinement based on updated statistics".to_string()
             }
@@ -491,10 +449,7 @@ fn has_filter_near_scan(plan: &ra_core::algebra::RelExpr) -> bool {
     has_filter_near_scan_depth(plan, 0)
 }
 
-fn has_filter_near_scan_depth(
-    plan: &ra_core::algebra::RelExpr,
-    depth: usize,
-) -> bool {
+fn has_filter_near_scan_depth(plan: &ra_core::algebra::RelExpr, depth: usize) -> bool {
     use ra_core::algebra::RelExpr;
 
     if depth > 2 {
@@ -546,7 +501,9 @@ fn detect_scan_optimization(
     let before_scan_type = find_scan_type(plan_before);
     let after_scan_type = find_scan_type(plan_after);
 
-    if before_scan_type != after_scan_type {
+    if before_scan_type == after_scan_type {
+        None
+    } else {
         match (before_scan_type.as_deref(), after_scan_type.as_deref()) {
             (Some("Scan"), Some("IndexOnlyScan")) => {
                 Some("Index-only scan enabled (covering index)".to_string())
@@ -559,14 +516,10 @@ fn detect_scan_optimization(
             }
             _ => Some(format!(
                 "Scan method: {} → {}",
-                before_scan_type
-                    .unwrap_or_else(|| "Unknown".to_string()),
-                after_scan_type
-                    .unwrap_or_else(|| "Unknown".to_string())
+                before_scan_type.unwrap_or_else(|| "Unknown".to_string()),
+                after_scan_type.unwrap_or_else(|| "Unknown".to_string())
             )),
         }
-    } else {
-        None
     }
 }
 
@@ -576,12 +529,8 @@ fn find_scan_type(plan: &ra_core::algebra::RelExpr) -> Option<String> {
     match plan {
         RelExpr::Scan { .. } => Some("Scan".to_string()),
         RelExpr::IndexOnlyScan { .. } => Some("IndexOnlyScan".to_string()),
-        RelExpr::BitmapIndexScan { .. } => {
-            Some("BitmapIndexScan".to_string())
-        }
-        RelExpr::BitmapHeapScan { .. } => {
-            Some("BitmapHeapScan".to_string())
-        }
+        RelExpr::BitmapIndexScan { .. } => Some("BitmapIndexScan".to_string()),
+        RelExpr::BitmapHeapScan { .. } => Some("BitmapHeapScan".to_string()),
         _ => {
             for child in plan.children() {
                 if let Some(scan_type) = find_scan_type(child) {
@@ -594,11 +543,9 @@ fn find_scan_type(plan: &ra_core::algebra::RelExpr) -> Option<String> {
 }
 
 fn extract_operator(line: &str) -> String {
-    line.trim_start_matches(
-        |c: char| c.is_whitespace() || "└├─│".contains(c),
-    )
-    .trim()
-    .to_string()
+    line.trim_start_matches(|c: char| c.is_whitespace() || "└├─│".contains(c))
+        .trim()
+        .to_string()
 }
 
 fn print_plan_with_changes_inline(
@@ -611,10 +558,8 @@ fn print_plan_with_changes_inline(
     let before_lines: Vec<&str> = before_tree.lines().collect();
     let after_lines: Vec<&str> = after_tree.lines().collect();
 
-    let before_ops: Vec<String> =
-        before_lines.iter().map(|l| extract_operator(l)).collect();
-    let after_ops: Vec<String> =
-        after_lines.iter().map(|l| extract_operator(l)).collect();
+    let before_ops: Vec<String> = before_lines.iter().map(|l| extract_operator(l)).collect();
+    let after_ops: Vec<String> = after_lines.iter().map(|l| extract_operator(l)).collect();
 
     let mut removed_ops: Vec<(usize, &str)> = Vec::new();
     for (i, op) in before_ops.iter().enumerate() {
@@ -630,13 +575,7 @@ fn print_plan_with_changes_inline(
 
         let line_depth = line
             .chars()
-            .take_while(|c| {
-                c.is_whitespace()
-                    || *c == '│'
-                    || *c == '├'
-                    || *c == '└'
-                    || *c == '─'
-            })
+            .take_while(|c| c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─')
             .count();
 
         for (removed_idx, removed_line) in &removed_ops {
@@ -647,17 +586,11 @@ fn print_plan_with_changes_inline(
             let removed_depth = removed_line
                 .chars()
                 .take_while(|c| {
-                    c.is_whitespace()
-                        || *c == '│'
-                        || *c == '├'
-                        || *c == '└'
-                        || *c == '─'
+                    c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─'
                 })
                 .count();
 
-            if removed_depth <= line_depth
-                && removed_depth + 4 >= line_depth
-            {
+            if removed_depth <= line_depth && removed_depth + 4 >= line_depth {
                 eprintln!(
                     "    {} {}",
                     "−".red().bold(),
@@ -685,10 +618,7 @@ fn print_plan_with_changes_inline(
     }
 }
 
-fn has_scan_upgrade(
-    before: &ra_core::algebra::RelExpr,
-    after: &ra_core::algebra::RelExpr,
-) -> bool {
+fn has_scan_upgrade(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
     has_table_scan(before) && has_index_scan(after)
 }
 
@@ -745,7 +675,7 @@ fn print_applied_rules(tracking: &ra_engine::RuleTrackingResult) {
 
     for (i, rule) in tracking.applied.iter().enumerate() {
         let cost_info = if let Some(improvement) = rule.cost_improvement {
-            format!(" (cost improvement: {:.2})", improvement)
+            format!(" (cost improvement: {improvement:.2})")
         } else {
             String::new()
         };
@@ -795,7 +725,5 @@ fn print_available_rules(tracking: &ra_engine::RuleTrackingResult) {
         "Available Rules".bold(),
         tracking.available.len()
     );
-    eprintln!(
-        "  Use --rules-applied to see which rules modified the plan"
-    );
+    eprintln!("  Use --rules-applied to see which rules modified the plan");
 }

@@ -28,6 +28,10 @@ impl ProfileRegistry {
     /// Load a profile by name.
     ///
     /// First checks built-in profiles, then falls back to loading from disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the profile is not found or cannot be loaded.
     pub fn load(&self, name: &str) -> Result<ParserProfile, Box<dyn Error>> {
         // Check for built-in profiles first
         match name {
@@ -39,11 +43,19 @@ impl ProfileRegistry {
     /// Load an extension profile.
     ///
     /// Extension profiles are searched in the extensions/ subdirectory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the extension profile is not found or cannot be loaded.
     pub fn load_extension(&self, name: &str) -> Result<ParserProfile, Box<dyn Error>> {
         self.loader.load_extension(name)
     }
 
     /// List all available profiles.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the profile directory cannot be read.
     pub fn list(&self) -> Result<Vec<String>, Box<dyn Error>> {
         let mut profiles = vec!["universal".to_string()];
         profiles.extend(self.loader.list_profiles()?);
@@ -51,6 +63,7 @@ impl ProfileRegistry {
     }
 }
 
+#[expect(clippy::unwrap_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

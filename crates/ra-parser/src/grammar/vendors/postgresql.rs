@@ -1,6 +1,6 @@
 //! PostgreSQL-specific SQL grammar extensions.
 //!
-//! PostgreSQL extends standard SQL with powerful features including arrays, JSONB,
+//! `PostgreSQL` extends standard SQL with powerful features including arrays, JSONB,
 //! and many custom operators.
 //!
 //! # Key Features
@@ -23,7 +23,7 @@
 //!
 //! ## Type Casting
 //!
-//! PostgreSQL uses `::` for type casting:
+//! `PostgreSQL` uses `::` for type casting:
 //! ```sql
 //! SELECT '123'::integer;
 //! SELECT now()::date;
@@ -53,7 +53,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct PostgreSQLExtension;
 
 impl GrammarExtension for PostgreSQLExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "postgresql"
     }
 
@@ -103,7 +103,7 @@ impl GrammarExtension for PostgreSQLExtension {
     fn operators(&self) -> Vec<&str> {
         vec![
             // Type casting
-            "::", // JSONB operators
+            "::",  // JSONB operators
             "@>",  // Contains (JSONB, array, range)
             "<@",  // Contained by
             "@?",  // Path exists (JSON path query)

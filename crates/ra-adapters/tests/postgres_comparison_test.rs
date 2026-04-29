@@ -1,6 +1,8 @@
-//! Integration tests for PostgreSQL adapter comparison functionality.
+#![expect(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
+#![expect(clippy::float_cmp, reason = "exact float literals in tests")]
+//! Integration tests for `PostgreSQL` adapter comparison functionality.
 //!
-//! Run with: cargo test -p ra-adapters --features postgres postgres_comparison
+//! Run with: `cargo test -p ra-adapters --features postgres postgres_comparison`
 
 #[cfg(feature = "postgres")]
 mod postgres_tests {
@@ -21,14 +23,14 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_adapter_connection() {
         let adapter = setup_adapter();
         assert_eq!(adapter.database_name(), "postgresql");
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_execute_simple_query() {
         let adapter = setup_adapter();
         let result = adapter.execute("SELECT 1 AS value");
@@ -40,7 +42,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_execute_native() {
         let adapter = setup_adapter();
         let result = adapter.execute_native("SELECT NOW() AS current_time");
@@ -51,7 +53,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_execute_with_ra() {
         let adapter = setup_adapter();
         let result = adapter.execute_with_ra("SELECT 42 AS answer");
@@ -62,7 +64,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_get_explain_plan() {
         let adapter = setup_adapter();
         let query = "SELECT 1";
@@ -74,7 +76,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_get_stats_pg_class() {
         let adapter = setup_adapter();
         let result = adapter.get_stats("pg_class");
@@ -86,7 +88,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_check_extensions() {
         let adapter = setup_adapter();
         let result = adapter.check_extensions();
@@ -99,7 +101,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_compare_single_query() {
         let adapter = setup_adapter();
         let query = "SELECT COUNT(*) FROM pg_class";
@@ -114,7 +116,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_compare_queries() {
         let adapter = setup_adapter();
         let queries = vec![
@@ -131,7 +133,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_comparison_metrics() {
         let adapter = setup_adapter();
         let query = "SELECT * FROM pg_class LIMIT 10";
@@ -145,7 +147,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_comparison_with_filtering() {
         let adapter = setup_adapter();
         let query = "SELECT relname FROM pg_class WHERE relkind = 'r' LIMIT 5";
@@ -157,7 +159,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_comparison_report_json() {
         let adapter = setup_adapter();
         let queries = vec!["SELECT 1".to_string(), "SELECT 2".to_string()];
@@ -172,7 +174,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_comparison_report_markdown() {
         let adapter = setup_adapter();
         let queries = vec!["SELECT 1".to_string()];
@@ -186,7 +188,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_ra_optimization_improvement() {
         let adapter = setup_adapter();
         let query = "SELECT COUNT(*) FROM pg_class WHERE relkind = 'r'";
@@ -198,7 +200,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_aggregation_query_comparison() {
         let adapter = setup_adapter();
         let query = "SELECT relkind, COUNT(*) FROM pg_class GROUP BY relkind";
@@ -210,7 +212,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_join_query_comparison() {
         let adapter = setup_adapter();
         let query = "SELECT c.relname, n.nspname \
@@ -225,7 +227,7 @@ mod postgres_tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn test_comparison_statistics() {
         let adapter = setup_adapter();
         let queries = vec![

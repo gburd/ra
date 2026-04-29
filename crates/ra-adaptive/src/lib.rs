@@ -27,6 +27,8 @@
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
+// Test code legitimately uses expect/unwrap for assertions and setup.
+#![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 #![allow(clippy::cast_possible_wrap)]
 
 pub mod batch;

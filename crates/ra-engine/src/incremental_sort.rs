@@ -163,7 +163,8 @@ pub fn try_incremental_sort(
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::float_cmp, reason = "legacy allow")]
+#[expect(clippy::panic, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use ra_core::algebra::{NullOrdering, SortDirection, SortKey};

@@ -9,7 +9,7 @@
 //! - Each rule gets a unique `u16` ID (supports up to 65,536 rules)
 //! - Tracking uses `SparseMap` (sparse bitmap) instead of `Vec<String>`
 //! - Only enabled when `--rules` flag is passed (CLI) or `track_rules` is set (API)
-//! - Zero overhead in production (PostgreSQL, Stoolap) when disabled
+//! - Zero overhead in production (`PostgreSQL`, Stoolap) when disabled
 
 use crate::sparsemap::SparseMap;
 use std::sync::OnceLock;
@@ -38,14 +38,14 @@ impl RuleSet {
     /// Record that a rule was applied.
     #[inline]
     pub fn mark_applied(&mut self, rule_id: RuleId) {
-        self.bitmap.set(rule_id as u32);
+        self.bitmap.set(u32::from(rule_id));
     }
 
     /// Check if a rule was applied.
     #[must_use]
     #[inline]
     pub fn was_applied(&self, rule_id: RuleId) -> bool {
-        self.bitmap.is_set(rule_id as u32)
+        self.bitmap.is_set(u32::from(rule_id))
     }
 
     /// Count total rules applied.
@@ -74,7 +74,7 @@ impl RuleSet {
     pub fn to_names(&self) -> Vec<String> {
         self.iter()
             .filter_map(|id| registry().id_to_name(id))
-            .map(|s| s.to_owned())
+            .map(std::borrow::ToOwned::to_owned)
             .collect()
     }
 }
@@ -103,6 +103,7 @@ impl RuleRegistry {
         Self { rules: Vec::new() }
     }
 
+    #[expect(clippy::too_many_lines, reason = "rule registration for all optimizer rules")]
     fn init(&mut self) {
         // Register all rules with numeric IDs from rule_priority.rs
         let mut id = 0;
@@ -309,6 +310,7 @@ macro_rules! rule_id_unchecked {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 

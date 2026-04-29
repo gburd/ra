@@ -243,6 +243,7 @@ fn default_l3_cache() -> u64 {
 
 impl HardwareProfileDef {
     /// Convert to `HardwareProfile` used by optimizer.
+    #[must_use]
     pub fn to_hardware_profile(&self) -> HardwareProfile {
         HardwareProfile {
             cpu_cores: self.cpu_cores,
@@ -401,16 +402,18 @@ pub struct IndexDef {
 /// Index type definition (serialization-friendly).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum IndexTypeDef {
     /// B-tree index.
+    #[default]
     Btree,
     /// Hash index.
     Hash,
-    /// GiST (Generalized Search Tree).
+    /// `GiST` (Generalized Search Tree).
     Gist,
     /// GIN (Generalized Inverted Index).
     Gin,
-    /// SP-GiST (Space-Partitioned GiST).
+    /// SP-GiST (Space-Partitioned `GiST`).
     SpGist,
     /// BRIN (Block Range Index).
     Brin,
@@ -420,12 +423,6 @@ pub enum IndexTypeDef {
     Bitmap,
     /// Unknown or unsupported.
     Unknown,
-}
-
-impl Default for IndexTypeDef {
-    fn default() -> Self {
-        Self::Btree
-    }
 }
 
 impl From<IndexTypeDef> for IndexType {
@@ -460,8 +457,10 @@ pub struct ForeignKeyDef {
 /// Storage format definition (serialization-friendly).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum StorageFormatDef {
     /// Row-based storage (heap tables).
+    #[default]
     RowBased,
     /// Column-based storage.
     Columnar,
@@ -473,12 +472,6 @@ pub enum StorageFormatDef {
     ArrowIpc,
     /// Unknown or mixed format.
     Unknown,
-}
-
-impl Default for StorageFormatDef {
-    fn default() -> Self {
-        Self::RowBased
-    }
 }
 
 impl From<StorageFormatDef> for StorageFormat {
@@ -738,26 +731,31 @@ impl TimelineConfig {
     }
 
     /// Get hardware profile by name.
+    #[must_use]
     pub fn get_hardware_profile(&self, name: &str) -> Option<&HardwareProfileDef> {
         self.hardware_profiles.iter().find(|p| p.name == name)
     }
 
     /// Total number of snapshots.
+    #[must_use]
     pub fn snapshot_count(&self) -> usize {
         self.snapshots.len()
     }
 
     /// Total number of events.
+    #[must_use]
     pub fn event_count(&self) -> usize {
         self.events.len()
     }
 
     /// Total number of expectations.
+    #[must_use]
     pub fn expectation_count(&self) -> usize {
         self.expectations.len()
     }
 
     /// Duration from first to last snapshot.
+    #[must_use]
     pub fn time_span(&self) -> u64 {
         if self.snapshots.len() < 2 {
             return 0;
@@ -767,6 +765,7 @@ impl TimelineConfig {
     }
 
     /// All table names mentioned in any snapshot.
+    #[must_use]
     pub fn table_names(&self) -> Vec<String> {
         let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
         for snapshot in &self.snapshots {
@@ -781,6 +780,7 @@ impl TimelineConfig {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 
@@ -1005,8 +1005,8 @@ mod tests {
             has_gpu: true,
             gpu_memory: Some(8_000_000_000),
             l1_cache_size: 32768,
-            l2_cache_size: 262144,
-            l3_cache_size: 8388608,
+            l2_cache_size: 262_144,
+            l3_cache_size: 8_388_608,
         };
 
         let hardware = profile_def.to_hardware_profile();

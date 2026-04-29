@@ -1,15 +1,15 @@
-//! XPath and XQuery optimization for SQL/XML queries (RFC 0083).
+//! `XPath` and `XQuery` optimization for SQL/XML queries (RFC 0083).
 //!
-//! Provides XPath expression analysis, XML index-aware cost
-//! estimation, and rewrite rules for queries embedding XPath or
-//! XQuery expressions. Extracts optimization principles from
+//! Provides `XPath` expression analysis, XML index-aware cost
+//! estimation, and rewrite rules for queries embedding `XPath` or
+//! `XQuery` expressions. Extracts optimization principles from
 //! Berkeley DB XML and adapts them to relational databases:
 //!
-//! - **PostgreSQL**: `xpath()`, `xmlexists()`, `xmltable()`
+//! - **`PostgreSQL`**: `xpath()`, `xmlexists()`, `xmltable()`
 //! - **Oracle**: `XMLQuery()`, `XMLTable()`, `existsNode()`
 //! - **SQL Server**: `.value()`, `.query()`, `.exist()`, `.nodes()`
 //!
-//! All XPath parsing is best-effort. Malformed expressions are left
+//! All `XPath` parsing is best-effort. Malformed expressions are left
 //! as opaque function calls with default costs. The optimizer never
 //! rejects a query due to XML parsing failure.
 //!
@@ -27,7 +27,7 @@ use crate::parse_var;
 // XPath axis types
 // ------------------------------------------------------------------
 
-/// XPath navigation axis.
+/// `XPath` navigation axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum XPathAxis {
     /// `child::` (default axis)
@@ -97,7 +97,7 @@ impl XPathAxis {
         }
     }
 
-    /// Parse an axis name from XPath syntax.
+    /// Parse an axis name from `XPath` syntax.
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -149,7 +149,7 @@ impl fmt::Display for XPathAxis {
 // XPath node tests
 // ------------------------------------------------------------------
 
-/// XPath node test (what kind of node to select).
+/// `XPath` node test (what kind of node to select).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NodeTest {
     /// Named element: `child::item`
@@ -185,7 +185,7 @@ impl fmt::Display for NodeTest {
 // XPath predicates
 // ------------------------------------------------------------------
 
-/// Comparison operator in an XPath predicate.
+/// Comparison operator in an `XPath` predicate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum XPathCompareOp {
     /// `=`
@@ -215,7 +215,7 @@ impl fmt::Display for XPathCompareOp {
     }
 }
 
-/// A predicate attached to an XPath step.
+/// A predicate attached to an `XPath` step.
 #[derive(Debug, Clone, PartialEq)]
 pub enum XPathPredicate {
     /// Comparison: `[@price > 100]`
@@ -268,8 +268,7 @@ impl XPathPredicate {
                 | XPathCompareOp::Gt
                 | XPathCompareOp::Ge => 0.33,
             },
-            Self::Position(PositionPredicate::Index(_)) => 0.01,
-            Self::Position(PositionPredicate::Last) => 0.01,
+            Self::Position(PositionPredicate::Index(_) | PositionPredicate::Last) => 0.01,
             Self::Position(PositionPredicate::Computed) => 0.5,
             Self::Function { name, .. } => match name.as_str() {
                 "contains" | "starts-with" => 0.1,
@@ -309,7 +308,7 @@ impl XPathPredicate {
 // XPath expression structure
 // ------------------------------------------------------------------
 
-/// A single navigation step in an XPath expression.
+/// A single navigation step in an `XPath` expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct XPathStep {
     /// Navigation axis
@@ -351,7 +350,7 @@ fn predicate_eval_cost(pred: &XPathPredicate) -> f64 {
     }
 }
 
-/// Parsed XPath expression as a sequence of steps.
+/// Parsed `XPath` expression as a sequence of steps.
 #[derive(Debug, Clone, PartialEq)]
 pub struct XPathExpr {
     /// Whether the path is absolute (`/doc/...`) or relative
@@ -372,7 +371,11 @@ impl XPathExpr {
     #[must_use]
     pub fn is_index_coverable(&self) -> bool {
         self.steps.iter().all(|step| {
-            step.can_use_path_index() && step.predicates.iter().all(|p| p.supports_value_index())
+            step.can_use_path_index()
+                && step
+                    .predicates
+                    .iter()
+                    .all(XPathPredicate::supports_value_index)
         })
     }
 
@@ -410,6 +413,7 @@ impl XPathExpr {
 
     /// Combined selectivity of all predicates.
     #[must_use]
+    #[expect(clippy::similar_names, reason = "sels and self are distinct concepts")]
     pub fn combined_selectivity(&self) -> f64 {
         let sels: Vec<f64> = self
             .all_predicates()
@@ -468,9 +472,9 @@ impl fmt::Display for XPathPredicate {
 // XPath parser (best-effort, common patterns only)
 // ------------------------------------------------------------------
 
-/// Parse an XPath expression string into structured form.
+/// Parse an `XPath` expression string into structured form.
 ///
-/// Handles common XPath 1.0 patterns used in SQL/XML queries.
+/// Handles common `XPath` 1.0 patterns used in SQL/XML queries.
 /// Returns None for expressions too complex to parse (they remain
 /// as opaque function calls with default costs).
 #[must_use]
@@ -550,7 +554,7 @@ fn split_path_segments(path: &str) -> Vec<&str> {
     segments
 }
 
-/// Parse a single XPath step (e.g., "item[@price > 100]").
+/// Parse a single `XPath` step (e.g., "item[@price > 100]").
 fn parse_step(segment: &str) -> Option<XPathStep> {
     let trimmed = segment.trim();
     if trimmed.is_empty() {
@@ -696,7 +700,7 @@ fn parse_predicate(s: &str) -> Option<XPathPredicate> {
     None
 }
 
-/// Check if a name is a known XPath function.
+/// Check if a name is a known `XPath` function.
 fn is_xpath_function(name: &str) -> bool {
     matches!(
         name,
@@ -731,7 +735,7 @@ fn is_xpath_function(name: &str) -> bool {
     )
 }
 
-/// Parse axis and node test from "axis::test" or abbreviated form.
+/// Parse axis and node test from "`axis::test`" or abbreviated form.
 fn parse_axis_and_test(s: &str) -> Option<(XPathAxis, NodeTest)> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -822,7 +826,7 @@ pub enum XmlValueType {
 pub struct XmlIndexInfo {
     /// Index type
     pub index_type: XmlIndexType,
-    /// Indexed paths (e.g., ["/doc/items/item/@price"])
+    /// Indexed paths (e.g., `["/doc/items/item/@price"]`)
     pub paths: Vec<String>,
     /// Value type constraint (for value indexes)
     pub value_type: Option<XmlValueType>,
@@ -833,12 +837,11 @@ pub struct XmlIndexInfo {
 }
 
 impl XmlIndexInfo {
-    /// Whether this index covers the given XPath expression.
+    /// Whether this index covers the given `XPath` expression.
     #[must_use]
     pub fn covers_xpath(&self, xpath: &XPathExpr) -> bool {
-        let simple = match xpath.simple_path() {
-            Some(p) => p,
-            None => return false,
+        let Some(simple) = xpath.simple_path() else {
+            return false;
         };
 
         match self.index_type {
@@ -847,7 +850,7 @@ impl XmlIndexInfo {
                 .iter()
                 .any(|p| simple.starts_with(p.as_str()) || p.starts_with(simple.as_str())),
             XmlIndexType::Value | XmlIndexType::Property => {
-                self.paths.iter().any(|p| simple == *p)
+                self.paths.contains(&simple)
                     && xpath
                         .all_predicates()
                         .iter()
@@ -900,7 +903,7 @@ impl Default for XmlCostParams {
     }
 }
 
-/// Estimate the cost of evaluating an XPath expression.
+/// Estimate the cost of evaluating an `XPath` expression.
 ///
 /// When XML indexes are available, the cost is significantly
 /// reduced. Without indexes, cost scales with document size
@@ -982,13 +985,13 @@ pub fn combine_selectivities(selectivities: &[f64]) -> f64 {
 // XPath expression simplification
 // ------------------------------------------------------------------
 
-/// Simplify an XPath expression by removing redundant steps.
+/// Simplify an `XPath` expression by removing redundant steps.
 ///
 /// Applies the following simplifications (inspired by Berkeley DB
 /// XML's ASTReplaceOptimizer):
 ///
-/// 1. Remove self::node() steps (no-op navigation)
-/// 2. Collapse descendant-or-self::node()/child::X to descendant::X
+/// 1. Remove `self::node()` steps (no-op navigation)
+/// 2. Collapse `descendant-or-self::node()/child::X` to `descendant::X`
 /// 3. Remove duplicate adjacent child steps to the same element
 #[must_use]
 pub fn simplify_xpath(expr: &XPathExpr) -> XPathExpr {
@@ -1049,28 +1052,28 @@ pub fn simplify_xpath(expr: &XPathExpr) -> XPathExpr {
 /// Database platform for XML function classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum XmlPlatform {
-    /// PostgreSQL: xpath(), xmlexists(), xmltable()
+    /// `PostgreSQL`: `xpath()`, `xmlexists()`, `xmltable()`
     PostgreSQL,
-    /// Oracle: XMLQuery(), XMLTable(), existsNode()
+    /// Oracle: `XMLQuery()`, `XMLTable()`, `existsNode()`
     Oracle,
-    /// SQL Server: .value(), .query(), .exist(), .nodes()
+    /// SQL Server: .`value()`, .`query()`, .`exist()`, .`nodes()`
     SqlServer,
 }
 
 /// Classification of an XML function call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum XmlFunctionKind {
-    /// Returns XML fragment(s): xpath(), XMLQuery(), .query()
+    /// Returns XML fragment(s): `xpath()`, `XMLQuery()`, .`query()`
     Query,
-    /// Returns scalar value: xpath()[1]::text, .value()
+    /// Returns scalar value: `xpath()`[1]`::text`, .`value()`
     Value,
-    /// Returns boolean existence: xmlexists(), existsNode(), .exist()
+    /// Returns boolean existence: `xmlexists()`, `existsNode()`, .`exist()`
     Exists,
-    /// Returns relational table: xmltable(), XMLTable(), .nodes()
+    /// Returns relational table: `xmltable()`, `XMLTable()`, .`nodes()`
     Table,
 }
 
-/// Recognized XML function call with parsed XPath.
+/// Recognized XML function call with parsed `XPath`.
 #[derive(Debug, Clone)]
 pub struct XmlFunctionCall {
     /// Platform this function belongs to
@@ -1079,9 +1082,9 @@ pub struct XmlFunctionCall {
     pub kind: XmlFunctionKind,
     /// Function name as it appears in SQL
     pub function_name: String,
-    /// Parsed XPath expression (if parseable)
+    /// Parsed `XPath` expression (if parseable)
     pub xpath: Option<XPathExpr>,
-    /// Raw XPath string
+    /// Raw `XPath` string
     pub xpath_raw: String,
 }
 
@@ -1112,7 +1115,7 @@ pub fn classify_xml_function(name: &str) -> Option<(XmlPlatform, XmlFunctionKind
 
 /// Return rewrite rules for XML/XPath/XQuery optimization.
 ///
-/// Rules target SQL/XML patterns where XPath expressions are
+/// Rules target SQL/XML patterns where `XPath` expressions are
 /// embedded in function calls. The rules are safe for all
 /// platforms; platform-specific rewrites are handled at the
 /// dialect translation layer.
@@ -1233,14 +1236,9 @@ fn contains_xml_function(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, dep
             | RelLang::Lt([l, r])
             | RelLang::Le([l, r])
             | RelLang::Gt([l, r])
-            | RelLang::Ge([l, r]) => {
-                if contains_xml_function(egraph, *l, depth - 1)
-                    || contains_xml_function(egraph, *r, depth - 1)
-                {
-                    return true;
-                }
-            }
-            RelLang::And([l, r]) | RelLang::Or([l, r]) => {
+            | RelLang::Ge([l, r])
+            | RelLang::And([l, r])
+            | RelLang::Or([l, r]) => {
                 if contains_xml_function(egraph, *l, depth - 1)
                     || contains_xml_function(egraph, *r, depth - 1)
                 {
@@ -1268,13 +1266,13 @@ fn contains_xml_function(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, dep
 /// the XML function call as opaque with default costs.
 #[derive(Debug, thiserror::Error)]
 pub enum XmlOptimizerError {
-    /// XPath expression could not be parsed.
+    /// `XPath` expression could not be parsed.
     #[error(
         "XPath parse failed for '{xpath}': {reason}; \
          using default cost estimate"
     )]
     XPathParseFailed {
-        /// The raw XPath string
+        /// The raw `XPath` string
         xpath: String,
         /// Why parsing failed
         reason: String,
@@ -1298,7 +1296,12 @@ pub enum XmlOptimizerError {
 // ------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test code"
+)]
 mod tests {
     use super::*;
     use crate::egraph::to_rec_expr;

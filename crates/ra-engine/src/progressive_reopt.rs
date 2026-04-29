@@ -156,14 +156,19 @@ pub enum StitchTransferKind {
 #[must_use]
 pub fn join_transfer_kind(from: JoinImplKind, to: JoinImplKind) -> StitchTransferKind {
     match (from, to) {
-        (JoinImplKind::Hash, JoinImplKind::Merge) => StitchTransferKind::Sort,
-        (JoinImplKind::Hash, JoinImplKind::NestedLoop) => StitchTransferKind::Discard,
-        (JoinImplKind::NestedLoop, JoinImplKind::Hash) => StitchTransferKind::HashBuild,
-        (JoinImplKind::NestedLoop, JoinImplKind::Merge) => StitchTransferKind::Sort,
-        (JoinImplKind::Merge, JoinImplKind::Hash) => StitchTransferKind::HashBuild,
-        (JoinImplKind::Merge, JoinImplKind::NestedLoop) => StitchTransferKind::Discard,
+        (JoinImplKind::Hash | JoinImplKind::NestedLoop, JoinImplKind::Merge) => {
+            StitchTransferKind::Sort
+        }
+        (JoinImplKind::Hash | JoinImplKind::Merge, JoinImplKind::NestedLoop) => {
+            StitchTransferKind::Discard
+        }
+        (JoinImplKind::NestedLoop | JoinImplKind::Merge, JoinImplKind::Hash) => {
+            StitchTransferKind::HashBuild
+        }
         // Same implementation: simple copy of cursor state.
-        _ => StitchTransferKind::Copy,
+        (JoinImplKind::Hash, JoinImplKind::Hash)
+        | (JoinImplKind::NestedLoop, JoinImplKind::NestedLoop)
+        | (JoinImplKind::Merge, JoinImplKind::Merge) => StitchTransferKind::Copy,
     }
 }
 
@@ -209,6 +214,7 @@ pub fn estimate_remaining_cost(total_estimated_cost: f64, progress_fraction: f64
 ///
 /// The returned plan is semantically equivalent to the input but
 /// decorated with monitoring metadata.
+#[must_use]
 pub fn insert_stitch_points(plan: &RelExpr) -> (RelExpr, Vec<StitchPointMeta>) {
     let mut metas = Vec::new();
     let annotated = insert_stitch_points_rec(plan, &mut metas);
@@ -382,6 +388,10 @@ pub fn evaluate_reopt_decision(
 pub trait ReoptimizeFn: Send + 'static {
     /// Re-optimize `plan` using the corrected `stats` and return
     /// the improved plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ReoptError` if optimization fails.
     fn reoptimize(
         &self,
         plan: &RelExpr,
@@ -438,6 +448,7 @@ impl BackgroundReoptimizer {
     /// `corrected_stats` are runtime-observed statistics.
     /// `optimizer_fn` performs the actual re-optimization.
     /// `config` controls divergence thresholds and max attempts.
+    #[must_use]
     pub fn spawn(
         quick_plan: RelExpr,
         corrected_stats: HashMap<String, Statistics>,
@@ -498,7 +509,7 @@ impl BackgroundReoptimizer {
     pub fn is_finished(&self) -> bool {
         self.handle
             .as_ref()
-            .map_or(true, thread::JoinHandle::is_finished)
+            .is_none_or(thread::JoinHandle::is_finished)
     }
 }
 
@@ -510,6 +521,7 @@ impl Drop for BackgroundReoptimizer {
 
 /// The background worker loop. Runs up to `max_reoptimizations`
 /// rounds, sending any improved plan back through `tx`.
+#[expect(clippy::needless_pass_by_value, reason = "thread-spawned function needs owned values")]
 fn background_worker(
     plan: RelExpr,
     stats: HashMap<String, Statistics>,
@@ -523,7 +535,7 @@ fn background_worker(
     let mut improved = false;
 
     for _ in 0..config.max_reoptimizations {
-        if cancel.lock().map_or(false, |f| *f) {
+        if cancel.lock().is_ok_and(|f| *f) {
             debug!("background reoptimization cancelled");
             let _send = tx.send(ReoptResult {
                 improved_plan: None,
@@ -536,20 +548,19 @@ fn background_worker(
         attempts += 1;
         match optimizer_fn.reoptimize(&best_plan, &stats) {
             Ok(new_plan) => {
-                if new_plan != best_plan {
-                    debug!(
-                        "background reopt attempt {attempts}: \
-                         found improved plan"
-                    );
-                    best_plan = new_plan;
-                    improved = true;
-                } else {
+                if new_plan == best_plan {
                     debug!(
                         "background reopt attempt {attempts}: \
                          no improvement, stopping"
                     );
                     break;
                 }
+                debug!(
+                    "background reopt attempt {attempts}: \
+                     found improved plan"
+                );
+                best_plan = new_plan;
+                improved = true;
             }
             Err(e) => {
                 warn!("background reopt attempt {attempts} failed: {e}");
@@ -572,6 +583,8 @@ fn background_worker(
 /// The quick plan is the input plan unchanged (representing the
 /// initial fast path). The handle allows polling for an improved
 /// plan from the background thread.
+#[must_use]
+#[expect(clippy::implicit_hasher, reason = "always uses default hasher")]
 pub fn progressive_optimize(
     plan: RelExpr,
     corrected_stats: HashMap<String, Statistics>,
@@ -584,6 +597,7 @@ pub fn progressive_optimize(
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use ra_core::algebra::{JoinType, RelExpr};

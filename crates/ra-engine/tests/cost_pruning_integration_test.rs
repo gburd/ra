@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Integration tests for cost-based pruning (Phase 3 - Task #258).
 //!
 //! Validates that cost pruning improves optimization efficiency.
@@ -69,8 +70,10 @@ fn test_cost_pruning_disabled() {
         eq(col("users.id"), col("orders.user_id")),
     );
 
-    let mut config = OptimizerConfig::default();
-    config.use_cost_pruning = false; // Disable cost pruning
+    let config = OptimizerConfig {
+        use_cost_pruning: false, // Disable cost pruning
+        ..OptimizerConfig::default()
+    };
 
     let mut optimizer = Optimizer::with_config(config);
     let mut stats = Statistics::new(10000.0);
@@ -93,8 +96,10 @@ fn test_cost_pruning_threshold_validation() {
     );
 
     // Aggressive pruning (1.2x threshold)
-    let mut config_aggressive = OptimizerConfig::default();
-    config_aggressive.cost_pruning_threshold = 1.2;
+    let config_aggressive = OptimizerConfig {
+        cost_pruning_threshold: 1.2,
+        ..OptimizerConfig::default()
+    };
 
     let mut opt_aggressive = Optimizer::with_config(config_aggressive);
     let mut stats = Statistics::new(10000.0);
@@ -108,8 +113,10 @@ fn test_cost_pruning_threshold_validation() {
     assert!(result.is_ok());
 
     // Conservative pruning (2.0x threshold)
-    let mut config_conservative = OptimizerConfig::default();
-    config_conservative.cost_pruning_threshold = 2.0;
+    let config_conservative = OptimizerConfig {
+        cost_pruning_threshold: 2.0,
+        ..OptimizerConfig::default()
+    };
 
     let mut opt_conservative = Optimizer::with_config(config_conservative);
     opt_conservative.add_table_stats("a", stats.clone());
@@ -122,6 +129,23 @@ fn test_cost_pruning_threshold_validation() {
 
 #[test]
 fn test_cost_pruning_produces_valid_plans() {
+    fn contains_join(expr: &RelExpr) -> bool {
+        match expr {
+            RelExpr::Join { .. } => true,
+            RelExpr::Filter { input, .. }
+            | RelExpr::Project { input, .. }
+            | RelExpr::Aggregate { input, .. }
+            | RelExpr::Sort { input, .. }
+            | RelExpr::Limit { input, .. }
+            | RelExpr::Window { input, .. }
+            | RelExpr::Distinct { input } => contains_join(input),
+            RelExpr::Union { left, right, .. }
+            | RelExpr::Intersect { left, right, .. }
+            | RelExpr::Except { left, right, .. } => contains_join(left) || contains_join(right),
+            _ => false,
+        }
+    }
+
     // Verify cost pruning doesn't break plan correctness
     let query = join(
         join(
@@ -139,24 +163,6 @@ fn test_cost_pruning_produces_valid_plans() {
     assert!(result.is_ok());
 
     let optimized = result.unwrap();
-
-    // Validate plan structure
-    fn contains_join(expr: &RelExpr) -> bool {
-        match expr {
-            RelExpr::Join { .. } => true,
-            RelExpr::Filter { input, .. }
-            | RelExpr::Project { input, .. }
-            | RelExpr::Aggregate { input, .. }
-            | RelExpr::Sort { input, .. }
-            | RelExpr::Limit { input, .. }
-            | RelExpr::Window { input, .. }
-            | RelExpr::Distinct { input } => contains_join(input),
-            RelExpr::Union { left, right, .. }
-            | RelExpr::Intersect { left, right, .. }
-            | RelExpr::Except { left, right, .. } => contains_join(left) || contains_join(right),
-            _ => false,
-        }
-    }
 
     assert!(
         contains_join(&optimized),

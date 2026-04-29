@@ -22,6 +22,7 @@ pub enum QueryComplexity {
 
 impl QueryComplexity {
     /// Classify a query by analyzing its structure.
+    #[must_use]
     pub fn from_expr(expr: &RelExpr) -> Self {
         let table_count = count_tables(expr);
         let join_count = count_joins(expr);
@@ -46,6 +47,7 @@ impl QueryComplexity {
 
     /// Get recommended iteration limit for this complexity level.
     #[inline]
+    #[must_use]
     pub fn default_iter_limit(self) -> usize {
         match self {
             Self::Trivial => 3,
@@ -62,6 +64,7 @@ impl QueryComplexity {
     /// the optimizer completes at least 2-3 meaningful iterations
     /// before timing out.
     #[inline]
+    #[must_use]
     pub fn default_timeout_ms(self) -> u64 {
         match self {
             Self::Trivial => 50,
@@ -77,18 +80,17 @@ impl QueryComplexity {
 fn count_tables(expr: &RelExpr) -> usize {
     match expr {
         RelExpr::Scan { .. } => 1,
-        RelExpr::Filter { input, .. } => count_tables(input),
-        RelExpr::Project { input, .. } => count_tables(input),
-        RelExpr::Join { left, right, .. } => count_tables(left) + count_tables(right),
-        RelExpr::Aggregate { input, .. } => count_tables(input),
-        RelExpr::Sort { input, .. } => count_tables(input),
-        RelExpr::Limit { input, .. } => count_tables(input),
-        RelExpr::Union { left, right, .. } => count_tables(left) + count_tables(right),
-        RelExpr::Intersect { left, right, .. } => count_tables(left) + count_tables(right),
-        RelExpr::Except { left, right, .. } => count_tables(left) + count_tables(right),
-        RelExpr::Window { input, .. } => count_tables(input),
-        RelExpr::Distinct { input } => count_tables(input),
-        RelExpr::Values { .. } => 0, // Not a base table
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Aggregate { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Window { input, .. }
+        | RelExpr::Distinct { input } => count_tables(input),
+        RelExpr::Join { left, right, .. }
+        | RelExpr::Union { left, right, .. }
+        | RelExpr::Intersect { left, right, .. }
+        | RelExpr::Except { left, right, .. } => count_tables(left) + count_tables(right),
         RelExpr::CTE {
             definition, body, ..
         } => count_tables(definition) + count_tables(body),
@@ -98,7 +100,6 @@ fn count_tables(expr: &RelExpr) -> usize {
             body,
             ..
         } => count_tables(base_case) + count_tables(recursive_case) + count_tables(body),
-        // Other variants don't directly contain tables
         _ => 0,
     }
 }
@@ -164,7 +165,7 @@ fn count_outer_joins(expr: &RelExpr) -> usize {
                 join_type,
                 JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter
             );
-            let count = if is_outer { 1 } else { 0 };
+            let count = usize::from(is_outer);
             count + count_outer_joins(left) + count_outer_joins(right)
         }
         RelExpr::Filter { input, .. }
@@ -248,7 +249,7 @@ mod tests {
     fn test_complex_complexity() {
         let mut expr = join(scan("t1"), scan("t2"));
         for i in 3..=8 {
-            expr = join(expr, scan(&format!("t{}", i)));
+            expr = join(expr, scan(&format!("t{i}")));
         }
         assert_eq!(QueryComplexity::from_expr(&expr), QueryComplexity::Complex);
         assert_eq!(QueryComplexity::Complex.default_iter_limit(), 15);
@@ -258,7 +259,7 @@ mod tests {
     fn test_very_complex() {
         let mut expr = join(scan("t1"), scan("t2"));
         for i in 3..=11 {
-            expr = join(expr, scan(&format!("t{}", i)));
+            expr = join(expr, scan(&format!("t{i}")));
         }
         assert_eq!(
             QueryComplexity::from_expr(&expr),

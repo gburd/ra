@@ -1,5 +1,7 @@
 //! Pretty-printing for relational expressions and query plans.
 
+use std::fmt::Write;
+
 use ra_core::algebra::{AggregateFunction, RelExpr, SortDirection};
 use ra_core::expr::{BinOp, Const, Expr, UnaryOp};
 
@@ -39,7 +41,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             buf.push_str(connector);
             buf.push_str("Filter\n");
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("predicate: ");
             buf.push_str(&format_expr(predicate));
             buf.push('\n');
@@ -52,7 +54,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             buf.push_str(connector);
             buf.push_str("Project\n");
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("columns: ");
             for (i, col) in columns.iter().enumerate() {
                 if i > 0 {
@@ -77,9 +79,9 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("{join_type} Join\n"));
+            let _ = writeln!(buf, "{join_type} Join");
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("condition: ");
             buf.push_str(&format_expr(condition));
             buf.push('\n');
@@ -99,7 +101,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
 
             if !group_by.is_empty() {
                 buf.push_str(prefix);
-                buf.push_str(&child_prefix_ext);
+                buf.push_str(child_prefix_ext);
                 buf.push_str("group_by: ");
                 for (i, expr) in group_by.iter().enumerate() {
                     if i > 0 {
@@ -112,13 +114,13 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
 
             if !aggregates.is_empty() {
                 buf.push_str(prefix);
-                buf.push_str(&child_prefix_ext);
+                buf.push_str(child_prefix_ext);
                 buf.push_str("aggregates: ");
                 for (i, agg) in aggregates.iter().enumerate() {
                     if i > 0 {
                         buf.push_str(", ");
                     }
-                    buf.push_str(&format_agg_function(agg.function));
+                    buf.push_str(format_agg_function(agg.function));
                     buf.push('(');
                     if let Some(arg) = &agg.arg {
                         buf.push_str(&format_expr(arg));
@@ -140,7 +142,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             buf.push_str(connector);
             buf.push_str("Sort\n");
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("keys: ");
             for (i, key) in keys.iter().enumerate() {
                 if i > 0 {
@@ -148,7 +150,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
                 }
                 buf.push_str(&format_expr(&key.expr));
                 buf.push(' ');
-                buf.push_str(&format_sort_direction(key.direction));
+                buf.push_str(format_sort_direction(key.direction));
             }
             buf.push('\n');
 
@@ -162,7 +164,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("Limit(count={count}, offset={offset})\n"));
+            let _ = writeln!(buf, "Limit(count={count}, offset={offset})");
 
             let child_prefix = format!("{prefix}{child_prefix_ext}");
             format_plan_tree_impl(input, buf, &child_prefix, true);
@@ -213,7 +215,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("CTE({name})\n"));
+            let _ = writeln!(buf, "CTE({name})");
 
             let child_prefix = format!("{prefix}{child_prefix_ext}");
             format_plan_tree_impl(definition, buf, &child_prefix, false);
@@ -222,7 +224,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         RelExpr::Window { functions, input } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("Window({} function(s))\n", functions.len()));
+            let _ = writeln!(buf, "Window({} function(s))", functions.len());
 
             let child_prefix = format!("{prefix}{child_prefix_ext}");
             format_plan_tree_impl(input, buf, &child_prefix, true);
@@ -244,10 +246,10 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("RecursiveCTE({name})"));
+            let _ = write!(buf, "RecursiveCTE({name})");
             if let Some(cd) = cycle_detection {
                 if let Some(depth) = cd.max_depth {
-                    buf.push_str(&format!(" [max_depth={depth}]"));
+                    let _ = write!(buf, " [max_depth={depth}]");
                 }
             }
             buf.push('\n');
@@ -264,7 +266,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         RelExpr::Values { rows } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("Values({} row(s))\n", rows.len()));
+            let _ = writeln!(buf, "Values({} row(s))", rows.len());
         }
         RelExpr::IncrementalSort {
             prefix_keys,
@@ -276,7 +278,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             buf.push_str("IncrementalSort\n");
 
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("prefix_keys: ");
             for (i, key) in prefix_keys.iter().enumerate() {
                 if i > 0 {
@@ -284,12 +286,12 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
                 }
                 buf.push_str(&format_expr(&key.expr));
                 buf.push(' ');
-                buf.push_str(&format_sort_direction(key.direction));
+                buf.push_str(format_sort_direction(key.direction));
             }
             buf.push('\n');
 
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("suffix_keys: ");
             for (i, key) in suffix_keys.iter().enumerate() {
                 if i > 0 {
@@ -297,7 +299,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
                 }
                 buf.push_str(&format_expr(&key.expr));
                 buf.push(' ');
-                buf.push_str(&format_sort_direction(key.direction));
+                buf.push_str(format_sort_direction(key.direction));
             }
             buf.push('\n');
 
@@ -307,7 +309,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         RelExpr::IndexScan { table, column } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("IndexScan({table}.{column})\n"));
+            let _ = writeln!(buf, "IndexScan({table}.{column})");
         }
         RelExpr::IndexOnlyScan {
             table,
@@ -317,10 +319,10 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("IndexOnlyScan({table}, index={index})\n"));
+            let _ = writeln!(buf, "IndexOnlyScan({table}, index={index})");
 
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("columns: ");
             for (i, col) in columns.iter().enumerate() {
                 if i > 0 {
@@ -331,7 +333,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             buf.push('\n');
 
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("predicate: ");
             buf.push_str(&format_expr(predicate));
             buf.push('\n');
@@ -354,10 +356,10 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("BitmapIndexScan({table}, index={index})\n"));
+            let _ = writeln!(buf, "BitmapIndexScan({table}, index={index})");
 
             buf.push_str(prefix);
-            buf.push_str(&child_prefix_ext);
+            buf.push_str(child_prefix_ext);
             buf.push_str("predicate: ");
             buf.push_str(&format_expr(predicate));
             buf.push('\n');
@@ -389,11 +391,11 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("BitmapHeapScan({table})\n"));
+            let _ = writeln!(buf, "BitmapHeapScan({table})");
 
             if let Some(cond) = recheck_cond {
                 buf.push_str(prefix);
-                buf.push_str(&child_prefix_ext);
+                buf.push_str(child_prefix_ext);
                 buf.push_str("recheck_cond: ");
                 buf.push_str(&format_expr(cond));
                 buf.push('\n');
@@ -405,7 +407,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         other => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!("{:?}\n", std::mem::discriminant(other)));
+            let _ = writeln!(buf, "{:?}", std::mem::discriminant(other));
         }
     }
 }

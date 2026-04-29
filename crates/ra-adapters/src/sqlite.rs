@@ -1,4 +1,4 @@
-//! SQLite database adapter implementation with FTS5 and sqlite-vec support.
+//! `SQLite` database adapter implementation with FTS5 and sqlite-vec support.
 
 #[cfg(feature = "sqlite")]
 use crate::{
@@ -25,9 +25,9 @@ use rusqlite::{OpenFlags, Row};
 #[cfg(feature = "sqlite")]
 use std::path::Path;
 
-/// SQLite database adapter.
+/// `SQLite` database adapter.
 ///
-/// Connects to SQLite databases to gather schema information, statistics,
+/// Connects to `SQLite` databases to gather schema information, statistics,
 /// and detect FTS5 and sqlite-vec extensions for hybrid search capabilities.
 ///
 /// # Features
@@ -35,7 +35,7 @@ use std::path::Path;
 /// - Connection pooling via r2d2
 /// - FTS5 full-text search detection
 /// - sqlite-vec vector search detection
-/// - Schema introspection via sqlite_master
+/// - Schema introspection via `sqlite_master`
 /// - Statistics from ANALYZE tables
 #[cfg(feature = "sqlite")]
 pub struct SQLiteAdapter {
@@ -50,22 +50,21 @@ impl std::fmt::Debug for SQLiteAdapter {
         f.debug_struct("SQLiteAdapter")
             .field("connection_string", &self.connection_string)
             .field("pool", &self.pool.as_ref().map(|_| "<connected>"))
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 /// Internal storage for gathered facts.
 #[cfg(feature = "sqlite")]
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct SQLiteFacts {
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     table_stats: HashMap<String, ra_core::facts::TableStats>,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     column_stats: HashMap<(String, String), ra_core::statistics::ColumnStats>,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     schemas: HashMap<String, ra_core::facts::TableInfo>,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     hardware: ra_core::facts::HardwareProfile,
     features: HashMap<String, bool>,
 }
@@ -95,7 +94,7 @@ impl SQLiteFacts {
 
 #[cfg(feature = "sqlite")]
 impl SQLiteAdapter {
-    /// Create a new SQLite adapter.
+    /// Create a new `SQLite` adapter.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -147,11 +146,9 @@ impl SQLiteAdapter {
 
         // Try to use vec_distance_l2 function - if it exists, sqlite-vec is loaded
         let result = conn
-            .query_row(
-                "SELECT vec_distance_l2('[1,2,3]', '[4,5,6]')",
-                [],
-                |_| Ok(true),
-            )
+            .query_row("SELECT vec_distance_l2('[1,2,3]', '[4,5,6]')", [], |_| {
+                Ok(true)
+            })
             .is_ok();
 
         Ok(result)
@@ -217,9 +214,7 @@ impl SQLiteAdapter {
 
         let tables = stmt
             .query_map([], |row: &Row| row.get::<_, String>(0))
-            .map_err(|e| {
-                AdapterError::QueryError(format!("Failed to query vector tables: {e}"))
-            })?
+            .map_err(|e| AdapterError::QueryError(format!("Failed to query vector tables: {e}")))?
             .collect::<Result<Vec<String>, _>>()
             .map_err(|e| AdapterError::QueryError(format!("Failed to collect results: {e}")))?;
 
@@ -228,7 +223,7 @@ impl SQLiteAdapter {
 
     /// Execute a query and return results compatible with ra-web API.
     ///
-    /// This method returns a structure compatible with the PostgreSQL adapter's
+    /// This method returns a structure compatible with the `PostgreSQL` adapter's
     /// `execute()` method, including timing information.
     ///
     /// # Errors
@@ -283,7 +278,9 @@ impl SQLiteAdapter {
     /// # Errors
     ///
     /// Returns an error if not connected or pool is exhausted.
-    pub fn get_connection(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, AdapterError> {
+    pub fn get_connection(
+        &self,
+    ) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, AdapterError> {
         let pool = self
             .pool
             .as_ref()
@@ -293,7 +290,7 @@ impl SQLiteAdapter {
     }
 }
 
-/// Convert a SQLite row value to JSON.
+/// Convert a `SQLite` row value to JSON.
 #[cfg(feature = "sqlite")]
 fn row_value_to_json(row: &Row, idx: usize) -> Result<serde_json::Value, rusqlite::Error> {
     use rusqlite::types::ValueRef;
@@ -302,8 +299,7 @@ fn row_value_to_json(row: &Row, idx: usize) -> Result<serde_json::Value, rusqlit
         ValueRef::Null => Ok(serde_json::Value::Null),
         ValueRef::Integer(i) => Ok(serde_json::Value::Number(i.into())),
         ValueRef::Real(f) => Ok(serde_json::Number::from_f64(f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null)),
+            .map_or(serde_json::Value::Null, serde_json::Value::Number)),
         ValueRef::Text(s) => {
             let text = std::str::from_utf8(s).unwrap_or("");
             Ok(serde_json::Value::String(text.to_string()))
@@ -388,9 +384,7 @@ impl DatabaseAdapter for SQLiteAdapter {
         conn.query_row("SELECT sqlite_version()", [], |row: &Row| {
             row.get::<_, String>(0)
         })
-        .map_err(|e| {
-            AdapterError::ConnectionError(format!("Invalid SQLite database: {e}"))
-        })?;
+        .map_err(|e| AdapterError::ConnectionError(format!("Invalid SQLite database: {e}")))?;
 
         self.connection_string = Some(connection_string.to_string());
         self.pool = Some(pool);
@@ -399,7 +393,10 @@ impl DatabaseAdapter for SQLiteAdapter {
         let fts5_available = self.check_fts5().unwrap_or(false);
         let vec_available = self.check_sqlite_vec().unwrap_or(false);
 
-        let mut facts = self.facts.lock().unwrap();
+        let mut facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         facts.features.insert("fts5".to_string(), fts5_available);
         facts
             .features
@@ -421,7 +418,9 @@ impl DatabaseAdapter for SQLiteAdapter {
 
         // Get all regular tables (not views or virtual tables)
         let mut stmt = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            )
             .map_err(|e| AdapterError::QueryError(format!("Failed to query tables: {e}")))?;
 
         let table_names: Vec<String> = stmt
@@ -457,7 +456,10 @@ impl DatabaseAdapter for SQLiteAdapter {
         Ok(stats)
     }
 
-    fn gather_column_stats(&self, table: &str) -> Result<HashMap<String, ColumnStats>, AdapterError> {
+    fn gather_column_stats(
+        &self,
+        table: &str,
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError> {
         let pool = self
             .pool
             .as_ref()
@@ -481,9 +483,11 @@ impl DatabaseAdapter for SQLiteAdapter {
 
         // Get total rows for null fraction calculation
         let total_rows: i64 = conn
-            .query_row(&format!("SELECT COUNT(*) FROM \"{table}\""), [], |row: &Row| {
-                row.get(0)
-            })
+            .query_row(
+                &format!("SELECT COUNT(*) FROM \"{table}\""),
+                [],
+                |row: &Row| row.get(0),
+            )
             .unwrap_or(0);
 
         for column in columns {
@@ -528,6 +532,7 @@ impl DatabaseAdapter for SQLiteAdapter {
         Ok(stats)
     }
 
+    #[expect(clippy::too_many_lines, reason = "schema query assembly")]
     fn get_schema_info(&self) -> Result<SchemaInfo, AdapterError> {
         let pool = self
             .pool
@@ -541,7 +546,9 @@ impl DatabaseAdapter for SQLiteAdapter {
 
         // Get all tables
         let mut stmt = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            )
             .map_err(|e| AdapterError::QueryError(format!("Failed to query tables: {e}")))?;
 
         let table_names: Vec<String> = stmt
@@ -554,7 +561,9 @@ impl DatabaseAdapter for SQLiteAdapter {
             // Get columns
             let mut col_stmt = conn
                 .prepare(&format!("PRAGMA table_info(\"{table_name}\")"))
-                .map_err(|e| AdapterError::QueryError(format!("Failed to query table info: {e}")))?;
+                .map_err(|e| {
+                    AdapterError::QueryError(format!("Failed to query table info: {e}"))
+                })?;
 
             let columns: Vec<ColumnInfo> = col_stmt
                 .query_map([], |row: &Row| {
@@ -572,7 +581,9 @@ impl DatabaseAdapter for SQLiteAdapter {
             // Get primary key - need to check pk column in table_info
             let mut pk_stmt = conn
                 .prepare(&format!("PRAGMA table_info(\"{table_name}\")"))
-                .unwrap();
+                .map_err(|e| {
+                    AdapterError::QueryError(format!("Failed to query table info: {e}"))
+                })?;
             let primary_key: Vec<String> = pk_stmt
                 .query_map([], |row: &Row| {
                     let pk_flag: i32 = row.get(5)?;
@@ -582,14 +593,18 @@ impl DatabaseAdapter for SQLiteAdapter {
                         Err(rusqlite::Error::InvalidQuery)
                     }
                 })
-                .unwrap()
+                .map_err(|e| {
+                    AdapterError::QueryError(format!("Failed to query primary keys: {e}"))
+                })?
                 .filter_map(Result::ok)
                 .collect();
 
             // Get foreign keys
             let mut fk_stmt = conn
                 .prepare(&format!("PRAGMA foreign_key_list(\"{table_name}\")"))
-                .map_err(|e| AdapterError::QueryError(format!("Failed to query foreign keys: {e}")))?;
+                .map_err(|e| {
+                    AdapterError::QueryError(format!("Failed to query foreign keys: {e}"))
+                })?;
 
             let foreign_keys: Vec<ForeignKeyInfo> = fk_stmt
                 .query_map([], |row: &Row| {
@@ -600,7 +615,9 @@ impl DatabaseAdapter for SQLiteAdapter {
                         referenced_columns: vec![row.get(4)?],
                     })
                 })
-                .map_err(|e| AdapterError::QueryError(format!("Failed to query foreign keys: {e}")))?
+                .map_err(|e| {
+                    AdapterError::QueryError(format!("Failed to query foreign keys: {e}"))
+                })?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| {
                     AdapterError::QueryError(format!("Failed to collect foreign keys: {e}"))
@@ -617,12 +634,10 @@ impl DatabaseAdapter for SQLiteAdapter {
                     let unique: bool = row.get::<_, i32>(2)? == 1;
 
                     // Get index columns
-                    let mut idx_col_stmt = conn
-                        .prepare(&format!("PRAGMA index_info(\"{index_name}\")"))
-                        .unwrap();
+                    let mut idx_col_stmt =
+                        conn.prepare(&format!("PRAGMA index_info(\"{index_name}\")"))?;
                     let index_columns: Vec<String> = idx_col_stmt
-                        .query_map([], |row: &Row| row.get(2))
-                        .unwrap()
+                        .query_map([], |row: &Row| row.get(2))?
                         .collect::<Result<Vec<_>, _>>()
                         .unwrap_or_default();
 
@@ -653,7 +668,10 @@ impl DatabaseAdapter for SQLiteAdapter {
     }
 
     fn get_capabilities(&self) -> Result<DatabaseCapabilities, AdapterError> {
-        let facts = self.facts.lock().unwrap();
+        let facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         Ok(DatabaseCapabilities {
             database_name: "SQLite".to_string(),
             dialect: SqlDialect::Sqlite,
@@ -664,7 +682,10 @@ impl DatabaseAdapter for SQLiteAdapter {
     }
 
     fn supports_feature(&self, feature: &str) -> Result<bool, AdapterError> {
-        let facts = self.facts.lock().unwrap();
+        let facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         Ok(facts.features.get(feature).copied().unwrap_or(false))
     }
 
@@ -689,7 +710,11 @@ impl FactsProvider for SQLiteAdapter {
         None
     }
 
-    fn get_column_stats(&self, _table_name: &str, _column_name: &str) -> Option<&ra_core::statistics::ColumnStats> {
+    fn get_column_stats(
+        &self,
+        _table_name: &str,
+        _column_name: &str,
+    ) -> Option<&ra_core::statistics::ColumnStats> {
         // Cannot return reference from Mutex - need to redesign
         None
     }
@@ -714,7 +739,9 @@ impl FactsProvider for SQLiteAdapter {
     }
 
     fn supports_feature(&self, feature_name: &str) -> bool {
-        let facts = self.facts.lock().unwrap();
+        let Ok(facts) = self.facts.lock() else {
+            return false;
+        };
         facts.features.get(feature_name).copied().unwrap_or(false)
     }
 

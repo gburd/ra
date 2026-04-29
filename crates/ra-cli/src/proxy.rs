@@ -21,11 +21,11 @@ pub struct ProxyConfig {
     pub enable_plan_takeover: bool,
     /// Log format (postgres, json, or plain).
     /// TODO: Implement in full wire protocol handler (Issue #80)
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "reserved for future use")]
     pub log_format: LogFormat,
     /// Minimum improvement percentage to log (e.g., 10.0 for 10%).
     /// TODO: Implement in query comparison logic (Issue #80)
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "reserved for future use")]
     pub min_improvement_percent: f64,
 }
 
@@ -127,13 +127,12 @@ async fn handle_connection(
         let mut buf = vec![0u8; 8192];
         loop {
             match client_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
+                Ok(n) if n > 0 => {
                     if backend_write.write_all(&buf[..n]).await.is_err() {
                         break;
                     }
                 }
-                Err(_) => break,
+                _ => break,
             }
         }
     };
@@ -142,21 +141,20 @@ async fn handle_connection(
         let mut buf = vec![0u8; 8192];
         loop {
             match backend_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
+                Ok(n) if n > 0 => {
                     if client_write.write_all(&buf[..n]).await.is_err() {
                         break;
                     }
                 }
-                Err(_) => break,
+                _ => break,
             }
         }
     };
 
     // Wait for either direction to close
     tokio::select! {
-        _ = client_to_backend => {},
-        _ = backend_to_client => {},
+        () = client_to_backend => {},
+        () = backend_to_client => {},
     }
 
     debug!("Connection from {} closed", client_addr);
@@ -188,7 +186,7 @@ fn parse_backend_address(connection_string: &str) -> Result<String> {
         if host.contains(':') {
             Ok(host.to_string())
         } else {
-            Ok(format!("{}:5432", host))
+            Ok(format!("{host}:5432"))
         }
     } else {
         // Assume direct host:port
@@ -208,7 +206,7 @@ pub fn mask_connection_string(s: &str) -> String {
             // Mask password if present
             if let Some(colon_pos) = credentials.find(':') {
                 let user = &credentials[..colon_pos];
-                return format!("{}{}:****{}", scheme, user, rest);
+                return format!("{scheme}{user}:****{rest}");
             }
         }
     }

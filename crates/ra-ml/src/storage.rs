@@ -14,6 +14,9 @@ use tracing::{debug, info};
 use crate::belief_network::{BeliefNetworkState, ExecutionObservation};
 use crate::nn::FeedForwardNet;
 
+/// Type alias for complex query result tuple.
+type QueryResultRow = (String, f64, f64, Option<f64>, bool, Vec<u8>, i64);
+
 /// Errors from storage operations.
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -45,7 +48,7 @@ pub enum StorageError {
 /// Database backend type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DatabaseBackend {
-    /// PostgreSQL backend.
+    /// `PostgreSQL` backend.
     Postgres,
 }
 
@@ -55,9 +58,7 @@ impl FromStr for DatabaseBackend {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "postgres" | "postgresql" => Ok(Self::Postgres),
-            _ => Err(StorageError::InvalidConfig(format!(
-                "unknown backend: {s}"
-            ))),
+            _ => Err(StorageError::InvalidConfig(format!("unknown backend: {s}"))),
         }
     }
 }
@@ -85,7 +86,7 @@ impl Default for StorageConfig {
 
 /// Model storage backend.
 pub enum ModelStorage {
-    /// PostgreSQL storage.
+    /// `PostgreSQL` storage.
     Postgres(Pool<Postgres>),
 }
 
@@ -114,7 +115,7 @@ impl ModelStorage {
 
     async fn init_postgres(pool: &Pool<Postgres>) -> Result<(), StorageError> {
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS ml_models (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
@@ -155,7 +156,7 @@ impl ModelStorage {
 
             CREATE INDEX IF NOT EXISTS idx_observations_rule ON execution_observations(rule_id);
             CREATE INDEX IF NOT EXISTS idx_observations_scope ON execution_observations(scope, account_id, project_id);
-            "#,
+            ",
         )
         .execute(pool)
         .await
@@ -178,19 +179,19 @@ impl ModelStorage {
         account_id: Option<&str>,
         project_id: Option<&str>,
     ) -> Result<(), StorageError> {
-        let model_data =
-            serde_json::to_vec(model).map_err(|e| StorageError::SerializationFailed(e.to_string()))?;
+        let model_data = serde_json::to_vec(model)
+            .map_err(|e| StorageError::SerializationFailed(e.to_string()))?;
 
         let Self::Postgres(pool) = self;
         sqlx::query(
-            r#"
+            r"
             INSERT INTO ml_models (name, scope, account_id, project_id, model_data, schema_data, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, NOW())
             ON CONFLICT (name) DO UPDATE SET
                 model_data = EXCLUDED.model_data,
                 schema_data = EXCLUDED.schema_data,
                 updated_at = NOW()
-            "#,
+            ",
         )
         .bind(name)
         .bind(scope)
@@ -213,14 +214,13 @@ impl ModelStorage {
     /// Returns `StorageError` if model not found or deserialization fails.
     pub async fn load_model(&self, name: &str) -> Result<(FeedForwardNet, Vec<u8>), StorageError> {
         let Self::Postgres(pool) = self;
-        let (model_data, schema_data): (Vec<u8>, Vec<u8>) = sqlx::query_as(
-            "SELECT model_data, schema_data FROM ml_models WHERE name = $1",
-        )
-        .bind(name)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| StorageError::QueryFailed(e.to_string()))?
-        .ok_or_else(|| StorageError::ModelNotFound(name.to_string()))?;
+        let (model_data, schema_data): (Vec<u8>, Vec<u8>) =
+            sqlx::query_as("SELECT model_data, schema_data FROM ml_models WHERE name = $1")
+                .bind(name)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| StorageError::QueryFailed(e.to_string()))?
+                .ok_or_else(|| StorageError::ModelNotFound(name.to_string()))?;
 
         let model: FeedForwardNet = serde_json::from_slice(&model_data)
             .map_err(|e| StorageError::DeserializationFailed(e.to_string()))?;
@@ -246,13 +246,13 @@ impl ModelStorage {
 
         let Self::Postgres(pool) = self;
         sqlx::query(
-            r#"
+            r"
             INSERT INTO belief_networks (scope, account_id, project_id, network_data, updated_at)
             VALUES ($1, $2, $3, $4, NOW())
             ON CONFLICT (scope, account_id, project_id) DO UPDATE SET
                 network_data = EXCLUDED.network_data,
                 updated_at = NOW()
-            "#,
+            ",
         )
         .bind(scope)
         .bind(account_id)
@@ -279,10 +279,10 @@ impl ModelStorage {
     ) -> Result<BeliefNetworkState, StorageError> {
         let Self::Postgres(pool) = self;
         let (network_data,): (Vec<u8>,) = sqlx::query_as(
-            r#"
+            r"
             SELECT network_data FROM belief_networks
             WHERE scope = $1 AND account_id IS NOT DISTINCT FROM $2 AND project_id IS NOT DISTINCT FROM $3
-            "#,
+            ",
         )
         .bind(scope)
         .bind(account_id)
@@ -317,11 +317,11 @@ impl ModelStorage {
 
             let Self::Postgres(pool) = self;
             sqlx::query(
-                r#"
+                r"
                 INSERT INTO execution_observations
                 (rule_id, estimated_time_before, estimated_time_after, actual_time, improved, context, timestamp, scope, account_id, project_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                "#,
+                ",
             )
             .bind(&obs.rule_id)
             .bind(obs.estimated_time_before)
@@ -356,15 +356,15 @@ impl ModelStorage {
         limit: i64,
     ) -> Result<Vec<ExecutionObservation>, StorageError> {
         let Self::Postgres(pool) = self;
-        let rows: Vec<(String, f64, f64, Option<f64>, bool, Vec<u8>, i64)> = if let Some(rule) = rule_id {
+        let rows: Vec<QueryResultRow> = if let Some(rule) = rule_id {
             sqlx::query_as(
-                r#"
+                r"
                 SELECT rule_id, estimated_time_before, estimated_time_after, actual_time, improved, context, timestamp
                 FROM execution_observations
                 WHERE rule_id = $1 AND scope = $2 AND account_id IS NOT DISTINCT FROM $3 AND project_id IS NOT DISTINCT FROM $4
                 ORDER BY created_at DESC
                 LIMIT $5
-                "#,
+                ",
             )
             .bind(rule)
             .bind(scope)
@@ -376,13 +376,13 @@ impl ModelStorage {
             .map_err(|e| StorageError::QueryFailed(e.to_string()))?
         } else {
             sqlx::query_as(
-                r#"
+                r"
                 SELECT rule_id, estimated_time_before, estimated_time_after, actual_time, improved, context, timestamp
                 FROM execution_observations
                 WHERE scope = $1 AND account_id IS NOT DISTINCT FROM $2 AND project_id IS NOT DISTINCT FROM $3
                 ORDER BY created_at DESC
                 LIMIT $4
-                "#,
+                ",
             )
             .bind(scope)
             .bind(account_id)
@@ -395,18 +395,28 @@ impl ModelStorage {
 
         let observations: Vec<ExecutionObservation> = rows
             .into_iter()
-            .filter_map(|(rule_id, time_before, time_after, actual_time, improved, context_data, timestamp)| {
-                let context: Vec<f64> = serde_json::from_slice(&context_data).ok()?;
-                Some(ExecutionObservation {
+            .filter_map(
+                |(
                     rule_id,
-                    estimated_time_before: time_before,
-                    estimated_time_after: time_after,
+                    time_before,
+                    time_after,
                     actual_time,
                     improved,
-                    context,
+                    context_data,
                     timestamp,
-                })
-            })
+                )| {
+                    let context: Vec<f64> = serde_json::from_slice(&context_data).ok()?;
+                    Some(ExecutionObservation {
+                        rule_id,
+                        estimated_time_before: time_before,
+                        estimated_time_after: time_after,
+                        actual_time,
+                        improved,
+                        context,
+                        timestamp,
+                    })
+                },
+            )
             .collect();
 
         debug!(count = %observations.len(), "Loaded execution observations");
@@ -414,6 +424,7 @@ impl ModelStorage {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,7 +439,7 @@ mod tests {
     #[test]
     fn database_backend_from_str() {
         assert_eq!(
-            DatabaseBackend::from_str("postgres").unwrap(),
+            DatabaseBackend::from_str("postgres").expect("parse database backend"),
             DatabaseBackend::Postgres
         );
         assert!(DatabaseBackend::from_str("invalid").is_err());

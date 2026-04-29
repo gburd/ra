@@ -1,4 +1,12 @@
-#![cfg_attr(test, allow(clippy::expect_used, clippy::float_cmp, clippy::unwrap_used, clippy::cast_lossless))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::expect_used,
+        clippy::float_cmp,
+        clippy::unwrap_used,
+        clippy::cast_lossless
+    )
+)]
 //! Statistics abstraction system for query optimization.
 //!
 //! This crate provides a comprehensive statistics framework modeling
@@ -86,11 +94,10 @@
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::must_use_candidate)]
-#![cfg_attr(test, allow(clippy::float_cmp))]
 
 pub mod accuracy;
-pub mod adaptive;
 pub mod adapters;
+pub mod adaptive;
 // Phase 6: Timeline system (deferred) - delta uses timeline types
 #[cfg(feature = "timeline")]
 pub mod delta;
@@ -111,9 +118,11 @@ pub mod streaming;
 pub mod timeline;
 pub mod types;
 
-pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};
-pub use adaptive::{AdaptiveConfig, AdaptiveCostDriver, ResourceSnapshot, UpdateTrigger};
+pub use accuracy::{
+    QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState,
+};
 pub use adapters::MonitoringAdapter;
+pub use adaptive::{AdaptiveConfig, AdaptiveCostDriver, ResourceSnapshot, UpdateTrigger};
 // Phase 6: Timeline system (deferred)
 #[cfg(feature = "timeline")]
 pub use delta::{DeltaSet, StatisticsDelta};
@@ -123,27 +132,23 @@ pub use feedback::{
 };
 pub use gathering_cost::{CostEstimator, GatheringCost, GatheringMethod, GatheringPriority};
 pub use index_metadata::{
-    IndexAccessMethod, IndexCapabilities, IndexMetadata as IndexMetadataV2, IndexOperation,
-    discover_indexes_for_table, find_indexes_supporting,
+    discover_indexes_for_table, find_indexes_supporting, IndexAccessMethod, IndexCapabilities,
+    IndexMetadata as IndexMetadataV2, IndexOperation,
 };
 pub use index_types::{IndexCostFactors, IndexMetadata, IndexType};
 pub use percentiles::{PercentileSummary, PercentileTracker, TDigest};
 pub use profiles::{ProfileSelector, StatisticsProfile};
 pub use ring_buffer::RingBuffer;
 pub use smoother::{Ewma, SmootherSet};
-pub use streaming::{
-    ChangeThresholds, CostModelUpdate, MetricKind, StreamingPipeline,
-};
+pub use streaming::{ChangeThresholds, CostModelUpdate, MetricKind, StreamingPipeline};
 // Phase 6: Timeline system (deferred)
-#[cfg(feature = "timeline")]
-pub use timeline::{
-    PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer,
-};
+pub use multi_column::{MatchQuality, MultiColumnConfig, MultiColumnEstimator};
 pub use skew::{
     FrequencyBucket, FrequencyHistogram, HotKey, SkewAnalysis, SkewDetector, SkewSeverity,
     SkewStrategy,
 };
-pub use multi_column::{MatchQuality, MultiColumnConfig, MultiColumnEstimator};
+#[cfg(feature = "timeline")]
+pub use timeline::{PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer};
 pub use types::{
     AccessPattern, ColumnId, ColumnStats, CorrelationStats, FunctionalDependency, Histogram,
     HotColumn, IndexStats, JoinStats, MostCommonValues, MultiColumnNdv, MultiColumnStats,

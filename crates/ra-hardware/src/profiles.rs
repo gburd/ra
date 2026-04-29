@@ -573,7 +573,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip() {
         let profile = CompleteHardwareProfile::gpu_server_a100();
         let json = serde_json::to_string(&profile).expect("serialization should succeed");
@@ -583,7 +586,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip_raspberry_pi() {
         let profile = CompleteHardwareProfile::raspberry_pi_4();
         let json = serde_json::to_string(&profile).expect("serialization should succeed");

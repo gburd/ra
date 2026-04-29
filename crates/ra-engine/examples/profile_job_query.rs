@@ -1,9 +1,14 @@
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "example binary uses stdout/stderr"
+)]
 //! Profile a single JOB query to measure optimizer performance.
 //!
 //! Run with:
-//!   RUST_LOG=ra_engine=info cargo run --release --example profile_job_query
+//!   `RUST_LOG=ra_engine=info cargo run --release --example profile_job_query`
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use ra_core::statistics::Statistics;
 use ra_engine::Optimizer;

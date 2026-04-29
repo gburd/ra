@@ -302,7 +302,7 @@ pub fn parse_metadata(source: &str) -> Result<RuleMetadata, ParseError> {
 // ── Tests ────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[expect(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
 

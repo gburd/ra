@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Integration tests for materialized view matching and rewriting.
 
 mod helpers;

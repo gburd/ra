@@ -211,6 +211,7 @@ impl RuleKnowledge {
     /// Rules with enough observations and effectiveness below the
     /// threshold are moved to the end (deprioritized). All other
     /// rules are sorted by priority with effectiveness as a tiebreaker.
+    #[must_use]
     pub fn rank_and_filter(
         &self,
         rules: Vec<Rewrite<RelLang, RelAnalysis>>,
@@ -352,11 +353,12 @@ fn merge_entries(dst: &mut RuleEffectivenessEntry, src: &RuleEffectivenessEntry)
 
     dst.ewma_effectiveness = w_dst * dst.ewma_effectiveness + w_src * src.ewma_effectiveness;
     dst.attempts = total;
-    dst.matches = dst.matches + src.matches;
-    dst.improvements = dst.improvements + src.improvements;
+    dst.matches += src.matches;
+    dst.improvements += src.improvements;
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 

@@ -126,25 +126,13 @@ impl Cost {
 
     /// Return a weighted total cost.
     #[must_use]
-    pub fn weighted_total(
-        &self,
-        cpu_weight: f64,
-        io_weight: f64,
-        network_weight: f64,
-    ) -> f64 {
-        self.cpu * cpu_weight
-            + self.io * io_weight
-            + self.network * network_weight
+    pub fn weighted_total(&self, cpu_weight: f64, io_weight: f64, network_weight: f64) -> f64 {
+        self.cpu * cpu_weight + self.io * io_weight + self.network * network_weight
     }
 
     /// Return a weighted startup cost.
     #[must_use]
-    pub fn weighted_startup(
-        &self,
-        cpu_weight: f64,
-        io_weight: f64,
-        network_weight: f64,
-    ) -> f64 {
+    pub fn weighted_startup(&self, cpu_weight: f64, io_weight: f64, network_weight: f64) -> f64 {
         self.startup_cpu * cpu_weight
             + self.startup_io * io_weight
             + self.startup_network * network_weight
@@ -163,8 +151,7 @@ impl Cost {
             memory: self.memory.saturating_add(other.memory),
             startup_cpu: self.startup_cpu + other.startup_cpu,
             startup_io: self.startup_io + other.startup_io,
-            startup_network: self.startup_network
-                + other.startup_network,
+            startup_network: self.startup_network + other.startup_network,
         }
     }
 
@@ -187,8 +174,7 @@ impl Cost {
         Self {
             cpu: self.startup_cpu + run_cpu * fraction,
             io: self.startup_io + run_io * fraction,
-            network: self.startup_network
-                + run_network * fraction,
+            network: self.startup_network + run_network * fraction,
             memory: self.memory,
             startup_cpu: self.startup_cpu,
             startup_io: self.startup_io,
@@ -204,10 +190,7 @@ impl Cost {
     ///   `total = outer.total + outer_rows * inner.total`
     ///   `startup = outer.startup`
     #[must_use]
-    pub fn nested_loop_inner_cost(
-        &self,
-        outer_rows: f64,
-    ) -> Self {
+    pub fn nested_loop_inner_cost(&self, outer_rows: f64) -> Self {
         Self {
             cpu: self.cpu * outer_rows,
             io: self.io * outer_rows,
@@ -227,11 +210,7 @@ pub trait CostModel: std::fmt::Debug + Send + Sync {
     ///
     /// The `statistics` function is called to look up statistics for
     /// base tables referenced by the expression.
-    fn estimate(
-        &self,
-        expr: &RelExpr,
-        statistics: &dyn StatisticsProvider,
-    ) -> Cost;
+    fn estimate(&self, expr: &RelExpr, statistics: &dyn StatisticsProvider) -> Cost;
 }
 
 /// Provides statistics for base tables.
@@ -374,10 +353,9 @@ mod tests {
     #[expect(clippy::expect_used)]
     fn serialize_roundtrip() {
         let cost = Cost::new(1.5, 2.5, 0.0, 4096);
-        let json = serde_json::to_string(&cost)
-            .expect("serialization should succeed");
-        let deserialized: Cost = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&cost).expect("serialization should succeed");
+        let deserialized: Cost =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(cost, deserialized);
     }
 
@@ -385,9 +363,7 @@ mod tests {
 
     #[test]
     fn with_startup_sets_fields() {
-        let c = Cost::with_startup(
-            100.0, 50.0, 10.0, 1024, 80.0, 40.0, 5.0,
-        );
+        let c = Cost::with_startup(100.0, 50.0, 10.0, 1024, 80.0, 40.0, 5.0);
         assert_eq!(c.cpu, 100.0);
         assert_eq!(c.io, 50.0);
         assert_eq!(c.startup_cpu, 80.0);
@@ -397,9 +373,7 @@ mod tests {
 
     #[test]
     fn with_startup_clamps_to_total() {
-        let c = Cost::with_startup(
-            10.0, 5.0, 2.0, 0, 999.0, 999.0, 999.0,
-        );
+        let c = Cost::with_startup(10.0, 5.0, 2.0, 0, 999.0, 999.0, 999.0);
         assert_eq!(c.startup_cpu, 10.0);
         assert_eq!(c.startup_io, 5.0);
         assert_eq!(c.startup_network, 2.0);
@@ -407,18 +381,14 @@ mod tests {
 
     #[test]
     fn startup_accessor() {
-        let c = Cost::with_startup(
-            100.0, 50.0, 10.0, 0, 80.0, 40.0, 5.0,
-        );
+        let c = Cost::with_startup(100.0, 50.0, 10.0, 0, 80.0, 40.0, 5.0);
         // startup = 80*1 + 40*4 + 5*2 = 80 + 160 + 10 = 250
         assert!((c.startup() - 250.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn run_cost_is_total_minus_startup() {
-        let c = Cost::with_startup(
-            100.0, 50.0, 10.0, 0, 80.0, 40.0, 5.0,
-        );
+        let c = Cost::with_startup(100.0, 50.0, 10.0, 0, 80.0, 40.0, 5.0);
         let expected = c.total() - c.startup();
         assert!((c.run() - expected).abs() < f64::EPSILON);
     }
@@ -436,9 +406,7 @@ mod tests {
     fn startup_cost_function_prefers_low_startup() {
         let cf = StartupCostFunction;
         let pipelined = Cost::new(1000.0, 0.0, 0.0, 0);
-        let blocking = Cost::with_startup(
-            500.0, 0.0, 0.0, 0, 400.0, 0.0, 0.0,
-        );
+        let blocking = Cost::with_startup(500.0, 0.0, 0.0, 0, 400.0, 0.0, 0.0);
         // pipelined has startup=0, blocking has startup=400
         assert!(cf.is_cheaper(&pipelined, &blocking));
         assert!(!cf.is_cheaper(&blocking, &pipelined));
@@ -450,9 +418,7 @@ mod tests {
     fn limit_cost_function_small_fraction_prefers_pipelined() {
         let cf = LimitCostFunction { fraction: 0.001 };
         let pipelined = Cost::new(1000.0, 0.0, 0.0, 0);
-        let blocking = Cost::with_startup(
-            500.0, 0.0, 0.0, 0, 400.0, 0.0, 0.0,
-        );
+        let blocking = Cost::with_startup(500.0, 0.0, 0.0, 0, 400.0, 0.0, 0.0);
         // pipelined: 0 + 1000 * 0.001 = 1.0
         // blocking: 400 + 100 * 0.001 = 400.1
         assert!(cf.is_cheaper(&pipelined, &blocking));
@@ -479,9 +445,7 @@ mod tests {
 
     #[test]
     fn limit_cost_blocking_pays_full_startup() {
-        let c = Cost::with_startup(
-            1000.0, 0.0, 0.0, 0, 900.0, 0.0, 0.0,
-        );
+        let c = Cost::with_startup(1000.0, 0.0, 0.0, 0, 900.0, 0.0, 0.0);
         let limited = c.limit_cost(10.0, 1000.0);
         // startup=900, run=100, fraction=0.01
         // total = 900 + 100*0.01 = 901.0
@@ -507,9 +471,7 @@ mod tests {
 
     #[test]
     fn nested_loop_inner_cost_multiplies() {
-        let inner = Cost::with_startup(
-            10.0, 5.0, 0.0, 100, 2.0, 1.0, 0.0,
-        );
+        let inner = Cost::with_startup(10.0, 5.0, 0.0, 100, 2.0, 1.0, 0.0);
         let rescanned = inner.nested_loop_inner_cost(100.0);
         assert!((rescanned.cpu - 1000.0).abs() < f64::EPSILON);
         assert!((rescanned.io - 500.0).abs() < f64::EPSILON);
@@ -521,9 +483,7 @@ mod tests {
 
     #[test]
     fn weighted_startup() {
-        let c = Cost::with_startup(
-            100.0, 50.0, 10.0, 0, 80.0, 40.0, 5.0,
-        );
+        let c = Cost::with_startup(100.0, 50.0, 10.0, 0, 80.0, 40.0, 5.0);
         let ws = c.weighted_startup(2.0, 1.0, 0.5);
         // 80*2 + 40*1 + 5*0.5 = 160 + 40 + 2.5 = 202.5
         assert!((ws - 202.5).abs() < f64::EPSILON);
@@ -534,13 +494,10 @@ mod tests {
     #[test]
     #[expect(clippy::expect_used)]
     fn serialize_roundtrip_with_startup() {
-        let cost = Cost::with_startup(
-            100.0, 50.0, 10.0, 4096, 80.0, 40.0, 5.0,
-        );
-        let json = serde_json::to_string(&cost)
-            .expect("serialization should succeed");
-        let deserialized: Cost = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let cost = Cost::with_startup(100.0, 50.0, 10.0, 4096, 80.0, 40.0, 5.0);
+        let json = serde_json::to_string(&cost).expect("serialization should succeed");
+        let deserialized: Cost =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(cost, deserialized);
     }
 
@@ -550,8 +507,7 @@ mod tests {
     #[expect(clippy::expect_used)]
     fn deserialize_legacy_json_without_startup() {
         let json = r#"{"cpu":10.0,"io":5.0,"network":2.0,"memory":1024}"#;
-        let cost: Cost = serde_json::from_str(json)
-            .expect("should deserialize legacy format");
+        let cost: Cost = serde_json::from_str(json).expect("should deserialize legacy format");
         assert_eq!(cost.cpu, 10.0);
         assert_eq!(cost.startup_cpu, 0.0);
         assert_eq!(cost.startup_io, 0.0);

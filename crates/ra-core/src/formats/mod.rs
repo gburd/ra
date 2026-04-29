@@ -48,10 +48,7 @@ pub trait FileFormat: Send + Sync + std::fmt::Debug {
     ///
     /// Returns an error if the file cannot be read or metadata
     /// cannot be parsed.
-    fn read_metadata(
-        &self,
-        path: &Path,
-    ) -> Result<FileMetadata, FormatError>;
+    fn read_metadata(&self, path: &Path) -> Result<FileMetadata, FormatError>;
 
     /// Optimization capabilities of this format.
     fn capabilities(&self) -> FormatCapabilities;
@@ -111,10 +108,7 @@ impl Field {
 
     /// Create a new non-nullable field.
     #[must_use]
-    pub fn non_null(
-        name: impl Into<String>,
-        data_type: DataType,
-    ) -> Self {
+    pub fn non_null(name: impl Into<String>, data_type: DataType) -> Self {
         Self {
             name: name.into(),
             data_type,
@@ -185,11 +179,7 @@ impl RowGroupMeta {
     /// Returns `true` if the row group can be skipped (predicate
     /// value falls outside the column's min/max range).
     #[must_use]
-    pub fn can_prune_with_zone_map(
-        &self,
-        column: &str,
-        value: &ScalarValue,
-    ) -> bool {
+    pub fn can_prune_with_zone_map(&self, column: &str, value: &ScalarValue) -> bool {
         let Some(stats) = self.column_stats.get(column) else {
             return false;
         };
@@ -233,8 +223,7 @@ impl ColumnEncodingInfo {
         if self.compressed_bytes == 0 {
             return 1.0;
         }
-        self.uncompressed_bytes as f64
-            / self.compressed_bytes as f64
+        self.uncompressed_bytes as f64 / self.compressed_bytes as f64
     }
 
     /// Width of dictionary codes in bytes (1, 2, or 4).
@@ -253,9 +242,7 @@ impl ColumnEncodingInfo {
 }
 
 /// Column encoding type.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ColumnEncoding {
     /// Plain encoding (no compression beyond the codec).
     Plain,
@@ -272,10 +259,7 @@ pub enum ColumnEncoding {
 }
 
 impl std::fmt::Display for ColumnEncoding {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Plain => write!(f, "PLAIN"),
             Self::Dictionary => write!(f, "DICTIONARY"),
@@ -288,17 +272,7 @@ impl std::fmt::Display for ColumnEncoding {
 }
 
 /// Compression codec applied to column data.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Default,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum CompressionCodec {
     /// No compression.
     #[default]
@@ -374,23 +348,14 @@ impl ScalarValue {
     /// Compare two scalar values, returning `None` for incompatible
     /// types or null values.
     #[must_use]
-    pub fn partial_cmp_value(
-        &self,
-        other: &Self,
-    ) -> Option<std::cmp::Ordering> {
+    pub fn partial_cmp_value(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
             (Self::Bool(a), Self::Bool(b)) => a.partial_cmp(b),
             (Self::Int64(a), Self::Int64(b)) => a.partial_cmp(b),
-            (Self::Float64(a), Self::Float64(b)) => {
-                a.partial_cmp(b)
-            }
+            (Self::Float64(a), Self::Float64(b)) => a.partial_cmp(b),
             (Self::Utf8(a), Self::Utf8(b)) => a.partial_cmp(b),
-            (Self::Int64(a), Self::Float64(b)) => {
-                (*a as f64).partial_cmp(b)
-            }
-            (Self::Float64(a), Self::Int64(b)) => {
-                a.partial_cmp(&(*b as f64))
-            }
+            (Self::Int64(a), Self::Float64(b)) => (*a as f64).partial_cmp(b),
+            (Self::Float64(a), Self::Int64(b)) => a.partial_cmp(&(*b as f64)),
             _ => None,
         }
     }
@@ -510,13 +475,8 @@ mod system_time_serde {
         nanos: u32,
     }
 
-    pub fn serialize<S: Serializer>(
-        time: &SystemTime,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let dur = time
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO);
+    pub fn serialize<S: Serializer>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error> {
+        let dur = time.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO);
         Dur {
             secs: dur.as_secs(),
             nanos: dur.subsec_nanos(),
@@ -524,9 +484,7 @@ mod system_time_serde {
         .serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<SystemTime, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SystemTime, D::Error> {
         let dur = Dur::deserialize(deserializer)?;
         Ok(UNIX_EPOCH + Duration::new(dur.secs, dur.nanos))
     }
@@ -539,11 +497,7 @@ impl FileMetadata {
     /// These row groups have zone maps (min/max) that prove no
     /// rows can match the predicate.
     #[must_use]
-    pub fn prunable_row_groups(
-        &self,
-        column: &str,
-        value: &ScalarValue,
-    ) -> Vec<usize> {
+    pub fn prunable_row_groups(&self, column: &str, value: &ScalarValue) -> Vec<usize> {
         self.row_groups
             .iter()
             .filter(|rg| rg.can_prune_with_zone_map(column, value))
@@ -554,16 +508,10 @@ impl FileMetadata {
     /// Return indices of row groups that survive zone map pruning
     /// (complement of `prunable_row_groups`).
     #[must_use]
-    pub fn surviving_row_groups(
-        &self,
-        column: &str,
-        value: &ScalarValue,
-    ) -> Vec<usize> {
+    pub fn surviving_row_groups(&self, column: &str, value: &ScalarValue) -> Vec<usize> {
         self.row_groups
             .iter()
-            .filter(|rg| {
-                !rg.can_prune_with_zone_map(column, value)
-            })
+            .filter(|rg| !rg.can_prune_with_zone_map(column, value))
             .map(|rg| rg.index)
             .collect()
     }
@@ -575,16 +523,8 @@ impl FileMetadata {
         if self.row_groups.is_empty() {
             return 1.0;
         }
-        let total_compressed: u64 = self
-            .row_groups
-            .iter()
-            .map(|rg| rg.compressed_size)
-            .sum();
-        let total_uncompressed: u64 = self
-            .row_groups
-            .iter()
-            .map(|rg| rg.uncompressed_size)
-            .sum();
+        let total_compressed: u64 = self.row_groups.iter().map(|rg| rg.compressed_size).sum();
+        let total_uncompressed: u64 = self.row_groups.iter().map(|rg| rg.uncompressed_size).sum();
         if total_compressed == 0 {
             return 1.0;
         }
@@ -615,8 +555,7 @@ impl CompressionCostAdjuster {
     pub fn from_encoding(info: &ColumnEncodingInfo) -> Self {
         let decompression_cpu_factor = match info.compression {
             CompressionCodec::Uncompressed => 1.0,
-            CompressionCodec::Snappy | CompressionCodec::Lz4
-            | CompressionCodec::Lz4Raw => 1.1,
+            CompressionCodec::Snappy | CompressionCodec::Lz4 | CompressionCodec::Lz4Raw => 1.1,
             CompressionCodec::Gzip => 1.4,
             CompressionCodec::Zstd => 1.3,
             CompressionCodec::Brotli => 1.5,
@@ -630,16 +569,15 @@ impl CompressionCostAdjuster {
             1.0
         };
 
-        let dict_predicate_cpu_factor =
-            if info.encoding == ColumnEncoding::Dictionary {
-                info.dict_code_width().map_or(0.5, |w| match w {
-                    1 => 0.1,
-                    2 => 0.15,
-                    _ => 0.3,
-                })
-            } else {
-                1.0
-            };
+        let dict_predicate_cpu_factor = if info.encoding == ColumnEncoding::Dictionary {
+            info.dict_code_width().map_or(0.5, |w| match w {
+                1 => 0.1,
+                2 => 0.15,
+                _ => 0.3,
+            })
+        } else {
+            1.0
+        };
 
         Self {
             decompression_cpu_factor,
@@ -691,7 +629,7 @@ pub fn detect_format(path: &Path) -> Option<&'static str> {
     }
 }
 
-
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,9 +645,7 @@ mod tests {
         ]);
 
         assert_eq!(schema.num_fields(), 3);
-        let id = schema
-            .field_by_name("id")
-            .expect("id field should exist");
+        let id = schema.field_by_name("id").expect("id field should exist");
         assert_eq!(id.data_type, DataType::Integer);
         assert!(id.nullable);
 
@@ -731,68 +667,47 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::approx_constant, reason = "3.14 is test data, not mathematical constant")]
+    #[expect(
+        clippy::approx_constant,
+        reason = "3.14 is test data, not mathematical constant"
+    )]
     fn scalar_value_display() {
         assert_eq!(ScalarValue::Null.to_string(), "NULL");
         assert_eq!(ScalarValue::Bool(true).to_string(), "true");
         assert_eq!(ScalarValue::Int64(42).to_string(), "42");
         assert_eq!(ScalarValue::Float64(3.14).to_string(), "3.14");
-        assert_eq!(
-            ScalarValue::Utf8("hello".into()).to_string(),
-            "'hello'"
-        );
-        assert_eq!(
-            ScalarValue::Binary(vec![1, 2, 3]).to_string(),
-            "<3 bytes>"
-        );
+        assert_eq!(ScalarValue::Utf8("hello".into()).to_string(), "'hello'");
+        assert_eq!(ScalarValue::Binary(vec![1, 2, 3]).to_string(), "<3 bytes>");
     }
 
     #[test]
     fn scalar_value_ordering_same_type() {
         let a = ScalarValue::Int64(10);
         let b = ScalarValue::Int64(20);
-        assert_eq!(
-            a.partial_cmp_value(&b),
-            Some(Ordering::Less)
-        );
-        assert_eq!(
-            b.partial_cmp_value(&a),
-            Some(Ordering::Greater)
-        );
-        assert_eq!(
-            a.partial_cmp_value(&a),
-            Some(Ordering::Equal)
-        );
+        assert_eq!(a.partial_cmp_value(&b), Some(Ordering::Less));
+        assert_eq!(b.partial_cmp_value(&a), Some(Ordering::Greater));
+        assert_eq!(a.partial_cmp_value(&a), Some(Ordering::Equal));
     }
 
     #[test]
     fn scalar_value_ordering_float() {
         let a = ScalarValue::Float64(1.5);
         let b = ScalarValue::Float64(2.5);
-        assert_eq!(
-            a.partial_cmp_value(&b),
-            Some(Ordering::Less)
-        );
+        assert_eq!(a.partial_cmp_value(&b), Some(Ordering::Less));
     }
 
     #[test]
     fn scalar_value_ordering_string() {
         let a = ScalarValue::Utf8("alice".into());
         let b = ScalarValue::Utf8("bob".into());
-        assert_eq!(
-            a.partial_cmp_value(&b),
-            Some(Ordering::Less)
-        );
+        assert_eq!(a.partial_cmp_value(&b), Some(Ordering::Less));
     }
 
     #[test]
     fn scalar_value_ordering_cross_type() {
         let a = ScalarValue::Int64(10);
         let b = ScalarValue::Float64(10.5);
-        assert_eq!(
-            a.partial_cmp_value(&b),
-            Some(Ordering::Less)
-        );
+        assert_eq!(a.partial_cmp_value(&b), Some(Ordering::Less));
     }
 
     #[test]
@@ -831,14 +746,8 @@ mod tests {
 
     #[test]
     fn detect_format_parquet() {
-        assert_eq!(
-            detect_format(Path::new("data.parquet")),
-            Some("parquet")
-        );
-        assert_eq!(
-            detect_format(Path::new("data.pq")),
-            Some("parquet")
-        );
+        assert_eq!(detect_format(Path::new("data.parquet")), Some("parquet"));
+        assert_eq!(detect_format(Path::new("data.pq")), Some("parquet"));
     }
 
     #[test]
@@ -848,18 +757,9 @@ mod tests {
 
     #[test]
     fn detect_format_arrow() {
-        assert_eq!(
-            detect_format(Path::new("data.arrow")),
-            Some("arrow_ipc")
-        );
-        assert_eq!(
-            detect_format(Path::new("data.ipc")),
-            Some("arrow_ipc")
-        );
-        assert_eq!(
-            detect_format(Path::new("data.feather")),
-            Some("arrow_ipc")
-        );
+        assert_eq!(detect_format(Path::new("data.arrow")), Some("arrow_ipc"));
+        assert_eq!(detect_format(Path::new("data.ipc")), Some("arrow_ipc"));
+        assert_eq!(detect_format(Path::new("data.feather")), Some("arrow_ipc"));
     }
 
     #[test]
@@ -874,10 +774,7 @@ mod tests {
         let err = FormatError::FileNotFound {
             path: "/tmp/missing.parquet".into(),
         };
-        assert_eq!(
-            err.to_string(),
-            "file not found: /tmp/missing.parquet"
-        );
+        assert_eq!(err.to_string(), "file not found: /tmp/missing.parquet");
 
         let err = FormatError::InvalidFormat {
             path: "/tmp/bad.parquet".into(),
@@ -894,9 +791,7 @@ mod tests {
     #[test]
     fn file_metadata_serde_roundtrip() {
         let meta = FileMetadata {
-            schema: Schema::new(vec![
-                Field::new("x", DataType::Integer),
-            ]),
+            schema: Schema::new(vec![Field::new("x", DataType::Integer)]),
             num_rows: 1000,
             row_groups: vec![RowGroupMeta {
                 index: 0,
@@ -919,10 +814,9 @@ mod tests {
             mtime: SystemTime::UNIX_EPOCH,
         };
 
-        let json = serde_json::to_string(&meta)
-            .expect("serialization should succeed");
-        let roundtrip: FileMetadata = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&meta).expect("serialization should succeed");
+        let roundtrip: FileMetadata =
+            serde_json::from_str(&json).expect("deserialization should succeed");
 
         assert_eq!(roundtrip.num_rows, 1000);
         assert_eq!(roundtrip.row_groups.len(), 1);
@@ -963,9 +857,7 @@ mod tests {
                 (
                     "name".into(),
                     FileColumnStats {
-                        min: Some(ScalarValue::Utf8(
-                            "alice".into(),
-                        )),
+                        min: Some(ScalarValue::Utf8("alice".into())),
                         max: Some(ScalarValue::Utf8("zara".into())),
                         null_count: 10,
                         distinct_count: None,
@@ -978,10 +870,7 @@ mod tests {
         };
 
         assert_eq!(rg.column_stats.len(), 2);
-        let id_stats = rg
-            .column_stats
-            .get("id")
-            .expect("id stats should exist");
+        let id_stats = rg.column_stats.get("id").expect("id stats should exist");
         assert_eq!(id_stats.null_count, 0);
         assert_eq!(id_stats.distinct_count, Some(500));
     }
@@ -997,16 +886,10 @@ mod tests {
     #[test]
     fn column_encoding_display() {
         assert_eq!(ColumnEncoding::Plain.to_string(), "PLAIN");
-        assert_eq!(
-            ColumnEncoding::Dictionary.to_string(),
-            "DICTIONARY"
-        );
+        assert_eq!(ColumnEncoding::Dictionary.to_string(), "DICTIONARY");
         assert_eq!(ColumnEncoding::RunLength.to_string(), "RLE");
         assert_eq!(ColumnEncoding::DeltaEncoding.to_string(), "DELTA");
-        assert_eq!(
-            ColumnEncoding::BitPacked.to_string(),
-            "BIT_PACKED"
-        );
+        assert_eq!(ColumnEncoding::BitPacked.to_string(), "BIT_PACKED");
     }
 
     #[test]
@@ -1083,36 +966,16 @@ mod tests {
         };
 
         // Value within range: cannot prune
-        assert!(
-            !rg.can_prune_with_zone_map(
-                "id",
-                &ScalarValue::Int64(150)
-            )
-        );
+        assert!(!rg.can_prune_with_zone_map("id", &ScalarValue::Int64(150)));
 
         // Value below min: can prune
-        assert!(
-            rg.can_prune_with_zone_map(
-                "id",
-                &ScalarValue::Int64(50)
-            )
-        );
+        assert!(rg.can_prune_with_zone_map("id", &ScalarValue::Int64(50)));
 
         // Value above max: can prune
-        assert!(
-            rg.can_prune_with_zone_map(
-                "id",
-                &ScalarValue::Int64(300)
-            )
-        );
+        assert!(rg.can_prune_with_zone_map("id", &ScalarValue::Int64(300)));
 
         // Unknown column: cannot prune
-        assert!(
-            !rg.can_prune_with_zone_map(
-                "unknown",
-                &ScalarValue::Int64(150)
-            )
-        );
+        assert!(!rg.can_prune_with_zone_map("unknown", &ScalarValue::Int64(150)));
     }
 
     #[test]
@@ -1178,16 +1041,10 @@ mod tests {
         };
 
         // Looking for id=500: only row group 0 survives
-        let pruned = meta.prunable_row_groups(
-            "id",
-            &ScalarValue::Int64(500),
-        );
+        let pruned = meta.prunable_row_groups("id", &ScalarValue::Int64(500));
         assert_eq!(pruned, vec![1, 2]);
 
-        let surviving = meta.surviving_row_groups(
-            "id",
-            &ScalarValue::Int64(500),
-        );
+        let surviving = meta.surviving_row_groups("id", &ScalarValue::Int64(500));
         assert_eq!(surviving, vec![0]);
     }
 
@@ -1221,10 +1078,7 @@ mod tests {
         };
 
         // 4000 / 1000 = 4.0
-        assert!(
-            (meta.avg_compression_ratio() - 4.0).abs()
-                < f64::EPSILON
-        );
+        assert!((meta.avg_compression_ratio() - 4.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1236,9 +1090,7 @@ mod tests {
             compressed_bytes: 500,
             uncompressed_bytes: 2000,
         };
-        assert!(
-            (info.compression_ratio() - 4.0).abs() < f64::EPSILON
-        );
+        assert!((info.compression_ratio() - 4.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1294,31 +1146,18 @@ mod tests {
         let tol = 1e-10;
 
         // Snappy decompression factor = 1.1
-        assert!(
-            (adjuster.decompression_cpu_factor - 1.1).abs() < tol
-        );
+        assert!((adjuster.decompression_cpu_factor - 1.1).abs() < tol);
         // IO reduction: 1/4 = 0.25
-        assert!(
-            (adjuster.io_reduction_factor - 0.25).abs() < tol
-        );
+        assert!((adjuster.io_reduction_factor - 0.25).abs() < tol);
         // Dictionary with 100 entries -> 1-byte codes -> factor 0.1
-        assert!(
-            (adjuster.dict_predicate_cpu_factor - 0.1).abs() < tol
-        );
+        assert!((adjuster.dict_predicate_cpu_factor - 0.1).abs() < tol);
 
         // Base I/O of 1000 -> adjusted to 250
-        assert!(
-            (adjuster.adjust_io(1000.0) - 250.0).abs() < tol
-        );
+        assert!((adjuster.adjust_io(1000.0) - 250.0).abs() < tol);
         // Base CPU of 100 -> adjusted to 110
-        assert!(
-            (adjuster.adjust_cpu(100.0) - 110.0).abs() < tol
-        );
+        assert!((adjuster.adjust_cpu(100.0) - 110.0).abs() < tol);
         // Predicate CPU of 100 -> adjusted to 10
-        assert!(
-            (adjuster.adjust_predicate_cpu(100.0) - 10.0).abs()
-                < tol
-        );
+        assert!((adjuster.adjust_predicate_cpu(100.0) - 10.0).abs() < tol);
     }
 
     #[test]
@@ -1331,35 +1170,17 @@ mod tests {
             uncompressed_bytes: 1000,
         };
         let adjuster = CompressionCostAdjuster::from_encoding(&info);
-        assert!(
-            (adjuster.decompression_cpu_factor - 1.0).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (adjuster.io_reduction_factor - 1.0).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (adjuster.dict_predicate_cpu_factor - 1.0).abs()
-                < f64::EPSILON
-        );
+        assert!((adjuster.decompression_cpu_factor - 1.0).abs() < f64::EPSILON);
+        assert!((adjuster.io_reduction_factor - 1.0).abs() < f64::EPSILON);
+        assert!((adjuster.dict_predicate_cpu_factor - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn compression_cost_adjuster_default() {
         let adjuster = CompressionCostAdjuster::default();
-        assert!(
-            (adjuster.adjust_io(100.0) - 100.0).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (adjuster.adjust_cpu(100.0) - 100.0).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (adjuster.adjust_predicate_cpu(100.0) - 100.0).abs()
-                < f64::EPSILON
-        );
+        assert!((adjuster.adjust_io(100.0) - 100.0).abs() < f64::EPSILON);
+        assert!((adjuster.adjust_cpu(100.0) - 100.0).abs() < f64::EPSILON);
+        assert!((adjuster.adjust_predicate_cpu(100.0) - 100.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1372,15 +1193,9 @@ mod tests {
             uncompressed_bytes: 1000,
         };
         let adjuster = CompressionCostAdjuster::from_encoding(&info);
-        assert!(
-            (adjuster.decompression_cpu_factor - 1.3).abs()
-                < f64::EPSILON
-        );
+        assert!((adjuster.decompression_cpu_factor - 1.3).abs() < f64::EPSILON);
         // 1/5 = 0.2
-        assert!(
-            (adjuster.io_reduction_factor - 0.2).abs()
-                < f64::EPSILON
-        );
+        assert!((adjuster.io_reduction_factor - 0.2).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1392,11 +1207,9 @@ mod tests {
             compressed_bytes: 1024,
             uncompressed_bytes: 4096,
         };
-        let json = serde_json::to_string(&info)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&info).expect("serialization should succeed");
         let roundtrip: ColumnEncodingInfo =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(info, roundtrip);
     }
 
@@ -1420,10 +1233,9 @@ mod tests {
                 },
             )]),
         };
-        let json = serde_json::to_string(&rg)
-            .expect("serialization should succeed");
-        let roundtrip: RowGroupMeta = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&rg).expect("serialization should succeed");
+        let roundtrip: RowGroupMeta =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert!(roundtrip.is_dictionary_encoded("status"));
     }
 
@@ -1437,8 +1249,8 @@ mod tests {
             "compressed_size": 50,
             "uncompressed_size": 100
         }"#;
-        let rg: RowGroupMeta = serde_json::from_str(json)
-            .expect("should deserialize legacy format");
+        let rg: RowGroupMeta =
+            serde_json::from_str(json).expect("should deserialize legacy format");
         assert!(rg.column_encodings.is_empty());
         assert_eq!(rg.num_rows, 100);
     }
@@ -1452,8 +1264,8 @@ mod tests {
             "bloom_filters": false,
             "nested_columns": false
         }"#;
-        let caps: FormatCapabilities = serde_json::from_str(json)
-            .expect("should deserialize legacy format");
+        let caps: FormatCapabilities =
+            serde_json::from_str(json).expect("should deserialize legacy format");
         assert!(caps.column_pruning);
         assert!(!caps.dictionary_encoding);
         assert!(!caps.late_materialization);

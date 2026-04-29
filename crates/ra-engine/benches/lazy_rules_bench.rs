@@ -1,3 +1,4 @@
+#![expect(clippy::print_stdout, reason = "benchmark diagnostic output")]
 //! Benchmark for lazy rule compilation.
 //!
 //! Measures the performance impact of lazy rule loading for queries of varying complexity.
@@ -176,7 +177,7 @@ fn pattern_analysis_benchmark(c: &mut Criterion) {
 }
 
 /// Benchmark rule count reduction
-#[allow(dead_code)]
+#[expect(dead_code)]
 fn rule_count_benchmark(_c: &mut Criterion) {
     let compiler = LazyRuleCompiler::new();
     let all = all_rules();

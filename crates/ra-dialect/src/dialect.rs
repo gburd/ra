@@ -528,10 +528,7 @@ pub fn feature_support(dialect: Dialect, feature: SqlFeature) -> FeatureSupport 
         // Emulated features
         (Dialect::MsSql | Dialect::Oracle, SqlFeature::Limit | SqlFeature::Offset)
         | (Dialect::MySql | Dialect::Sqlite, SqlFeature::Fetch)
-        | (
-            Dialect::Sqlite | Dialect::MsSql | Dialect::Oracle,
-            SqlFeature::BooleanLiterals,
-        )
+        | (Dialect::Sqlite | Dialect::MsSql | Dialect::Oracle, SqlFeature::BooleanLiterals)
         | (Dialect::MySql | Dialect::MsSql, SqlFeature::ConcatOperator)
         | (
             Dialect::MySql | Dialect::Sqlite | Dialect::MsSql | Dialect::Oracle,
@@ -539,13 +536,8 @@ pub fn feature_support(dialect: Dialect, feature: SqlFeature) -> FeatureSupport 
         )
         | (Dialect::Oracle, SqlFeature::Except)
         | (Dialect::MsSql, SqlFeature::Length)
-        | (
-            Dialect::Sqlite,
-            SqlFeature::DateExtract | SqlFeature::WindowFunctions,
-        )
-        | (Dialect::MySql, SqlFeature::WindowFunctions) => {
-            FeatureSupport::Emulated
-        }
+        | (Dialect::Sqlite, SqlFeature::DateExtract | SqlFeature::WindowFunctions)
+        | (Dialect::MySql, SqlFeature::WindowFunctions) => FeatureSupport::Emulated,
 
         // Everything else is natively supported (CTE, Recursive CTE,
         // Distinct, Having, Subquery, OrderBy are universal across
@@ -630,10 +622,7 @@ mod tests {
     fn sql_feature_display() {
         assert_eq!(SqlFeature::Limit.to_string(), "LIMIT");
         assert_eq!(SqlFeature::ConcatOperator.to_string(), "|| Concat");
-        assert_eq!(
-            SqlFeature::WindowFunctions.to_string(),
-            "Window Functions"
-        );
+        assert_eq!(SqlFeature::WindowFunctions.to_string(), "Window Functions");
         assert_eq!(SqlFeature::Cte.to_string(), "CTE (WITH)");
         assert_eq!(SqlFeature::Distinct.to_string(), "DISTINCT");
     }
@@ -720,18 +709,10 @@ mod tests {
 
     #[test]
     fn double_colon_cast_support() {
-        assert!(
-            Dialect::PostgreSql.supports_double_colon_cast()
-        );
-        assert!(
-            Dialect::DuckDb.supports_double_colon_cast()
-        );
-        assert!(
-            !Dialect::MySql.supports_double_colon_cast()
-        );
-        assert!(
-            !Dialect::MsSql.supports_double_colon_cast()
-        );
+        assert!(Dialect::PostgreSql.supports_double_colon_cast());
+        assert!(Dialect::DuckDb.supports_double_colon_cast());
+        assert!(!Dialect::MySql.supports_double_colon_cast());
+        assert!(!Dialect::MsSql.supports_double_colon_cast());
     }
 
     #[test]

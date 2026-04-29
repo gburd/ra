@@ -295,15 +295,10 @@ impl Default for RaParseState {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::expect_used,
-    reason = "test code uses expect for unwrapping"
-)]
+#[expect(clippy::expect_used, reason = "test code uses expect for unwrapping")]
 mod tests {
     use super::*;
-    use ra_core::algebra::{
-        AggregateFunction, NullOrdering, SortDirection, WindowFunction,
-    };
+    use ra_core::algebra::{AggregateFunction, NullOrdering, SortDirection, WindowFunction};
     use ra_core::expr::{ColumnRef, Const};
 
     #[test]

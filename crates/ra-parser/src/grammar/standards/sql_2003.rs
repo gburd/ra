@@ -16,13 +16,13 @@
 //! ```
 //!
 //! Window functions include:
-//! - **Ranking**: ROW_NUMBER, RANK, DENSE_RANK, NTILE
-//! - **Offset**: LAG, LEAD, FIRST_VALUE, LAST_VALUE
+//! - **Ranking**: `ROW_NUMBER`, RANK, `DENSE_RANK`, NTILE
+//! - **Offset**: LAG, LEAD, `FIRST_VALUE`, `LAST_VALUE`
 //! - **Aggregates**: All standard aggregates (SUM, AVG, etc.) with OVER clause
 //!
 //! ## XML Support
 //!
-//! - XMLType data type
+//! - `XMLType` data type
 //! - XML construction: XMLELEMENT, XMLATTRIBUTES, XMLAGG
 //! - XML query: XMLEXISTS, XMLQUERY, XMLTABLE
 //!
@@ -41,7 +41,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQL2003Extension;
 
 impl GrammarExtension for SQL2003Extension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sql:2003"
     }
 

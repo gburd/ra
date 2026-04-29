@@ -22,18 +22,18 @@
 pub mod algebra;
 pub mod cost;
 pub mod distributed_agg;
-pub mod document_algebra;
 pub mod distribution;
+pub mod document_algebra;
 pub mod expr;
 pub mod facts;
 pub mod federated;
-pub mod isolation;
 pub mod formats;
+pub mod isolation;
 pub mod pattern;
-pub mod precondition;
-pub mod row_pattern;
 pub mod physical_properties;
+pub mod precondition;
 pub mod properties;
+pub mod row_pattern;
 pub mod rule;
 pub mod search_types;
 pub mod statistics;
@@ -46,20 +46,16 @@ pub use distribution::*;
 pub use expr::*;
 pub use facts::{
     DataType, EmptyFactsProvider, FactsProvider, ForeignKey,
-    HardwareProfile as CoreHardwareProfile, IndexInfo,
-    IndexType, OperatorStats, SqlDialect, TableInfo,
-    TableStats as CoreTableStats,
+    HardwareProfile as CoreHardwareProfile, IndexInfo, IndexType, OperatorStats, SqlDialect,
+    TableInfo, TableStats as CoreTableStats,
 };
 pub use federated::*;
-pub use isolation::{
-    BackendKind, IsolationLevel, MultiXactPressure,
-    TransactionContext,
-};
+pub use isolation::{BackendKind, IsolationLevel, MultiXactPressure, TransactionContext};
 pub use pattern::*;
-pub use precondition::*;
-pub use row_pattern::*;
 pub use physical_properties::*;
+pub use precondition::*;
 pub use properties::*;
+pub use row_pattern::*;
 pub use rule::*;
 pub use search_types::{DistanceMetric, FullTextParser, RankingAlgorithm};
 pub use statistics::*;

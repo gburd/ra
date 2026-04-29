@@ -1,3 +1,9 @@
+#![expect(clippy::panic, clippy::expect_used, reason = "test code")]
+#![allow(
+    clippy::items_after_statements,
+    clippy::float_cmp,
+    reason = "test code"
+)]
 //! Tests for progressive re-optimization and plan stitching (RFC 0052).
 
 use std::collections::HashMap;
@@ -129,7 +135,7 @@ fn test_divergence_factor_normal() {
 #[test]
 fn test_divergence_factor_zero_estimated() {
     let factor = progressive_reopt::divergence_factor(0, 100);
-    assert_eq!(factor, f64::MAX);
+    assert!((factor - f64::MAX).abs() < f64::EPSILON);
 }
 
 #[test]

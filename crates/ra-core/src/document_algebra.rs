@@ -471,23 +471,15 @@ fn predicate_fields(pred: &DocPredicate) -> Vec<&FieldPath> {
 
 /// Check whether a predicate references only the given field paths.
 #[must_use]
-pub fn predicate_references_only(
-    pred: &DocPredicate,
-    allowed: &[&FieldPath],
-) -> bool {
-    predicate_fields(pred)
-        .iter()
-        .all(|f| allowed.contains(f))
+pub fn predicate_references_only(pred: &DocPredicate, allowed: &[&FieldPath]) -> bool {
+    predicate_fields(pred).iter().all(|f| allowed.contains(f))
 }
 
 /// Check whether a predicate references the given field.
-fn predicate_references_field(
-    pred: &DocPredicate,
-    field: &FieldPath,
-) -> bool {
-    predicate_fields(pred).iter().any(|f| {
-        *f == field || field.is_prefix_of(f)
-    })
+fn predicate_references_field(pred: &DocPredicate, field: &FieldPath) -> bool {
+    predicate_fields(pred)
+        .iter()
+        .any(|f| *f == field || field.is_prefix_of(f))
 }
 
 // -- Rule 1: Match Coalescence --
@@ -500,9 +492,7 @@ fn predicate_references_field(
 //   iff D in [[sigma_{phi1 AND phi2}(C)]]
 
 /// Coalesce adjacent Match stages into a single Match with AND.
-fn coalesce_adjacent_matches(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn coalesce_adjacent_matches(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut changed = false;
@@ -510,16 +500,11 @@ fn coalesce_adjacent_matches(
 
     while i < stages.len() {
         if i + 1 < stages.len() {
-            if let (
-                DocOperator::Match { predicate: p1 },
-                DocOperator::Match { predicate: p2 },
-            ) = (&stages[i], &stages[i + 1])
+            if let (DocOperator::Match { predicate: p1 }, DocOperator::Match { predicate: p2 }) =
+                (&stages[i], &stages[i + 1])
             {
                 new_stages.push(DocOperator::Match {
-                    predicate: DocPredicate::And(vec![
-                        p1.clone(),
-                        p2.clone(),
-                    ]),
+                    predicate: DocPredicate::And(vec![p1.clone(), p2.clone()]),
                 });
                 changed = true;
                 i += 2;
@@ -531,9 +516,7 @@ fn coalesce_adjacent_matches(
     }
 
     if changed {
-        Some(DocPipeline {
-            stages: new_stages,
-        })
+        Some(DocPipeline { stages: new_stages })
     } else {
         None
     }
@@ -546,9 +529,7 @@ fn coalesce_adjacent_matches(
 // is the same regardless of order.
 
 /// Push Match before Sort (reduces rows sorted).
-fn push_match_before_sort(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn push_match_before_sort(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut changed = false;
@@ -556,10 +537,8 @@ fn push_match_before_sort(
 
     while i < stages.len() {
         if i + 1 < stages.len() {
-            if let (
-                DocOperator::Sort { .. },
-                DocOperator::Match { predicate },
-            ) = (&stages[i], &stages[i + 1])
+            if let (DocOperator::Sort { .. }, DocOperator::Match { predicate }) =
+                (&stages[i], &stages[i + 1])
             {
                 new_stages.push(DocOperator::Match {
                     predicate: predicate.clone(),
@@ -575,9 +554,7 @@ fn push_match_before_sort(
     }
 
     if changed {
-        Some(DocPipeline {
-            stages: new_stages,
-        })
+        Some(DocPipeline { stages: new_stages })
     } else {
         None
     }
@@ -594,9 +571,7 @@ fn push_match_before_sort(
 
 /// Push Match before Unwind when the predicate does not reference
 /// the unwound field.
-fn push_match_before_unwind(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn push_match_before_unwind(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut changed = false;
@@ -604,10 +579,8 @@ fn push_match_before_unwind(
 
     while i < stages.len() {
         if i + 1 < stages.len() {
-            if let (
-                DocOperator::Unwind { field, .. },
-                DocOperator::Match { predicate },
-            ) = (&stages[i], &stages[i + 1])
+            if let (DocOperator::Unwind { field, .. }, DocOperator::Match { predicate }) =
+                (&stages[i], &stages[i + 1])
             {
                 if !predicate_references_field(predicate, field) {
                     new_stages.push(DocOperator::Match {
@@ -625,9 +598,7 @@ fn push_match_before_unwind(
     }
 
     if changed {
-        Some(DocPipeline {
-            stages: new_stages,
-        })
+        Some(DocPipeline { stages: new_stages })
     } else {
         None
     }
@@ -642,9 +613,7 @@ fn push_match_before_unwind(
 // fields, [[phi]](D) = [[phi]](D + {as: [...]}).
 
 /// Push Match before Lookup when predicate only references local fields.
-fn push_match_before_lookup(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn push_match_before_lookup(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut changed = false;
@@ -652,14 +621,11 @@ fn push_match_before_lookup(
 
     while i < stages.len() {
         if i + 1 < stages.len() {
-            if let (
-                DocOperator::Lookup { output_as, .. },
-                DocOperator::Match { predicate },
-            ) = (&stages[i], &stages[i + 1])
+            if let (DocOperator::Lookup { output_as, .. }, DocOperator::Match { predicate }) =
+                (&stages[i], &stages[i + 1])
             {
                 let lookup_field = FieldPath::new(output_as);
-                if !predicate_references_field(predicate, &lookup_field)
-                {
+                if !predicate_references_field(predicate, &lookup_field) {
                     new_stages.push(DocOperator::Match {
                         predicate: predicate.clone(),
                     });
@@ -675,9 +641,7 @@ fn push_match_before_lookup(
     }
 
     if changed {
-        Some(DocPipeline {
-            stages: new_stages,
-        })
+        Some(DocPipeline { stages: new_stages })
     } else {
         None
     }
@@ -692,9 +656,7 @@ fn push_match_before_lookup(
 
 /// Push `Match` before `AddFields` when predicate does not reference
 /// the added fields.
-fn push_match_before_addfields(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn push_match_before_addfields(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut changed = false;
@@ -702,20 +664,13 @@ fn push_match_before_addfields(
 
     while i < stages.len() {
         if i + 1 < stages.len() {
-            if let (
-                DocOperator::AddFields { fields },
-                DocOperator::Match { predicate },
-            ) = (&stages[i], &stages[i + 1])
+            if let (DocOperator::AddFields { fields }, DocOperator::Match { predicate }) =
+                (&stages[i], &stages[i + 1])
             {
-                let added: Vec<&FieldPath> =
-                    fields.iter().map(|(f, _)| f).collect();
+                let added: Vec<&FieldPath> = fields.iter().map(|(f, _)| f).collect();
                 let refs_added = predicate_fields(predicate)
                     .iter()
-                    .any(|pf| {
-                        added
-                            .iter()
-                            .any(|af| af.is_prefix_of(pf) || *pf == *af)
-                    });
+                    .any(|pf| added.iter().any(|af| af.is_prefix_of(pf) || *pf == *af));
                 if !refs_added {
                     new_stages.push(DocOperator::Match {
                         predicate: predicate.clone(),
@@ -732,9 +687,7 @@ fn push_match_before_addfields(
     }
 
     if changed {
-        Some(DocPipeline {
-            stages: new_stages,
-        })
+        Some(DocPipeline { stages: new_stages })
     } else {
         None
     }
@@ -746,9 +699,7 @@ fn push_match_before_addfields(
 // Proof: take(take(C, n), m) = take(C, min(m, n))
 
 /// Coalesce adjacent Limit stages.
-fn coalesce_adjacent_limits(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn coalesce_adjacent_limits(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut changed = false;
@@ -756,13 +707,12 @@ fn coalesce_adjacent_limits(
 
     while i < stages.len() {
         if i + 1 < stages.len() {
-            if let (
-                DocOperator::Limit { count: n },
-                DocOperator::Limit { count: m },
-            ) = (&stages[i], &stages[i + 1])
+            if let (DocOperator::Limit { count: n }, DocOperator::Limit { count: m }) =
+                (&stages[i], &stages[i + 1])
             {
-                new_stages
-                    .push(DocOperator::Limit { count: (*n).min(*m) });
+                new_stages.push(DocOperator::Limit {
+                    count: (*n).min(*m),
+                });
                 changed = true;
                 i += 2;
                 continue;
@@ -773,9 +723,7 @@ fn coalesce_adjacent_limits(
     }
 
     if changed {
-        Some(DocPipeline {
-            stages: new_stages,
-        })
+        Some(DocPipeline { stages: new_stages })
     } else {
         None
     }
@@ -787,9 +735,7 @@ fn coalesce_adjacent_limits(
 
 /// Fuse adjacent Skip followed by Limit into a combined operation.
 /// Returns the pipeline with skip absorbed into the limit's offset.
-fn coalesce_skip_limit(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn coalesce_skip_limit(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut i = 0;
@@ -813,9 +759,7 @@ fn coalesce_skip_limit(
 // sees the same values and produces the same order.
 
 /// Push Project before Sort when the projection includes all sort keys.
-fn push_project_before_sort(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn push_project_before_sort(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut changed = false;
@@ -831,10 +775,8 @@ fn push_project_before_sort(
                 },
             ) = (&stages[i], &stages[i + 1])
             {
-                let sort_fields: Vec<&FieldPath> =
-                    keys.iter().map(|(f, _)| f).collect();
-                let all_sort_fields_projected =
-                    sort_fields.iter().all(|sf| fields.contains(sf));
+                let sort_fields: Vec<&FieldPath> = keys.iter().map(|(f, _)| f).collect();
+                let all_sort_fields_projected = sort_fields.iter().all(|sf| fields.contains(sf));
 
                 if all_sort_fields_projected {
                     new_stages.push(DocOperator::Project {
@@ -853,9 +795,7 @@ fn push_project_before_sort(
     }
 
     if changed {
-        Some(DocPipeline {
-            stages: new_stages,
-        })
+        Some(DocPipeline { stages: new_stages })
     } else {
         None
     }
@@ -869,9 +809,7 @@ fn push_project_before_sort(
 // Project, the outer one subsumes the inner one.
 
 /// Eliminate redundant adjacent projections.
-fn eliminate_redundant_project(
-    pipeline: &DocPipeline,
-) -> Option<DocPipeline> {
+fn eliminate_redundant_project(pipeline: &DocPipeline) -> Option<DocPipeline> {
     let stages = &pipeline.stages;
     let mut new_stages = Vec::with_capacity(stages.len());
     let mut changed = false;
@@ -903,9 +841,7 @@ fn eliminate_redundant_project(
     }
 
     if changed {
-        Some(DocPipeline {
-            stages: new_stages,
-        })
+        Some(DocPipeline { stages: new_stages })
     } else {
         None
     }
@@ -970,9 +906,10 @@ impl HotEligibility {
         if !self.is_indexed {
             return true;
         }
-        !self.indexed_paths.iter().any(|ip| {
-            ip.is_prefix_of(update_path) || update_path.is_prefix_of(ip)
-        })
+        !self
+            .indexed_paths
+            .iter()
+            .any(|ip| ip.is_prefix_of(update_path) || update_path.is_prefix_of(ip))
     }
 }
 
@@ -984,10 +921,7 @@ impl HotEligibility {
 ///
 /// Returns the additional I/O cost to add to the base scan cost.
 #[must_use]
-pub fn estimate_toast_io_penalty(
-    row_count: f64,
-    toast_info: &ToastInfo,
-) -> Cost {
+pub fn estimate_toast_io_penalty(row_count: f64, toast_info: &ToastInfo) -> Cost {
     let toasted_rows = row_count * toast_info.toast_fraction;
     let extra_io = toasted_rows * 2.0;
     let detoast_cpu = toasted_rows * 0.5;
@@ -1004,10 +938,7 @@ pub fn estimate_toast_io_penalty(
 /// If a projection excludes a toasted column, we avoid all detoast
 /// I/O. This quantifies the savings for the cost model.
 #[must_use]
-pub fn estimate_toast_avoidance_savings(
-    row_count: f64,
-    toast_info: &ToastInfo,
-) -> Cost {
+pub fn estimate_toast_avoidance_savings(row_count: f64, toast_info: &ToastInfo) -> Cost {
     estimate_toast_io_penalty(row_count, toast_info)
 }
 
@@ -1017,10 +948,7 @@ pub fn estimate_toast_avoidance_savings(
 /// one index entry insert + one index entry delete per index.
 /// Returns the cost savings per row.
 #[must_use]
-pub fn estimate_hot_update_savings(
-    row_count: f64,
-    num_indexes_skipped: u32,
-) -> Cost {
+pub fn estimate_hot_update_savings(row_count: f64, num_indexes_skipped: u32) -> Cost {
     let saved_io = row_count * f64::from(num_indexes_skipped) * 0.5;
     let saved_cpu = row_count * f64::from(num_indexes_skipped) * 0.3;
     Cost::new(saved_cpu, saved_io, 0.0, 0)
@@ -1028,23 +956,15 @@ pub fn estimate_hot_update_savings(
 
 /// Estimate the cost of a document pipeline stage.
 #[must_use]
-pub fn estimate_stage_cost(
-    stage: &DocOperator,
-    input_count: f64,
-    avg_doc_size: u64,
-) -> Cost {
+pub fn estimate_stage_cost(stage: &DocOperator, input_count: f64, avg_doc_size: u64) -> Cost {
     let doc_size_f = u64_to_f64(avg_doc_size);
     match stage {
         DocOperator::Scan { .. } => {
             let io = input_count * doc_size_f * 0.001;
             Cost::new(input_count * 0.1, io, 0.0, avg_doc_size * 1024)
         }
-        DocOperator::Match { .. } => {
-            Cost::new(input_count * 0.15, 0.0, 0.0, 0)
-        }
-        DocOperator::Project { .. } => {
-            Cost::new(input_count * 0.05, 0.0, 0.0, 0)
-        }
+        DocOperator::Match { .. } => Cost::new(input_count * 0.15, 0.0, 0.0, 0),
+        DocOperator::Project { .. } => Cost::new(input_count * 0.05, 0.0, 0.0, 0),
         DocOperator::Unwind { .. } => {
             Cost::new(input_count * 0.1, 0.0, 0.0, f64_to_mem(input_count * 64.0))
         }
@@ -1061,9 +981,7 @@ pub fn estimate_stage_cost(
             let io = input_count * 10.0;
             Cost::new(input_count * 0.5, io, 0.0, f64_to_mem(input_count * 256.0))
         }
-        DocOperator::AddFields { .. } => {
-            Cost::new(input_count * 0.08, 0.0, 0.0, 0)
-        }
+        DocOperator::AddFields { .. } => Cost::new(input_count * 0.08, 0.0, 0.0, 0),
         DocOperator::Sort { .. } => {
             let n_log_n = if input_count > 1.0 {
                 input_count * input_count.log2()
@@ -1084,12 +1002,8 @@ pub fn estimate_stage_cost(
             let effective = input_count.min(*count as f64);
             Cost::new(effective * 0.01, 0.0, 0.0, 0)
         }
-        DocOperator::Skip { count } => {
-            Cost::new(*count as f64 * 0.01, 0.0, 0.0, 0)
-        }
-        DocOperator::Count { .. } => {
-            Cost::new(input_count * 0.02, 0.0, 0.0, 0)
-        }
+        DocOperator::Skip { count } => Cost::new(*count as f64 * 0.01, 0.0, 0.0, 0),
+        DocOperator::Count { .. } => Cost::new(input_count * 0.02, 0.0, 0.0, 0),
     }
 }
 
@@ -1104,8 +1018,7 @@ pub fn estimate_pipeline_cost(
     let mut current_count = initial_count;
 
     for stage in &pipeline.stages {
-        let stage_cost =
-            estimate_stage_cost(stage, current_count, avg_doc_size);
+        let stage_cost = estimate_stage_cost(stage, current_count, avg_doc_size);
         total = total.add(&stage_cost);
 
         current_count = estimate_output_count(stage, current_count);
@@ -1121,9 +1034,7 @@ fn estimate_output_count(stage: &DocOperator, input: f64) -> f64 {
         DocOperator::Unwind { .. } => input * 5.0,
         DocOperator::Group { .. } => (input * 0.1).max(1.0),
         DocOperator::Limit { count } => input.min(*count as f64),
-        DocOperator::Skip { count } => {
-            (input - *count as f64).max(0.0)
-        }
+        DocOperator::Skip { count } => (input - *count as f64).max(0.0),
         DocOperator::Count { .. } => 1.0,
         // Passthrough: scan, project, lookup, addfields, sort
         DocOperator::Scan { .. }
@@ -1151,6 +1062,7 @@ fn f64_to_mem(val: f64) -> u64 {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 #[expect(clippy::float_cmp)]
 mod tests {
@@ -1216,10 +1128,7 @@ mod tests {
     fn pipeline_then_appends() {
         let p = DocPipeline::new("orders")
             .then(DocOperator::Match {
-                predicate: DocPredicate::Gt(
-                    FieldPath::new("amount"),
-                    DocValue::Int(100),
-                ),
+                predicate: DocPredicate::Gt(FieldPath::new("amount"), DocValue::Int(100)),
             })
             .then(DocOperator::Limit { count: 10 });
         assert_eq!(p.len(), 3);
@@ -1232,16 +1141,10 @@ mod tests {
     fn rule_coalesce_adjacent_matches() {
         let p = DocPipeline::new("c")
             .then(DocOperator::Match {
-                predicate: DocPredicate::Eq(
-                    FieldPath::new("a"),
-                    DocValue::Int(1),
-                ),
+                predicate: DocPredicate::Eq(FieldPath::new("a"), DocValue::Int(1)),
             })
             .then(DocOperator::Match {
-                predicate: DocPredicate::Eq(
-                    FieldPath::new("b"),
-                    DocValue::Int(2),
-                ),
+                predicate: DocPredicate::Eq(FieldPath::new("b"), DocValue::Int(2)),
             });
         let opt = p.optimize();
         // Should coalesce into one Match with And
@@ -1306,10 +1209,7 @@ mod tests {
                 preserve_null: false,
             })
             .then(DocOperator::Match {
-                predicate: DocPredicate::Eq(
-                    FieldPath::new("items.price"),
-                    DocValue::Int(50),
-                ),
+                predicate: DocPredicate::Eq(FieldPath::new("items.price"), DocValue::Int(50)),
             });
         let opt = p.optimize();
         // Match references "items" (prefix of "items.price"), should NOT push
@@ -1327,10 +1227,7 @@ mod tests {
                 output_as: "customer".into(),
             })
             .then(DocOperator::Match {
-                predicate: DocPredicate::Gt(
-                    FieldPath::new("amount"),
-                    DocValue::Int(100),
-                ),
+                predicate: DocPredicate::Gt(FieldPath::new("amount"), DocValue::Int(100)),
             });
         let opt = p.optimize();
         // Match on "amount" doesn't reference "customer", push before lookup
@@ -1348,9 +1245,7 @@ mod tests {
                 output_as: "customer".into(),
             })
             .then(DocOperator::Match {
-                predicate: DocPredicate::Exists(FieldPath::new(
-                    "customer",
-                )),
+                predicate: DocPredicate::Exists(FieldPath::new("customer")),
             });
         let opt = p.optimize();
         // Match references "customer" (the lookup output), should NOT push
@@ -1382,16 +1277,10 @@ mod tests {
     fn rule_no_push_match_referencing_added_field() {
         let p = DocPipeline::new("c")
             .then(DocOperator::AddFields {
-                fields: vec![(
-                    FieldPath::new("total"),
-                    DocExpr::Literal(DocValue::Int(0)),
-                )],
+                fields: vec![(FieldPath::new("total"), DocExpr::Literal(DocValue::Int(0)))],
             })
             .then(DocOperator::Match {
-                predicate: DocPredicate::Gt(
-                    FieldPath::new("total"),
-                    DocValue::Int(10),
-                ),
+                predicate: DocPredicate::Gt(FieldPath::new("total"), DocValue::Int(10)),
             });
         let opt = p.optimize();
         // Match references "total" which is added, should NOT push
@@ -1426,10 +1315,7 @@ mod tests {
                 keys: vec![(FieldPath::new("name"), true)],
             })
             .then(DocOperator::Project {
-                fields: vec![
-                    FieldPath::new("name"),
-                    FieldPath::new("age"),
-                ],
+                fields: vec![FieldPath::new("name"), FieldPath::new("age")],
                 inclusion: true,
             });
         let opt = p.optimize();
@@ -1567,9 +1453,7 @@ mod tests {
             indexed_paths: vec![FieldPath::new("data.address.city")],
         };
         // Updating "data.address" changes the prefix of an indexed path
-        assert!(
-            !hot.is_hot_eligible(&FieldPath::new("data.address"))
-        );
+        assert!(!hot.is_hot_eligible(&FieldPath::new("data.address")));
     }
 
     #[test]
@@ -1605,10 +1489,7 @@ mod tests {
     fn match_cost_is_cpu_only() {
         let cost = estimate_stage_cost(
             &DocOperator::Match {
-                predicate: DocPredicate::Eq(
-                    FieldPath::new("x"),
-                    DocValue::Int(1),
-                ),
+                predicate: DocPredicate::Eq(FieldPath::new("x"), DocValue::Int(1)),
             },
             1000.0,
             512,
@@ -1631,17 +1512,9 @@ mod tests {
 
     #[test]
     fn limit_cost_bounded() {
-        let cost = estimate_stage_cost(
-            &DocOperator::Limit { count: 10 },
-            1_000_000.0,
-            256,
-        );
+        let cost = estimate_stage_cost(&DocOperator::Limit { count: 10 }, 1_000_000.0, 256);
         // Limit only processes min(input, count) rows
-        let large_cost = estimate_stage_cost(
-            &DocOperator::Limit { count: 10 },
-            10.0,
-            256,
-        );
+        let large_cost = estimate_stage_cost(&DocOperator::Limit { count: 10 }, 10.0, 256);
         assert!((cost.cpu - large_cost.cpu).abs() < f64::EPSILON);
     }
 
@@ -1651,10 +1524,7 @@ mod tests {
     fn pipeline_cost_accumulates() {
         let p = DocPipeline::new("users")
             .then(DocOperator::Match {
-                predicate: DocPredicate::Eq(
-                    FieldPath::new("active"),
-                    DocValue::Bool(true),
-                ),
+                predicate: DocPredicate::Eq(FieldPath::new("active"), DocValue::Bool(true)),
             })
             .then(DocOperator::Limit { count: 10 });
         let cost = estimate_pipeline_cost(&p, 100_000.0, 512);
@@ -1668,15 +1538,11 @@ mod tests {
                 keys: vec![(FieldPath::new("date"), false)],
             })
             .then(DocOperator::Match {
-                predicate: DocPredicate::Gt(
-                    FieldPath::new("amount"),
-                    DocValue::Int(100),
-                ),
+                predicate: DocPredicate::Gt(FieldPath::new("amount"), DocValue::Int(100)),
             });
         let original_cost = estimate_pipeline_cost(&p, 100_000.0, 256);
         let opt = p.optimize();
-        let optimized_cost =
-            estimate_pipeline_cost(&opt, 100_000.0, 256);
+        let optimized_cost = estimate_pipeline_cost(&opt, 100_000.0, 256);
         // Filtering before sort should reduce the sort cost
         assert!(optimized_cost.total() < original_cost.total());
     }
@@ -1685,10 +1551,7 @@ mod tests {
 
     #[test]
     fn predicate_fields_simple() {
-        let pred = DocPredicate::Eq(
-            FieldPath::new("name"),
-            DocValue::String("Alice".into()),
-        );
+        let pred = DocPredicate::Eq(FieldPath::new("name"), DocValue::String("Alice".into()));
         let fields = predicate_fields(&pred);
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].as_dotted(), "name");
@@ -1706,9 +1569,7 @@ mod tests {
 
     #[test]
     fn predicate_fields_not() {
-        let pred = DocPredicate::Not(Box::new(DocPredicate::Exists(
-            FieldPath::new("deleted"),
-        )));
+        let pred = DocPredicate::Not(Box::new(DocPredicate::Exists(FieldPath::new("deleted"))));
         let fields = predicate_fields(&pred);
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].as_dotted(), "deleted");
@@ -1729,10 +1590,7 @@ mod tests {
 
     #[test]
     fn predicate_references_only_check() {
-        let pred = DocPredicate::Eq(
-            FieldPath::new("x"),
-            DocValue::Int(1),
-        );
+        let pred = DocPredicate::Eq(FieldPath::new("x"), DocValue::Int(1));
         let x_path = FieldPath::new("x");
         let allowed = vec![&x_path];
         assert!(predicate_references_only(&pred, &allowed));
@@ -1747,16 +1605,12 @@ mod tests {
     #[test]
     fn doc_predicate_serialize_roundtrip() {
         let pred = DocPredicate::And(vec![
-            DocPredicate::Eq(
-                FieldPath::new("status"),
-                DocValue::String("active".into()),
-            ),
+            DocPredicate::Eq(FieldPath::new("status"), DocValue::String("active".into())),
             DocPredicate::Gt(FieldPath::new("age"), DocValue::Int(18)),
         ]);
-        let json = serde_json::to_string(&pred)
-            .expect("serialization should succeed");
-        let deser: DocPredicate = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&pred).expect("serialization should succeed");
+        let deser: DocPredicate =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(pred, deser);
     }
 
@@ -1764,16 +1618,12 @@ mod tests {
     fn doc_pipeline_serialize_roundtrip() {
         let p = DocPipeline::new("users")
             .then(DocOperator::Match {
-                predicate: DocPredicate::Eq(
-                    FieldPath::new("active"),
-                    DocValue::Bool(true),
-                ),
+                predicate: DocPredicate::Eq(FieldPath::new("active"), DocValue::Bool(true)),
             })
             .then(DocOperator::Limit { count: 10 });
-        let json = serde_json::to_string(&p)
-            .expect("serialization should succeed");
-        let deser: DocPipeline = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&p).expect("serialization should succeed");
+        let deser: DocPipeline =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(p, deser);
     }
 
@@ -1785,10 +1635,8 @@ mod tests {
             toast_fraction: 0.3,
             strategy: ToastStrategy::Extended,
         };
-        let json = serde_json::to_string(&info)
-            .expect("serialization should succeed");
-        let deser: ToastInfo = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&info).expect("serialization should succeed");
+        let deser: ToastInfo = serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(info, deser);
     }
 
@@ -1799,10 +1647,9 @@ mod tests {
             is_indexed: true,
             indexed_paths: vec![FieldPath::new("data.status")],
         };
-        let json = serde_json::to_string(&hot)
-            .expect("serialization should succeed");
-        let deser: HotEligibility = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&hot).expect("serialization should succeed");
+        let deser: HotEligibility =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(hot, deser);
     }
 
@@ -1812,10 +1659,7 @@ mod tests {
     fn output_count_match_reduces() {
         let count = estimate_output_count(
             &DocOperator::Match {
-                predicate: DocPredicate::Eq(
-                    FieldPath::new("x"),
-                    DocValue::Int(1),
-                ),
+                predicate: DocPredicate::Eq(FieldPath::new("x"), DocValue::Int(1)),
             },
             1000.0,
         );
@@ -1836,30 +1680,19 @@ mod tests {
 
     #[test]
     fn output_count_limit_caps() {
-        let count = estimate_output_count(
-            &DocOperator::Limit { count: 10 },
-            1000.0,
-        );
+        let count = estimate_output_count(&DocOperator::Limit { count: 10 }, 1000.0);
         assert_eq!(count, 10.0);
     }
 
     #[test]
     fn output_count_skip_reduces() {
-        let count = estimate_output_count(
-            &DocOperator::Skip { count: 50 },
-            100.0,
-        );
+        let count = estimate_output_count(&DocOperator::Skip { count: 50 }, 100.0);
         assert_eq!(count, 50.0);
     }
 
     #[test]
     fn output_count_count_is_one() {
-        let count = estimate_output_count(
-            &DocOperator::Count {
-                field: "n".into(),
-            },
-            1000.0,
-        );
+        let count = estimate_output_count(&DocOperator::Count { field: "n".into() }, 1000.0);
         assert_eq!(count, 1.0);
     }
 
@@ -1881,10 +1714,7 @@ mod tests {
     fn project_cost_is_cpu_only() {
         let cost = estimate_stage_cost(
             &DocOperator::Project {
-                fields: vec![
-                    FieldPath::new("name"),
-                    FieldPath::new("age"),
-                ],
+                fields: vec![FieldPath::new("name"), FieldPath::new("age")],
                 inclusion: true,
             },
             1000.0,
@@ -1955,11 +1785,7 @@ mod tests {
 
     #[test]
     fn skip_cost_proportional_to_skip_count() {
-        let cost = estimate_stage_cost(
-            &DocOperator::Skip { count: 100 },
-            10000.0,
-            128,
-        );
+        let cost = estimate_stage_cost(&DocOperator::Skip { count: 100 }, 10000.0, 128);
         assert!(cost.cpu > 0.0);
     }
 
@@ -2030,10 +1856,7 @@ mod tests {
     fn output_count_addfields_passes_through() {
         let count = estimate_output_count(
             &DocOperator::AddFields {
-                fields: vec![(
-                    FieldPath::new("x"),
-                    DocExpr::Literal(DocValue::Int(1)),
-                )],
+                fields: vec![(FieldPath::new("x"), DocExpr::Literal(DocValue::Int(1)))],
             },
             200.0,
         );
@@ -2058,10 +1881,7 @@ mod tests {
 
     #[test]
     fn output_count_skip_clamped_at_zero() {
-        let count = estimate_output_count(
-            &DocOperator::Skip { count: 200 },
-            100.0,
-        );
+        let count = estimate_output_count(&DocOperator::Skip { count: 200 }, 100.0);
         assert_eq!(count, 0.0);
     }
 
@@ -2069,10 +1889,7 @@ mod tests {
 
     #[test]
     fn output_count_limit_passes_when_input_smaller() {
-        let count = estimate_output_count(
-            &DocOperator::Limit { count: 1000 },
-            50.0,
-        );
+        let count = estimate_output_count(&DocOperator::Limit { count: 1000 }, 50.0);
         assert_eq!(count, 50.0);
     }
 

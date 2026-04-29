@@ -210,8 +210,10 @@ fn test_join_graph_enabled_config() {
     assert!(result.is_ok());
 
     // Test with join graph disabled
-    let mut config = OptimizerConfig::default();
-    config.use_join_graph_filtering = false;
+    let config = OptimizerConfig {
+        use_join_graph_filtering: false,
+        ..OptimizerConfig::default()
+    };
 
     let mut optimizer_disabled = Optimizer::with_config(config);
     let mut stats = Statistics::new(10000.0);

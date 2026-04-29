@@ -11,9 +11,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 /// Unique identifier for a node in the cluster.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u32);
 
 impl fmt::Display for NodeId {
@@ -36,10 +34,7 @@ pub struct Location {
 impl Location {
     /// Create a new location.
     #[must_use]
-    pub fn new(
-        region: impl Into<String>,
-        datacenter: impl Into<String>,
-    ) -> Self {
+    pub fn new(region: impl Into<String>, datacenter: impl Into<String>) -> Self {
         Self {
             region: region.into(),
             datacenter: datacenter.into(),
@@ -63,9 +58,7 @@ impl Location {
 }
 
 /// Classification of network link by physical topology.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LinkType {
     /// Same rack (10-100 Gbps, <1us latency).
     IntraRack,
@@ -84,11 +77,11 @@ impl LinkType {
     #[must_use]
     pub fn default_bandwidth(&self) -> u64 {
         match self {
-            Self::IntraRack => 12_500_000_000,        // 100 Gbps
-            Self::IntraDatacenter => 1_250_000_000,    // 10 Gbps
-            Self::CrossDatacenter => 125_000_000,      // 1 Gbps
-            Self::CrossRegion => 12_500_000,           // 100 Mbps
-            Self::Internet => 6_250_000,               // 50 Mbps
+            Self::IntraRack => 12_500_000_000,      // 100 Gbps
+            Self::IntraDatacenter => 1_250_000_000, // 10 Gbps
+            Self::CrossDatacenter => 125_000_000,   // 1 Gbps
+            Self::CrossRegion => 12_500_000,        // 100 Mbps
+            Self::Internet => 6_250_000,            // 50 Mbps
         }
     }
 
@@ -98,9 +91,9 @@ impl LinkType {
         match self {
             Self::IntraRack => 1,
             Self::IntraDatacenter => 5,
-            Self::CrossDatacenter => 5_000,      // 5ms
-            Self::CrossRegion => 100_000,        // 100ms
-            Self::Internet => 150_000,           // 150ms
+            Self::CrossDatacenter => 5_000, // 5ms
+            Self::CrossRegion => 100_000,   // 100ms
+            Self::Internet => 150_000,      // 150ms
         }
     }
 
@@ -109,9 +102,9 @@ impl LinkType {
     pub fn default_cost_per_gb(&self) -> f64 {
         match self {
             Self::IntraRack | Self::IntraDatacenter => 0.0,
-            Self::CrossDatacenter => 0.01,    // AWS cross-AZ
-            Self::CrossRegion => 0.02,        // AWS cross-region
-            Self::Internet => 0.09,           // AWS internet egress
+            Self::CrossDatacenter => 0.01, // AWS cross-AZ
+            Self::CrossRegion => 0.02,     // AWS cross-region
+            Self::Internet => 0.09,        // AWS internet egress
         }
     }
 }
@@ -144,12 +137,7 @@ pub struct NetworkLink {
 impl NetworkLink {
     /// Create a new network link.
     #[must_use]
-    pub fn new(
-        bandwidth: u64,
-        latency_us: u64,
-        cost_per_gb: f64,
-        link_type: LinkType,
-    ) -> Self {
+    pub fn new(bandwidth: u64, latency_us: u64, cost_per_gb: f64, link_type: LinkType) -> Self {
         Self {
             bandwidth,
             latency_us,
@@ -173,9 +161,7 @@ impl NetworkLink {
     #[must_use]
     pub fn transfer_time(&self, bytes: u64) -> Duration {
         let latency = Duration::from_micros(self.latency_us);
-        let transfer = Duration::from_secs_f64(
-            bytes as f64 / self.bandwidth as f64,
-        );
+        let transfer = Duration::from_secs_f64(bytes as f64 / self.bandwidth as f64);
         latency + transfer
     }
 
@@ -250,45 +236,23 @@ mod link_map_serde {
         impl<'de> Visitor<'de> for LinkMapVisitor {
             type Value = HashMap<(NodeId, NodeId), NetworkLink>;
 
-            fn expecting(
-                &self,
-                f: &mut fmt::Formatter<'_>,
-            ) -> fmt::Result {
-                f.write_str(
-                    "a map with keys like \"0->1\"",
-                )
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a map with keys like \"0->1\"")
             }
 
-            fn visit_map<M>(
-                self,
-                mut access: M,
-            ) -> Result<Self::Value, M::Error>
+            fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
             where
                 M: MapAccess<'de>,
             {
-                let mut map = HashMap::with_capacity(
-                    access.size_hint().unwrap_or(0),
-                );
-                while let Some((key, value)) =
-                    access.next_entry::<String, NetworkLink>()?
-                {
-                    let parts: Vec<&str> =
-                        key.split("->").collect();
+                let mut map = HashMap::with_capacity(access.size_hint().unwrap_or(0));
+                while let Some((key, value)) = access.next_entry::<String, NetworkLink>()? {
+                    let parts: Vec<&str> = key.split("->").collect();
                     if parts.len() != 2 {
-                        return Err(de::Error::custom(
-                            format!("invalid link key: {key}"),
-                        ));
+                        return Err(de::Error::custom(format!("invalid link key: {key}")));
                     }
-                    let from: u32 = parts[0]
-                        .parse()
-                        .map_err(de::Error::custom)?;
-                    let to: u32 = parts[1]
-                        .parse()
-                        .map_err(de::Error::custom)?;
-                    map.insert(
-                        (NodeId(from), NodeId(to)),
-                        value,
-                    );
+                    let from: u32 = parts[0].parse().map_err(de::Error::custom)?;
+                    let to: u32 = parts[1].parse().map_err(de::Error::custom)?;
+                    map.insert((NodeId(from), NodeId(to)), value);
                 }
                 Ok(map)
             }
@@ -333,11 +297,7 @@ impl NetworkTopology {
     }
 
     /// Add a node to the topology.
-    pub fn add_node(
-        &mut self,
-        id: NodeId,
-        location: Location,
-    ) {
+    pub fn add_node(&mut self, id: NodeId, location: Location) {
         if !self.nodes.contains(&id) {
             self.nodes.push(id);
         }
@@ -345,41 +305,25 @@ impl NetworkTopology {
     }
 
     /// Add a bidirectional link between two nodes.
-    pub fn add_link(
-        &mut self,
-        a: NodeId,
-        b: NodeId,
-        link: NetworkLink,
-    ) {
+    pub fn add_link(&mut self, a: NodeId, b: NodeId, link: NetworkLink) {
         self.links.insert((a, b), link.clone());
         self.links.insert((b, a), link);
     }
 
     /// Add a directional link from one node to another.
-    pub fn add_directional_link(
-        &mut self,
-        from: NodeId,
-        to: NodeId,
-        link: NetworkLink,
-    ) {
+    pub fn add_directional_link(&mut self, from: NodeId, to: NodeId, link: NetworkLink) {
         self.links.insert((from, to), link);
     }
 
     /// Get the link between two nodes, falling back to the default.
     #[must_use]
     pub fn get_link(&self, from: NodeId, to: NodeId) -> &NetworkLink {
-        self.links
-            .get(&(from, to))
-            .unwrap_or(&self.default_link)
+        self.links.get(&(from, to)).unwrap_or(&self.default_link)
     }
 
     /// Get the link between two nodes without fallback.
     #[must_use]
-    pub fn get_explicit_link(
-        &self,
-        from: NodeId,
-        to: NodeId,
-    ) -> Option<&NetworkLink> {
+    pub fn get_explicit_link(&self, from: NodeId, to: NodeId) -> Option<&NetworkLink> {
         self.links.get(&(from, to))
     }
 
@@ -403,12 +347,7 @@ impl NetworkTopology {
 
     /// Estimate transfer time for data between two nodes.
     #[must_use]
-    pub fn transfer_time(
-        &self,
-        from: NodeId,
-        to: NodeId,
-        bytes: u64,
-    ) -> Duration {
+    pub fn transfer_time(&self, from: NodeId, to: NodeId, bytes: u64) -> Duration {
         if from == to {
             return Duration::ZERO;
         }
@@ -417,12 +356,7 @@ impl NetworkTopology {
 
     /// Estimate cloud billing cost for data transfer between nodes.
     #[must_use]
-    pub fn transfer_cost(
-        &self,
-        from: NodeId,
-        to: NodeId,
-        bytes: u64,
-    ) -> f64 {
+    pub fn transfer_cost(&self, from: NodeId, to: NodeId, bytes: u64) -> f64 {
         if from == to {
             return 0.0;
         }
@@ -452,9 +386,7 @@ impl NetworkTopology {
     pub fn same_rack(&self, a: NodeId, b: NodeId) -> bool {
         match (self.locations.get(&a), self.locations.get(&b)) {
             (Some(la), Some(lb)) => {
-                la.datacenter == lb.datacenter
-                    && la.rack.is_some()
-                    && la.rack == lb.rack
+                la.datacenter == lb.datacenter && la.rack.is_some() && la.rack == lb.rack
             }
             _ => false,
         }
@@ -462,11 +394,7 @@ impl NetworkTopology {
 
     /// Infer the link type between two nodes from their locations.
     #[must_use]
-    pub fn infer_link_type(
-        &self,
-        a: NodeId,
-        b: NodeId,
-    ) -> LinkType {
+    pub fn infer_link_type(&self, a: NodeId, b: NodeId) -> LinkType {
         if a == b {
             return LinkType::IntraRack;
         }
@@ -537,35 +465,20 @@ impl NetworkTopology {
     /// Find the cheapest (lowest billing cost) link between two nodes.
     /// Returns the direct link cost; does not consider multi-hop routing.
     #[must_use]
-    pub fn cheapest_cost(
-        &self,
-        from: NodeId,
-        to: NodeId,
-        bytes: u64,
-    ) -> f64 {
+    pub fn cheapest_cost(&self, from: NodeId, to: NodeId, bytes: u64) -> f64 {
         self.transfer_cost(from, to, bytes)
     }
 
     /// Find the fastest (lowest latency+transfer) link between nodes.
     #[must_use]
-    pub fn fastest_time(
-        &self,
-        from: NodeId,
-        to: NodeId,
-        bytes: u64,
-    ) -> Duration {
+    pub fn fastest_time(&self, from: NodeId, to: NodeId, bytes: u64) -> Duration {
         self.transfer_time(from, to, bytes)
     }
 
     /// Compute the total cost to broadcast data from one node to all
     /// specified targets.
     #[must_use]
-    pub fn broadcast_cost(
-        &self,
-        source: NodeId,
-        targets: &[NodeId],
-        bytes: u64,
-    ) -> BroadcastCost {
+    pub fn broadcast_cost(&self, source: NodeId, targets: &[NodeId], bytes: u64) -> BroadcastCost {
         let mut total_time = Duration::ZERO;
         let mut max_time = Duration::ZERO;
         let mut total_billing = 0.0;
@@ -611,8 +524,12 @@ pub struct BroadcastCost {
     pub target_count: usize,
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "Exact float equality needed for deterministic network cost tests"
+)]
 mod tests {
     use super::*;
 
@@ -620,19 +537,9 @@ mod tests {
         let mut topo = NetworkTopology::new();
         let n0 = NodeId(0);
         let n1 = NodeId(1);
-        topo.add_node(
-            n0,
-            Location::with_rack("us-east-1", "us-east-1a", "rack-1"),
-        );
-        topo.add_node(
-            n1,
-            Location::with_rack("us-east-1", "us-east-1a", "rack-2"),
-        );
-        topo.add_link(
-            n0,
-            n1,
-            NetworkLink::from_type(LinkType::IntraDatacenter),
-        );
+        topo.add_node(n0, Location::with_rack("us-east-1", "us-east-1a", "rack-1"));
+        topo.add_node(n1, Location::with_rack("us-east-1", "us-east-1a", "rack-2"));
+        topo.add_link(n0, n1, NetworkLink::from_type(LinkType::IntraDatacenter));
         topo
     }
 
@@ -640,19 +547,9 @@ mod tests {
         let mut topo = NetworkTopology::new();
         let n0 = NodeId(0);
         let n1 = NodeId(1);
-        topo.add_node(
-            n0,
-            Location::new("us-east-1", "us-east-1a"),
-        );
-        topo.add_node(
-            n1,
-            Location::new("eu-west-1", "eu-west-1a"),
-        );
-        topo.add_link(
-            n0,
-            n1,
-            NetworkLink::from_type(LinkType::CrossRegion),
-        );
+        topo.add_node(n0, Location::new("us-east-1", "us-east-1a"));
+        topo.add_node(n1, Location::new("eu-west-1", "eu-west-1a"));
+        topo.add_link(n0, n1, NetworkLink::from_type(LinkType::CrossRegion));
         topo
     }
 
@@ -671,8 +568,7 @@ mod tests {
 
     #[test]
     fn location_with_rack() {
-        let loc =
-            Location::with_rack("us-east-1", "us-east-1a", "rack-1");
+        let loc = Location::with_rack("us-east-1", "us-east-1a", "rack-1");
         assert_eq!(loc.rack.as_deref(), Some("rack-1"));
     }
 
@@ -695,10 +591,7 @@ mod tests {
     #[test]
     fn link_type_display() {
         assert_eq!(format!("{}", LinkType::IntraRack), "intra-rack");
-        assert_eq!(
-            format!("{}", LinkType::CrossDatacenter),
-            "cross-datacenter"
-        );
+        assert_eq!(format!("{}", LinkType::CrossDatacenter), "cross-datacenter");
     }
 
     #[test]
@@ -762,10 +655,7 @@ mod tests {
     #[test]
     fn topology_add_node() {
         let mut topo = NetworkTopology::new();
-        topo.add_node(
-            NodeId(0),
-            Location::new("us-east-1", "us-east-1a"),
-        );
+        topo.add_node(NodeId(0), Location::new("us-east-1", "us-east-1a"));
         assert_eq!(topo.node_count(), 1);
     }
 
@@ -803,12 +693,8 @@ mod tests {
     #[test]
     fn topology_get_explicit_link() {
         let topo = two_node_topology();
-        assert!(
-            topo.get_explicit_link(NodeId(0), NodeId(1)).is_some()
-        );
-        assert!(
-            topo.get_explicit_link(NodeId(0), NodeId(99)).is_none()
-        );
+        assert!(topo.get_explicit_link(NodeId(0), NodeId(1)).is_some());
+        assert!(topo.get_explicit_link(NodeId(0), NodeId(99)).is_none());
     }
 
     #[test]
@@ -821,8 +707,7 @@ mod tests {
     #[test]
     fn topology_transfer_time_different_nodes() {
         let topo = two_node_topology();
-        let time =
-            topo.transfer_time(NodeId(0), NodeId(1), 1_000_000);
+        let time = topo.transfer_time(NodeId(0), NodeId(1), 1_000_000);
         assert!(time > Duration::ZERO);
     }
 
@@ -870,14 +755,8 @@ mod tests {
         let mut topo = NetworkTopology::new();
         let n0 = NodeId(0);
         let n1 = NodeId(1);
-        topo.add_node(
-            n0,
-            Location::with_rack("us-east-1", "us-east-1a", "rack-1"),
-        );
-        topo.add_node(
-            n1,
-            Location::with_rack("us-east-1", "us-east-1a", "rack-1"),
-        );
+        topo.add_node(n0, Location::with_rack("us-east-1", "us-east-1a", "rack-1"));
+        topo.add_node(n1, Location::with_rack("us-east-1", "us-east-1a", "rack-1"));
         assert!(topo.same_rack(n0, n1));
     }
 
@@ -890,14 +769,8 @@ mod tests {
     #[test]
     fn topology_same_rack_requires_rack_field() {
         let mut topo = NetworkTopology::new();
-        topo.add_node(
-            NodeId(0),
-            Location::new("us-east-1", "us-east-1a"),
-        );
-        topo.add_node(
-            NodeId(1),
-            Location::new("us-east-1", "us-east-1a"),
-        );
+        topo.add_node(NodeId(0), Location::new("us-east-1", "us-east-1a"));
+        topo.add_node(NodeId(1), Location::new("us-east-1", "us-east-1a"));
         // No rack info, so same_rack is false
         assert!(!topo.same_rack(NodeId(0), NodeId(1)));
     }
@@ -905,14 +778,8 @@ mod tests {
     #[test]
     fn topology_infer_link_type_same_rack() {
         let mut topo = NetworkTopology::new();
-        topo.add_node(
-            NodeId(0),
-            Location::with_rack("us-east-1", "dc1", "r1"),
-        );
-        topo.add_node(
-            NodeId(1),
-            Location::with_rack("us-east-1", "dc1", "r1"),
-        );
+        topo.add_node(NodeId(0), Location::with_rack("us-east-1", "dc1", "r1"));
+        topo.add_node(NodeId(1), Location::with_rack("us-east-1", "dc1", "r1"));
         assert_eq!(
             topo.infer_link_type(NodeId(0), NodeId(1)),
             LinkType::IntraRack
@@ -931,14 +798,8 @@ mod tests {
     #[test]
     fn topology_infer_link_type_cross_dc() {
         let mut topo = NetworkTopology::new();
-        topo.add_node(
-            NodeId(0),
-            Location::new("us-east-1", "us-east-1a"),
-        );
-        topo.add_node(
-            NodeId(1),
-            Location::new("us-east-1", "us-east-1b"),
-        );
+        topo.add_node(NodeId(0), Location::new("us-east-1", "us-east-1a"));
+        topo.add_node(NodeId(1), Location::new("us-east-1", "us-east-1b"));
         assert_eq!(
             topo.infer_link_type(NodeId(0), NodeId(1)),
             LinkType::CrossDatacenter
@@ -1003,11 +864,7 @@ mod tests {
     #[test]
     fn topology_broadcast_cost_single_target() {
         let topo = two_node_topology();
-        let cost = topo.broadcast_cost(
-            NodeId(0),
-            &[NodeId(1)],
-            1_000_000,
-        );
+        let cost = topo.broadcast_cost(NodeId(0), &[NodeId(1)], 1_000_000);
         assert_eq!(cost.target_count, 1);
         assert!(cost.max_time > Duration::ZERO);
     }
@@ -1015,11 +872,7 @@ mod tests {
     #[test]
     fn topology_broadcast_cost_includes_self() {
         let topo = two_node_topology();
-        let cost = topo.broadcast_cost(
-            NodeId(0),
-            &[NodeId(0), NodeId(1)],
-            1_000_000,
-        );
+        let cost = topo.broadcast_cost(NodeId(0), &[NodeId(0), NodeId(1)], 1_000_000);
         // Self-transfer should not add time
         assert_eq!(cost.target_count, 2);
     }
@@ -1028,10 +881,7 @@ mod tests {
     fn topology_broadcast_cost_multiple_targets() {
         let mut topo = NetworkTopology::new();
         for i in 0..4 {
-            topo.add_node(
-                NodeId(i),
-                Location::new("us-east-1", "us-east-1a"),
-            );
+            topo.add_node(NodeId(i), Location::new("us-east-1", "us-east-1a"));
         }
         for i in 1..4 {
             topo.add_link(
@@ -1040,10 +890,8 @@ mod tests {
                 NetworkLink::from_type(LinkType::IntraDatacenter),
             );
         }
-        let targets: Vec<NodeId> =
-            (1..4).map(NodeId).collect();
-        let cost =
-            topo.broadcast_cost(NodeId(0), &targets, 1_000_000);
+        let targets: Vec<NodeId> = (1..4).map(NodeId).collect();
+        let cost = topo.broadcast_cost(NodeId(0), &targets, 1_000_000);
         assert_eq!(cost.target_count, 3);
         assert!(cost.total_time > cost.max_time);
     }
@@ -1051,42 +899,22 @@ mod tests {
     #[test]
     fn topology_directional_link() {
         let mut topo = NetworkTopology::new();
-        topo.add_node(
-            NodeId(0),
-            Location::new("us-east-1", "dc1"),
-        );
-        topo.add_node(
-            NodeId(1),
-            Location::new("us-east-1", "dc1"),
-        );
+        topo.add_node(NodeId(0), Location::new("us-east-1", "dc1"));
+        topo.add_node(NodeId(1), Location::new("us-east-1", "dc1"));
         topo.add_directional_link(
             NodeId(0),
             NodeId(1),
-            NetworkLink::new(
-                1_000_000_000,
-                10,
-                0.01,
-                LinkType::IntraDatacenter,
-            ),
+            NetworkLink::new(1_000_000_000, 10, 0.01, LinkType::IntraDatacenter),
         );
         // Forward link exists
-        assert!(
-            topo.get_explicit_link(NodeId(0), NodeId(1)).is_some()
-        );
+        assert!(topo.get_explicit_link(NodeId(0), NodeId(1)).is_some());
         // Reverse link does not
-        assert!(
-            topo.get_explicit_link(NodeId(1), NodeId(0)).is_none()
-        );
+        assert!(topo.get_explicit_link(NodeId(1), NodeId(0)).is_none());
     }
 
     #[test]
     fn topology_with_custom_default_link() {
-        let custom = NetworkLink::new(
-            500_000_000,
-            50,
-            0.05,
-            LinkType::CrossDatacenter,
-        );
+        let custom = NetworkLink::new(500_000_000, 50, 0.05, LinkType::CrossDatacenter);
         let topo = NetworkTopology::with_default_link(custom);
         let link = topo.get_link(NodeId(0), NodeId(99));
         assert_eq!(link.link_type, LinkType::CrossDatacenter);
@@ -1114,8 +942,7 @@ mod tests {
     fn link_type_bandwidth_ordering() {
         // Faster links should have higher bandwidth
         assert!(
-            LinkType::IntraRack.default_bandwidth()
-                > LinkType::IntraDatacenter.default_bandwidth()
+            LinkType::IntraRack.default_bandwidth() > LinkType::IntraDatacenter.default_bandwidth()
         );
         assert!(
             LinkType::IntraDatacenter.default_bandwidth()
@@ -1125,10 +952,7 @@ mod tests {
             LinkType::CrossDatacenter.default_bandwidth()
                 > LinkType::CrossRegion.default_bandwidth()
         );
-        assert!(
-            LinkType::CrossRegion.default_bandwidth()
-                > LinkType::Internet.default_bandwidth()
-        );
+        assert!(LinkType::CrossRegion.default_bandwidth() > LinkType::Internet.default_bandwidth());
     }
 
     #[test]
@@ -1147,8 +971,7 @@ mod tests {
                 < LinkType::CrossRegion.default_latency_us()
         );
         assert!(
-            LinkType::CrossRegion.default_latency_us()
-                < LinkType::Internet.default_latency_us()
+            LinkType::CrossRegion.default_latency_us() < LinkType::Internet.default_latency_us()
         );
     }
 
@@ -1168,8 +991,7 @@ mod tests {
                 <= LinkType::CrossRegion.default_cost_per_gb()
         );
         assert!(
-            LinkType::CrossRegion.default_cost_per_gb()
-                <= LinkType::Internet.default_cost_per_gb()
+            LinkType::CrossRegion.default_cost_per_gb() <= LinkType::Internet.default_cost_per_gb()
         );
     }
 
@@ -1203,12 +1025,10 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_link() {
-        let link =
-            NetworkLink::from_type(LinkType::CrossDatacenter);
-        let json = serde_json::to_string(&link)
-            .expect("serialization should succeed");
-        let deser: NetworkLink = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let link = NetworkLink::from_type(LinkType::CrossDatacenter);
+        let json = serde_json::to_string(&link).expect("serialization should succeed");
+        let deser: NetworkLink =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(link.bandwidth, deser.bandwidth);
         assert_eq!(link.latency_us, deser.latency_us);
         assert_eq!(link.link_type, deser.link_type);
@@ -1217,10 +1037,9 @@ mod tests {
     #[test]
     fn serialize_roundtrip_topology() {
         let topo = two_node_topology();
-        let json = serde_json::to_string(&topo)
-            .expect("serialization should succeed");
-        let deser: NetworkTopology = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&topo).expect("serialization should succeed");
+        let deser: NetworkTopology =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deser.node_count(), 2);
         assert_eq!(deser.link_count(), 2);
     }

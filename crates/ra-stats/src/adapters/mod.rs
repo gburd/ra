@@ -32,36 +32,16 @@ pub struct MetricSample {
 /// Common interface for monitoring backends.
 pub trait MonitoringAdapter: std::fmt::Debug + Send {
     /// Push a single gauge value.
-    fn record_gauge(
-        &mut self,
-        name: &str,
-        value: f64,
-        tags: &[(&str, &str)],
-    );
+    fn record_gauge(&mut self, name: &str, value: f64, tags: &[(&str, &str)]);
 
     /// Push a histogram observation.
-    fn record_histogram(
-        &mut self,
-        name: &str,
-        value: f64,
-        tags: &[(&str, &str)],
-    );
+    fn record_histogram(&mut self, name: &str, value: f64, tags: &[(&str, &str)]);
 
     /// Push a counter increment.
-    fn record_counter(
-        &mut self,
-        name: &str,
-        delta: u64,
-        tags: &[(&str, &str)],
-    );
+    fn record_counter(&mut self, name: &str, delta: u64, tags: &[(&str, &str)]);
 
     /// Push a full percentile summary (p50/p75/p90/p99).
-    fn record_summary(
-        &mut self,
-        name: &str,
-        summary: &PercentileSummary,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_summary(&mut self, name: &str, summary: &PercentileSummary, tags: &[(&str, &str)]) {
         let tag_owned: Vec<(String, String)> = tags
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
@@ -71,26 +51,10 @@ pub trait MonitoringAdapter: std::fmt::Debug + Send {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
 
-        self.record_gauge(
-            &format!("{name}.p50"),
-            summary.p50,
-            &tag_refs,
-        );
-        self.record_gauge(
-            &format!("{name}.p75"),
-            summary.p75,
-            &tag_refs,
-        );
-        self.record_gauge(
-            &format!("{name}.p90"),
-            summary.p90,
-            &tag_refs,
-        );
-        self.record_gauge(
-            &format!("{name}.p99"),
-            summary.p99,
-            &tag_refs,
-        );
+        self.record_gauge(&format!("{name}.p50"), summary.p50, &tag_refs);
+        self.record_gauge(&format!("{name}.p75"), summary.p75, &tag_refs);
+        self.record_gauge(&format!("{name}.p90"), summary.p90, &tag_refs);
+        self.record_gauge(&format!("{name}.p99"), summary.p99, &tag_refs);
     }
 
     /// Flush any buffered data to the backend.
@@ -105,29 +69,11 @@ pub trait MonitoringAdapter: std::fmt::Debug + Send {
 pub struct NullAdapter;
 
 impl MonitoringAdapter for NullAdapter {
-    fn record_gauge(
-        &mut self,
-        _name: &str,
-        _value: f64,
-        _tags: &[(&str, &str)],
-    ) {
-    }
+    fn record_gauge(&mut self, _name: &str, _value: f64, _tags: &[(&str, &str)]) {}
 
-    fn record_histogram(
-        &mut self,
-        _name: &str,
-        _value: f64,
-        _tags: &[(&str, &str)],
-    ) {
-    }
+    fn record_histogram(&mut self, _name: &str, _value: f64, _tags: &[(&str, &str)]) {}
 
-    fn record_counter(
-        &mut self,
-        _name: &str,
-        _delta: u64,
-        _tags: &[(&str, &str)],
-    ) {
-    }
+    fn record_counter(&mut self, _name: &str, _delta: u64, _tags: &[(&str, &str)]) {}
 
     fn flush(&mut self) {}
 

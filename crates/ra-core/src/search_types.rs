@@ -110,6 +110,7 @@ impl RankingAlgorithm {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,18 +132,12 @@ mod tests {
 
     #[test]
     fn fulltext_parser_defaults() {
-        assert_eq!(
-            FullTextParser::default_parser(),
-            FullTextParser::Standard
-        );
+        assert_eq!(FullTextParser::default_parser(), FullTextParser::Standard);
     }
 
     #[test]
     fn ranking_algorithm_defaults() {
-        assert_eq!(
-            RankingAlgorithm::default_ranking(),
-            RankingAlgorithm::BM25
-        );
+        assert_eq!(RankingAlgorithm::default_ranking(), RankingAlgorithm::BM25);
         assert!(RankingAlgorithm::Proximity.uses_proximity());
         assert!(!RankingAlgorithm::TermFrequency.uses_proximity());
     }
@@ -160,8 +155,7 @@ mod tests {
     fn serialize_distance_metric() {
         let metric = DistanceMetric::Cosine;
         let json = serde_json::to_string(&metric).expect("serialize");
-        let back: DistanceMetric =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: DistanceMetric = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(metric, back);
     }
 
@@ -169,8 +163,7 @@ mod tests {
     fn serialize_fulltext_parser() {
         let parser = FullTextParser::NGram { size: 3 };
         let json = serde_json::to_string(&parser).expect("serialize");
-        let back: FullTextParser =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: FullTextParser = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parser, back);
     }
 
@@ -178,8 +171,7 @@ mod tests {
     fn serialize_ranking_algorithm() {
         let algo = RankingAlgorithm::BM25;
         let json = serde_json::to_string(&algo).expect("serialize");
-        let back: RankingAlgorithm =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: RankingAlgorithm = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(algo, back);
     }
 

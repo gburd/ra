@@ -1,4 +1,4 @@
-//! Main RaParser facade for profile-based SQL parsing.
+//! Main `RaParser` facade for profile-based SQL parsing.
 //!
 //! The `RaParser` provides a unified interface for parsing SQL queries with
 //! automatic dialect detection and profile-based grammar extensions.
@@ -42,9 +42,9 @@ pub enum ParserError {
 impl fmt::Display for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParserError::InvalidProfile(msg) => write!(f, "Invalid profile: {}", msg),
-            ParserError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            ParserError::UnsupportedFeature(msg) => write!(f, "Unsupported feature: {}", msg),
+            ParserError::InvalidProfile(msg) => write!(f, "Invalid profile: {msg}"),
+            ParserError::ParseError(msg) => write!(f, "Parse error: {msg}"),
+            ParserError::UnsupportedFeature(msg) => write!(f, "Unsupported feature: {msg}"),
         }
     }
 }
@@ -59,6 +59,7 @@ impl RaParser {
     ///
     /// This is the most permissive profile and will attempt to parse SQL from
     /// any vendor or standard.
+    #[must_use]
     pub fn universal() -> Self {
         Self {
             profile: ParserProfile::universal(),
@@ -92,6 +93,10 @@ impl RaParser {
     /// # Returns
     ///
     /// Returns a parser configured for the detected dialect with a confidence score.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ParserError::InvalidProfile` if dialect detection fails.
     pub fn auto_detect(sql: &str) -> Result<(Self, f64)> {
         let (profile, confidence) =
             ParserProfile::infer(sql).map_err(|e| ParserError::InvalidProfile(e.to_string()))?;
@@ -122,6 +127,10 @@ impl RaParser {
     /// This is a lower-level interface that returns the sqlparser AST directly,
     /// useful for tooling that needs to inspect or transform SQL before
     /// converting to relational algebra.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ParserError::ParseError` if the SQL contains syntax errors.
     pub fn parse_to_ast(&self, sql: &str) -> Result<Vec<Statement>> {
         use crate::parser::ProfileDialect;
         use sqlparser::parser::Parser;
@@ -132,11 +141,13 @@ impl RaParser {
     }
 
     /// Get the current profile being used by this parser.
+    #[must_use]
     pub fn profile(&self) -> &ParserProfile {
         &self.profile
     }
 }
 
+#[expect(clippy::unwrap_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,4 +1,4 @@
-//! Tests for TimescaleDB time-series optimization rules.
+//! Tests for `TimescaleDB` time-series optimization rules.
 
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
@@ -88,7 +88,7 @@ fn test_timescaledb_time_bucket_custom() {
 #[test]
 fn test_timescaledb_chunk_pruning_time_range() {
     let optimizer = create_optimizer();
-    let plan = filter(scan("hypertable"), lt_pred("time", 1640000000));
+    let plan = filter(scan("hypertable"), lt_pred("time", 1_640_000_000));
     assert!(optimizer.optimize(&plan).is_ok());
 }
 

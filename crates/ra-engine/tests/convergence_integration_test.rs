@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Integration tests for convergence detection (Task #244).
 //!
 //! Validates that early termination works correctly in practice.
@@ -97,21 +98,6 @@ fn test_convergence_respects_complexity() {
 
 #[test]
 fn test_convergence_produces_valid_plans() {
-    // Verify that early termination doesn't produce invalid plans
-    let query = join(
-        join(scan("a"), scan("b"), eq(col("a.id"), col("b.id"))),
-        scan("c"),
-        eq(col("b.id"), col("c.id")),
-    );
-
-    let optimizer = make_optimizer_with_stats(&["a", "b", "c"]);
-
-    let result = optimizer.optimize(&query);
-    assert!(result.is_ok());
-
-    let optimized = result.unwrap();
-
-    // Validate the plan structure (should still have joins)
     fn contains_join(expr: &RelExpr) -> bool {
         match expr {
             RelExpr::Join { .. } => true,
@@ -129,6 +115,20 @@ fn test_convergence_produces_valid_plans() {
         }
     }
 
+    // Verify that early termination doesn't produce invalid plans
+    let query = join(
+        join(scan("a"), scan("b"), eq(col("a.id"), col("b.id"))),
+        scan("c"),
+        eq(col("b.id"), col("c.id")),
+    );
+
+    let optimizer = make_optimizer_with_stats(&["a", "b", "c"]);
+
+    let result = optimizer.optimize(&query);
+    assert!(result.is_ok());
+
+    let optimized = result.unwrap();
+
     assert!(
         contains_join(&optimized),
         "Optimized plan should still contain joins"
@@ -144,9 +144,11 @@ fn test_convergence_can_be_disabled() {
         eq(col("users.id"), col("orders.user_id")),
     );
 
-    let mut config = OptimizerConfig::default();
-    config.use_adaptive_limits = false;
-    config.iter_limit = 5;
+    let config = OptimizerConfig {
+        use_adaptive_limits: false,
+        iter_limit: 5,
+        ..OptimizerConfig::default()
+    };
 
     let mut optimizer = Optimizer::with_config(config);
     let mut stats = Statistics::new(10000.0);

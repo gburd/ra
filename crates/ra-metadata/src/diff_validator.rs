@@ -583,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(clippy::expect_used, reason = "test code")]
     fn serialize_roundtrip() {
         let comparison = PlanComparison {
             agreements: vec![PlanAgreement {

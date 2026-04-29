@@ -67,7 +67,10 @@ impl PlanFingerprint {
 pub fn count_tables(plan: &RelExpr) -> usize {
     match plan {
         RelExpr::Scan { .. } | RelExpr::IndexScan { .. } => 1,
-        RelExpr::Join { left, right, .. } => count_tables(left) + count_tables(right),
+        RelExpr::Join { left, right, .. }
+        | RelExpr::Union { left, right, .. }
+        | RelExpr::Intersect { left, right, .. }
+        | RelExpr::Except { left, right, .. } => count_tables(left) + count_tables(right),
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
@@ -75,9 +78,6 @@ pub fn count_tables(plan: &RelExpr) -> usize {
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. } => count_tables(input),
-        RelExpr::Union { left, right, .. }
-        | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => count_tables(left) + count_tables(right),
         RelExpr::CTE {
             definition, body, ..
         } => count_tables(definition) + count_tables(body),
@@ -136,7 +136,6 @@ pub fn predicate_complexity(plan: &RelExpr) -> usize {
 /// Count the number of nodes in a scalar expression tree.
 fn expr_complexity(expr: &Expr) -> usize {
     match expr {
-        Expr::Column(_) | Expr::Const(_) => 1,
         Expr::BinOp { left, right, .. } => 1 + expr_complexity(left) + expr_complexity(right),
         Expr::UnaryOp { operand, .. } => 1 + expr_complexity(operand),
         Expr::Function { args, .. } => 1 + args.iter().map(expr_complexity).sum::<usize>(),

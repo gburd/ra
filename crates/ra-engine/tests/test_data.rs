@@ -2,6 +2,12 @@
 //!
 //! Provides utilities for generating synthetic documents, embeddings,
 //! queries, and expected results for testing hybrid search functionality.
+#![expect(
+    clippy::float_cmp,
+    clippy::unwrap_used,
+    reason = "test code"
+)]
+#![allow(dead_code)]
 
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -14,7 +20,6 @@ pub struct TestDocument {
     pub title: String,
     pub content: String,
     pub embedding: Vec<f64>,
-    #[allow(dead_code)]
     pub category: String,
 }
 
@@ -31,7 +36,6 @@ pub struct TestQuery {
 #[derive(Debug, Clone)]
 pub struct ExpectedResult {
     pub doc_id: usize,
-    #[allow(dead_code)]
     pub expected_rank_range: (usize, usize),
     pub min_score: f64,
 }
@@ -43,9 +47,10 @@ pub struct ExpectedResult {
 /// - Random titles and content from a vocabulary
 /// - Random embeddings in the specified dimension
 /// - Category labels for filtering
+#[must_use]
 pub fn generate_documents(count: usize, embedding_dim: usize, seed: u64) -> Vec<TestDocument> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let categories = vec![
+    let categories = [
         "technology",
         "science",
         "sports",
@@ -103,6 +108,7 @@ pub fn generate_documents(count: usize, embedding_dim: usize, seed: u64) -> Vec<
 }
 
 /// Generate a query with high FTS selectivity (rare terms).
+#[must_use]
 pub fn generate_high_fts_selectivity_query(embedding_dim: usize) -> TestQuery {
     TestQuery {
         text: "machine learning optimization neural network".to_string(),
@@ -113,6 +119,7 @@ pub fn generate_high_fts_selectivity_query(embedding_dim: usize) -> TestQuery {
 }
 
 /// Generate a query with high vector selectivity (precise embedding).
+#[must_use]
 pub fn generate_high_vector_selectivity_query(embedding_dim: usize) -> TestQuery {
     TestQuery {
         text: "data query search".to_string(),
@@ -123,6 +130,7 @@ pub fn generate_high_vector_selectivity_query(embedding_dim: usize) -> TestQuery
 }
 
 /// Generate a query with similar selectivities (balanced).
+#[must_use]
 pub fn generate_balanced_query(embedding_dim: usize) -> TestQuery {
     TestQuery {
         text: "search algorithm database".to_string(),
@@ -135,6 +143,7 @@ pub fn generate_balanced_query(embedding_dim: usize) -> TestQuery {
 }
 
 /// Generate queries with varying selectivity for testing strategy selection.
+#[must_use]
 pub fn generate_varied_queries(embedding_dim: usize) -> Vec<TestQuery> {
     vec![
         generate_high_fts_selectivity_query(embedding_dim),
@@ -158,6 +167,7 @@ pub fn generate_varied_queries(embedding_dim: usize) -> Vec<TestQuery> {
 }
 
 /// Calculate L2 distance between two vectors.
+#[must_use]
 pub fn l2_distance(a: &[f64], b: &[f64]) -> f64 {
     a.iter()
         .zip(b.iter())
@@ -167,6 +177,7 @@ pub fn l2_distance(a: &[f64], b: &[f64]) -> f64 {
 }
 
 /// Calculate cosine similarity between two vectors.
+#[must_use]
 pub fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
     let dot_product: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let magnitude_a: f64 = a.iter().map(|x| x.powi(2)).sum::<f64>().sqrt();
@@ -180,6 +191,7 @@ pub fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
 }
 
 /// Calculate inner product between two vectors.
+#[must_use]
 pub fn inner_product(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
@@ -187,6 +199,7 @@ pub fn inner_product(a: &[f64], b: &[f64]) -> f64 {
 /// Calculate simple BM25-like score for testing.
 ///
 /// Simplified BM25 that counts term matches without IDF.
+#[must_use]
 pub fn simple_bm25_score(doc_text: &str, query_text: &str) -> f64 {
     let doc_words: Vec<&str> = doc_text.split_whitespace().collect();
     let query_words: Vec<&str> = query_text.split_whitespace().collect();
@@ -213,6 +226,11 @@ pub fn simple_bm25_score(doc_text: &str, query_text: &str) -> f64 {
 }
 
 /// Generate expected results based on distance metric and fusion method.
+///
+/// # Panics
+///
+/// Panics if score comparison yields NaN (all scores should be finite).
+#[must_use]
 pub fn generate_expected_results(
     docs: &[TestDocument],
     query: &TestQuery,
@@ -245,6 +263,7 @@ pub fn generate_expected_results(
 }
 
 /// Generate a large dataset for performance testing.
+#[must_use]
 pub fn generate_large_dataset(size: usize, embedding_dim: usize) -> Vec<TestDocument> {
     generate_documents(size, embedding_dim, 12345)
 }

@@ -6,8 +6,6 @@
 //! - Cache hit rate
 //! - Throughput (queries/second)
 
-#![allow(clippy::expect_used)]
-
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};

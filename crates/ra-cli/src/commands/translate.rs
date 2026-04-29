@@ -18,8 +18,7 @@ pub fn cmd_translate(query: &str, from: &str, to: &str, quiet: bool) -> Result<(
 
     if !quiet {
         print_header(&format!(
-            "SQL Translation: {} -> {}",
-            source_dialect, target_dialect
+            "SQL Translation: {source_dialect} -> {target_dialect}",
         ));
         eprintln!("  {}: {query}", "Input".bold());
         eprintln!();

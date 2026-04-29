@@ -1,4 +1,4 @@
-//! PostgreSQL RUM index optimization.
+//! `PostgreSQL` RUM index optimization.
 //!
 //! Provides cost modeling, query classification, and e-graph rewrite
 //! rules for queries that can exploit RUM indexes. RUM extends GIN
@@ -529,7 +529,7 @@ pub fn evaluate_rum_recommendation(
 /// These rules recognize patterns where RUM indexes provide ordering
 /// that GIN cannot, and rewrite queries to exploit that ordering:
 ///
-/// 1. `rum-rank-to-distance`: Rewrite ts_rank ORDER BY to distance
+/// 1. `rum-rank-to-distance`: Rewrite `ts_rank` ORDER BY to distance
 ///    scan when RUM is available
 /// 2. `rum-phrase-index-scan`: Prefer RUM for phrase predicates
 /// 3. `rum-sort-elimination`: Remove sort when RUM provides order
@@ -611,14 +611,9 @@ fn contains_text_search_pattern(
             | RelLang::Lt([l, r])
             | RelLang::Le([l, r])
             | RelLang::Gt([l, r])
-            | RelLang::Ge([l, r]) => {
-                if contains_text_search_pattern(egraph, *l, depth - 1)
-                    || contains_text_search_pattern(egraph, *r, depth - 1)
-                {
-                    return true;
-                }
-            }
-            RelLang::And([l, r]) | RelLang::Or([l, r]) => {
+            | RelLang::Ge([l, r])
+            | RelLang::And([l, r])
+            | RelLang::Or([l, r]) => {
                 if contains_text_search_pattern(egraph, *l, depth - 1)
                     || contains_text_search_pattern(egraph, *r, depth - 1)
                 {
@@ -666,7 +661,7 @@ pub fn rum_boolean_cost_factor_vs_gin() -> f64 {
 /// Errors specific to RUM index optimization.
 ///
 /// All errors are non-fatal: the optimizer falls back to GIN-based
-/// or standard PostgreSQL planning.
+/// or standard `PostgreSQL` planning.
 #[derive(Debug, thiserror::Error)]
 pub enum RumError {
     /// RUM extension is not installed.
@@ -699,7 +694,7 @@ pub enum RumError {
 // ------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::egraph::{to_rec_expr, RelLang};
@@ -852,7 +847,7 @@ mod tests {
         // RUM boolean should be comparable or slightly more expensive
         let ratio = rum / gin;
         assert!(
-            ratio >= 0.9 && ratio <= 1.5,
+            (0.9..=1.5).contains(&ratio),
             "RUM boolean should be close to GIN: \
              rum={rum:.1}, gin={gin:.1}, ratio={ratio:.2}"
         );

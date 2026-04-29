@@ -4,6 +4,7 @@
 //! PostgreSQL databases. These snapshots can be used with the timeline
 //! system for deterministic testing and what-if analysis.
 
+use std::fmt::Write;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -23,7 +24,7 @@ pub fn capture_pg_snapshot(
     _database_url: &str,
     _tables: &[String],
     output_path: &Path,
-    label: Option<String>,
+    label: Option<&str>,
 ) -> Result<()> {
     eprintln!("{}", "Connecting to PostgreSQL...".cyan());
 
@@ -38,18 +39,18 @@ pub fn capture_pg_snapshot(
     eprintln!("{}", "Use the extension SQL functions instead:".yellow());
     eprintln!();
     eprintln!("  {}", "-- Load the extension".bright_black());
-    eprintln!("  {}", "CREATE EXTENSION IF NOT EXISTS pg_ra_planner;");
+    eprintln!("  CREATE EXTENSION IF NOT EXISTS pg_ra_planner;");
     eprintln!();
     eprintln!("  {}", "-- Capture snapshot".bright_black());
-    eprintln!("  {}", "SELECT ra.capture_snapshot_to_file(");
-    eprintln!("    {}", "ARRAY['public.orders', 'public.customers'],");
-    eprintln!("    {},", format!("'{}'", output_path.display()));
-    if let Some(ref lbl) = label {
-        eprintln!("    {}", format!("'{lbl}'"));
+    eprintln!("  SELECT ra.capture_snapshot_to_file(");
+    eprintln!("    ARRAY['public.orders', 'public.customers'],");
+    eprintln!("    '{}',", output_path.display());
+    if let Some(lbl) = label {
+        eprintln!("    '{lbl}'");
     } else {
-        eprintln!("    {}", "NULL");
+        eprintln!("    NULL");
     }
-    eprintln!("  {}", ");");
+    eprintln!("  );");
     eprintln!();
 
     bail!("Direct PostgreSQL connection not implemented - use extension SQL functions")
@@ -86,31 +87,30 @@ pub fn generate_capture_script(
 
     if let Some(interval) = interval_seconds {
         script.push_str("-- Capture initial snapshot\n");
-        script.push_str(&format!(
-            "SELECT ra.capture_snapshot_to_file(\n  {},\n  '{}',\n  'Initial snapshot'\n);\n\n",
-            table_array,
+        let _ = write!(
+            script,
+            "SELECT ra.capture_snapshot_to_file(\n  {table_array},\n  '{}',\n  'Initial snapshot'\n);\n\n",
             output_dir.join("snapshot_0.toml").display()
-        ));
+        );
 
-        script.push_str(&format!("-- Wait {interval} seconds\n"));
-        script.push_str(&format!("SELECT pg_sleep({interval});\n\n"));
+        let _ = writeln!(script, "-- Wait {interval} seconds");
+        let _ = writeln!(script, "SELECT pg_sleep({interval});\n");
 
         script.push_str("-- Capture subsequent snapshot\n");
-        script.push_str(&format!(
-            "SELECT ra.capture_snapshot_to_file(\n  {},\n  '{}',\n  'After {} seconds'\n);\n",
-            table_array,
+        let _ = write!(
+            script,
+            "SELECT ra.capture_snapshot_to_file(\n  {table_array},\n  '{}',\n  'After {interval} seconds'\n);\n",
             output_dir
                 .join(format!("snapshot_{interval}.toml"))
                 .display(),
-            interval
-        ));
+        );
     } else {
         script.push_str("-- Capture snapshot\n");
-        script.push_str(&format!(
-            "SELECT ra.capture_snapshot_to_file(\n  {},\n  '{}',\n  'Snapshot'\n);\n",
-            table_array,
+        let _ = write!(
+            script,
+            "SELECT ra.capture_snapshot_to_file(\n  {table_array},\n  '{}',\n  'Snapshot'\n);\n",
             output_dir.join("snapshot.toml").display()
-        ));
+        );
     }
 
     Ok(script)
@@ -170,10 +170,7 @@ pub fn merge_snapshots_to_timeline(
         bail!("No snapshot files found in {}", snapshot_dir.display());
     }
 
-    eprintln!(
-        "{}",
-        format!("Found {} snapshot(s)", snapshots.len()).green()
-    );
+    eprintln!("{}", format!("Found {} snapshot(s)", snapshots.len()).green());
 
     // Extract unique hardware profiles
     let mut hardware_profiles = Vec::new();
@@ -191,9 +188,9 @@ pub fn merge_snapshots_to_timeline(
                 simd_width: 256,
                 has_gpu: false,
                 gpu_memory: None,
-                l1_cache_size: 32768,
-                l2_cache_size: 262144,
-                l3_cache_size: 8388608,
+                l1_cache_size: 32_768,
+                l2_cache_size: 262_144,
+                l3_cache_size: 8_388_608,
             });
         }
     }

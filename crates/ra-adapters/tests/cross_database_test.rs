@@ -1,13 +1,14 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Cross-database integration tests for hybrid search.
 //!
 //! Tests verify:
-//! - Same hybrid query executes on PostgreSQL, MySQL, SQLite
+//! - Same hybrid query executes on `PostgreSQL`, `MySQL`, `SQLite`
 //! - Result consistency across databases
 //! - Performance comparison
 //! - Connection pooling
 //! - Error handling
 
-use ra_adapters::{DatabaseAdapter, PostgresAdapter, StoolapAdapter, AdapterError};
+use ra_adapters::{AdapterError, DatabaseAdapter, PostgresAdapter, StoolapAdapter};
 
 /// Mock test to verify adapter trait implementation.
 #[test]
@@ -24,7 +25,7 @@ fn test_database_adapter_trait_exists() {
     accepts_adapter(&st);
 }
 
-/// Test PostgreSQL adapter creation and basic operations.
+/// Test `PostgreSQL` adapter creation and basic operations.
 #[test]
 fn test_postgres_adapter_creation() {
     let adapter = PostgresAdapter::new();
@@ -48,7 +49,10 @@ fn test_connection_error_handling() {
     assert!(result.is_err());
 
     if let Err(e) = result {
-        assert!(matches!(e, AdapterError::ConnectionError(_) | AdapterError::InvalidConfiguration(_)));
+        assert!(matches!(
+            e,
+            AdapterError::ConnectionError(_) | AdapterError::InvalidConfiguration(_)
+        ));
     }
 }
 
@@ -59,13 +63,13 @@ fn test_postgres_hybrid_search_features() {
 
     // PostgreSQL should support these features (when connected)
     let expected_features = vec![
-        "fts",           // Full-text search
-        "vector",        // Vector similarity (pgvector)
-        "rum_index",     // RUM indexes
-        "gin_index",     // GIN indexes
-        "tsvector",      // Text search vectors
-        "hnsw",          // HNSW indexes (pgvector)
-        "ivfflat",       // IVFFlat indexes (pgvector)
+        "fts",       // Full-text search
+        "vector",    // Vector similarity (pgvector)
+        "rum_index", // RUM indexes
+        "gin_index", // GIN indexes
+        "tsvector",  // Text search vectors
+        "hnsw",      // HNSW indexes (pgvector)
+        "ivfflat",   // IVFFlat indexes (pgvector)
     ];
 
     // Mock feature check (would query database when connected)
@@ -80,7 +84,7 @@ mod query_translation {
     #[test]
     fn test_postgres_hybrid_query_structure() {
         // PostgreSQL hybrid query structure
-        let pg_query = r#"
+        let pg_query = r"
             SELECT id, content,
                    ts_rank(content_tsvector, to_tsquery('search')) as fts_score,
                    content_embedding <-> '[0.1, 0.2, 0.3]' as vector_dist
@@ -88,7 +92,7 @@ mod query_translation {
             WHERE content_tsvector @@ to_tsquery('search')
             ORDER BY (0.7 * fts_score + 0.3 * (1/(1+vector_dist))) DESC
             LIMIT 10
-        "#;
+        ";
 
         assert!(pg_query.contains("ts_rank"));
         assert!(pg_query.contains("<->"));
@@ -98,7 +102,7 @@ mod query_translation {
     #[test]
     fn test_mysql_hybrid_query_structure() {
         // MySQL hybrid query structure
-        let mysql_query = r#"
+        let mysql_query = r"
             SELECT id, content,
                    MATCH(content) AGAINST('search') as fts_score,
                    vector_distance(content_embedding, '[0.1, 0.2, 0.3]') as vector_dist
@@ -106,7 +110,7 @@ mod query_translation {
             WHERE MATCH(content) AGAINST('search')
             ORDER BY (0.7 * fts_score + 0.3 * (1/(1+vector_dist))) DESC
             LIMIT 10
-        "#;
+        ";
 
         assert!(mysql_query.contains("MATCH"));
         assert!(mysql_query.contains("AGAINST"));
@@ -116,7 +120,7 @@ mod query_translation {
     #[test]
     fn test_sqlite_hybrid_query_structure() {
         // SQLite hybrid query structure
-        let sqlite_query = r#"
+        let sqlite_query = r"
             SELECT d.id, d.content,
                    bm25(fts) as fts_score,
                    vec_distance_l2(d.embedding, '[0.1, 0.2, 0.3]') as vector_dist
@@ -125,7 +129,7 @@ mod query_translation {
             WHERE fts MATCH 'search'
             ORDER BY (0.7 * fts_score + 0.3 * (1/(1+vector_dist))) DESC
             LIMIT 10
-        "#;
+        ";
 
         assert!(sqlite_query.contains("bm25"));
         assert!(sqlite_query.contains("MATCH"));
@@ -167,11 +171,7 @@ mod result_consistency {
     fn test_ranking_consistency() {
         // Test that ranking algorithms produce consistent orderings
 
-        let docs = vec![
-            ("doc1", 0.9),
-            ("doc2", 0.7),
-            ("doc3", 0.8),
-        ];
+        let docs = vec![("doc1", 0.9), ("doc2", 0.7), ("doc3", 0.8)];
 
         let mut sorted = docs.clone();
         sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
@@ -242,9 +242,7 @@ mod connection_pooling {
     #[test]
     fn test_multiple_adapter_instances() {
         // Create multiple adapter instances
-        let adapters: Vec<PostgresAdapter> = (0..10)
-            .map(|_| PostgresAdapter::new())
-            .collect();
+        let adapters: Vec<PostgresAdapter> = (0..10).map(|_| PostgresAdapter::new()).collect();
 
         assert_eq!(adapters.len(), 10);
 
@@ -277,9 +275,7 @@ mod connection_pooling {
         let handles: Vec<_> = (0..5)
             .map(|_| {
                 let adapter_clone = Arc::clone(&adapter);
-                thread::spawn(move || {
-                    adapter_clone.database_name().to_string()
-                })
+                thread::spawn(move || adapter_clone.database_name().to_string())
             })
             .collect();
 
@@ -318,7 +314,10 @@ mod error_handling {
 
         if let Err(e) = result {
             // Stub mode returns ConnectionError, real mode returns QueryError
-            assert!(matches!(e, AdapterError::QueryError(_) | AdapterError::ConnectionError(_)));
+            assert!(matches!(
+                e,
+                AdapterError::QueryError(_) | AdapterError::ConnectionError(_)
+            ));
         }
     }
 
@@ -343,7 +342,10 @@ mod error_handling {
 
         if let Err(e) = result {
             // Stub mode returns ConnectionError, real mode returns QueryError
-            assert!(matches!(e, AdapterError::QueryError(_) | AdapterError::ConnectionError(_)));
+            assert!(matches!(
+                e,
+                AdapterError::QueryError(_) | AdapterError::ConnectionError(_)
+            ));
         }
     }
 
@@ -443,8 +445,7 @@ mod integration_workflow {
         assert_eq!(adapter.database_name(), "PostgreSQL");
 
         // 4. Check SQL dialect
-        use ra_core::SqlDialect;
-        assert!(matches!(adapter.sql_dialect(), SqlDialect::Postgres));
+        assert!(matches!(adapter.sql_dialect(), ra_core::SqlDialect::Postgres));
 
         // 5. Query capabilities (behavior differs between stub and real mode)
         let _cap_result = adapter.get_capabilities();
@@ -463,9 +464,8 @@ mod integration_workflow {
         assert_ne!(pg.database_name(), st.database_name());
 
         // Each adapter reports its own dialect
-        use ra_core::SqlDialect;
-        assert!(matches!(pg.sql_dialect(), SqlDialect::Postgres));
-        assert!(matches!(st.sql_dialect(), SqlDialect::Generic));
+        assert!(matches!(pg.sql_dialect(), ra_core::SqlDialect::Postgres));
+        assert!(matches!(st.sql_dialect(), ra_core::SqlDialect::Generic));
     }
 }
 

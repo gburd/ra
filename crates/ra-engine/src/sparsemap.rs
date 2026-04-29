@@ -211,9 +211,7 @@ impl SparseMap {
     /// Create a new empty sparse map.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            chunks: Vec::new(),
-        }
+        Self { chunks: Vec::new() }
     }
 
     /// Set bit `idx`.
@@ -241,6 +239,7 @@ impl SparseMap {
     }
 
     /// Clear bit `idx`.
+    #[cfg_attr(not(test), expect(dead_code, reason = "API completeness"))]
     pub fn clear(&mut self, idx: Idx) {
         let chunk_idx = (idx as usize) / BITS_PER_CHUNK;
         let bit_idx = (idx as usize) % BITS_PER_CHUNK;
@@ -327,9 +326,7 @@ impl SparseMap {
         self.chunks
             .iter()
             .enumerate()
-            .filter_map(|(chunk_idx, chunk)| {
-                chunk.as_ref().map(|c| (chunk_idx, c.as_ref()))
-            })
+            .filter_map(|(chunk_idx, chunk)| chunk.as_ref().map(|c| (chunk_idx, c.as_ref())))
             .flat_map(|(chunk_idx, chunk)| {
                 (0..VECS_PER_CHUNK).flat_map(move |vec_idx| {
                     let vec = chunk.get_vector(vec_idx);
@@ -363,12 +360,18 @@ impl fmt::Debug for SparseMap {
 impl Clone for SparseMap {
     fn clone(&self) -> Self {
         Self {
-            chunks: self.chunks.iter().map(|c| c.as_ref().map(|chunk| {
-                Box::new(Chunk {
-                    flags: chunk.flags,
-                    vectors: chunk.vectors.clone(),
+            chunks: self
+                .chunks
+                .iter()
+                .map(|c| {
+                    c.as_ref().map(|chunk| {
+                        Box::new(Chunk {
+                            flags: chunk.flags,
+                            vectors: chunk.vectors.clone(),
+                        })
+                    })
                 })
-            })).collect(),
+                .collect(),
         }
     }
 }

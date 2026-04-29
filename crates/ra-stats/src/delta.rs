@@ -99,34 +99,25 @@ impl StatisticsDelta {
     /// for additions/removals or zero-to-nonzero transitions.
     pub fn magnitude(&self) -> f64 {
         match self {
-            Self::TableRowCount { old, new, .. }
-            | Self::ColumnNDV { old, new, .. } => {
+            Self::TableRowCount { old, new, .. } | Self::ColumnNDV { old, new, .. } => {
                 relative_change(*old as f64, *new as f64)
             }
-            Self::ColumnNullFraction { old, new, .. } => {
-                (*new - *old).abs()
+            Self::ColumnNullFraction { old, new, .. } => (*new - *old).abs(),
+            Self::ColumnCorrelation { old, new, .. } => match (old, new) {
+                (Some(o), Some(n)) => (n - o).abs(),
+                (None, None) => 0.0,
+                _ => f64::INFINITY,
+            },
+            Self::TableAdded { .. } | Self::TableRemoved { .. } | Self::StalenessChanged { .. } => {
+                f64::INFINITY
             }
-            Self::ColumnCorrelation { old, new, .. } => {
-                match (old, new) {
-                    (Some(o), Some(n)) => (n - o).abs(),
-                    (None, None) => 0.0,
-                    _ => f64::INFINITY,
-                }
-            }
-            Self::TableAdded { .. }
-            | Self::TableRemoved { .. }
-            | Self::StalenessChanged { .. } => f64::INFINITY,
         }
     }
 
     /// Whether this delta represents a structural change (table
     /// added/removed) vs a numeric change.
     pub fn is_structural(&self) -> bool {
-        matches!(
-            self,
-            Self::TableAdded { .. }
-            | Self::TableRemoved { .. }
-        )
+        matches!(self, Self::TableAdded { .. } | Self::TableRemoved { .. })
     }
 }
 
@@ -304,9 +295,7 @@ impl<'a> IntoIterator for &'a DeltaSet {
 }
 
 /// Build a name -> table snapshot map.
-fn table_map(
-    tables: &[TableSnapshot],
-) -> std::collections::HashMap<&str, &TableSnapshot> {
+fn table_map(tables: &[TableSnapshot]) -> std::collections::HashMap<&str, &TableSnapshot> {
     let mut map = std::collections::HashMap::new();
     for t in tables {
         map.insert(t.name.as_str(), t);
@@ -340,9 +329,7 @@ fn diff_table(
 }
 
 /// Build a name -> column snapshot map.
-fn column_map(
-    columns: &[ColumnSnapshot],
-) -> std::collections::HashMap<&str, &ColumnSnapshot> {
+fn column_map(columns: &[ColumnSnapshot]) -> std::collections::HashMap<&str, &ColumnSnapshot> {
     let mut map = std::collections::HashMap::new();
     for c in columns {
         map.insert(c.name.as_str(), c);
@@ -367,7 +354,7 @@ fn diff_column(
         });
     }
 
-    if prev.null_fraction != next.null_fraction {
+    if (prev.null_fraction - next.null_fraction).abs() > f64::EPSILON {
         deltas.push(StatisticsDelta::ColumnNullFraction {
             table: table.to_string(),
             column: column.to_string(),
@@ -387,7 +374,6 @@ fn diff_column(
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -435,11 +421,7 @@ mod tests {
         }
     }
 
-    fn snap_two_tables(
-        time: u64,
-        t1_rows: u64,
-        t2_rows: u64,
-    ) -> Snapshot {
+    fn snap_two_tables(time: u64, t1_rows: u64, t2_rows: u64) -> Snapshot {
         Snapshot {
             time_offset: time,
             label: None,
@@ -483,8 +465,13 @@ mod tests {
         let ds = DeltaSet::compute(&a, &b);
         assert_eq!(ds.len(), 1);
         let d = &ds.deltas()[0];
-        assert!(matches!(d,
-            StatisticsDelta::TableRowCount { old: 1000, new: 1500, .. }
+        assert!(matches!(
+            d,
+            StatisticsDelta::TableRowCount {
+                old: 1000,
+                new: 1500,
+                ..
+            }
         ));
     }
 
@@ -494,8 +481,13 @@ mod tests {
         let b = snap_simple(60, 1000);
         let ds = DeltaSet::compute(&a, &b);
         assert_eq!(ds.len(), 1);
-        assert!(matches!(&ds.deltas()[0],
-            StatisticsDelta::TableRowCount { old: 2000, new: 1000, .. }
+        assert!(matches!(
+            &ds.deltas()[0],
+            StatisticsDelta::TableRowCount {
+                old: 2000,
+                new: 1000,
+                ..
+            }
         ));
     }
 
@@ -505,8 +497,13 @@ mod tests {
         let b = snap_with_columns(60, 1000, 600, 0.0, None);
         let ds = DeltaSet::compute(&a, &b);
         assert_eq!(ds.len(), 1);
-        assert!(matches!(&ds.deltas()[0],
-            StatisticsDelta::ColumnNDV { old: 500, new: 600, .. }
+        assert!(matches!(
+            &ds.deltas()[0],
+            StatisticsDelta::ColumnNDV {
+                old: 500,
+                new: 600,
+                ..
+            }
         ));
     }
 
@@ -516,7 +513,8 @@ mod tests {
         let b = snap_with_columns(60, 1000, 500, 0.05, None);
         let ds = DeltaSet::compute(&a, &b);
         assert_eq!(ds.len(), 1);
-        assert!(matches!(&ds.deltas()[0],
+        assert!(matches!(
+            &ds.deltas()[0],
             StatisticsDelta::ColumnNullFraction { .. }
         ));
     }
@@ -527,7 +525,8 @@ mod tests {
         let b = snap_with_columns(60, 1000, 500, 0.0, Some(0.85));
         let ds = DeltaSet::compute(&a, &b);
         assert_eq!(ds.len(), 1);
-        assert!(matches!(&ds.deltas()[0],
+        assert!(matches!(
+            &ds.deltas()[0],
             StatisticsDelta::ColumnCorrelation { .. }
         ));
     }
@@ -865,8 +864,7 @@ mod tests {
         let b = snap_with_columns(60, 1500, 600, 0.05, Some(0.7));
         let ds = DeltaSet::compute(&a, &b);
         let json = serde_json::to_string(&ds).expect("serialize");
-        let ds2: DeltaSet =
-            serde_json::from_str(&json).expect("deserialize");
+        let ds2: DeltaSet = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(ds, ds2);
     }
 
@@ -879,8 +877,7 @@ mod tests {
             new: 200,
         };
         let json = serde_json::to_string(&d).expect("serialize");
-        let d2: StatisticsDelta =
-            serde_json::from_str(&json).expect("deserialize");
+        let d2: StatisticsDelta = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(d, d2);
     }
 }

@@ -1,7 +1,7 @@
-//! sqlite-vec extension for SQLite - Vector similarity search.
+//! sqlite-vec extension for `SQLite` - Vector similarity search.
 //!
-//! sqlite-vec is a SQLite extension that provides vector similarity search capabilities
-//! similar to pgvector, enabling efficient semantic search in SQLite databases.
+//! sqlite-vec is a `SQLite` extension that provides vector similarity search capabilities
+//! similar to pgvector, enabling efficient semantic search in `SQLite` databases.
 //!
 //! # Key Features
 //!
@@ -61,11 +61,11 @@ use std::error::Error;
 
 use crate::grammar::extension::GrammarExtension;
 
-/// sqlite-vec extension for vector similarity search in SQLite.
+/// sqlite-vec extension for vector similarity search in `SQLite`.
 pub struct SqliteVecExtension;
 
 impl GrammarExtension for SqliteVecExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sqlite-vec"
     }
 

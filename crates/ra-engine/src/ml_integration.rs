@@ -55,7 +55,7 @@ pub struct MlOptimizer {
 #[derive(Debug, Clone)]
 struct OptimizationContext {
     /// Input plan.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     input_plan: RelExpr,
     /// Output plan.
     output_plan: RelExpr,
@@ -135,7 +135,10 @@ impl MlOptimizer {
             return;
         }
 
-        let mut ctx = self.last_context.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ctx = self
+            .last_context
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *ctx = Some(OptimizationContext {
             input_plan: plan.clone(),
             output_plan: plan.clone(),
@@ -152,7 +155,10 @@ impl MlOptimizer {
             return;
         }
 
-        let mut ctx = self.last_context.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ctx = self
+            .last_context
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(context) = ctx.as_mut() {
             context.rules_applied.push(rule_id.to_string());
         }
@@ -164,7 +170,10 @@ impl MlOptimizer {
             return;
         }
 
-        let mut ctx = self.last_context.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ctx = self
+            .last_context
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(mut context) = ctx.take() {
             context.output_plan = output_plan.clone();
             context.cost_after = final_cost;
@@ -218,15 +227,22 @@ pub fn integrate_with_rule_priority(
 ) -> Vec<String> {
     let ml_ordered = ml_optimizer.order_rules(rule_ids, plan, stats);
 
-    let ml_filtered = ml_optimizer.filter_rules(&ml_ordered, plan, stats);
-
-    ml_filtered
+    ml_optimizer.filter_rules(&ml_ordered, plan, stats)
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use ra_core::statistics::Statistics;
+
+    #[derive(Debug)]
+    struct DummyStats;
+    impl StatisticsProvider for DummyStats {
+        fn get_statistics(&self, _table: &str) -> Option<&Statistics> {
+            None
+        }
+    }
 
     #[test]
     fn ml_optimizer_basic() {
@@ -235,14 +251,6 @@ mod tests {
 
         let plan = RelExpr::scan("users");
         let rules = vec!["rule1".to_string(), "rule2".to_string()];
-
-        #[derive(Debug)]
-        struct DummyStats;
-        impl StatisticsProvider for DummyStats {
-            fn get_statistics(&self, _table: &str) -> Option<&Statistics> {
-                None
-            }
-        }
 
         let ordered = optimizer.order_rules(&rules, &plan, &DummyStats);
         assert_eq!(ordered.len(), 2);
@@ -276,14 +284,6 @@ mod tests {
 
         let plan = RelExpr::scan("users");
         let rules = vec!["rule1".to_string(), "rule2".to_string()];
-
-        #[derive(Debug)]
-        struct DummyStats;
-        impl StatisticsProvider for DummyStats {
-            fn get_statistics(&self, _table: &str) -> Option<&Statistics> {
-                None
-            }
-        }
 
         let ordered = optimizer.order_rules(&rules, &plan, &DummyStats);
         assert_eq!(ordered, rules);

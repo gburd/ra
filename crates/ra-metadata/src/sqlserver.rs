@@ -171,6 +171,10 @@ impl SqlServerConnector {
         })
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "SQL Server constraints + FK queries are logically one unit"
+    )]
     fn query_constraints(&mut self, table: &str) -> MetadataResult<Vec<ConstraintInfo>> {
         self.rt.block_on(async {
             let sql = format!(
@@ -527,7 +531,7 @@ impl SqlServerConnector {
                 .ok();
 
             let text = lines.join("\n");
-            parse_sqlserver_explain(&text)
+            Ok(parse_sqlserver_explain(&text))
         })
     }
 }
@@ -590,9 +594,9 @@ fn parse_sqlserver_url(url: &str) -> MetadataResult<UrlParts> {
     })
 }
 
-/// Parse SQL Server SHOWPLAN_TEXT output into an
+/// Parse SQL Server `SHOWPLAN_TEXT` output into an
 /// `ExplainPlan`.
-fn parse_sqlserver_explain(text: &str) -> MetadataResult<ExplainPlan> {
+fn parse_sqlserver_explain(text: &str) -> ExplainPlan {
     let lines: Vec<&str> = text
         .lines()
         .map(str::trim)
@@ -602,7 +606,7 @@ fn parse_sqlserver_explain(text: &str) -> MetadataResult<ExplainPlan> {
     let first = lines.first().copied().unwrap_or("");
     let node_type = classify_sqlserver_node(first);
 
-    Ok(ExplainPlan {
+    ExplainPlan {
         root: ExplainNode {
             node_type,
             join_type: None,
@@ -620,14 +624,12 @@ fn parse_sqlserver_explain(text: &str) -> MetadataResult<ExplainPlan> {
         query: None,
         total_cost: None,
         total_rows: None,
-    })
+    }
 }
 
 fn classify_sqlserver_node(line: &str) -> NodeType {
     let upper = line.to_uppercase();
-    if upper.contains("TABLE SCAN") {
-        NodeType::SeqScan
-    } else if upper.contains("CLUSTERED INDEX SCAN") {
+    if upper.contains("TABLE SCAN") || upper.contains("CLUSTERED INDEX SCAN") {
         NodeType::SeqScan
     } else if upper.contains("INDEX SEEK") || upper.contains("INDEX SCAN") {
         NodeType::IndexScan
@@ -646,6 +648,7 @@ fn classify_sqlserver_node(line: &str) -> NodeType {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -696,7 +699,7 @@ mod tests {
     #[test]
     fn parse_explain_basic() {
         let text = "  |--Table Scan [orders]";
-        let plan = parse_sqlserver_explain(text).expect("should parse");
+        let plan = parse_sqlserver_explain(text);
         assert_eq!(plan.root.node_type, NodeType::SeqScan);
     }
 

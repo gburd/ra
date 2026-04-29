@@ -37,7 +37,6 @@ const HAS_CAST: u32 = 1 << 16;
 const MULTI_TABLE: u32 = 1 << 17;
 const IS_UNIVERSAL: u32 = 1 << 31;
 
-#[allow(clippy::missing_docs_in_private_items)]
 impl QueryFeatureSet {
     pub const HAS_JOIN: Self = Self(HAS_JOIN);
     pub const HAS_AGGREGATE: Self = Self(HAS_AGGREGATE);

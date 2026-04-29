@@ -176,8 +176,12 @@ impl IndexStats {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
-#[expect(clippy::float_cmp, reason = "exact float equality needed for deterministic statistics tests")]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic statistics tests"
+)]
 mod tests {
     use super::*;
 
@@ -248,16 +252,11 @@ mod tests {
     #[test]
     fn statistics_with_columns() {
         let mut stats = Statistics::new(500.0);
-        stats
-            .columns
-            .insert("id".into(), ColumnStats::new(500.0));
-        stats
-            .columns
-            .insert("name".into(), ColumnStats::new(200.0));
+        stats.columns.insert("id".into(), ColumnStats::new(500.0));
+        stats.columns.insert("name".into(), ColumnStats::new(200.0));
 
         assert_eq!(stats.columns.len(), 2);
-        let id_stats =
-            stats.columns.get("id").expect("id column should exist");
+        let id_stats = stats.columns.get("id").expect("id column should exist");
         assert_eq!(id_stats.distinct_count, 500.0);
     }
 
@@ -266,14 +265,11 @@ mod tests {
         let mut stats = Statistics::new(100.0);
         stats.avg_row_size = 64;
         stats.total_size = 6400;
-        stats
-            .columns
-            .insert("col".into(), ColumnStats::new(50.0));
+        stats.columns.insert("col".into(), ColumnStats::new(50.0));
 
-        let json = serde_json::to_string(&stats)
-            .expect("serialization should succeed");
-        let deserialized: Statistics = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&stats).expect("serialization should succeed");
+        let deserialized: Statistics =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(stats, deserialized);
     }
 }

@@ -18,12 +18,8 @@ use ra_core::statistics::Statistics;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use crate::checkpoint::{
-    CheckpointManager, CheckpointState,
-};
-use crate::plan_switch::{
-    Adaptation, JoinStrategy, PlanSwitcher,
-};
+use crate::checkpoint::{CheckpointManager, CheckpointState};
+use crate::plan_switch::{Adaptation, JoinStrategy, PlanSwitcher};
 use crate::runtime_stats::{NodeId, PlanStats};
 use crate::triggers::{TriggerConfig, TriggerEvent, TriggerSet};
 
@@ -34,9 +30,7 @@ pub enum AdaptiveError {
     #[error("reoptimization failed: {0}")]
     ReoptimizationFailed(String),
     /// A plan switch was attempted but is not safe.
-    #[error(
-        "unsafe plan transition at node {node_id}: {reason}"
-    )]
+    #[error("unsafe plan transition at node {node_id}: {reason}")]
     UnsafeTransition {
         /// The node where the transition was attempted.
         node_id: NodeId,
@@ -140,12 +134,8 @@ impl AdaptiveExecutor {
 
     /// Create an executor with custom configuration.
     #[must_use]
-    pub fn with_config(
-        plan: RelExpr,
-        config: AdaptiveConfig,
-    ) -> Self {
-        let triggers =
-            TriggerSet::with_config(config.trigger_config.clone());
+    pub fn with_config(plan: RelExpr, config: AdaptiveConfig) -> Self {
+        let triggers = TriggerSet::with_config(config.trigger_config.clone());
         Self {
             config,
             triggers,
@@ -161,11 +151,7 @@ impl AdaptiveExecutor {
     }
 
     /// Register an operator with its estimated row count.
-    pub fn register_operator(
-        &mut self,
-        node_id: NodeId,
-        estimated_rows: f64,
-    ) {
+    pub fn register_operator(&mut self, node_id: NodeId, estimated_rows: f64) {
         self.plan_stats.register(node_id, estimated_rows);
         self.checkpoint_mgr
             .record(node_id, CheckpointState::NotStarted);
@@ -173,22 +159,13 @@ impl AdaptiveExecutor {
 
     /// Register a join operator with its estimated rows and
     /// initial strategy.
-    pub fn register_join(
-        &mut self,
-        node_id: NodeId,
-        estimated_rows: f64,
-        strategy: JoinStrategy,
-    ) {
+    pub fn register_join(&mut self, node_id: NodeId, estimated_rows: f64, strategy: JoinStrategy) {
         self.register_operator(node_id, estimated_rows);
         self.join_strategies.insert(node_id, strategy);
     }
 
     /// Provide table statistics for potential reoptimization.
-    pub fn add_table_stats(
-        &mut self,
-        table: impl Into<String>,
-        stats: Statistics,
-    ) {
+    pub fn add_table_stats(&mut self, table: impl Into<String>, stats: Statistics) {
         self.table_stats.insert(table.into(), stats);
     }
 
@@ -199,11 +176,7 @@ impl AdaptiveExecutor {
     /// triggers and applies adaptations.
     ///
     /// Returns any adaptations that were applied.
-    pub fn report_rows(
-        &mut self,
-        node_id: NodeId,
-        count: u64,
-    ) -> Vec<Adaptation> {
+    pub fn report_rows(&mut self, node_id: NodeId, count: u64) -> Vec<Adaptation> {
         if !self.config.enabled {
             return Vec::new();
         }
@@ -211,17 +184,12 @@ impl AdaptiveExecutor {
         self.plan_stats.record_rows(node_id, count);
 
         // Update checkpoint
-        let rows_emitted = self
-            .plan_stats
-            .get(node_id)
-            .map_or(0, |s| s.actual_rows);
-        self.checkpoint_mgr.record(
-            node_id,
-            CheckpointState::InProgress { rows_emitted },
-        );
+        let rows_emitted = self.plan_stats.get(node_id).map_or(0, |s| s.actual_rows);
+        self.checkpoint_mgr
+            .record(node_id, CheckpointState::InProgress { rows_emitted });
 
         // Check if we've hit the interval for trigger evaluation
-        if rows_emitted % self.config.check_interval_rows != 0 {
+        if !rows_emitted.is_multiple_of(self.config.check_interval_rows) {
             return Vec::new();
         }
 
@@ -229,29 +197,18 @@ impl AdaptiveExecutor {
     }
 
     /// Mark an operator as completed.
-    pub fn report_completed(
-        &mut self,
-        node_id: NodeId,
-        total_rows: u64,
-    ) {
+    pub fn report_completed(&mut self, node_id: NodeId, total_rows: u64) {
         self.plan_stats.record_rows(node_id, 0);
-        if let Some(stats) =
-            self.plan_stats.operators.get_mut(&node_id)
-        {
+        if let Some(stats) = self.plan_stats.operators.get_mut(&node_id) {
             stats.actual_rows = total_rows;
         }
-        self.checkpoint_mgr.record(
-            node_id,
-            CheckpointState::Completed { total_rows },
-        );
+        self.checkpoint_mgr
+            .record(node_id, CheckpointState::Completed { total_rows });
     }
 
     /// Force an immediate trigger evaluation for a specific
     /// operator, regardless of the check interval.
-    pub fn force_evaluate(
-        &mut self,
-        node_id: NodeId,
-    ) -> Vec<Adaptation> {
+    pub fn force_evaluate(&mut self, node_id: NodeId) -> Vec<Adaptation> {
         if !self.config.enabled {
             return Vec::new();
         }
@@ -266,10 +223,7 @@ impl AdaptiveExecutor {
 
     /// Get the current join strategy for a node.
     #[must_use]
-    pub fn join_strategy(
-        &self,
-        node_id: NodeId,
-    ) -> Option<JoinStrategy> {
+    pub fn join_strategy(&self, node_id: NodeId) -> Option<JoinStrategy> {
         self.join_strategies.get(&node_id).copied()
     }
 
@@ -308,10 +262,7 @@ impl AdaptiveExecutor {
         &self.checkpoint_mgr
     }
 
-    fn evaluate_and_adapt(
-        &mut self,
-        node_id: NodeId,
-    ) -> Vec<Adaptation> {
+    fn evaluate_and_adapt(&mut self, node_id: NodeId) -> Vec<Adaptation> {
         if self.adaptation_count >= self.config.max_adaptations {
             return Vec::new();
         }
@@ -319,21 +270,15 @@ impl AdaptiveExecutor {
         let Some(stats) = self.plan_stats.get(node_id) else {
             return Vec::new();
         };
-        let events =
-            self.triggers.check_operator(node_id, stats);
+        let events = self.triggers.check_operator(node_id, stats);
 
         let mut applied = Vec::new();
         for event in events {
-            if self.adaptation_count
-                >= self.config.max_adaptations
-            {
+            if self.adaptation_count >= self.config.max_adaptations {
                 break;
             }
             if let Some(adaptation) = self.try_adapt(&event) {
-                let rows_at = self
-                    .plan_stats
-                    .get(node_id)
-                    .map_or(0, |s| s.actual_rows);
+                let rows_at = self.plan_stats.get(node_id).map_or(0, |s| s.actual_rows);
                 self.adaptations.push(AdaptationRecord {
                     sequence: self.adaptation_count,
                     trigger: event,
@@ -352,18 +297,14 @@ impl AdaptiveExecutor {
         applied
     }
 
-    fn try_adapt(
-        &mut self,
-        event: &TriggerEvent,
-    ) -> Option<Adaptation> {
+    fn try_adapt(&mut self, event: &TriggerEvent) -> Option<Adaptation> {
         let current_strategy = self
             .join_strategies
             .get(&event.node_id)
             .copied()
             .unwrap_or(JoinStrategy::HashJoin);
 
-        let adaptation =
-            self.switcher.recommend(event, current_strategy)?;
+        let adaptation = self.switcher.recommend(event, current_strategy)?;
 
         if !self.checkpoint_mgr.is_safe_transition(&adaptation) {
             debug!(
@@ -379,28 +320,19 @@ impl AdaptiveExecutor {
 
     fn apply_adaptation(&mut self, adaptation: &Adaptation) {
         match adaptation {
-            Adaptation::SwitchJoinStrategy {
-                node_id, to, ..
-            } => {
+            Adaptation::SwitchJoinStrategy { node_id, to, .. } => {
                 self.join_strategies.insert(*node_id, *to);
             }
             Adaptation::SwapJoinInputs { .. } => {
-                if let Some(swapped) =
-                    PlanSwitcher::swap_join_inputs(
-                        &self.current_plan,
-                    )
-                {
+                if let Some(swapped) = PlanSwitcher::swap_join_inputs(&self.current_plan) {
                     self.current_plan = swapped;
                 }
             }
             Adaptation::ReoptimizePlan { new_plan } => {
-                self.current_plan = new_plan.clone();
+                self.current_plan = new_plan.as_ref().clone();
             }
             Adaptation::SpillToDisk { node_id } => {
-                debug!(
-                    node_id,
-                    "signaling spill-to-disk"
-                );
+                debug!(node_id, "signaling spill-to-disk");
             }
         }
     }
@@ -420,9 +352,7 @@ mod tests {
             condition: Expr::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(Expr::Column(ColumnRef::new("a"))),
-                right: Box::new(Expr::Column(
-                    ColumnRef::new("b"),
-                )),
+                right: Box::new(Expr::Column(ColumnRef::new("b"))),
             },
             left: Box::new(RelExpr::scan("big")),
             right: Box::new(RelExpr::scan("small")),
@@ -448,10 +378,7 @@ mod tests {
     fn register_join_sets_strategy() {
         let mut exec = AdaptiveExecutor::new(simple_join());
         exec.register_join(1, 1000.0, JoinStrategy::NestedLoop);
-        assert_eq!(
-            exec.join_strategy(1),
-            Some(JoinStrategy::NestedLoop)
-        );
+        assert_eq!(exec.join_strategy(1), Some(JoinStrategy::NestedLoop));
     }
 
     #[test]
@@ -468,8 +395,7 @@ mod tests {
             enabled: false,
             ..AdaptiveConfig::default()
         };
-        let mut exec =
-            AdaptiveExecutor::with_config(simple_join(), config);
+        let mut exec = AdaptiveExecutor::with_config(simple_join(), config);
         exec.register_join(1, 1.0, JoinStrategy::NestedLoop);
         // Even with a massive cardinality misestimate, disabled
         // executor does nothing.
@@ -489,8 +415,7 @@ mod tests {
             },
             enabled: true,
         };
-        let mut exec =
-            AdaptiveExecutor::with_config(simple_join(), config);
+        let mut exec = AdaptiveExecutor::with_config(simple_join(), config);
         exec.register_join(1, 100.0, JoinStrategy::NestedLoop);
 
         // First interval: should trigger adaptation
@@ -504,7 +429,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
     fn report_completed_records_final_stats() {
         let mut exec = AdaptiveExecutor::new(RelExpr::scan("t"));
         exec.register_operator(1, 1000.0);
@@ -517,9 +441,7 @@ mod tests {
             .expect("node 1 should have stats");
         assert_eq!(summary.actual_rows, 1500);
         assert!((summary.estimated_rows - 1000.0).abs() < f64::EPSILON);
-        let ratio = summary
-            .cardinality_ratio
-            .expect("ratio should exist");
+        let ratio = summary.cardinality_ratio.expect("ratio should exist");
         assert!((ratio - 1.5).abs() < f64::EPSILON);
     }
 
@@ -546,8 +468,7 @@ mod tests {
             enabled: true,
             ..AdaptiveConfig::default()
         };
-        let mut exec =
-            AdaptiveExecutor::with_config(simple_join(), config);
+        let mut exec = AdaptiveExecutor::with_config(simple_join(), config);
         exec.register_join(1, 100.0, JoinStrategy::NestedLoop);
 
         // Report rows but not at a check interval
@@ -576,16 +497,11 @@ mod tests {
             },
             rows_at_switch: 10_000,
         };
-        let json = serde_json::to_string(&record)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&record).expect("serialization should succeed");
         let deserialized: AdaptationRecord =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(record.sequence, deserialized.sequence);
-        assert_eq!(
-            record.rows_at_switch,
-            deserialized.rows_at_switch
-        );
+        assert_eq!(record.rows_at_switch, deserialized.rows_at_switch);
     }
 
     #[test]
@@ -604,15 +520,10 @@ mod tests {
         };
 
         let plan = simple_join();
-        let mut exec =
-            AdaptiveExecutor::with_config(plan, config);
+        let mut exec = AdaptiveExecutor::with_config(plan, config);
 
         // Register: join node estimated at 100 rows
-        exec.register_join(
-            1,
-            100.0,
-            JoinStrategy::NestedLoop,
-        );
+        exec.register_join(1, 100.0, JoinStrategy::NestedLoop);
 
         // Simulate row flow: actual cardinality is 100x estimate
         for _ in 0..10 {
@@ -623,9 +534,7 @@ mod tests {
         assert!(report.was_adapted);
 
         // The strategy should have switched from NL to hash
-        let strategy = exec
-            .join_strategy(1)
-            .expect("should have a strategy");
+        let strategy = exec.join_strategy(1).expect("should have a strategy");
         assert_eq!(strategy, JoinStrategy::HashJoin);
     }
 
@@ -643,28 +552,18 @@ mod tests {
         };
 
         let plan = simple_join();
-        let mut exec =
-            AdaptiveExecutor::with_config(plan, config);
-        exec.register_join(
-            1,
-            10_000.0,
-            JoinStrategy::HashJoin,
-        );
+        let mut exec = AdaptiveExecutor::with_config(plan, config);
+        exec.register_join(1, 10_000.0, JoinStrategy::HashJoin);
 
         // Add a skewed column sketch
-        if let Some(stats) =
-            exec.plan_stats.operators.get_mut(&1)
-        {
+        if let Some(stats) = exec.plan_stats.operators.get_mut(&1) {
             stats.column_sketches.insert(
                 "key".into(),
                 crate::runtime_stats::ColumnSketch {
                     approx_distinct: 50,
                     null_count: 0,
                     total_count: 10_000,
-                    most_frequent: Some((
-                        "hot".into(),
-                        5000,
-                    )),
+                    most_frequent: Some(("hot".into(), 5000)),
                 },
             );
         }

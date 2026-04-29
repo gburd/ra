@@ -54,8 +54,7 @@ impl FeatureSchema {
             column_indices.insert((*col).to_string(), i);
         }
 
-        let total_features =
-            FIXED_FEATURES + tables.len() + columns.len();
+        let total_features = FIXED_FEATURES + tables.len() + columns.len();
 
         Self {
             table_indices,
@@ -72,16 +71,16 @@ impl FeatureSchema {
     /// Returns a fixed-size vector of `self.total_features`
     /// elements.
     #[must_use]
-    pub fn extract(
-        &self,
-        expr: &RelExpr,
-        stats: &HashMap<String, Statistics>,
-    ) -> Vec<f64> {
+    pub fn extract(&self, expr: &RelExpr, stats: &HashMap<String, Statistics>) -> Vec<f64> {
         let mut features = vec![0.0; self.total_features];
         self.encode_expr(expr, stats, &mut features);
         features
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Feature encoding requires handling many RelExpr and Expr variants"
+    )]
     fn encode_expr(
         &self,
         expr: &RelExpr,
@@ -91,7 +90,9 @@ impl FeatureSchema {
         match expr {
             RelExpr::Scan { table, .. }
             | RelExpr::IndexScan { table, .. }
-            | RelExpr::IndexOnlyScan { table, .. } => {
+            | RelExpr::IndexOnlyScan { table, .. }
+            | RelExpr::BitmapIndexScan { table, .. }
+            | RelExpr::ParallelScan { table, .. } => {
                 features[OP_TYPE_OFFSET] = 1.0;
                 self.encode_table(table, stats, features);
             }
@@ -104,11 +105,17 @@ impl FeatureSchema {
             }
             RelExpr::Project { input, columns, .. } => {
                 features[OP_TYPE_OFFSET + 2] = 1.0;
-                features[STATS_OFFSET + 5] =
-                    log_scale(columns.len() as f64);
+                features[STATS_OFFSET + 5] = log_scale(columns.len() as f64);
                 self.encode_expr(input, stats, features);
             }
             RelExpr::Join {
+                join_type,
+                condition,
+                left,
+                right,
+                ..
+            }
+            | RelExpr::ParallelHashJoin {
                 join_type,
                 condition,
                 left,
@@ -123,16 +130,17 @@ impl FeatureSchema {
             }
             RelExpr::Aggregate {
                 group_by, input, ..
+            }
+            | RelExpr::ParallelAggregate {
+                group_by, input, ..
             } => {
                 features[OP_TYPE_OFFSET + 4] = 1.0;
-                features[STATS_OFFSET + 4] =
-                    log_scale(group_by.len() as f64);
+                features[STATS_OFFSET + 4] = log_scale(group_by.len() as f64);
                 self.encode_expr(input, stats, features);
             }
             RelExpr::Sort { input, keys, .. } => {
                 features[OP_TYPE_OFFSET + 5] = 1.0;
-                features[STATS_OFFSET + 5] =
-                    log_scale(keys.len() as f64);
+                features[STATS_OFFSET + 5] = log_scale(keys.len() as f64);
                 self.encode_expr(input, stats, features);
             }
             RelExpr::IncrementalSort {
@@ -141,9 +149,8 @@ impl FeatureSchema {
                 input,
             } => {
                 features[OP_TYPE_OFFSET + 5] = 1.0;
-                features[STATS_OFFSET + 5] = log_scale(
-                    (prefix_keys.len() + suffix_keys.len()) as f64,
-                );
+                features[STATS_OFFSET + 5] =
+                    log_scale((prefix_keys.len() + suffix_keys.len()) as f64);
                 self.encode_expr(input, stats, features);
             }
             RelExpr::Limit {
@@ -153,10 +160,8 @@ impl FeatureSchema {
                 ..
             } => {
                 features[OP_TYPE_OFFSET + 6] = 1.0;
-                features[STATS_OFFSET + 2] =
-                    log_scale(*count as f64);
-                features[STATS_OFFSET + 3] =
-                    log_scale(*offset as f64);
+                features[STATS_OFFSET + 2] = log_scale(*count as f64);
+                features[STATS_OFFSET + 3] = log_scale(*offset as f64);
                 self.encode_expr(input, stats, features);
             }
             RelExpr::Union { left, right, .. } => {
@@ -182,7 +187,9 @@ impl FeatureSchema {
                 self.encode_expr(body, stats, features);
             }
             RelExpr::Window { input, .. }
-            | RelExpr::Distinct { input, .. } => {
+            | RelExpr::Distinct { input, .. }
+            | RelExpr::RowPattern { input, .. }
+            | RelExpr::TopK { input, .. } => {
                 features[OP_TYPE_OFFSET + 2] = 1.0;
                 self.encode_expr(input, stats, features);
             }
@@ -200,62 +207,25 @@ impl FeatureSchema {
             RelExpr::Values { .. } => {
                 features[OP_TYPE_OFFSET] = 1.0;
             }
-            RelExpr::Unnest { input, .. }
-            | RelExpr::TableFunction { input, .. } => {
+            RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
                 features[OP_TYPE_OFFSET + 2] = 1.0;
                 if let Some(inp) = input {
                     self.encode_expr(inp, stats, features);
                 }
             }
-            RelExpr::RowPattern { input, .. } => {
-                features[OP_TYPE_OFFSET + 2] = 1.0;
-                self.encode_expr(input, stats, features);
-            }
             RelExpr::MultiUnnest { .. } => {
                 features[OP_TYPE_OFFSET + 3] = 1.0;
             }
-            RelExpr::BitmapIndexScan { table, .. } => {
-                features[OP_TYPE_OFFSET] = 1.0;
-                self.encode_table(table, stats, features);
-            }
-            RelExpr::BitmapHeapScan {
-                table, bitmap, ..
-            } => {
+            RelExpr::BitmapHeapScan { table, bitmap, .. } => {
                 features[OP_TYPE_OFFSET] = 1.0;
                 self.encode_table(table, stats, features);
                 self.encode_expr(bitmap, stats, features);
             }
-            RelExpr::BitmapAnd { inputs }
-            | RelExpr::BitmapOr { inputs } => {
+            RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
                 features[OP_TYPE_OFFSET + 1] = 1.0;
                 for inp in inputs {
                     self.encode_expr(inp, stats, features);
                 }
-            }
-            RelExpr::ParallelScan { table, .. } => {
-                features[OP_TYPE_OFFSET] = 1.0;
-                self.encode_table(table, stats, features);
-            }
-            RelExpr::ParallelHashJoin {
-                join_type,
-                condition,
-                left,
-                right,
-                ..
-            } => {
-                features[OP_TYPE_OFFSET + 3] = 1.0;
-                encode_join_type(*join_type, features);
-                self.encode_predicate(condition, features);
-                self.encode_expr(left, stats, features);
-                self.encode_expr(right, stats, features);
-            }
-            RelExpr::ParallelAggregate {
-                group_by, input, ..
-            } => {
-                features[OP_TYPE_OFFSET + 4] = 1.0;
-                features[STATS_OFFSET + 4] =
-                    log_scale(group_by.len() as f64);
-                self.encode_expr(input, stats, features);
             }
             RelExpr::Gather { input, .. } => {
                 self.encode_expr(input, stats, features);
@@ -264,10 +234,6 @@ impl FeatureSchema {
                 features[OP_TYPE_OFFSET] = 1.0;
                 self.encode_table(view_name, stats, features);
             }
-            RelExpr::TopK { input, .. } => {
-                features[OP_TYPE_OFFSET + 2] = 1.0;
-                self.encode_expr(input, stats, features);
-            }
             RelExpr::VectorFilter { input, .. } => {
                 features[OP_TYPE_OFFSET + 1] = 1.0;
                 self.encode_expr(input, stats, features);
@@ -275,12 +241,7 @@ impl FeatureSchema {
         }
     }
 
-    fn encode_table(
-        &self,
-        table: &str,
-        stats: &HashMap<String, Statistics>,
-        features: &mut [f64],
-    ) {
+    fn encode_table(&self, table: &str, stats: &HashMap<String, Statistics>, features: &mut [f64]) {
         if let Some(&idx) = self.table_indices.get(table) {
             let offset = FIXED_FEATURES + idx;
             if offset < features.len() {
@@ -290,24 +251,15 @@ impl FeatureSchema {
 
         if let Some(s) = stats.get(table) {
             features[STATS_OFFSET] = log_scale(s.row_count);
-            features[STATS_OFFSET + 1] =
-                log_scale(s.avg_row_size as f64);
+            features[STATS_OFFSET + 1] = log_scale(s.avg_row_size as f64);
         }
     }
 
-    fn encode_predicate(
-        &self,
-        expr: &Expr,
-        features: &mut [f64],
-    ) {
+    fn encode_predicate(&self, expr: &Expr, features: &mut [f64]) {
         match expr {
             Expr::Column(col_ref) => {
-                if let Some(&idx) =
-                    self.column_indices.get(&col_ref.column)
-                {
-                    let offset = FIXED_FEATURES
-                        + self.table_indices.len()
-                        + idx;
+                if let Some(&idx) = self.column_indices.get(&col_ref.column) {
+                    let offset = FIXED_FEATURES + self.table_indices.len() + idx;
                     if offset < features.len() {
                         features[offset] = 1.0;
                     }
@@ -401,20 +353,15 @@ pub fn log_scale(x: f64) -> f64 {
     (1.0 + x.max(0.0)).log2()
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::algebra::RelExpr;
-    use ra_core::expr::{
-        BinOp as ExprBinOp, ColumnRef, Const, Expr,
-    };
+    use ra_core::expr::{BinOp as ExprBinOp, ColumnRef, Const, Expr};
 
     fn test_schema() -> FeatureSchema {
-        FeatureSchema::new(
-            &["users", "orders"],
-            &["id", "name", "amount", "user_id"],
-        )
+        FeatureSchema::new(&["users", "orders"], &["id", "name", "amount", "user_id"])
     }
 
     fn test_stats() -> HashMap<String, Statistics> {
@@ -432,13 +379,9 @@ mod tests {
         let features = schema.extract(&expr, &stats_map);
 
         assert_eq!(features.len(), schema.total_features);
-        assert!(
-            (features[OP_TYPE_OFFSET] - 1.0).abs() < f64::EPSILON
-        );
+        assert!((features[OP_TYPE_OFFSET] - 1.0).abs() < f64::EPSILON);
         let users_idx = FIXED_FEATURES;
-        assert!(
-            (features[users_idx] - 1.0).abs() < f64::EPSILON
-        );
+        assert!((features[users_idx] - 1.0).abs() < f64::EPSILON);
         assert!(features[STATS_OFFSET] > 0.0);
     }
 
@@ -448,21 +391,13 @@ mod tests {
         let stats_map = test_stats();
         let expr = RelExpr::scan("orders").filter(Expr::BinOp {
             op: ExprBinOp::Gt,
-            left: Box::new(Expr::Column(ColumnRef::new(
-                "amount",
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::new("amount"))),
             right: Box::new(Expr::Const(Const::Int(100))),
         });
         let features = schema.extract(&expr, &stats_map);
 
-        assert!(
-            (features[OP_TYPE_OFFSET + 1] - 1.0).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (features[PRED_OP_OFFSET + 4] - 1.0).abs()
-                < f64::EPSILON
-        );
+        assert!((features[OP_TYPE_OFFSET + 1] - 1.0).abs() < f64::EPSILON);
+        assert!((features[PRED_OP_OFFSET + 4] - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -473,26 +408,16 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: ExprBinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("users", "id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("orders", "user_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
             },
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
         };
         let features = schema.extract(&expr, &stats_map);
 
-        assert!(
-            (features[OP_TYPE_OFFSET + 3] - 1.0).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (features[JOIN_TYPE_OFFSET] - 1.0).abs()
-                < f64::EPSILON
-        );
+        assert!((features[OP_TYPE_OFFSET + 3] - 1.0).abs() < f64::EPSILON);
+        assert!((features[JOIN_TYPE_OFFSET] - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -525,25 +450,15 @@ mod tests {
         let expr = RelExpr::scan("unknown_table");
         let empty_stats = HashMap::new();
         let features = schema.extract(&expr, &empty_stats);
-        assert!(
-            (features[STATS_OFFSET] - 0.0).abs() < f64::EPSILON
-        );
+        assert!((features[STATS_OFFSET] - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn schema_serialization() {
         let schema = test_schema();
-        let json = serde_json::to_string(&schema)
-            .expect("serialize schema");
-        let restored: FeatureSchema = serde_json::from_str(&json)
-            .expect("deserialize schema");
-        assert_eq!(
-            restored.total_features,
-            schema.total_features
-        );
-        assert_eq!(
-            restored.table_indices.len(),
-            schema.table_indices.len()
-        );
+        let json = serde_json::to_string(&schema).expect("serialize schema");
+        let restored: FeatureSchema = serde_json::from_str(&json).expect("deserialize schema");
+        assert_eq!(restored.total_features, schema.total_features);
+        assert_eq!(restored.table_indices.len(), schema.table_indices.len());
     }
 }

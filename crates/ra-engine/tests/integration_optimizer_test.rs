@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Integration tests for optimizer end-to-end behavior.
 //!
 //! Tests cross-component interactions between parser, optimizer,

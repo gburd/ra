@@ -8,7 +8,7 @@
 //! - Resource tracking overhead: <5%
 //! - Color rendering overhead: <1ms
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};

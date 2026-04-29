@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 //! Integration tests for timeline optimizer.
 
 #![cfg(feature = "timeline")]
@@ -270,9 +271,11 @@ fn custom_thresholds() {
     let optimizer = Optimizer::new();
 
     // Create custom thresholds with higher sensitivity
-    let mut thresholds = ra_engine::StalenessThresholds::default();
-    thresholds.cardinality_ratio = 1.1; // Very sensitive to row count changes
-    thresholds.index_changes_trigger = true;
+    let thresholds = ra_engine::StalenessThresholds {
+        cardinality_ratio: 1.1, // Very sensitive to row count changes
+        index_changes_trigger: true,
+        ..ra_engine::StalenessThresholds::default()
+    };
 
     let mut timeline_optimizer =
         TimelineOptimizer::with_thresholds(config, query, optimizer, thresholds);
@@ -322,8 +325,8 @@ fn empty_timeline_handling() {
             has_gpu: false,
             gpu_memory: None,
             l1_cache_size: 32768,
-            l2_cache_size: 262144,
-            l3_cache_size: 8388608,
+            l2_cache_size: 262_144,
+            l3_cache_size: 8_388_608,
         }],
         snapshots: vec![FingerPrintSnapshot {
             time_offset: 0,
@@ -383,8 +386,10 @@ fn statistics_drift_detection() {
 
     // Use lower thresholds to detect the smaller row count changes in the test timeline
     // (1M -> 1.05M = 1.05x, which is below default 2.0x threshold)
-    let mut thresholds = ra_engine::StalenessThresholds::default();
-    thresholds.cardinality_ratio = 1.03; // Detect 3% or more change
+    let thresholds = ra_engine::StalenessThresholds {
+        cardinality_ratio: 1.03, // Detect 3% or more change
+        ..ra_engine::StalenessThresholds::default()
+    };
 
     let mut timeline_optimizer =
         TimelineOptimizer::with_thresholds(config, query, optimizer, thresholds);

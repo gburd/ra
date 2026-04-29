@@ -1,3 +1,4 @@
+#![expect(clippy::panic, clippy::expect_used, reason = "test assertions")]
 //! Integration tests for distributed aggregation + distribution
 //! strategy integration.
 //!

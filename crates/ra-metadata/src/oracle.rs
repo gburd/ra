@@ -250,27 +250,26 @@ impl OracleConnector {
             .conn
             .query_row_as::<(f64, f64)>(sql, &[&self.schema, &table.to_uppercase()]);
 
-        match result {
-            Ok((rows, bytes)) => Ok((rows.max(0.0), bytes.max(0.0) as u64)),
-            Err(_) => {
-                // Fallback: just get num_rows without size.
-                let sql2 = "SELECT NVL(num_rows, 0) \
-                     FROM all_tables \
-                     WHERE owner = :1 \
-                     AND table_name = :2";
+        if let Ok((rows, bytes)) = result {
+            Ok((rows.max(0.0), bytes.max(0.0) as u64))
+        } else {
+            // Fallback: just get num_rows without size.
+            let sql2 = "SELECT NVL(num_rows, 0) \
+                 FROM all_tables \
+                 WHERE owner = :1 \
+                 AND table_name = :2";
 
-                let (rows,) = self
-                    .conn
-                    .query_row_as::<(f64,)>(sql2, &[&self.schema, &table.to_uppercase()])
-                    .map_err(|e| MetadataError::Query {
-                        message: format!(
-                            "failed to query stats for \
-                                 {table}: {e}"
-                        ),
-                    })?;
+            let (rows,) = self
+                .conn
+                .query_row_as::<(f64,)>(sql2, &[&self.schema, &table.to_uppercase()])
+                .map_err(|e| MetadataError::Query {
+                    message: format!(
+                        "failed to query stats for \
+                             {table}: {e}"
+                    ),
+                })?;
 
-                Ok((rows.max(0.0), 0))
-            }
+            Ok((rows.max(0.0), 0))
         }
     }
 
@@ -465,7 +464,7 @@ impl OracleConnector {
         }
 
         let text = lines.join("\n");
-        let first = lines.first().map(String::as_str).unwrap_or("");
+        let first = lines.first().map_or("", String::as_str);
         let node_type = classify_oracle_node(first);
 
         Ok(ExplainPlan {
@@ -560,13 +559,12 @@ fn classify_oracle_node(line: &str) -> NodeType {
         NodeType::Sort
     } else if upper.contains("GROUP BY") || upper.contains("HASH GROUP") {
         NodeType::HashAggregate
-    } else if upper.contains("FILTER") {
-        NodeType::Other
     } else {
         NodeType::Other
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

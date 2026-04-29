@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, clippy::float_cmp, reason = "test code")]
 //! Integration tests for ra-hardware with ra-engine cost models.
 //!
 //! Validates that hardware profiles (CPU, GPU, FPGA) correctly

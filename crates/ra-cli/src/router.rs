@@ -1,3 +1,4 @@
+#![expect(clippy::exit, reason = "CLI binary uses process::exit for error codes")]
 //! Command dispatch/routing for ra-cli.
 
 use anyhow::{Context, Result};
@@ -5,7 +6,10 @@ use clap::CommandFactory;
 use clap_complete::generate;
 use colored::Colorize;
 
-use crate::cli::*;
+use crate::cli::{
+    CacheCommands, Cli, Commands, ConfigCommands, FederatedCommands, MigrateCommands,
+    PgSnapshotCommands, RegressionCommands, RuleDisplayMode, StatsTimelineCommands,
+};
 use crate::commands;
 use crate::helpers::resolve_query;
 use crate::{
@@ -158,7 +162,13 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             takeover,
             log_format,
             min_improvement,
-        } => commands::proxy_cmd::cmd_proxy(&backend, &listen, takeover, &log_format, min_improvement),
+        } => commands::proxy_cmd::cmd_proxy(
+            &backend,
+            &listen,
+            takeover,
+            &log_format,
+            min_improvement,
+        ),
         Commands::Translate { query, from, to } => {
             commands::translate::cmd_translate(&query, &from, &to, cli.quiet)
         }
@@ -214,7 +224,7 @@ fn dispatch_pg_snapshot(sub: PgSnapshotCommands) -> Result<()> {
             tables,
             output,
             label,
-        } => pg_snapshot_commands::capture_pg_snapshot(&database, &tables, &output, label.clone()),
+        } => pg_snapshot_commands::capture_pg_snapshot(&database, &tables, &output, label.as_deref()),
         PgSnapshotCommands::GenerateScript {
             tables,
             output_dir,
@@ -316,11 +326,7 @@ fn dispatch_cache(sub: CacheCommands, verbose: bool, quiet: bool) -> Result<()> 
     }
 }
 
-fn dispatch_regression(
-    sub: RegressionCommands,
-    verbose: bool,
-    quiet: bool,
-) -> Result<()> {
+fn dispatch_regression(sub: RegressionCommands, verbose: bool, quiet: bool) -> Result<()> {
     match sub {
         RegressionCommands::Baseline {
             query_file,
@@ -382,8 +388,12 @@ fn dispatch_migrate(sub: MigrateCommands) -> Result<()> {
         } => {
             let input_path = std::path::Path::new(&input);
             let output_path = std::path::Path::new(&output);
-            match migrate_commands::migrate_preconditions(input_path, output_path, dry_run, validate)
-            {
+            match migrate_commands::migrate_preconditions(
+                input_path,
+                output_path,
+                dry_run,
+                validate,
+            ) {
                 Ok(report) => {
                     report.print_summary();
                     Ok(())

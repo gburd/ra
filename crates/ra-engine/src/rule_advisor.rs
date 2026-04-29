@@ -316,7 +316,7 @@ impl std::fmt::Debug for RuleAdvisor {
             .field("context_slots", &self.context_slots.len())
             .field("total_rule_count", &self.total_rule_count)
             .field("has_knowledge", &self.knowledge.is_some())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -326,7 +326,6 @@ fn dirs_home() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

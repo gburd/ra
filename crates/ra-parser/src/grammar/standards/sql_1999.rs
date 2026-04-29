@@ -7,7 +7,7 @@
 //!
 //! - **CTEs (WITH clause)**: Recursive and non-recursive common table expressions
 //! - **CASE expressions**: Conditional logic in queries
-//! - **Window functions**: ROW_NUMBER, RANK, DENSE_RANK (part of OLAP amendment)
+//! - **Window functions**: `ROW_NUMBER`, RANK, `DENSE_RANK` (part of OLAP amendment)
 //! - **Triggers**: ON INSERT/UPDATE/DELETE
 //! - **Stored procedures**: CREATE PROCEDURE/FUNCTION
 //!
@@ -42,7 +42,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQL1999Extension;
 
 impl GrammarExtension for SQL1999Extension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sql:1999"
     }
 

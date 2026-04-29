@@ -1,6 +1,12 @@
+#![expect(
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "example binary"
+)]
 //! Diagnostic: which optimization path each JOB query takes.
 //!
-//! Run with: cargo run --example job_diagnostic --package ra-engine --release
+//! Run with: `cargo run --example job_diagnostic --package ra-engine --release`
 
 use ra_core::statistics::Statistics;
 use ra_engine::Optimizer;
@@ -96,10 +102,10 @@ fn main() {
 
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
         .collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     // First: measure all_rules() cost
     let rules_start = Instant::now();
@@ -130,9 +136,8 @@ fn main() {
         let query_id = path.file_stem().unwrap().to_str().unwrap().to_owned();
         let sql = fs::read_to_string(&path).unwrap();
 
-        let relexpr = match sql_to_relexpr(&sql) {
-            Ok(r) => r,
-            Err(_) => continue,
+        let Ok(relexpr) = sql_to_relexpr(&sql) else {
+            continue;
         };
 
         let tables = count_tables(&relexpr);

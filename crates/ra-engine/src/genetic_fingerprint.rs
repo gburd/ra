@@ -27,6 +27,7 @@ use ra_core::expr::{BinOp, Expr, UnaryOp};
 /// typical queries) and cheap to compare (three integer comparisons
 /// for exact match, a handful of bit ops for similarity).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[expect(clippy::struct_excessive_bools, reason = "boolean flags represent independent query features")]
 pub struct QueryFingerprint {
     /// Hash of the join graph: tables involved and join topology.
     pub join_graph_hash: u64,
@@ -130,7 +131,7 @@ struct FingerprintCollector {
     tables: BTreeSet<String>,
     /// Join types encountered, in traversal order.
     join_types: Vec<JoinType>,
-    /// Predicate operator shapes (BinOp discriminants, column refs).
+    /// Predicate operator shapes (`BinOp` discriminants, column refs).
     predicate_ops: Vec<u8>,
     /// Aggregate functions used.
     agg_functions: Vec<AggregateFunction>,
@@ -143,16 +144,24 @@ struct FingerprintCollector {
 }
 
 impl FingerprintCollector {
+    #[expect(clippy::too_many_lines, reason = "match over all RelExpr variants")]
     fn visit(&mut self, expr: &RelExpr) {
         match expr {
-            RelExpr::Scan { table, .. } => {
+            RelExpr::Scan { table, .. }
+            | RelExpr::IndexScan { table, .. }
+            | RelExpr::IndexOnlyScan { table, .. }
+            | RelExpr::ParallelScan { table, .. } => {
                 self.tables.insert(table.clone());
             }
             RelExpr::Filter { predicate, input } => {
                 self.visit_expr(predicate);
                 self.visit(input);
             }
-            RelExpr::Project { input, .. } => {
+            RelExpr::Project { input, .. }
+            | RelExpr::Window { input, .. }
+            | RelExpr::Gather { input, .. }
+            | RelExpr::TopK { input, .. }
+            | RelExpr::VectorFilter { input, .. } => {
                 self.visit(input);
             }
             RelExpr::Join {
@@ -160,6 +169,13 @@ impl FingerprintCollector {
                 condition,
                 left,
                 right,
+            }
+            | RelExpr::ParallelHashJoin {
+                join_type,
+                condition,
+                left,
+                right,
+                ..
             } => {
                 self.join_types.push(*join_type);
                 self.visit_expr(condition);
@@ -170,16 +186,21 @@ impl FingerprintCollector {
                 group_by,
                 aggregates,
                 input,
+            }
+            | RelExpr::ParallelAggregate {
+                group_by,
+                aggregates,
+                input,
+                ..
             } => {
-                {
-                    self.group_by_count = group_by.len() as u16;
-                }
+                self.group_by_count = group_by.len() as u16;
                 for agg in aggregates {
                     self.agg_functions.push(agg.function);
                 }
                 self.visit(input);
             }
-            RelExpr::Sort { input, .. } => {
+            RelExpr::Sort { input, .. }
+            | RelExpr::IncrementalSort { input, .. } => {
                 self.has_sort = true;
                 self.visit(input);
             }
@@ -203,9 +224,6 @@ impl FingerprintCollector {
                 self.visit(definition);
                 self.visit(body);
             }
-            RelExpr::Window { input, .. } => {
-                self.visit(input);
-            }
             RelExpr::RecursiveCTE {
                 base_case,
                 recursive_case,
@@ -216,25 +234,10 @@ impl FingerprintCollector {
                 self.visit(recursive_case);
                 self.visit(body);
             }
-            RelExpr::Unnest { input, .. } => {
+            RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
                 if let Some(inp) = input {
                     self.visit(inp);
                 }
-            }
-            RelExpr::TableFunction { input, .. } => {
-                if let Some(inp) = input {
-                    self.visit(inp);
-                }
-            }
-            RelExpr::IncrementalSort { input, .. } => {
-                self.has_sort = true;
-                self.visit(input);
-            }
-            RelExpr::IndexScan { table, .. } => {
-                self.tables.insert(table.clone());
-            }
-            RelExpr::IndexOnlyScan { table, .. } => {
-                self.tables.insert(table.clone());
             }
             RelExpr::BitmapIndexScan {
                 table, predicate, ..
@@ -258,53 +261,16 @@ impl FingerprintCollector {
                     self.visit(inp);
                 }
             }
-            RelExpr::ParallelScan { table, .. } => {
-                self.tables.insert(table.clone());
-            }
-            RelExpr::ParallelHashJoin {
-                join_type,
-                condition,
-                left,
-                right,
-                ..
-            } => {
-                self.join_types.push(*join_type);
-                self.visit_expr(condition);
-                self.visit(left);
-                self.visit(right);
-            }
-            RelExpr::ParallelAggregate {
-                group_by,
-                aggregates,
-                input,
-                ..
-            } => {
-                {
-                    self.group_by_count = group_by.len() as u16;
-                }
-                for agg in aggregates {
-                    self.agg_functions.push(agg.function);
-                }
-                self.visit(input);
-            }
-            RelExpr::Gather { input, .. } => {
-                self.visit(input);
-            }
             RelExpr::Values { .. }
             | RelExpr::MultiUnnest { .. }
             | RelExpr::RowPattern { .. }
             | RelExpr::MvScan { .. } => {}
-            RelExpr::TopK { input, .. } => {
-                self.visit(input);
-            }
-            RelExpr::VectorFilter { input, .. } => {
-                self.visit(input);
-            }
         }
     }
 
     /// Visit an expression, recording operator shape but ignoring
     /// literal values.
+    #[expect(clippy::too_many_lines, reason = "match over all Expr variants")]
     fn visit_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Column(col_ref) => {
@@ -328,13 +294,13 @@ impl FingerprintCollector {
             }
             Expr::BinOp { op, left, right } => {
                 self.predicate_ops.push(0x03);
-                self.predicate_ops.push(binop_discriminant(op));
+                self.predicate_ops.push(binop_discriminant(*op));
                 self.visit_expr(left);
                 self.visit_expr(right);
             }
             Expr::UnaryOp { op, operand } => {
                 self.predicate_ops.push(0x04);
-                self.predicate_ops.push(unaryop_discriminant(op));
+                self.predicate_ops.push(unaryop_discriminant(*op));
                 self.visit_expr(operand);
             }
             Expr::Function { name, args } => {
@@ -504,7 +470,7 @@ impl Hasher for FnvHasher {
     }
 }
 
-fn binop_discriminant(op: &BinOp) -> u8 {
+fn binop_discriminant(op: BinOp) -> u8 {
     match op {
         BinOp::Eq => 0,
         BinOp::Ne => 1,
@@ -524,7 +490,7 @@ fn binop_discriminant(op: &BinOp) -> u8 {
     }
 }
 
-fn unaryop_discriminant(op: &UnaryOp) -> u8 {
+fn unaryop_discriminant(op: UnaryOp) -> u8 {
     match op {
         UnaryOp::Not => 0,
         UnaryOp::Neg => 1,

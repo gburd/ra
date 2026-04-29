@@ -369,7 +369,8 @@ impl NetworkCostModel {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::float_cmp, reason = "legacy allow")]
+#[expect(clippy::panic, reason = "test assertions")]
 mod tests {
     use super::*;
     use ra_hardware::network::{LinkType, Location, NetworkLink, NetworkTopology};

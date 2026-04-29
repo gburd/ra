@@ -5,34 +5,15 @@ use std::env;
 use std::path::PathBuf;
 
 fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
-    // --- Compile SIMD tokenizer as a separate unit ----------------------
-    // The AVX2 path uses __attribute__((target("avx2"))), so no special
-    // flags are needed — it compiles on any x86_64 toolchain. On ARM the
-    // NEON path is selected automatically by the compiler.
-    cc::Build::new()
-        .file(lime_src.join("tokenize_simd.c"))
-        .include(lime_inc)
-        .define("_GNU_SOURCE", None)
-        .std("c11")
-        .warnings(false) // upstream C code, not our warnings to fix
-        .compile("tokenize_simd");
+    let simd_sources = ["tokenize_simd.c"];
 
-    // --- Compile JIT stubs (no LLVM dependency) -------------------------
-    cc::Build::new()
-        .files([
-            lime_src.join("jit_context.c"),
-            lime_src.join("jit_codegen.c"),
-            lime_src.join("jit_policy.c"),
-            lime_src.join("jit_tokenizer.c"),
-        ])
-        .include(lime_inc)
-        .define("_GNU_SOURCE", None)
-        .define("LIME_NO_JIT", None)
-        .std("c11")
-        .warnings(false)
-        .compile("lime_jit");
+    let jit_sources = [
+        "jit_context.c",
+        "jit_codegen.c",
+        "jit_policy.c",
+        "jit_tokenizer.c",
+    ];
 
-    // --- Compile core library -------------------------------------------
     let core_sources = [
         "version.c",
         "snapshot.c",
@@ -53,6 +34,29 @@ fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
         "glr.c",
     ];
 
+    // --- Compile SIMD tokenizer as a separate unit ----------------------
+    // The AVX2 path uses __attribute__((target("avx2"))), so no special
+    // flags are needed — it compiles on any x86_64 toolchain. On ARM the
+    // NEON path is selected automatically by the compiler.
+    cc::Build::new()
+        .file(lime_src.join("tokenize_simd.c"))
+        .include(lime_inc)
+        .define("_GNU_SOURCE", None)
+        .std("c11")
+        .warnings(false) // upstream C code, not our warnings to fix
+        .compile("tokenize_simd");
+
+    // --- Compile JIT stubs (no LLVM dependency) -------------------------
+    cc::Build::new()
+        .files(jit_sources.iter().map(|f| lime_src.join(f)))
+        .include(lime_inc)
+        .define("_GNU_SOURCE", None)
+        .define("LIME_NO_JIT", None)
+        .std("c11")
+        .warnings(false)
+        .compile("lime_jit");
+
+    // --- Compile core library -------------------------------------------
     cc::Build::new()
         .files(core_sources.iter().map(|f| lime_src.join(f)))
         .include(lime_inc)
@@ -65,10 +69,38 @@ fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
     // Link pthreads (required by token_table.c rwlock)
     println!("cargo:rustc-link-lib=pthread");
 
-    // Re-run if Lime sources change
+    // --- Per-file change tracking for granular rebuild detection ---------
+    // Track individual C source files instead of entire directories so
+    // that cargo only reruns build.rs when an actual source changes.
     println!("cargo:rerun-if-env-changed=LIME_DIR");
-    println!("cargo:rerun-if-changed={}", lime_src.display());
-    println!("cargo:rerun-if-changed={}", lime_inc.display());
+    println!("cargo:rerun-if-changed=wrapper.h");
+
+    for source in simd_sources
+        .iter()
+        .chain(jit_sources.iter())
+        .chain(core_sources.iter())
+    {
+        println!(
+            "cargo:rerun-if-changed={}",
+            lime_src.join(source).display(),
+        );
+    }
+
+    // Track all header files in both include/ and src/ directories
+    emit_rerun_for_headers(lime_inc);
+    emit_rerun_for_headers(lime_src);
+}
+
+/// Emit `cargo:rerun-if-changed` for every `.h` file in `dir`.
+fn emit_rerun_for_headers(dir: &std::path::Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "h") {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
 }
 
 fn generate_bindings(lime_inc: &std::path::Path, lime_src: &std::path::Path) {

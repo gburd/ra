@@ -24,7 +24,7 @@ pub use to_rec::to_rec_expr;
 pub use tracking::{IntermediateStep, RuleApplication, RuleEvaluation, RuleTrackingResult};
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use ra_core::algebra::{JoinType, RelExpr};
@@ -168,7 +168,7 @@ mod tests {
         let expr = RelExpr::scan("users");
         let result = optimizer.optimize_bounded(&expr);
         assert!(result.is_err());
-        let err = result.err().expect("should be error");
+        let err = result.expect_err("should be error");
         assert!(matches!(err, EGraphError::ResourceBudgetExceeded(_)));
     }
 
@@ -216,8 +216,8 @@ mod tests {
         let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::standard());
         let expr = RelExpr::scan("users");
         let result = optimizer.optimize_bounded(&expr).expect("should succeed");
-        // Elapsed time should be non-zero (we did some work)
-        let _elapsed = result.resource_usage.elapsed_time;
+        // Elapsed time should be recorded (we did some work)
+        assert!(result.resource_usage.elapsed_time.as_nanos() > 0);
     }
 
     #[test]
@@ -542,8 +542,8 @@ mod tests {
         let (_, stats) = optimizer
             .optimize_incremental(&expr, &delta)
             .expect("should succeed");
-        // Elapsed should be non-zero.
-        let _elapsed = stats.elapsed;
+        // Elapsed should be recorded.
+        assert!(stats.elapsed.as_nanos() > 0);
     }
 
     #[test]

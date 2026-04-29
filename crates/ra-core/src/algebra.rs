@@ -8,9 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::expr::{ColumnRef, Expr};
-use crate::row_pattern::{
-    MatchMode, PatternDefine, PatternExpr, PatternMeasure, SkipMode,
-};
+use crate::row_pattern::{MatchMode, PatternDefine, PatternExpr, PatternMeasure, SkipMode};
 use crate::search_types::DistanceMetric;
 
 /// A relational expression (query plan node).
@@ -273,7 +271,6 @@ pub enum RelExpr {
     },
 
     // ===== Covering Index (Index-Only Scan) =====
-
     /// Index-only scan: reads all needed columns from a covering
     /// index, avoiding heap fetches entirely.
     IndexOnlyScan {
@@ -288,7 +285,6 @@ pub enum RelExpr {
     },
 
     // ===== Parallel Query Execution Operators =====
-
     /// Parallel scan: distributes table scan across multiple workers.
     /// Each worker scans a subset of the table pages/blocks.
     ParallelScan {
@@ -336,7 +332,6 @@ pub enum RelExpr {
     },
 
     // ===== Materialized View Scan =====
-
     /// Scan a materialized view instead of re-computing from base
     /// tables. The optimizer rewrites eligible sub-trees into this
     /// node when an MV is cheaper than the original plan.
@@ -348,7 +343,6 @@ pub enum RelExpr {
     },
 
     // ===== Vector Search Operators =====
-
     /// Top-K vector similarity search: returns K nearest neighbors.
     /// Used for ORDER BY vector_distance(...) LIMIT k queries.
     TopK {
@@ -404,9 +398,7 @@ pub struct ProjectionColumn {
 }
 
 /// The type of join operation.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum JoinType {
     /// Inner join: rows matching the condition from both sides.
     Inner,
@@ -438,9 +430,7 @@ pub struct AggregateExpr {
 }
 
 /// Standard aggregate functions.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AggregateFunction {
     /// Count rows.
     Count,
@@ -480,9 +470,7 @@ pub struct WindowExpr {
 }
 
 /// Window function types.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WindowFunction {
     /// Aggregate: AVG.
     Avg,
@@ -528,9 +516,7 @@ pub struct WindowFrame {
 }
 
 /// Window frame mode.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WindowFrameMode {
     /// Frame defined by row positions.
     Rows,
@@ -567,9 +553,7 @@ pub struct SortKey {
 }
 
 /// Sort direction.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SortDirection {
     /// Ascending order.
     Asc,
@@ -578,9 +562,7 @@ pub enum SortDirection {
 }
 
 /// NULL ordering in sorts.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NullOrdering {
     /// NULLs sort before all other values.
     First,
@@ -647,11 +629,7 @@ impl RelExpr {
 
     /// Create a correlated (lateral) unnest operator.
     #[must_use]
-    pub fn unnest_lateral(
-        expr: Expr,
-        input: RelExpr,
-        alias: Option<String>,
-    ) -> Self {
+    pub fn unnest_lateral(expr: Expr, input: RelExpr, alias: Option<String>) -> Self {
         Self::Unnest {
             expr,
             alias,
@@ -736,7 +714,10 @@ impl RelExpr {
     #[expect(clippy::too_many_lines)]
     fn collect_columns(&self, out: &mut Vec<ColumnRef>) {
         match self {
-            Self::Scan { .. } | Self::IndexScan { .. } | Self::ParallelScan { .. } | Self::MvScan { .. } => {}
+            Self::Scan { .. }
+            | Self::IndexScan { .. }
+            | Self::ParallelScan { .. }
+            | Self::MvScan { .. } => {}
             Self::IndexOnlyScan { predicate, .. } | Self::BitmapIndexScan { predicate, .. } => {
                 collect_expr_columns(predicate, out);
             }
@@ -753,9 +734,7 @@ impl RelExpr {
                 collect_expr_columns(predicate, out);
                 input.collect_columns(out);
             }
-            Self::Project {
-                columns, input, ..
-            } => {
+            Self::Project { columns, input, .. } => {
                 for pc in columns {
                     collect_expr_columns(&pc.expr, out);
                 }
@@ -872,9 +851,7 @@ impl RelExpr {
                     collect_expr_columns(expr, out);
                 }
             }
-            Self::TableFunction {
-                args, input, ..
-            } => {
+            Self::TableFunction { args, input, .. } => {
                 for arg in args {
                     collect_expr_columns(arg, out);
                 }
@@ -949,7 +926,9 @@ impl RelExpr {
             | Self::IndexOnlyScan { table, .. }
             | Self::BitmapIndexScan { table, .. }
             | Self::ParallelScan { table, .. }
-            | Self::MvScan { view_name: table, .. } => table == cte_name,
+            | Self::MvScan {
+                view_name: table, ..
+            } => table == cte_name,
             Self::Filter { input, .. }
             | Self::Project { input, .. }
             | Self::Aggregate { input, .. }
@@ -962,23 +941,17 @@ impl RelExpr {
             | Self::ParallelAggregate { input, .. }
             | Self::Gather { input, .. }
             | Self::TopK { input, .. }
-            | Self::VectorFilter { input, .. } => {
-                input.references_cte(cte_name)
-            }
+            | Self::VectorFilter { input, .. } => input.references_cte(cte_name),
             Self::Join { left, right, .. }
             | Self::Union { left, right, .. }
             | Self::Intersect { left, right, .. }
             | Self::Except { left, right, .. }
             | Self::ParallelHashJoin { left, right, .. } => {
-                left.references_cte(cte_name)
-                    || right.references_cte(cte_name)
+                left.references_cte(cte_name) || right.references_cte(cte_name)
             }
             Self::CTE {
                 definition, body, ..
-            } => {
-                definition.references_cte(cte_name)
-                    || body.references_cte(cte_name)
-            }
+            } => definition.references_cte(cte_name) || body.references_cte(cte_name),
             Self::RecursiveCTE {
                 base_case,
                 recursive_case,
@@ -989,15 +962,11 @@ impl RelExpr {
                     || recursive_case.references_cte(cte_name)
                     || body.references_cte(cte_name)
             }
-            Self::Values { .. }
-            | Self::MultiUnnest { .. } => false,
-            Self::Unnest { input, .. }
-            | Self::TableFunction { input, .. } => {
-                input
-                    .as_ref()
-                    .is_some_and(|i| i.references_cte(cte_name))
+            Self::Values { .. } | Self::MultiUnnest { .. } => false,
+            Self::Unnest { input, .. } | Self::TableFunction { input, .. } => {
+                input.as_ref().is_some_and(|i| i.references_cte(cte_name))
             }
-            Self::BitmapAnd { inputs } | Self::BitmapOr { inputs} => {
+            Self::BitmapAnd { inputs } | Self::BitmapOr { inputs } => {
                 inputs.iter().any(|b| b.references_cte(cte_name))
             }
             Self::BitmapHeapScan { bitmap, table, .. } => {
@@ -1058,9 +1027,7 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
         | Expr::PatternLast(inner, _) => {
             collect_expr_columns(inner, out);
         }
-        Expr::ArraySlice {
-            array, start, end,
-        } => {
+        Expr::ArraySlice { array, start, end } => {
             collect_expr_columns(array, out);
             if let Some(s) = start {
                 collect_expr_columns(s, out);
@@ -1155,6 +1122,7 @@ impl std::fmt::Display for SortDirection {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1293,10 +1261,9 @@ mod tests {
     #[test]
     fn serialize_roundtrip() {
         let plan = RelExpr::scan("users").limit(10, 0);
-        let json = serde_json::to_string(&plan)
-            .expect("serialization should succeed");
-        let deserialized: RelExpr = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&plan).expect("serialization should succeed");
+        let deserialized: RelExpr =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(plan, deserialized);
     }
 
@@ -1338,10 +1305,9 @@ mod tests {
                 path_column: None,
             }),
         };
-        let json = serde_json::to_string(&rcte)
-            .expect("serialization should succeed");
-        let deserialized: RelExpr = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&rcte).expect("serialization should succeed");
+        let deserialized: RelExpr =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(rcte, deserialized);
     }
 
@@ -1349,13 +1315,11 @@ mod tests {
     fn recursive_cte_referenced_columns() {
         let rcte = RelExpr::RecursiveCTE {
             name: "r".to_owned(),
-            base_case: Box::new(
-                RelExpr::scan("t").filter(Expr::BinOp {
-                    op: ExprBinOp::Eq,
-                    left: Box::new(Expr::Column(ColumnRef::new("x"))),
-                    right: Box::new(Expr::Const(Const::Int(1))),
-                }),
-            ),
+            base_case: Box::new(RelExpr::scan("t").filter(Expr::BinOp {
+                op: ExprBinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("x"))),
+                right: Box::new(Expr::Const(Const::Int(1))),
+            })),
             recursive_case: Box::new(RelExpr::scan("t")),
             body: Box::new(RelExpr::scan("r")),
             cycle_detection: None,
@@ -1522,8 +1486,7 @@ mod tests {
 
     #[test]
     fn references_cte_through_filter() {
-        let plan = RelExpr::scan("cte1")
-            .filter(Expr::Const(Const::Bool(true)));
+        let plan = RelExpr::scan("cte1").filter(Expr::Const(Const::Bool(true)));
         assert!(plan.references_cte("cte1"));
     }
 

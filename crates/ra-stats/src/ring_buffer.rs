@@ -137,7 +137,6 @@ impl std::fmt::Debug for RingBuffer {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -243,7 +242,7 @@ mod tests {
         let cap = 1024;
         let mut buf = RingBuffer::new(cap);
         for i in 0..10_000 {
-            buf.push(i as f64);
+            buf.push(f64::from(i));
         }
         assert_eq!(buf.len(), cap);
         let snap = buf.snapshot();

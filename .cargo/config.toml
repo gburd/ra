@@ -1,4 +1,29 @@
 # Cargo configuration for the RA project
+#
+# Linker optimization:
+# For faster linking, install a faster linker and uncomment the
+# appropriate section below (or set in your personal config at
+# ~/.cargo/config.toml):
+#
+# macOS (Apple Silicon/x86_64):
+#   brew install llvm
+#   Then uncomment the [target.aarch64-apple-darwin] section below.
+#
+# Linux:
+#   Install mold: https://github.com/rui314/mold
+#   Then uncomment the [target.x86_64-unknown-linux-gnu] section below.
+
+# Uncomment for macOS with LLVM lld installed via Homebrew:
+# [target.aarch64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"]
+#
+# [target.x86_64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=/usr/local/opt/llvm/bin/ld64.lld"]
+
+# Uncomment for Linux with mold:
+# [target.x86_64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 [alias]
 # Build tasks via xtask

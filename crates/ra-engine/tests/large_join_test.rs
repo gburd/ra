@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Tests for large join graph optimization fallback.
 
 use std::collections::HashMap;
@@ -95,9 +96,9 @@ impl MockStatsProvider {
         // Add more tables for large join tests
         for i in 1..=20 {
             stats.insert(
-                format!("table{}", i),
+                format!("table{i}"),
                 Statistics {
-                    row_count: (i as f64) * 1000.0,
+                    row_count: f64::from(i) * 1000.0,
                     avg_row_size: 100,
                     total_size: i as u64 * 100_000,
                     columns: HashMap::new(),
@@ -175,6 +176,13 @@ fn test_greedy_join_order_two_tables() {
 
 #[test]
 fn test_greedy_join_order_multiple_tables() {
+    fn count_joins(expr: &RelExpr) -> usize {
+        match expr {
+            RelExpr::Join { left, right, .. } => 1 + count_joins(left) + count_joins(right),
+            _ => 0,
+        }
+    }
+
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
@@ -207,14 +215,6 @@ fn test_greedy_join_order_multiple_tables() {
 
     // Should produce a valid join tree
     assert!(matches!(result, RelExpr::Join { .. }));
-
-    // Count the number of joins
-    fn count_joins(expr: &RelExpr) -> usize {
-        match expr {
-            RelExpr::Join { left, right, .. } => 1 + count_joins(left) + count_joins(right),
-            _ => 0,
-        }
-    }
 
     assert_eq!(count_joins(&result), 3); // 4 tables need 3 joins
 }
@@ -319,7 +319,7 @@ fn test_large_join_20_tables() {
     let mut joins = Vec::new();
     for i in 1..=20 {
         joins.push(JoinNode {
-            table: format!("table{}", i),
+            table: format!("table{i}"),
             alias: None,
             condition: Some(Expr::Const(Const::Bool(true))),
         });
@@ -332,7 +332,7 @@ fn test_large_join_20_tables() {
     assert!(matches!(result, RelExpr::Join { .. }));
 
     // Greedy should complete in under 5 seconds for 20 tables
-    assert!(greedy_time.as_secs() < 5, "Greedy took {:?}", greedy_time);
+    assert!(greedy_time.as_secs() < 5, "Greedy took {greedy_time:?}");
 
     // Test simulated annealing with 20 tables
     let optimizer_sa = LargeJoinOptimizer::new(
@@ -352,11 +352,7 @@ fn test_large_join_20_tables() {
     assert!(matches!(result, RelExpr::Join { .. }));
 
     // Simulated annealing should complete in under 30 seconds for 20 tables
-    assert!(
-        sa_time.as_secs() < 30,
-        "Simulated annealing took {:?}",
-        sa_time
-    );
+    assert!(sa_time.as_secs() < 30, "Simulated annealing took {sa_time:?}");
 }
 
 #[test]

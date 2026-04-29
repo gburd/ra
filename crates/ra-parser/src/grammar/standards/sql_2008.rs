@@ -33,7 +33,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQL2008Extension;
 
 impl GrammarExtension for SQL2008Extension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sql:2008"
     }
 

@@ -1,3 +1,4 @@
+#![expect(clippy::float_cmp, reason = "test code")]
 //! Comprehensive tests for RFC 0059 v2: event-driven plan cache
 //! invalidation using differential dataflow.
 //!
@@ -9,7 +10,7 @@
 //! - Edge cases (zero rows, missing stats, empty changes)
 //! - End-to-end flow: detect changes -> compute affected -> invalidate
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![expect(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::{HashMap, HashSet};
 
@@ -458,7 +459,7 @@ fn hot_entry_gets_soft_invalidation() {
         let _ = cache.lookup(&fp);
     }
 
-    cache.invalidate(&[fp.clone()]);
+    cache.invalidate(std::slice::from_ref(&fp));
 
     // Should still be in cache but marked stale
     let result = cache.lookup(&fp).expect("should hit");
@@ -632,7 +633,7 @@ fn mark_fresh_restores_exact_match() {
     cache.insert(fp.clone(), plan);
     let _ = cache.lookup(&fp); // hit_count >= threshold
 
-    cache.invalidate(&[fp.clone()]);
+    cache.invalidate(std::slice::from_ref(&fp));
     assert_eq!(cache.lookup(&fp).unwrap().match_type, CacheMatchType::Stale);
 
     cache.mark_fresh(&fp);
@@ -643,8 +644,10 @@ fn mark_fresh_restores_exact_match() {
 
 #[test]
 fn detect_histogram_drift_via_detect_changes() {
-    let mut thresholds = StalenessThresholds::default();
-    thresholds.histogram_kl_threshold = 0.1;
+    let thresholds = StalenessThresholds {
+        histogram_kl_threshold: 0.1,
+        ..StalenessThresholds::default()
+    };
 
     let opt = IncrementalOptimizer::with_thresholds(
         ra_engine::OptimizerConfig::default(),

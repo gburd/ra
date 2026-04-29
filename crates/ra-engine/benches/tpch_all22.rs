@@ -1,3 +1,8 @@
+#![expect(
+    clippy::print_stderr,
+    clippy::panic,
+    reason = "benchmark diagnostic output"
+)]
 //! TPC-H full 22-query optimizer benchmarks.
 //!
 //! Measures Ra optimizer latency for all 22 TPC-H queries with
@@ -6,9 +11,7 @@
 //! time across query complexity categories.
 //!
 //! Run with:
-//!   cargo bench --package ra-engine --bench tpch_all22
-
-#![allow(clippy::expect_used)]
+//!   `cargo bench --package ra-engine --bench tpch_all22`
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::RelExpr;

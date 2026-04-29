@@ -7,7 +7,23 @@
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+// Date/time column destructuring uses conventional short names (y, m, d, h, s).
+#![allow(clippy::many_single_char_names)]
+// Adapter helper methods take &self for API consistency even when not
+// accessing fields directly (they use a separate Database handle).
+#![allow(clippy::unused_self)]
+// All public adapter methods return Result<_, AdapterError> with uniform
+// error semantics (connection, query, parse failures). Individual # Errors
+// sections would be repetitive.
+#![allow(clippy::missing_errors_doc)]
 #![allow(clippy::unnecessary_literal_bound)]
+// Database adapters convert between database-native types and internal
+// representations. Integer-to-float casts for row counts and statistics,
+// and cross-width integer casts for column values, are inherent to this work.
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_possible_wrap)]
 
 use anyhow::Result;
 use ra_core::{FactsProvider, SqlDialect};
@@ -23,11 +39,11 @@ pub mod sqlite;
 pub mod stoolap;
 
 // Re-exports
-pub use comparison::{ComparisonReport, ComparisonResult, ExecutionMetrics};
 #[cfg(feature = "mysql")]
 pub use comparison::{compare_mysql_queries, compare_single_mysql_query};
 #[cfg(feature = "postgres")]
 pub use comparison::{compare_queries, compare_single_query};
+pub use comparison::{ComparisonReport, ComparisonResult, ExecutionMetrics};
 pub use duckdb::DuckDBAdapter;
 pub use mysql::MySQLAdapter;
 pub use postgres::{ExecutionResult, PostgresAdapter};
@@ -105,7 +121,10 @@ pub trait DatabaseAdapter: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the table doesn't exist or statistics are unavailable.
-    fn gather_column_stats(&self, table: &str) -> Result<HashMap<String, ColumnStats>, AdapterError>;
+    fn gather_column_stats(
+        &self,
+        table: &str,
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError>;
 
     /// Get schema information for all tables.
     ///

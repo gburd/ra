@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Integration tests for staleness-aware cost model.
 
 use ra_engine::cost::IntegratedCostModel;
@@ -71,9 +72,7 @@ fn stale_stats_increased_cost() {
 
     assert!(
         stale_cost > fresh_cost * 2.0,
-        "Stale stats should have significantly higher cost. Fresh: {}, Stale: {}",
-        fresh_cost,
-        stale_cost
+        "Stale stats should have significantly higher cost. Fresh: {fresh_cost}, Stale: {stale_cost}",
     );
 }
 
@@ -101,9 +100,7 @@ fn index_scan_more_sensitive_to_staleness() {
 
     assert!(
         idx_penalty > seq_penalty,
-        "Index scan should be more sensitive to staleness. Seq penalty: {:.2}x, Index penalty: {:.2}x",
-        seq_penalty,
-        idx_penalty
+        "Index scan should be more sensitive to staleness. Seq penalty: {seq_penalty:.2}x, Index penalty: {idx_penalty:.2}x",
     );
 }
 
@@ -236,10 +233,7 @@ fn cost_comparison_fresh_vs_stale() {
 
     assert!(
         cost_fresh < cost_mod && cost_mod < cost_very,
-        "Costs should increase with staleness. Fresh: {:.2}, Moderate: {:.2}, Very: {:.2}",
-        cost_fresh,
-        cost_mod,
-        cost_very
+        "Costs should increase with staleness. Fresh: {cost_fresh:.2}, Moderate: {cost_mod:.2}, Very: {cost_very:.2}",
     );
 }
 
@@ -268,8 +262,6 @@ fn robust_plans_favored_when_stale() {
     assert!(
         stale_ratio > fresh_ratio,
         "Index scan should become relatively more expensive with stale stats. \
-         Fresh idx/seq: {:.2}, Stale idx/seq: {:.2}",
-        fresh_ratio,
-        stale_ratio
+         Fresh idx/seq: {fresh_ratio:.2}, Stale idx/seq: {stale_ratio:.2}",
     );
 }

@@ -55,6 +55,4 @@ pub use backends::{Backend, TranslationBackend};
 pub use dialect::{feature_support, Dialect, FeatureSupport, SqlFeature};
 pub use error::{TranslationError, TranslationWarning, WarningSeverity};
 pub use matrix::CompatibilityMatrix;
-pub use translator::{
-    DialectTranslator, DialectVersion, TranslationResult,
-};
+pub use translator::{DialectTranslator, DialectVersion, TranslationResult};

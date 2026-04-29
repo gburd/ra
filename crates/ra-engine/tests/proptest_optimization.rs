@@ -1,3 +1,5 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
+#![allow(clippy::items_after_statements, reason = "test-local functions")]
 //! Property-based tests for the optimization engine.
 //!
 //! Uses proptest to generate arbitrary relational algebra expressions
@@ -7,7 +9,8 @@
 //! - Idempotence: optimizing twice yields same result as once
 //! - Hash determinism: same expression always hashes identically
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
+#![expect(clippy::float_cmp, reason = "intentional exact comparison in property test")]
 
 use proptest::prelude::*;
 
@@ -567,9 +570,6 @@ proptest! {
         use ra_core::expr::{Const, Expr};
         use ra_test_utils::TestProfile;
 
-        let profile = TestProfile::current();
-        let max_iters = profile.scale_iterations(50);
-
         // Skip expressions with null predicates - they can cause excessive
         // rewrites without proper null-constant simplification rules.
         fn has_null_predicate(e: &RelExpr) -> bool {
@@ -594,6 +594,9 @@ proptest! {
                 _ => false
             }
         }
+
+        let profile = TestProfile::current();
+        let max_iters = profile.scale_iterations(50);
 
         prop_assume!(!has_null_predicate(&expr));
 
@@ -672,7 +675,7 @@ proptest! {
 /// Check if an expression contains any joins
 fn contains_joins(expr: &RelExpr) -> bool {
     match expr {
-        RelExpr::Join { .. } => true,
+        RelExpr::Join { .. } | RelExpr::ParallelHashJoin { .. } => true,
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
@@ -682,7 +685,10 @@ fn contains_joins(expr: &RelExpr) -> bool {
         | RelExpr::Window { input, .. }
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::TopK { input, .. }
-        | RelExpr::VectorFilter { input, .. } => contains_joins(input),
+        | RelExpr::VectorFilter { input, .. }
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => contains_joins(input),
         RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
         | RelExpr::Except { left, right, .. } => contains_joins(left) || contains_joins(right),
@@ -695,30 +701,27 @@ fn contains_joins(expr: &RelExpr) -> bool {
             body,
             ..
         } => contains_joins(base_case) || contains_joins(recursive_case) || contains_joins(body),
-        RelExpr::Scan { .. } | RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => false,
-        RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
-            input.as_ref().is_some_and(|i| contains_joins(i))
-        }
-        RelExpr::RowPattern { input, .. } => contains_joins(input),
-        RelExpr::IndexScan { .. }
+        RelExpr::Scan { .. }
+        | RelExpr::Values { .. }
+        | RelExpr::MultiUnnest { .. }
+        | RelExpr::IndexScan { .. }
         | RelExpr::BitmapIndexScan { .. }
         | RelExpr::IndexOnlyScan { .. }
         | RelExpr::ParallelScan { .. }
         | RelExpr::MvScan { .. } => false,
+        RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
+            input.as_ref().is_some_and(|i| contains_joins(i))
+        }
         RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
             inputs.iter().any(|i| contains_joins(i))
         }
         RelExpr::BitmapHeapScan { bitmap, .. } => contains_joins(bitmap),
-        RelExpr::ParallelHashJoin { .. } => true,
-        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
-            contains_joins(input)
-        }
     }
 }
 
 /// Generate expressions that are more likely to contain joins
 fn arb_rel_expr_with_joins() -> impl Strategy<Value = RelExpr> {
-    arb_rel_expr(2).prop_filter("contains joins", |expr| contains_joins(expr))
+    arb_rel_expr(2).prop_filter("contains joins", contains_joins)
 }
 
 proptest! {
@@ -815,7 +818,7 @@ proptest! {
 // Helpers
 // ---------------------------------------------------------------
 
-/// Estimate the cost of a RelExpr by converting it to RecExpr and
+/// Estimate the cost of a `RelExpr` by converting it to `RecExpr` and
 /// computing the extraction cost using the integrated cost model.
 fn estimate_cost(expr: &RelExpr) -> Result<f64, Box<dyn std::error::Error>> {
     use egg::{Extractor, Runner};
@@ -847,7 +850,14 @@ fn collect_tables(expr: &RelExpr) -> std::collections::HashSet<String> {
 
 fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String>) {
     match expr {
-        RelExpr::Scan { table, .. } => {
+        RelExpr::Scan { table, .. }
+        | RelExpr::IndexScan { table, .. }
+        | RelExpr::BitmapIndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. }
+        | RelExpr::ParallelScan { table, .. }
+        | RelExpr::MvScan {
+            view_name: table, ..
+        } => {
             out.insert(table.clone());
         }
         RelExpr::Filter { input, .. }
@@ -857,13 +867,19 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::TopK { input, .. }
-        | RelExpr::VectorFilter { input, .. } => {
+        | RelExpr::VectorFilter { input, .. }
+        | RelExpr::Window { input, .. }
+        | RelExpr::Distinct { input, .. }
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
             collect_tables_rec(input, out);
         }
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => {
+        | RelExpr::Except { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. } => {
             collect_tables_rec(left, out);
             collect_tables_rec(right, out);
         }
@@ -872,9 +888,6 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         } => {
             collect_tables_rec(definition, out);
             collect_tables_rec(body, out);
-        }
-        RelExpr::Window { input, .. } | RelExpr::Distinct { input, .. } => {
-            collect_tables_rec(input, out);
         }
         RelExpr::RecursiveCTE {
             base_case,
@@ -892,18 +905,6 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
                 collect_tables_rec(inp, out);
             }
         }
-        RelExpr::RowPattern { input, .. } => {
-            collect_tables_rec(input, out);
-        }
-        RelExpr::IndexScan { table, .. }
-        | RelExpr::BitmapIndexScan { table, .. }
-        | RelExpr::IndexOnlyScan { table, .. }
-        | RelExpr::ParallelScan { table, .. }
-        | RelExpr::MvScan {
-            view_name: table, ..
-        } => {
-            out.insert(table.clone());
-        }
         RelExpr::BitmapHeapScan { table, bitmap, .. } => {
             out.insert(table.clone());
             collect_tables_rec(bitmap, out);
@@ -912,13 +913,6 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             for inp in inputs {
                 collect_tables_rec(inp, out);
             }
-        }
-        RelExpr::ParallelHashJoin { left, right, .. } => {
-            collect_tables_rec(left, out);
-            collect_tables_rec(right, out);
-        }
-        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
-            collect_tables_rec(input, out);
         }
     }
 }

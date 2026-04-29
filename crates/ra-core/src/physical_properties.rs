@@ -12,15 +12,10 @@
 //! - **Provided** properties flow bottom-up (what a child delivers).
 //! - **Enforcers** bridge the gap when provided < required.
 
-use crate::algebra::{
-    JoinType, NullOrdering, RelExpr, SortDirection, SortKey,
-};
+use crate::algebra::{JoinType, NullOrdering, RelExpr, SortDirection, SortKey};
 use crate::cost::Cost;
 use crate::expr::{ColumnRef, Expr};
-use crate::properties::{
-    Ordering, OrderingColumn, Partitioning, PhysicalProperty,
-    PropertySet,
-};
+use crate::properties::{Ordering, OrderingColumn, Partitioning, PhysicalProperty, PropertySet};
 
 /// Derive the output physical properties produced by a `RelExpr`
 /// given the properties of its input(s).
@@ -30,10 +25,7 @@ use crate::properties::{
 /// interior nodes the properties are inferred from the operator
 /// semantics and the input properties.
 #[must_use]
-pub fn derive_properties(
-    expr: &RelExpr,
-    input_props: &[&PropertySet],
-) -> PropertySet {
+pub fn derive_properties(expr: &RelExpr, input_props: &[&PropertySet]) -> PropertySet {
     match expr {
         RelExpr::Scan { .. }
         | RelExpr::IndexScan { .. }
@@ -48,22 +40,16 @@ pub fn derive_properties(
         | RelExpr::Intersect { .. }
         | RelExpr::Except { .. } => PropertySet::new(),
 
-        RelExpr::Filter { .. }
-        | RelExpr::Limit { .. }
-        | RelExpr::Window { .. } => {
+        RelExpr::Filter { .. } | RelExpr::Limit { .. } | RelExpr::Window { .. } => {
             // These operators preserve input properties.
             input_props
                 .first()
                 .map_or_else(PropertySet::new, |p| (*p).clone())
         }
 
-        RelExpr::Project { columns, .. } => {
-            derive_project_properties(columns, input_props)
-        }
+        RelExpr::Project { columns, .. } => derive_project_properties(columns, input_props),
 
-        RelExpr::Sort { keys, .. } => {
-            derive_sort_properties(keys, input_props)
-        }
+        RelExpr::Sort { keys, .. } => derive_sort_properties(keys, input_props),
 
         RelExpr::Distinct { .. } => {
             // Distinct may or may not preserve ordering depending
@@ -72,29 +58,19 @@ pub fn derive_properties(
             let mut ps = PropertySet::new();
             if let Some(inp) = input_props.first() {
                 if let Some(part) = inp.partitioning() {
-                    ps.add(PhysicalProperty::Partitioning(
-                        part.clone(),
-                    ));
+                    ps.add(PhysicalProperty::Partitioning(part.clone()));
                 }
             }
             ps
         }
 
-        RelExpr::Aggregate { group_by, .. } => {
-            derive_aggregate_properties(group_by)
-        }
+        RelExpr::Aggregate { group_by, .. } => derive_aggregate_properties(group_by),
 
         RelExpr::Join {
             join_type, left, ..
-        } => derive_join_properties(
-            *join_type,
-            left,
-            input_props,
-        ),
+        } => derive_join_properties(*join_type, left, input_props),
 
-        RelExpr::RowPattern { order_by, .. } => {
-            derive_row_pattern_properties(order_by)
-        }
+        RelExpr::RowPattern { order_by, .. } => derive_row_pattern_properties(order_by),
 
         RelExpr::IncrementalSort {
             prefix_keys,
@@ -165,22 +141,17 @@ fn derive_project_properties(
             .cloned()
             .collect();
         if !prefix.is_empty() {
-            ps.add(PhysicalProperty::Ordering(Ordering::new(
-                prefix,
-            )));
+            ps.add(PhysicalProperty::Ordering(Ordering::new(prefix)));
         }
     }
 
     // Partitioning is preserved if all partition keys survive.
     if let Some(part) = inp.partitioning() {
         let keys_survive = match part {
-            Partitioning::Hash(keys)
-            | Partitioning::Range(keys) => keys
-                .iter()
-                .all(|k| surviving_cols.contains(k)),
-            Partitioning::Single
-            | Partitioning::Broadcast
-            | Partitioning::RoundRobin => true,
+            Partitioning::Hash(keys) | Partitioning::Range(keys) => {
+                keys.iter().all(|k| surviving_cols.contains(k))
+            }
+            Partitioning::Single | Partitioning::Broadcast | Partitioning::RoundRobin => true,
         };
         if keys_survive {
             ps.add(PhysicalProperty::Partitioning(part.clone()));
@@ -191,10 +162,7 @@ fn derive_project_properties(
 }
 
 /// Derive properties for a Sort node.
-fn derive_sort_properties(
-    keys: &[SortKey],
-    input_props: &[&PropertySet],
-) -> PropertySet {
+fn derive_sort_properties(keys: &[SortKey], input_props: &[&PropertySet]) -> PropertySet {
     let mut ps = PropertySet::new();
 
     let ordering_cols: Vec<OrderingColumn> = keys
@@ -213,9 +181,7 @@ fn derive_sort_properties(
         .collect();
 
     if !ordering_cols.is_empty() {
-        ps.add(PhysicalProperty::Ordering(Ordering::new(
-            ordering_cols,
-        )));
+        ps.add(PhysicalProperty::Ordering(Ordering::new(ordering_cols)));
     }
 
     // Partitioning is preserved through sort.
@@ -233,9 +199,7 @@ fn derive_sort_properties(
 /// If the GROUP BY keys are simple columns, the output is
 /// implicitly grouped (and potentially sorted, depending on
 /// the aggregation strategy chosen later).
-fn derive_aggregate_properties(
-    group_by: &[Expr],
-) -> PropertySet {
+fn derive_aggregate_properties(group_by: &[Expr]) -> PropertySet {
     let mut ps = PropertySet::new();
 
     // Hash aggregate: no guaranteed ordering.
@@ -257,8 +221,7 @@ fn derive_aggregate_properties(
         })
         .collect();
 
-    if group_cols.len() == group_by.len() && !group_cols.is_empty()
-    {
+    if group_cols.len() == group_by.len() && !group_cols.is_empty() {
         ps.add(PhysicalProperty::Partitioning(Partitioning::Hash(
             group_cols,
         )));
@@ -280,32 +243,23 @@ fn derive_join_properties(
     let mut ps = PropertySet::new();
 
     match join_type {
-        JoinType::Inner
-        | JoinType::LeftOuter
-        | JoinType::Semi
-        | JoinType::Anti => {
+        JoinType::Inner | JoinType::LeftOuter | JoinType::Semi | JoinType::Anti => {
             // Preserve left input's ordering (nested-loop or
             // merge join over outer side).
             if let Some(left_props) = input_props.first() {
                 if let Some(ordering) = left_props.ordering() {
-                    ps.add(PhysicalProperty::Ordering(
-                        ordering.clone(),
-                    ));
+                    ps.add(PhysicalProperty::Ordering(ordering.clone()));
                 }
             }
         }
-        JoinType::RightOuter
-        | JoinType::FullOuter
-        | JoinType::Cross => {}
+        JoinType::RightOuter | JoinType::FullOuter | JoinType::Cross => {}
     }
 
     ps
 }
 
 /// Derive properties for a `RowPattern` (`MATCH_RECOGNIZE`) node.
-fn derive_row_pattern_properties(
-    order_by: &[SortKey],
-) -> PropertySet {
+fn derive_row_pattern_properties(order_by: &[SortKey]) -> PropertySet {
     let mut ps = PropertySet::new();
 
     let ordering_cols: Vec<OrderingColumn> = order_by
@@ -324,9 +278,7 @@ fn derive_row_pattern_properties(
         .collect();
 
     if !ordering_cols.is_empty() {
-        ps.add(PhysicalProperty::Ordering(Ordering::new(
-            ordering_cols,
-        )));
+        ps.add(PhysicalProperty::Ordering(Ordering::new(ordering_cols)));
     }
 
     ps
@@ -364,9 +316,7 @@ pub fn enforcer_cost(
 
     let provided_ordering = provided.ordering();
 
-    let prefix_len = provided_ordering.map_or(0, |po| {
-        required.common_prefix(po).columns.len()
-    });
+    let prefix_len = provided_ordering.map_or(0, |po| required.common_prefix(po).columns.len());
 
     if prefix_len >= required.columns.len() {
         return Cost::ZERO;
@@ -377,15 +327,13 @@ pub fn enforcer_cost(
         let assumed_group_size = (row_count / 100.0).max(2.0);
         let log_group = assumed_group_size.log2().max(1.0);
         let cpu = row_count * log_group * 0.5;
-        let mem = f64_to_u64_saturating(assumed_group_size)
-            .saturating_mul(avg_row_bytes);
+        let mem = f64_to_u64_saturating(assumed_group_size).saturating_mul(avg_row_bytes);
         Cost::new(cpu, 0.0, 0.0, mem)
     } else {
         // Full sort.
         let log_n = row_count.log2().max(1.0);
         let cpu = row_count * log_n;
-        let mem = f64_to_u64_saturating(row_count)
-            .saturating_mul(avg_row_bytes);
+        let mem = f64_to_u64_saturating(row_count).saturating_mul(avg_row_bytes);
         Cost::new(cpu, 0.0, 0.0, mem)
     }
 }
@@ -407,8 +355,7 @@ pub fn repartition_cost(
         }
     }
 
-    let total_bytes = f64_to_u64_saturating(row_count)
-        .saturating_mul(avg_row_bytes);
+    let total_bytes = f64_to_u64_saturating(row_count).saturating_mul(avg_row_bytes);
 
     match required {
         Partitioning::Broadcast => {
@@ -419,9 +366,7 @@ pub fn repartition_cost(
             let network = total_bytes as f64;
             Cost::new(0.0, 0.0, network, 0)
         }
-        Partitioning::Single | Partitioning::RoundRobin => {
-            Cost::ZERO
-        }
+        Partitioning::Single | Partitioning::RoundRobin => Cost::ZERO,
     }
 }
 
@@ -431,10 +376,7 @@ pub fn repartition_cost(
 /// A sort is redundant when the input already provides an
 /// ordering that satisfies the sort keys.
 #[must_use]
-pub fn is_sort_redundant(
-    sort_keys: &[SortKey],
-    input_props: &PropertySet,
-) -> bool {
+pub fn is_sort_redundant(sort_keys: &[SortKey], input_props: &PropertySet) -> bool {
     let required_cols: Vec<OrderingColumn> = sort_keys
         .iter()
         .filter_map(|k| {
@@ -484,9 +426,7 @@ pub fn can_merge_join(
         return false;
     }
 
-    for (i, (lk, rk)) in
-        left_keys.iter().zip(right_keys).enumerate()
-    {
+    for (i, (lk, rk)) in left_keys.iter().zip(right_keys).enumerate() {
         let Some(lo) = left_ordering.columns.get(i) else {
             return false;
         };
@@ -545,27 +485,21 @@ pub fn merge_join_required_properties(
     )
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algebra::{
-        NullOrdering, ProjectionColumn, RelExpr, SortDirection,
-        SortKey,
-    };
+    use crate::algebra::{NullOrdering, ProjectionColumn, RelExpr, SortDirection, SortKey};
     use crate::expr::{ColumnRef, Const, Expr};
     use crate::properties::{
-        Ordering, OrderingColumn, Partitioning, PhysicalProperty,
-        PropertySet,
+        Ordering, OrderingColumn, Partitioning, PhysicalProperty, PropertySet,
     };
 
     fn col(name: &str) -> ColumnRef {
         ColumnRef::new(name)
     }
 
-    fn ord_col(
-        name: &str,
-        dir: SortDirection,
-    ) -> OrderingColumn {
+    fn ord_col(name: &str, dir: SortDirection) -> OrderingColumn {
         OrderingColumn::new(ColumnRef::new(name), dir)
     }
 
@@ -577,13 +511,8 @@ mod tests {
         }
     }
 
-    fn make_input_props_ordered(
-        cols: &[(&str, SortDirection)],
-    ) -> PropertySet {
-        let ordering_cols: Vec<OrderingColumn> = cols
-            .iter()
-            .map(|(n, d)| ord_col(n, *d))
-            .collect();
+    fn make_input_props_ordered(cols: &[(&str, SortDirection)]) -> PropertySet {
+        let ordering_cols: Vec<OrderingColumn> = cols.iter().map(|(n, d)| ord_col(n, *d)).collect();
         PropertySet::with_ordering(Ordering::new(ordering_cols))
     }
 
@@ -602,10 +531,7 @@ mod tests {
             predicate: Expr::Const(Const::Bool(true)),
             input: Box::new(RelExpr::scan("t")),
         };
-        let input = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let input = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         let props = derive_properties(&expr, &[&input]);
         assert!(props.ordering().is_some());
     }
@@ -618,14 +544,10 @@ mod tests {
         };
         let empty = PropertySet::new();
         let props = derive_properties(&expr, &[&empty]);
-        let ordering =
-            props.ordering().expect("should have ordering");
+        let ordering = props.ordering().expect("should have ordering");
         assert_eq!(ordering.columns.len(), 1);
         assert_eq!(ordering.columns[0].column.column, "name");
-        assert_eq!(
-            ordering.columns[0].direction,
-            SortDirection::Desc
-        );
+        assert_eq!(ordering.columns[0].direction, SortDirection::Desc);
     }
 
     #[test]
@@ -635,24 +557,17 @@ mod tests {
             offset: 0,
             input: Box::new(RelExpr::scan("t")),
         };
-        let input = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let input = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         let props = derive_properties(&expr, &[&input]);
         assert!(props.ordering().is_some());
     }
 
     #[test]
     fn distinct_drops_ordering() {
-        let expr =
-            RelExpr::Distinct {
-                input: Box::new(RelExpr::scan("t")),
-            };
-        let input = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let expr = RelExpr::Distinct {
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let input = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         let props = derive_properties(&expr, &[&input]);
         assert!(props.ordering().is_none());
     }
@@ -672,13 +587,10 @@ mod tests {
             ],
             input: Box::new(RelExpr::scan("t")),
         };
-        let input = make_input_props_ordered(&[
-            ("id", SortDirection::Asc),
-            ("age", SortDirection::Desc),
-        ]);
+        let input =
+            make_input_props_ordered(&[("id", SortDirection::Asc), ("age", SortDirection::Desc)]);
         let props = derive_properties(&expr, &[&input]);
-        let ordering =
-            props.ordering().expect("should have ordering");
+        let ordering = props.ordering().expect("should have ordering");
         assert_eq!(ordering.columns.len(), 1);
         assert_eq!(ordering.columns[0].column.column, "id");
     }
@@ -692,10 +604,7 @@ mod tests {
             }],
             input: Box::new(RelExpr::scan("t")),
         };
-        let input = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let input = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         let props = derive_properties(&expr, &[&input]);
         assert!(props.ordering().is_none());
     }
@@ -708,10 +617,7 @@ mod tests {
             left: Box::new(RelExpr::scan("a")),
             right: Box::new(RelExpr::scan("b")),
         };
-        let left = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let left = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         let right = PropertySet::new();
         let props = derive_properties(&expr, &[&left, &right]);
         assert!(props.ordering().is_some());
@@ -725,10 +631,7 @@ mod tests {
             left: Box::new(RelExpr::scan("a")),
             right: Box::new(RelExpr::scan("b")),
         };
-        let left = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let left = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         let right = PropertySet::new();
         let props = derive_properties(&expr, &[&left, &right]);
         assert!(props.ordering().is_none());
@@ -741,10 +644,7 @@ mod tests {
             left: Box::new(RelExpr::scan("a")),
             right: Box::new(RelExpr::scan("b")),
         };
-        let left = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let left = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         let right = PropertySet::new();
         let props = derive_properties(&expr, &[&left, &right]);
         assert!(props.ordering().is_none());
@@ -754,19 +654,14 @@ mod tests {
     #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn aggregate_produces_partitioning() {
         let expr = RelExpr::Aggregate {
-            group_by: vec![
-                Expr::Column(col("region")),
-                Expr::Column(col("year")),
-            ],
+            group_by: vec![Expr::Column(col("region")), Expr::Column(col("year"))],
             aggregates: vec![],
             input: Box::new(RelExpr::scan("sales")),
         };
         let empty = PropertySet::new();
         let props = derive_properties(&expr, &[&empty]);
         assert!(props.partitioning().is_some());
-        if let Some(Partitioning::Hash(keys)) =
-            props.partitioning()
-        {
+        if let Some(Partitioning::Hash(keys)) = props.partitioning() {
             assert_eq!(keys.len(), 2);
         } else {
             panic!("expected Hash partitioning");
@@ -779,10 +674,7 @@ mod tests {
             functions: vec![],
             input: Box::new(RelExpr::scan("t")),
         };
-        let input = make_input_props_ordered(&[(
-            "ts",
-            SortDirection::Asc,
-        )]);
+        let input = make_input_props_ordered(&[("ts", SortDirection::Asc)]);
         let props = derive_properties(&expr, &[&input]);
         assert!(props.ordering().is_some());
     }
@@ -791,28 +683,18 @@ mod tests {
 
     #[test]
     fn enforcer_cost_zero_when_satisfied() {
-        let required = Ordering::new(vec![ord_col(
-            "id",
-            SortDirection::Asc,
-        )]);
-        let provided = make_input_props_ordered(&[
-            ("id", SortDirection::Asc),
-            ("name", SortDirection::Desc),
-        ]);
-        let cost =
-            enforcer_cost(&required, &provided, 1000.0, 64);
+        let required = Ordering::new(vec![ord_col("id", SortDirection::Asc)]);
+        let provided =
+            make_input_props_ordered(&[("id", SortDirection::Asc), ("name", SortDirection::Desc)]);
+        let cost = enforcer_cost(&required, &provided, 1000.0, 64);
         assert!(cost.cpu.abs() < f64::EPSILON);
     }
 
     #[test]
     fn enforcer_cost_full_sort() {
-        let required = Ordering::new(vec![ord_col(
-            "name",
-            SortDirection::Asc,
-        )]);
+        let required = Ordering::new(vec![ord_col("name", SortDirection::Asc)]);
         let provided = PropertySet::new();
-        let cost =
-            enforcer_cost(&required, &provided, 1000.0, 64);
+        let cost = enforcer_cost(&required, &provided, 1000.0, 64);
         assert!(cost.cpu > 0.0);
         assert!(cost.memory > 0);
     }
@@ -823,29 +705,17 @@ mod tests {
             ord_col("a", SortDirection::Asc),
             ord_col("b", SortDirection::Asc),
         ]);
-        let provided = make_input_props_ordered(&[(
-            "a",
-            SortDirection::Asc,
-        )]);
-        let cost_incr =
-            enforcer_cost(&required, &provided, 10000.0, 64);
+        let provided = make_input_props_ordered(&[("a", SortDirection::Asc)]);
+        let cost_incr = enforcer_cost(&required, &provided, 10000.0, 64);
 
-        let cost_full = enforcer_cost(
-            &required,
-            &PropertySet::new(),
-            10000.0,
-            64,
-        );
+        let cost_full = enforcer_cost(&required, &PropertySet::new(), 10000.0, 64);
 
         assert!(cost_incr.cpu < cost_full.cpu);
     }
 
     #[test]
     fn enforcer_cost_zero_rows() {
-        let required = Ordering::new(vec![ord_col(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let required = Ordering::new(vec![ord_col("id", SortDirection::Asc)]);
         let provided = PropertySet::new();
         let cost = enforcer_cost(&required, &provided, 0.0, 64);
         assert!(cost.cpu.abs() < f64::EPSILON);
@@ -855,23 +725,18 @@ mod tests {
 
     #[test]
     fn repartition_cost_zero_when_satisfied() {
-        let required =
-            Partitioning::Hash(vec![ColumnRef::new("id")]);
-        let provided = PropertySet::with_partitioning(
-            Partitioning::Hash(vec![ColumnRef::new("id")]),
-        );
-        let cost =
-            repartition_cost(&required, &provided, 1000.0, 64);
+        let required = Partitioning::Hash(vec![ColumnRef::new("id")]);
+        let provided =
+            PropertySet::with_partitioning(Partitioning::Hash(vec![ColumnRef::new("id")]));
+        let cost = repartition_cost(&required, &provided, 1000.0, 64);
         assert!(cost.network.abs() < f64::EPSILON);
     }
 
     #[test]
     fn repartition_cost_shuffle() {
-        let required =
-            Partitioning::Hash(vec![ColumnRef::new("id")]);
+        let required = Partitioning::Hash(vec![ColumnRef::new("id")]);
         let provided = PropertySet::new();
-        let cost =
-            repartition_cost(&required, &provided, 1000.0, 64);
+        let cost = repartition_cost(&required, &provided, 1000.0, 64);
         assert!(cost.network > 0.0);
     }
 
@@ -879,8 +744,7 @@ mod tests {
     fn repartition_cost_broadcast() {
         let required = Partitioning::Broadcast;
         let provided = PropertySet::new();
-        let cost =
-            repartition_cost(&required, &provided, 1000.0, 64);
+        let cost = repartition_cost(&required, &provided, 1000.0, 64);
         assert!(cost.network > 0.0);
     }
 
@@ -889,20 +753,15 @@ mod tests {
     #[test]
     fn sort_redundant_when_already_sorted() {
         let keys = vec![sort_key("id", SortDirection::Asc)];
-        let input = make_input_props_ordered(&[
-            ("id", SortDirection::Asc),
-            ("name", SortDirection::Desc),
-        ]);
+        let input =
+            make_input_props_ordered(&[("id", SortDirection::Asc), ("name", SortDirection::Desc)]);
         assert!(is_sort_redundant(&keys, &input));
     }
 
     #[test]
     fn sort_not_redundant_different_direction() {
         let keys = vec![sort_key("id", SortDirection::Desc)];
-        let input = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let input = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         assert!(!is_sort_redundant(&keys, &input));
     }
 
@@ -916,10 +775,7 @@ mod tests {
     #[test]
     fn sort_not_redundant_different_column() {
         let keys = vec![sort_key("name", SortDirection::Asc)];
-        let input = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let input = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         assert!(!is_sort_redundant(&keys, &input));
     }
 
@@ -927,78 +783,38 @@ mod tests {
 
     #[test]
     fn merge_join_possible_when_both_sorted() {
-        let left = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
-        let right = make_input_props_ordered(&[(
-            "fk",
-            SortDirection::Asc,
-        )]);
-        assert!(can_merge_join(
-            &left,
-            &right,
-            &[col("id")],
-            &[col("fk")]
-        ));
+        let left = make_input_props_ordered(&[("id", SortDirection::Asc)]);
+        let right = make_input_props_ordered(&[("fk", SortDirection::Asc)]);
+        assert!(can_merge_join(&left, &right, &[col("id")], &[col("fk")]));
     }
 
     #[test]
     fn merge_join_not_possible_different_directions() {
-        let left = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
-        let right = make_input_props_ordered(&[(
-            "fk",
-            SortDirection::Desc,
-        )]);
-        assert!(!can_merge_join(
-            &left,
-            &right,
-            &[col("id")],
-            &[col("fk")]
-        ));
+        let left = make_input_props_ordered(&[("id", SortDirection::Asc)]);
+        let right = make_input_props_ordered(&[("fk", SortDirection::Desc)]);
+        assert!(!can_merge_join(&left, &right, &[col("id")], &[col("fk")]));
     }
 
     #[test]
     fn merge_join_not_possible_no_right_ordering() {
-        let left = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
+        let left = make_input_props_ordered(&[("id", SortDirection::Asc)]);
         let right = PropertySet::new();
-        assert!(!can_merge_join(
-            &left,
-            &right,
-            &[col("id")],
-            &[col("fk")]
-        ));
+        assert!(!can_merge_join(&left, &right, &[col("id")], &[col("fk")]));
     }
 
     #[test]
     fn merge_join_not_possible_empty_keys() {
-        let left = make_input_props_ordered(&[(
-            "id",
-            SortDirection::Asc,
-        )]);
-        let right = make_input_props_ordered(&[(
-            "fk",
-            SortDirection::Asc,
-        )]);
+        let left = make_input_props_ordered(&[("id", SortDirection::Asc)]);
+        let right = make_input_props_ordered(&[("fk", SortDirection::Asc)]);
         assert!(!can_merge_join(&left, &right, &[], &[]));
     }
 
     #[test]
     fn merge_join_multi_key() {
-        let left = make_input_props_ordered(&[
-            ("a", SortDirection::Asc),
-            ("b", SortDirection::Asc),
-        ]);
-        let right = make_input_props_ordered(&[
-            ("x", SortDirection::Asc),
-            ("y", SortDirection::Asc),
-        ]);
+        let left =
+            make_input_props_ordered(&[("a", SortDirection::Asc), ("b", SortDirection::Asc)]);
+        let right =
+            make_input_props_ordered(&[("x", SortDirection::Asc), ("y", SortDirection::Asc)]);
         assert!(can_merge_join(
             &left,
             &right,
@@ -1011,18 +827,12 @@ mod tests {
 
     #[test]
     fn merge_join_required_props() {
-        let (left_req, right_req) =
-            merge_join_required_properties(
-                &[col("id")],
-                &[col("fk")],
-            );
-        let left_ord =
-            left_req.ordering().expect("should have ordering");
+        let (left_req, right_req) = merge_join_required_properties(&[col("id")], &[col("fk")]);
+        let left_ord = left_req.ordering().expect("should have ordering");
         assert_eq!(left_ord.columns.len(), 1);
         assert_eq!(left_ord.columns[0].column.column, "id");
 
-        let right_ord =
-            right_req.ordering().expect("should have ordering");
+        let right_ord = right_req.ordering().expect("should have ordering");
         assert_eq!(right_ord.columns.len(), 1);
         assert_eq!(right_ord.columns[0].column.column, "fk");
     }
@@ -1036,9 +846,9 @@ mod tests {
             input: Box::new(RelExpr::scan("t")),
         };
         let mut input = PropertySet::new();
-        input.add(PhysicalProperty::Partitioning(
-            Partitioning::Hash(vec![col("region")]),
-        ));
+        input.add(PhysicalProperty::Partitioning(Partitioning::Hash(vec![
+            col("region"),
+        ])));
         let props = derive_properties(&expr, &[&input]);
         assert!(props.partitioning().is_some());
     }
@@ -1059,9 +869,9 @@ mod tests {
             input: Box::new(RelExpr::scan("t")),
         };
         let mut input = PropertySet::new();
-        input.add(PhysicalProperty::Partitioning(
-            Partitioning::Hash(vec![col("region")]),
-        ));
+        input.add(PhysicalProperty::Partitioning(Partitioning::Hash(vec![
+            col("region"),
+        ])));
         let props = derive_properties(&expr, &[&input]);
         assert!(props.partitioning().is_some());
     }
@@ -1076,9 +886,9 @@ mod tests {
             input: Box::new(RelExpr::scan("t")),
         };
         let mut input = PropertySet::new();
-        input.add(PhysicalProperty::Partitioning(
-            Partitioning::Hash(vec![col("region")]),
-        ));
+        input.add(PhysicalProperty::Partitioning(Partitioning::Hash(vec![
+            col("region"),
+        ])));
         let props = derive_properties(&expr, &[&input]);
         assert!(props.partitioning().is_none());
     }

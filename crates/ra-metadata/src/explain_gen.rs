@@ -947,7 +947,7 @@ fn escape_xml(s: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
     use crate::explain::{parse_postgres_explain, ExplainNode, ExplainPlan, JoinType, NodeType};

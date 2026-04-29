@@ -27,9 +27,9 @@ pub fn cmd_analyze_triggers(
         print_header(&format!("Trigger Analysis: {table}"));
     }
 
-    print_dml_cost("INSERT", &analysis.insert_cost, verbose);
-    print_dml_cost("UPDATE", &analysis.update_cost, verbose);
-    print_dml_cost("DELETE", &analysis.delete_cost, verbose);
+    print_dml_cost("INSERT", analysis.insert_cost.as_ref(), verbose);
+    print_dml_cost("UPDATE", analysis.update_cost.as_ref(), verbose);
+    print_dml_cost("DELETE", analysis.delete_cost.as_ref(), verbose);
 
     if !analysis.cascade_warnings.is_empty() {
         eprintln!();
@@ -61,7 +61,7 @@ pub fn cmd_analyze_triggers(
 
 fn print_dml_cost(
     event: &str,
-    cost: &Option<ra_engine::trigger_optimizer::DmlCostEstimate>,
+    cost: Option<&ra_engine::trigger_optimizer::DmlCostEstimate>,
     verbose: bool,
 ) {
     let Some(cost) = cost else {

@@ -1,10 +1,10 @@
+#![expect(clippy::print_stdout, reason = "CLI output")]
 //! Commands for migrating rule pre-conditions from prose to formal YAML.
 
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use ra_core::{FactValue, PreCondition};
 use ra_parser::{parse_rule_file, RuleFile};
-use serde_yaml;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -24,7 +24,7 @@ pub fn migrate_preconditions(
     let mut report = MigrationReport::default();
 
     // Collect all .rra files to process
-    let files = collect_rra_files(input)?;
+    let files = collect_rra_files(input);
     report.total_files = files.len();
 
     for file_path in files {
@@ -55,7 +55,7 @@ pub fn validate_preconditions(
 ) -> Result<ValidationReport> {
     let mut report = ValidationReport::default();
 
-    let baseline_files = collect_rra_files(baseline_dir)?;
+    let baseline_files = collect_rra_files(baseline_dir);
     report.total_files = baseline_files.len();
 
     for baseline_path in baseline_files {
@@ -102,20 +102,20 @@ pub fn validate_preconditions(
 
 // ========== Helper Functions ==========
 
-fn collect_rra_files(dir: &Path) -> Result<Vec<PathBuf>> {
+fn collect_rra_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
 
     if dir.is_file() {
         if dir.extension().and_then(|s| s.to_str()) == Some("rra") {
             files.push(dir.to_path_buf());
         }
-        return Ok(files);
+        return files;
     }
 
     for entry in walkdir::WalkDir::new(dir)
         .follow_links(true)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
     {
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rra") {
@@ -123,7 +123,7 @@ fn collect_rra_files(dir: &Path) -> Result<Vec<PathBuf>> {
         }
     }
 
-    Ok(files)
+    files
 }
 
 fn migrate_single_file(
@@ -161,7 +161,7 @@ fn migrate_single_file(
         println!("\n{}", "=".repeat(80));
         println!("{}: {}", "Would migrate".green().bold(), input.display());
         println!("{}", "=".repeat(80));
-        println!("{}", migrated_content);
+        println!("{migrated_content}");
         return Ok(FileStatus::Migrated);
     }
 
@@ -171,8 +171,9 @@ fn migrate_single_file(
         .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
     let output_path = output_dir.join(relative);
 
-    fs::create_dir_all(output_path.parent().unwrap())
-        .context("Failed to create output directory")?;
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create output directory")?;
+    }
     fs::write(&output_path, migrated_content)
         .with_context(|| format!("Failed to write to {}", output_path.display()))?;
 
@@ -199,7 +200,7 @@ fn validate_single_file(
     let errors = validate_migration(&baseline_rule, &migrated_rule);
 
     for error in &errors {
-        eprintln!("  {}", error);
+        eprintln!("  {error}");
     }
 
     Ok(errors.is_empty())
@@ -330,7 +331,7 @@ fn validate_precondition_safety(
         let label = format!("migrated_precondition[{i}]");
 
         if let Some(base_pc) = find_matching_precondition(mig_pc, baseline) {
-            check_constraint_narrowing(&base_pc, mig_pc, &label, errors);
+            check_constraint_narrowing(base_pc, mig_pc, &label, errors);
         }
     }
 }
@@ -546,8 +547,7 @@ fn check_constraint_narrowing(
                 kind: ValidationErrorKind::ConstraintNarrowed,
                 field: label.into(),
                 reason: format!(
-                    "Fact '{}' constraint narrowed from '{} {:?}' to '{} {:?}'",
-                    bf, bc, bt, mc, mt
+                    "Fact '{bf}' constraint narrowed from '{bc} {bt:?}' to '{mc} {mt:?}'",
                 ),
                 suggestion: "Use a wider (more permissive) threshold to preserve baseline behavior"
                     .into(),
@@ -722,7 +722,6 @@ enum FileStatus {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use ra_parser::RuleMetadata;

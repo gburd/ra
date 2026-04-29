@@ -3,7 +3,7 @@
 //! Bridges the statistics abstraction system with the query optimizer's
 //! cost model, enabling statistics-aware planning.
 
-use crate::accuracy::{StatisticsState, Staleness};
+use crate::accuracy::{Staleness, StatisticsState};
 use crate::profiles::StatisticsProfile;
 use crate::types::{ColumnStats, TableStats};
 use std::collections::HashMap;
@@ -49,10 +49,7 @@ impl StatisticsAdapter {
     }
 
     /// Get mutable managed statistics for a table.
-    pub fn get_table_stats_mut(
-        &mut self,
-        table: &str,
-    ) -> Option<&mut ManagedTableStats> {
+    pub fn get_table_stats_mut(&mut self, table: &str) -> Option<&mut ManagedTableStats> {
         self.tables.get_mut(table)
     }
 
@@ -70,8 +67,7 @@ impl StatisticsAdapter {
 
         for (col_name, col_stats) in &managed.columns {
             let adjusted_ndv = col_stats.ndv as f64 * factor;
-            let mut core_col =
-                ra_core::statistics::ColumnStats::new(adjusted_ndv);
+            let mut core_col = ra_core::statistics::ColumnStats::new(adjusted_ndv);
             core_col.null_fraction = col_stats.null_fraction;
             stats.columns.insert(col_name.clone(), core_col);
         }
@@ -108,7 +104,6 @@ impl StatisticsAdapter {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
     use crate::accuracy::StatisticsSource;
@@ -127,10 +122,7 @@ mod tests {
                 last_analyzed: Some(1_000_000),
             },
             columns: HashMap::new(),
-            state: StatisticsState::new(
-                StatisticsSource::ExactCount,
-                10_000,
-            ),
+            state: StatisticsState::new(StatisticsSource::ExactCount, 10_000),
         }
     }
 
@@ -210,31 +202,22 @@ mod tests {
 
     #[test]
     fn adapter_should_reject_fresh_stats() {
-        let adapter =
-            StatisticsAdapter::new(StatisticsProfile::real_time());
-        let state = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            10_000,
-        );
+        let adapter = StatisticsAdapter::new(StatisticsProfile::real_time());
+        let state = StatisticsState::new(StatisticsSource::ExactCount, 10_000);
         assert!(!adapter.should_reject(&state));
     }
 
     #[test]
     fn adapter_should_reject_stale_stats() {
-        let adapter =
-            StatisticsAdapter::new(StatisticsProfile::real_time());
-        let mut state = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            10_000,
-        );
+        let adapter = StatisticsAdapter::new(StatisticsProfile::real_time());
+        let mut state = StatisticsState::new(StatisticsSource::ExactCount, 10_000);
         state.record_modifications(5_000);
         assert!(adapter.should_reject(&state));
     }
 
     #[test]
     fn adapter_table_count() {
-        let mut adapter =
-            StatisticsAdapter::new(StatisticsProfile::standard());
+        let mut adapter = StatisticsAdapter::new(StatisticsProfile::standard());
         assert_eq!(adapter.table_count(), 0);
         adapter.add_table("users".to_string(), sample_table());
         assert_eq!(adapter.table_count(), 1);
@@ -242,8 +225,7 @@ mod tests {
 
     #[test]
     fn adapter_get_table_stats() {
-        let mut adapter =
-            StatisticsAdapter::new(StatisticsProfile::standard());
+        let mut adapter = StatisticsAdapter::new(StatisticsProfile::standard());
         adapter.add_table("users".to_string(), sample_table());
         assert!(adapter.get_table_stats("users").is_some());
         assert!(adapter.get_table_stats("orders").is_none());
@@ -251,8 +233,7 @@ mod tests {
 
     #[test]
     fn adapter_profile_accessor() {
-        let adapter =
-            StatisticsAdapter::new(StatisticsProfile::analytical());
+        let adapter = StatisticsAdapter::new(StatisticsProfile::analytical());
         assert_eq!(adapter.profile().name, "Analytical");
     }
 }

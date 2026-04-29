@@ -568,7 +568,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip() {
         let cpu = CpuModel::intel_xeon_8380();
         let json = serde_json::to_string(&cpu).expect("serialization should succeed");

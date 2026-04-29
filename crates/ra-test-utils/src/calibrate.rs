@@ -19,6 +19,14 @@ use std::time::{Duration, Instant};
 /// - Memory bandwidth
 ///
 /// Total calibration time: ~60-90 seconds for comprehensive measurements
+///
+/// # Errors
+///
+/// Returns an error if hardware detection fails or benchmarks cannot complete.
+#[expect(
+    clippy::print_stdout,
+    reason = "Interactive calibration needs user feedback"
+)]
 pub fn calibrate() -> anyhow::Result<TestProfile> {
     println!("Calibrating test expectations for this platform...");
     println!("This will take about 60-90 seconds.\n");
@@ -31,7 +39,7 @@ pub fn calibrate() -> anyhow::Result<TestProfile> {
     let platform = PlatformInfo {
         id: format!("{}-{}-cores{}", os, arch, hw.cpu_cores),
         timestamp: Utc::now(),
-        os: format!("{} {}", os, arch),
+        os: format!("{os} {arch}"),
         arch: arch.to_string(),
         cpu_model: hw.name.clone(),
         cpu_cores: hw.cpu_cores,
@@ -41,24 +49,24 @@ pub fn calibrate() -> anyhow::Result<TestProfile> {
     // 2. Run micro-benchmarks (10 seconds total)
     print!("  Integer operations... ");
     let int_ops = benchmark_int_ops(Duration::from_secs(5));
-    println!("{} ops/ms", int_ops);
+    println!("{int_ops} ops/ms");
 
     print!("  Memory bandwidth... ");
     let mem_bw = benchmark_memory_bandwidth(Duration::from_secs(5));
-    println!("{} MB/s", mem_bw);
+    println!("{mem_bw} MB/s");
 
     // 3. Run optimizer benchmarks (60-80 seconds total)
     print!("  Simple optimization... ");
     let simple_opt = benchmark_simple_optimization(30)?;
-    println!("{:.2}ms", simple_opt);
+    println!("{simple_opt:.2}ms");
 
     print!("  Complex optimization... ");
     let complex_opt = benchmark_complex_optimization(20)?;
-    println!("{:.2}ms", complex_opt);
+    println!("{complex_opt:.2}ms");
 
     print!("  E-graph saturation... ");
-    let saturation = benchmark_egraph_saturation(30)?;
-    println!("{} iterations", saturation);
+    let saturation = benchmark_egraph_saturation(30);
+    println!("{saturation} iterations");
 
     // 4. Calculate scale factors relative to baseline
     let baseline = TestProfile::baseline();
@@ -86,11 +94,16 @@ pub fn calibrate() -> anyhow::Result<TestProfile> {
 
     println!("\nCalibration complete!");
     println!("  Platform: {}", profile.platform.id);
-    println!("  Time scale: {:.2}x ({})",
+    println!(
+        "  Time scale: {:.2}x ({})",
         scale_factors.time_scale,
-        if scale_factors.time_scale > 1.5 { "slower" }
-        else if scale_factors.time_scale < 0.7 { "faster" }
-        else { "similar" }
+        if scale_factors.time_scale > 1.5 {
+            "slower"
+        } else if scale_factors.time_scale < 0.7 {
+            "faster"
+        } else {
+            "similar"
+        }
     );
     println!("  Iteration scale: {:.2}x", scale_factors.iteration_scale);
     println!("  Memory scale: {:.2}x", scale_factors.memory_scale);
@@ -102,8 +115,8 @@ pub fn calibrate() -> anyhow::Result<TestProfile> {
 /// Benchmark simple optimization using actual optimizer (simulates 2-table join).
 #[cfg(test)]
 fn benchmark_simple_optimization(iterations: usize) -> anyhow::Result<f64> {
-    use ra_core::algebra::{RelExpr, JoinType};
-    use ra_core::{Expr, ColumnRef, BinOp};
+    use ra_core::algebra::{JoinType, RelExpr};
+    use ra_core::{BinOp, ColumnRef, Expr};
     use ra_engine::Optimizer;
 
     // Create a simple 2-table join plan
@@ -137,8 +150,8 @@ fn benchmark_simple_optimization(iterations: usize) -> anyhow::Result<f64> {
 
 /// Benchmark simple optimization using proxy when not in test mode.
 #[cfg(not(test))]
+#[expect(clippy::unnecessary_wraps, reason = "signature must match cfg(test) variant")]
 fn benchmark_simple_optimization(iterations: usize) -> anyhow::Result<f64> {
-    // When not in test mode (actual library usage), fall back to proxy
     Ok(benchmark_simple_optimization_proxy(iterations))
 }
 
@@ -170,7 +183,10 @@ fn benchmark_simple_optimization_proxy(iterations: usize) -> f64 {
 
 /// Simulate join optimization workload.
 #[cfg(not(test))]
-fn simulate_join_optimization(left: &[(usize, usize, usize)], right: &[(usize, usize, usize)]) -> usize {
+fn simulate_join_optimization(
+    left: &[(usize, usize, usize)],
+    right: &[(usize, usize, usize)],
+) -> usize {
     // Simulate nested loop join with hash build
     let mut hash_map = std::collections::HashMap::new();
     for &(key, val1, val2) in left {
@@ -180,8 +196,8 @@ fn simulate_join_optimization(left: &[(usize, usize, usize)], right: &[(usize, u
     let mut result_count = 0;
     for &(key, val1, val2) in right {
         if let Some(&(left_val1, left_val2)) = hash_map.get(&key) {
-            // Simulate tuple materialization
-            let _tuple = (key, left_val1, left_val2, val1, val2);
+            // Simulate tuple materialization (prevents optimization)
+            std::hint::black_box((key, left_val1, left_val2, val1, val2));
             result_count += 1;
         }
     }
@@ -191,8 +207,8 @@ fn simulate_join_optimization(left: &[(usize, usize, usize)], right: &[(usize, u
 /// Benchmark complex optimization using actual optimizer (simulates 4-table join).
 #[cfg(test)]
 fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
-    use ra_core::algebra::{RelExpr, JoinType};
-    use ra_core::{Expr, ColumnRef, BinOp};
+    use ra_core::algebra::{JoinType, RelExpr};
+    use ra_core::{BinOp, ColumnRef, Expr};
     use ra_engine::Optimizer;
 
     // Create a complex 4-table join plan: (t1 JOIN t2) JOIN (t3 JOIN t4)
@@ -248,6 +264,7 @@ fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
 
 /// Benchmark complex optimization using proxy when not in test mode.
 #[cfg(not(test))]
+#[expect(clippy::unnecessary_wraps, reason = "signature must match cfg(test) variant")]
 fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
     Ok(benchmark_complex_optimization_proxy(iterations))
 }
@@ -257,11 +274,7 @@ fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
 fn benchmark_complex_optimization_proxy(iterations: usize) -> f64 {
     // Create test data for 4 tables
     let tables: Vec<Vec<(usize, usize, usize)>> = (0..4)
-        .map(|t| {
-            (0..500)
-                .map(|i| (i, i * (t + 1), i * (t + 2)))
-                .collect()
-        })
+        .map(|t| (0..500).map(|i| (i, i * (t + 1), i * (t + 2))).collect())
         .collect();
 
     // Warmup
@@ -290,10 +303,10 @@ fn simulate_complex_join(tables: &[Vec<(usize, usize, usize)>]) -> usize {
     j1 + j2
 }
 
-/// Benchmark e-graph saturation iterations using actual egg::Runner.
+/// Benchmark e-graph saturation iterations using actual `egg::Runner`.
 #[cfg(test)]
-fn benchmark_egraph_saturation(iterations: usize) -> anyhow::Result<u64> {
-    use egg::{Runner, RecExpr, SymbolLang, rewrite, Rewrite};
+fn benchmark_egraph_saturation(iterations: usize) -> u64 {
+    use egg::{rewrite, RecExpr, Rewrite, Runner, SymbolLang};
 
     // Create a simple expression manually using SymbolLang for simplicity
     // This represents: filter(eq(col("x"), lit(42)), scan("t1"))
@@ -331,13 +344,13 @@ fn benchmark_egraph_saturation(iterations: usize) -> anyhow::Result<u64> {
         total_iters += runner.iterations.len() as u64;
     }
 
-    Ok(total_iters / iterations as u64)
+    total_iters / iterations as u64
 }
 
 /// Benchmark e-graph saturation using proxy when not in test mode.
 #[cfg(not(test))]
-fn benchmark_egraph_saturation(iterations: usize) -> anyhow::Result<u64> {
-    Ok(benchmark_egraph_saturation_proxy(iterations))
+fn benchmark_egraph_saturation(iterations: usize) -> u64 {
+    benchmark_egraph_saturation_proxy(iterations)
 }
 
 /// Proxy benchmark for e-graph saturation.
@@ -392,6 +405,7 @@ fn simulate_saturation() -> u64 {
 }
 
 /// Benchmark integer operations per millisecond.
+#[expect(clippy::print_stderr, reason = "Benchmark validation output")]
 fn benchmark_int_ops(duration: Duration) -> u64 {
     let mut count = 0u64;
     let mut x = 1u64;
@@ -400,7 +414,7 @@ fn benchmark_int_ops(duration: Duration) -> u64 {
     while start.elapsed() < duration {
         // Simple integer operations that won't be optimized away
         for _ in 0..1000 {
-            x = x.wrapping_mul(1234567).wrapping_add(89);
+            x = x.wrapping_mul(1_234_567).wrapping_add(89);
             x = x.rotate_left(7);
             x ^= x >> 13;
             count += 1;
@@ -417,6 +431,11 @@ fn benchmark_int_ops(duration: Duration) -> u64 {
 }
 
 /// Benchmark memory bandwidth.
+#[expect(
+    clippy::print_stderr,
+    clippy::needless_range_loop,
+    reason = "Benchmark needs specific memory patterns and validation"
+)]
 fn benchmark_memory_bandwidth(duration: Duration) -> u64 {
     const BUFFER_SIZE: usize = 8 * 1024 * 1024; // 8MB buffer
     let mut buffer = vec![0u8; BUFFER_SIZE];
@@ -432,7 +451,7 @@ fn benchmark_memory_bandwidth(duration: Duration) -> u64 {
         // Read and modify pattern
         let mut sum = 0u64;
         for i in 0..BUFFER_SIZE {
-            sum += buffer[i] as u64;
+            sum += u64::from(buffer[i]);
             buffer[i] = buffer[i].wrapping_add(1);
         }
 

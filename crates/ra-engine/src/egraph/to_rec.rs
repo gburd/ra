@@ -19,6 +19,7 @@ pub fn to_rec_expr(expr: &RelExpr) -> Result<RecExpr<RelLang>, EGraphError> {
     Ok(rec)
 }
 
+#[expect(clippy::too_many_lines, reason = "match over all RelExpr variants")]
 fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraphError> {
     match expr {
         RelExpr::Scan { table, alias } => {
@@ -322,7 +323,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let tag_id = add_symbol(rec, "topk");
             let vec_expr_id = add_scalar_expr(rec, vector_expr)?;
             let query_id = add_scalar_expr(rec, query_vector)?;
-            let metric_id = add_symbol(rec, &format!("{:?}", metric));
+            let metric_id = add_symbol(rec, &format!("{metric:?}"));
             let k_id = add_symbol(rec, &k.to_string());
             let input_id = add_rel_expr(rec, input)?;
             let ids = vec![tag_id, vec_expr_id, query_id, metric_id, k_id, input_id];
@@ -338,7 +339,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let tag_id = add_symbol(rec, "vector_filter");
             let vec_expr_id = add_scalar_expr(rec, vector_expr)?;
             let query_id = add_scalar_expr(rec, query_vector)?;
-            let metric_id = add_symbol(rec, &format!("{:?}", metric));
+            let metric_id = add_symbol(rec, &format!("{metric:?}"));
             let threshold_id = add_symbol(rec, &threshold.to_string());
             let input_id = add_rel_expr(rec, input)?;
             let ids = vec![
@@ -354,6 +355,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "match over all Expr variants")]
 fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraphError> {
     match expr {
         Expr::Column(col_ref) => {
@@ -706,6 +708,7 @@ fn add_window_expr(rec: &mut RecExpr<RelLang>, wexpr: &WindowExpr) -> Result<Id,
     ])))
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other add_ helpers")]
 fn add_window_frame(
     rec: &mut RecExpr<RelLang>,
     frame: Option<&WindowFrame>,

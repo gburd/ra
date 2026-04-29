@@ -5,7 +5,7 @@
 //! - Comparison with VALUES clause
 //! - Lateral unnest performance
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ra_core::expr::{Const, Expr};
@@ -100,7 +100,7 @@ fn bench_lateral_unnest(c: &mut Criterion) {
             let left_rows: Vec<Row> = (0..outer_rows)
                 .map(|i| {
                     Row::new(vec![
-                        Const::Int(i as i64),
+                        Const::Int(i64::from(i)),
                         Const::String("{1,2,3,4,5}".into()),
                     ])
                 })

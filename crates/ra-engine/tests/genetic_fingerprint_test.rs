@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Integration tests for genetic query fingerprinting and plan
 //! cache (RFC 0060).
 //!
@@ -186,7 +187,7 @@ fn similarity_is_symmetric() {
 
 #[test]
 fn similarity_range_0_to_1() {
-    let queries = vec![
+    let queries = [
         RelExpr::scan("a"),
         eq_filter("b", "c", 1),
         two_table_join(1, 1),
@@ -219,7 +220,7 @@ fn oltp_workload_high_cache_hit_rate() {
         Box::new(|v| eq_filter("orders", "id", v)),
         Box::new(|v| two_table_join(v, v * 10)),
         Box::new(|v| range_filter("products", "price", v, v + 100)),
-        Box::new(|v| agg_query(v)),
+        Box::new(agg_query),
     ];
 
     // Seed cache with one instance of each template

@@ -15,11 +15,8 @@ use std::process::Command;
 
 fn main() {
     let manifest_dir =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect(
-            "CARGO_MANIFEST_DIR must be set",
-        ));
-    let out_dir =
-        PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let workspace_root = manifest_dir
         .parent()
         .and_then(Path::parent)
@@ -39,20 +36,10 @@ fn main() {
     let lime_tool = build_lime_tool(&lime_root, &out_dir);
 
     // Step 2: Run lime on the grammar to produce C source.
-    let generated_c = run_lime(
-        &lime_tool,
-        &lime_root,
-        &grammar_file,
-        &out_dir,
-    );
+    let generated_c = run_lime(&lime_tool, &lime_root, &grammar_file, &out_dir);
 
     // Step 3: Compile the generated C parser.
-    compile_generated_parser(
-        &generated_c,
-        &grammar_dir,
-        &lime_root,
-        &out_dir,
-    );
+    compile_generated_parser(&generated_c, &grammar_dir, &lime_root, &out_dir);
 
     // Re-run triggers.
     println!("cargo:rerun-if-changed=grammar/ra_sql.lime");
@@ -95,12 +82,7 @@ fn build_lime_tool(lime_root: &Path, out_dir: &Path) -> PathBuf {
 }
 
 /// Run the lime tool on the grammar file to produce `ra_sql.c` and `ra_sql.h`.
-fn run_lime(
-    lime_tool: &Path,
-    lime_root: &Path,
-    grammar_file: &Path,
-    out_dir: &Path,
-) -> PathBuf {
+fn run_lime(lime_tool: &Path, lime_root: &Path, grammar_file: &Path, out_dir: &Path) -> PathBuf {
     let template = lime_root.join("limpar.c");
     assert!(
         template.exists(),
@@ -110,18 +92,15 @@ fn run_lime(
 
     // Copy grammar to OUT_DIR so lime generates output there.
     let work_grammar = out_dir.join("ra_sql.lime");
-    std::fs::copy(grammar_file, &work_grammar).unwrap_or_else(|e| {
-        panic!("failed to copy grammar to OUT_DIR: {e}")
-    });
+    std::fs::copy(grammar_file, &work_grammar)
+        .unwrap_or_else(|e| panic!("failed to copy grammar to OUT_DIR: {e}"));
 
     let output = Command::new(lime_tool)
         .arg(format!("-T{}", template.display()))
         .arg("-q")
         .arg(&work_grammar)
         .output()
-        .unwrap_or_else(|e| {
-            panic!("failed to run lime tool: {e}")
-        });
+        .unwrap_or_else(|e| panic!("failed to run lime tool: {e}"));
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

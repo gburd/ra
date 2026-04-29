@@ -1,6 +1,6 @@
 //! MySQL-specific SQL grammar extensions.
 //!
-//! MySQL has several unique syntax features including backtick identifiers,
+//! `MySQL` has several unique syntax features including backtick identifiers,
 //! alternative LIMIT syntax, and MySQL-specific functions.
 //!
 //! # Key Features
@@ -14,7 +14,7 @@
 //!
 //! ## LIMIT Syntax
 //!
-//! MySQL supports an alternative LIMIT syntax:
+//! `MySQL` supports an alternative LIMIT syntax:
 //! ```sql
 //! -- Standard: LIMIT count OFFSET offset
 //! SELECT * FROM users LIMIT 10 OFFSET 20;
@@ -50,7 +50,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct MySQLExtension;
 
 impl GrammarExtension for MySQLExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "mysql"
     }
 

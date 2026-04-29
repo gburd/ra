@@ -1,8 +1,13 @@
+#![expect(clippy::expect_used, reason = "test code")]
+#![expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic stats tests"
+)]
 //! Integration tests for skew detection with simulated datasets.
 
 use ra_stats::skew::{
-    generate_uniform_histogram, generate_zipf_histogram, FrequencyBucket,
-    FrequencyHistogram, HotKey, SkewDetector, SkewSeverity, SkewStrategy,
+    generate_uniform_histogram, generate_zipf_histogram, FrequencyBucket, FrequencyHistogram,
+    HotKey, SkewDetector, SkewSeverity, SkewStrategy,
 };
 
 // --- Zipf distribution integration tests ---
@@ -21,10 +26,7 @@ fn zipf_1_5_strong_skew() {
     let d = SkewDetector::default();
     let h = generate_zipf_histogram(100, 1_000_000, 1.5);
     let hot = d.detect_hot_keys(&h);
-    assert!(
-        !hot.is_empty(),
-        "Zipf 1.5 should produce hot keys"
-    );
+    assert!(!hot.is_empty(), "Zipf 1.5 should produce hot keys");
     assert!(hot[0].skew_ratio > 10.0);
 }
 
@@ -35,8 +37,7 @@ fn zipf_2_0_very_strong_skew() {
     let analysis = d.analyze("user_id", &h);
     assert!(!analysis.hot_keys.is_empty());
     assert!(
-        analysis.severity == SkewSeverity::Severe
-            || analysis.severity == SkewSeverity::Moderate
+        analysis.severity == SkewSeverity::Severe || analysis.severity == SkewSeverity::Moderate
     );
 }
 
@@ -47,10 +48,7 @@ fn zipf_0_5_mild_skew() {
     let analysis = d.analyze("category", &h);
     // Zipf 0.5 is fairly flat, may or may not have hot keys
     // but severity should be None or Mild
-    assert!(
-        analysis.severity == SkewSeverity::None
-            || analysis.severity == SkewSeverity::Mild
-    );
+    assert!(analysis.severity == SkewSeverity::None || analysis.severity == SkewSeverity::Mild);
 }
 
 #[test]
@@ -129,9 +127,7 @@ fn us_dominated_country_column() {
         value: "US".to_owned(),
         count: 5_000_000,
     }];
-    for country in &[
-        "UK", "DE", "FR", "JP", "CN", "BR", "IN", "AU", "CA",
-    ] {
+    for country in &["UK", "DE", "FR", "JP", "CN", "BR", "IN", "AU", "CA"] {
         buckets.push(FrequencyBucket {
             value: (*country).to_owned(),
             count: 100_000,
@@ -470,18 +466,15 @@ fn hot_key_json_roundtrip() {
         frequency: 5_000_000,
         skew_ratio: 87.5,
     };
-    let json =
-        serde_json::to_string(&hk).expect("serialize should succeed");
-    let deserialized: HotKey =
-        serde_json::from_str(&json).expect("deserialize should succeed");
+    let json = serde_json::to_string(&hk).expect("serialize should succeed");
+    let deserialized: HotKey = serde_json::from_str(&json).expect("deserialize should succeed");
     assert_eq!(hk, deserialized);
 }
 
 #[test]
 fn frequency_histogram_json_roundtrip() {
     let h = generate_zipf_histogram(10, 10_000, 1.0);
-    let json =
-        serde_json::to_string(&h).expect("serialize should succeed");
+    let json = serde_json::to_string(&h).expect("serialize should succeed");
     let deserialized: FrequencyHistogram =
         serde_json::from_str(&json).expect("deserialize should succeed");
     assert_eq!(h, deserialized);

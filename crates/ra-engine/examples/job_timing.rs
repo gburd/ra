@@ -1,6 +1,12 @@
+#![expect(
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "example binary"
+)]
 //! Quick timing measurement for JOB queries.
 //!
-//! Run with: cargo run --example job_timing --package ra-engine
+//! Run with: `cargo run --example job_timing --package ra-engine`
 
 use ra_core::statistics::Statistics;
 use ra_engine::Optimizer;
@@ -62,18 +68,18 @@ fn main() {
 
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
         .collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     let mut results: Vec<(String, f64, bool, String)> = Vec::new();
     let mut parse_failures = 0;
     let mut optimize_failures = 0;
 
     println!(
-        "{:<8} {:>10} {:>10} {:<10} {}",
-        "Query", "Parse(us)", "Opt(us)", "Status", "Notes"
+        "{:<8} {:>10} {:>10} {:<10} Notes",
+        "Query", "Parse(us)", "Opt(us)", "Status"
     );
     println!("{}", "-".repeat(70));
 
@@ -126,6 +132,15 @@ fn main() {
         }
     }
 
+    print_summary(&entries, &results, parse_failures, optimize_failures);
+}
+
+fn print_summary(
+    entries: &[std::fs::DirEntry],
+    results: &[(String, f64, bool, String)],
+    parse_failures: usize,
+    optimize_failures: usize,
+) {
     println!();
     println!("=== Summary ===");
     println!("Total queries:    {}", entries.len());
@@ -133,75 +148,78 @@ fn main() {
     println!("Optimize failures:{optimize_failures}");
 
     let successful: Vec<_> = results.iter().filter(|r| r.2).collect();
-    if !successful.is_empty() {
-        let total_us: f64 = successful.iter().map(|r| r.1).sum();
-        let avg_us = total_us / successful.len() as f64;
-        let max = successful
-            .iter()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-            .unwrap();
-        let min = successful
-            .iter()
-            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-            .unwrap();
-
-        println!("Successful:       {} / {}", successful.len(), results.len());
-        println!(
-            "Total opt time:   {:.0} us ({:.1} ms)",
-            total_us,
-            total_us / 1000.0
-        );
-        println!(
-            "Avg opt time:     {:.0} us ({:.1} ms)",
-            avg_us,
-            avg_us / 1000.0
-        );
-        println!("Min opt time:     {:.0} us ({})", min.1, min.0);
-        println!("Max opt time:     {:.0} us ({})", max.1, max.0);
-
-        // Breakdown by query complexity
-        let mut by_template: std::collections::BTreeMap<u32, Vec<f64>> =
-            std::collections::BTreeMap::new();
-        for r in &successful {
-            let num: u32 =
-                r.0.chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .collect::<String>()
-                    .parse()
-                    .unwrap_or(0);
-            by_template.entry(num).or_default().push(r.1);
-        }
-
-        println!();
-        println!(
-            "{:<12} {:>8} {:>12} {:>12}",
-            "Template", "Queries", "Avg(us)", "Max(us)"
-        );
-        println!("{}", "-".repeat(50));
-        for (template, times) in &by_template {
-            let avg = times.iter().sum::<f64>() / times.len() as f64;
-            let max = times.iter().copied().fold(0.0_f64, f64::max);
-            println!(
-                "{:<12} {:>8} {:>12.0} {:>12.0}",
-                template,
-                times.len(),
-                avg,
-                max
-            );
-        }
-
-        // Queries over 1ms, 10ms, 100ms, 1s
-        let over_1ms = successful.iter().filter(|r| r.1 > 1000.0).count();
-        let over_10ms = successful.iter().filter(|r| r.1 > 10_000.0).count();
-        let over_100ms = successful.iter().filter(|r| r.1 > 100_000.0).count();
-        let over_1s = successful.iter().filter(|r| r.1 > 1_000_000.0).count();
-        let over_5s = successful.iter().filter(|r| r.1 > 5_000_000.0).count();
-
-        println!();
-        println!("Queries >1ms:   {over_1ms}");
-        println!("Queries >10ms:  {over_10ms}");
-        println!("Queries >100ms: {over_100ms}");
-        println!("Queries >1s:    {over_1s}");
-        println!("Queries >5s:    {over_5s}");
+    if successful.is_empty() {
+        return;
     }
+
+    let total_us: f64 = successful.iter().map(|r| r.1).sum();
+    let avg_us = total_us / successful.len() as f64;
+    let max = successful
+        .iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .unwrap();
+    let min = successful
+        .iter()
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .unwrap();
+
+    println!("Successful:       {} / {}", successful.len(), results.len());
+    println!(
+        "Total opt time:   {:.0} us ({:.1} ms)",
+        total_us,
+        total_us / 1000.0
+    );
+    println!(
+        "Avg opt time:     {:.0} us ({:.1} ms)",
+        avg_us,
+        avg_us / 1000.0
+    );
+    println!("Min opt time:     {:.0} us ({})", min.1, min.0);
+    println!("Max opt time:     {:.0} us ({})", max.1, max.0);
+
+    // Breakdown by query complexity
+    let mut by_template: std::collections::BTreeMap<u32, Vec<f64>> =
+        std::collections::BTreeMap::new();
+    for r in &successful {
+        let num: u32 = r
+            .0
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .unwrap_or(0);
+        by_template.entry(num).or_default().push(r.1);
+    }
+
+    println!();
+    println!(
+        "{:<12} {:>8} {:>12} {:>12}",
+        "Template", "Queries", "Avg(us)", "Max(us)"
+    );
+    println!("{}", "-".repeat(50));
+    for (template, times) in &by_template {
+        let avg = times.iter().sum::<f64>() / times.len() as f64;
+        let max = times.iter().copied().fold(0.0_f64, f64::max);
+        println!(
+            "{:<12} {:>8} {:>12.0} {:>12.0}",
+            template,
+            times.len(),
+            avg,
+            max
+        );
+    }
+
+    // Queries over 1ms, 10ms, 100ms, 1s
+    let over_1ms = successful.iter().filter(|r| r.1 > 1000.0).count();
+    let over_10ms = successful.iter().filter(|r| r.1 > 10_000.0).count();
+    let over_100ms = successful.iter().filter(|r| r.1 > 100_000.0).count();
+    let over_1s = successful.iter().filter(|r| r.1 > 1_000_000.0).count();
+    let over_5s = successful.iter().filter(|r| r.1 > 5_000_000.0).count();
+
+    println!();
+    println!("Queries >1ms:   {over_1ms}");
+    println!("Queries >10ms:  {over_10ms}");
+    println!("Queries >100ms: {over_100ms}");
+    println!("Queries >1s:    {over_1s}");
+    println!("Queries >5s:    {over_5s}");
 }

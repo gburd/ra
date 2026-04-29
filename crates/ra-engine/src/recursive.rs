@@ -318,7 +318,7 @@ impl Default for RecursiveCTEExecutor {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::algebra::RelExpr;

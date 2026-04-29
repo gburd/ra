@@ -102,11 +102,7 @@ pub struct StreamingMlEstimator {
 impl StreamingMlEstimator {
     /// Create a new streaming estimator.
     #[must_use]
-    pub fn new(
-        model: FeedForwardNet,
-        _schema: FeatureSchema,
-        config: StreamingConfig,
-    ) -> Self {
+    pub fn new(model: FeedForwardNet, _schema: FeatureSchema, config: StreamingConfig) -> Self {
         Self {
             model: Arc::new(Mutex::new(model)),
             belief_network: Arc::new(BeliefNetwork::new()),
@@ -117,20 +113,23 @@ impl StreamingMlEstimator {
 
     /// Add an execution observation for continuous learning.
     pub fn observe(&self, observation: ExecutionObservation) {
-        self.belief_network.observe(observation.clone());
+        self.belief_network.observe(&observation);
 
-        let mut buffer = self.observation_buffer.lock().unwrap_or_else(|e| e.into_inner());
+        let mut buffer = self
+            .observation_buffer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         buffer.push(observation);
 
         if buffer.len() >= self.config.batch_size {
             debug!(batch_size = %buffer.len(), "Triggering batch model update");
             let batch = buffer.drain(..).collect::<Vec<_>>();
             drop(buffer);
-            self.update_model_batch(batch);
+            Self::update_model_batch(&batch);
         }
     }
 
-    fn update_model_batch(&self, observations: Vec<ExecutionObservation>) {
+    fn update_model_batch(observations: &[ExecutionObservation]) {
         info!(observations = %observations.len(), "Updating model with batch");
     }
 
@@ -154,17 +153,26 @@ impl StreamingMlEstimator {
 
     /// Filter rules based on expected improvement.
     #[must_use]
-    pub fn filter_rules(&self, rule_ids: &[String], context: &[f64], threshold: f64) -> Vec<String> {
-        self.belief_network.filter_rules(rule_ids, context, threshold)
+    pub fn filter_rules(
+        &self,
+        rule_ids: &[String],
+        context: &[f64],
+        threshold: f64,
+    ) -> Vec<String> {
+        self.belief_network
+            .filter_rules(rule_ids, context, threshold)
     }
 
     /// Force a model update with current buffer.
     pub fn flush(&self) {
-        let mut buffer = self.observation_buffer.lock().unwrap_or_else(|e| e.into_inner());
+        let mut buffer = self
+            .observation_buffer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !buffer.is_empty() {
             let batch = buffer.drain(..).collect::<Vec<_>>();
             drop(buffer);
-            self.update_model_batch(batch);
+            Self::update_model_batch(&batch);
         }
     }
 }
@@ -213,7 +221,8 @@ impl StreamingProcessor {
                 let belief_network = Arc::clone(&belief_network_for_thread);
 
                 worker.dataflow::<u64, _, _>(|scope| {
-                    let (mut _input, observations) = scope.new_collection::<StreamingUpdate, isize>();
+                    let (mut _input, observations) =
+                        scope.new_collection::<StreamingUpdate, isize>();
 
                     observations
                         .map(|update| (update.observation.rule_id.clone(), update.observation))
@@ -231,7 +240,7 @@ impl StreamingProcessor {
                         })
                         .inspect(move |((rule_id, obs), _time, _diff)| {
                             debug!(rule_id = %rule_id, "Processing observation");
-                            belief_network.observe(obs.clone());
+                            belief_network.observe(obs);
                         })
                         .probe_with(&mut probe);
                 });
@@ -294,7 +303,7 @@ impl SharedModelState {
     }
 
     /// Add an observation to the shared state.
-    pub fn observe(&self, observation: ExecutionObservation) {
+    pub fn observe(&self, observation: &ExecutionObservation) {
         self.belief_network.observe(observation);
     }
 
@@ -305,6 +314,7 @@ impl SharedModelState {
     }
 }
 
+#[expect(clippy::expect_used, clippy::unwrap_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,8 +353,10 @@ mod tests {
     fn streaming_estimator_batch_trigger() {
         let schema = FeatureSchema::new(&["users"], &["id"]);
         let model = build_default_mlp(&[schema.total_features, 32, 1]);
-        let mut config = StreamingConfig::default();
-        config.batch_size = 2;
+        let config = StreamingConfig {
+            batch_size: 2,
+            ..StreamingConfig::default()
+        };
 
         let estimator = StreamingMlEstimator::new(model, schema, config);
 
@@ -399,7 +411,7 @@ mod tests {
     fn shared_model_state() {
         let state = SharedModelState::new(ModelScope::Account);
 
-        state.observe(sample_observation("rule1", true));
+        state.observe(&sample_observation("rule1", true));
 
         let stats = state
             .belief_network()

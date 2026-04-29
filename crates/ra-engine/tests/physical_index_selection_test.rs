@@ -338,6 +338,6 @@ fn test_index_selection_with_writes() {
 fn test_index_bloat_consideration() {
     // Index bloat affects cost estimation
     let input = scan("old_table");
-    let filter = input.filter(gt(col("id"), int(1000000)));
+    let filter = input.filter(gt(col("id"), int(1_000_000)));
     assert_cost_calculated(filter);
 }

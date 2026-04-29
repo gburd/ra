@@ -16,10 +16,11 @@ use crate::fts_cost::{gin_scan_cost, rum_scan_cost, BooleanOperator, FtsIndexTyp
 /// Rule 1: FTS index scan introduction.
 ///
 /// Transform: Filter(fts-match(...), scan) -> fts-index-scan(table, gin, match)
-/// Condition: Column has FTS index (GIN in PostgreSQL, FULLTEXT in MySQL)
+/// Condition: Column has FTS index (GIN in `PostgreSQL`, FULLTEXT in `MySQL`)
 ///
 /// This rule recognizes full-text match patterns that can be
 /// accelerated with inverted indexes.
+#[must_use]
 pub fn fts_index_scan_introduction() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![rewrite!(
         "fts-match-to-gin-scan";
@@ -29,6 +30,7 @@ pub fn fts_index_scan_introduction() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 /// Rule 2: Multi-column FTS index usage (placeholder for future work).
+#[must_use]
 pub fn fts_multi_column_index() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![]
 }
@@ -39,6 +41,7 @@ pub fn fts_multi_column_index() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 ///         -> fts-skip-list-and(table, match1, match2)
 ///
 /// Applies skip-list acceleration for intersection of multiple FTS predicates.
+#[must_use]
 pub fn boolean_query_to_skip_list() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![rewrite!(
         "fts-and-to-skip-list";
@@ -60,6 +63,7 @@ pub fn boolean_query_to_skip_list() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 ///
 /// When sorting by FTS rank with a limit, use RUM index for direct
 /// ranked retrieval instead of sorting all matches.
+#[must_use]
 pub fn rank_aware_top_k() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![rewrite!(
         "fts-limit-sort-rank-to-rum";
@@ -73,13 +77,14 @@ pub fn rank_aware_top_k() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 
 /// Rule 5: Filter pushdown with FTS (bitmap AND).
 ///
-/// Transform: Filter(numeric_col > X, FtsIndexScan(...))
-///         -> BitmapAnd(BTreeIndex(numeric_col), FtsIndex(...))
+/// Transform: `Filter(numeric_col` > X, `FtsIndexScan`(...))
+///         -> `BitmapAnd(BTreeIndex(numeric_col)`, `FtsIndex`(...))
 ///
 /// Combines FTS posting lists with B-tree index bitmaps for
 /// conjunctive predicates.
 ///
 /// NOTE: Advanced bitmap rules disabled - require btree-index-scan and bitmap-and operators.
+#[must_use]
 pub fn fts_filter_pushdown() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Only keep the safe filter-merge rule that uses existing operators
@@ -101,6 +106,10 @@ pub fn fts_filter_pushdown() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 /// 2. Check if RUM index is available
 /// 3. If yes, use RUM distance-ordered scan (10-100x speedup)
 /// 4. If no, keep GIN + explicit sort
+/// # Panics
+///
+/// Panics if `limit` is `None` when the RUM index path is selected
+/// (match guard ensures this cannot happen).
 #[must_use]
 pub fn optimize_top_k_fts(
     has_rum: bool,
@@ -133,9 +142,12 @@ pub fn optimize_top_k_fts(
                 requires_ranking,
                 limit,
             );
+            // Match guard guarantees limit.is_some()
+            #[expect(clippy::expect_used, reason = "guarded by match arm condition")]
+            let limit_val = limit.expect("guarded by is_some()");
             OptimizationDecision::UseRumRankedScan {
                 cost: rum_cost.cpu,
-                limit: limit.unwrap(),
+                limit: limit_val,
             }
         }
         FtsIndexType::Gin => {
@@ -185,6 +197,7 @@ pub fn fts_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 #[cfg(test)]
+#[expect(clippy::panic, reason = "test assertions")]
 mod tests {
     use super::*;
 
@@ -229,14 +242,12 @@ mod tests {
 
         let gin_decision = optimize_top_k_fts(false, true, Some(10), &["rust"], 100_000, &[10_000]);
 
-        let rum_cost = match rum_decision {
-            OptimizationDecision::UseRumRankedScan { cost, .. } => cost,
-            _ => panic!("Expected RUM decision"),
+        let OptimizationDecision::UseRumRankedScan { cost: rum_cost, .. } = rum_decision else {
+            panic!("Expected RUM decision");
         };
 
-        let gin_cost = match gin_decision {
-            OptimizationDecision::UseGinWithSort { cost } => cost,
-            _ => panic!("Expected GIN decision"),
+        let OptimizationDecision::UseGinWithSort { cost: gin_cost } = gin_decision else {
+            panic!("Expected GIN decision");
         };
 
         // RUM has 1.1x base cost overhead and BM25 is costlier than TfIdf,

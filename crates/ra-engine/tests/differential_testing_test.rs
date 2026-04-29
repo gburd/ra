@@ -1,7 +1,8 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Differential testing for query optimization.
 //!
 //! These tests validate that our optimizer produces plans that match
-//! expected patterns from PostgreSQL, DuckDB, and SQLite optimizers.
+//! expected patterns from `PostgreSQL`, `DuckDB`, and `SQLite` optimizers.
 //! Rather than connecting to external databases, we test that our
 //! optimization logic follows industry-standard patterns.
 
@@ -110,7 +111,7 @@ fn test_plan_serialization() {
     let plan = filtered_scan("table", "col", 42);
     let opt = create_test_optimizer();
     let result = opt.optimize(&plan).expect("should optimize");
-    let _serialized = format!("{:?}", result);
+    let _serialized = format!("{result:?}");
 }
 
 #[test]
@@ -149,7 +150,7 @@ fn test_plan_visualization_export() {
     };
     let opt = create_test_optimizer();
     let result = opt.optimize(&complex).expect("should optimize");
-    let _debug = format!("{:#?}", result);
+    let _debug = format!("{result:#?}");
 }
 
 #[test]
@@ -194,7 +195,7 @@ fn test_plan_cache_invalidation() {
 #[test]
 fn test_concurrent_optimization_safety() {
     // Verify thread-safe optimization
-    let queries: Vec<RelExpr> = (0..10).map(|i| scan(&format!("t{}", i))).collect();
+    let queries: Vec<RelExpr> = (0..10).map(|i| scan(&format!("t{i}"))).collect();
     for query in queries {
         let opt = create_test_optimizer();
         let _result = opt.optimize(&query);
@@ -432,7 +433,7 @@ fn test_postgres_parallel_query() {
 #[test]
 fn test_postgres_partition_pruning() {
     // PostgreSQL: Partition pruning with filters
-    let partitioned = filtered_scan("events_partitioned", "date", 20240101);
+    let partitioned = filtered_scan("events_partitioned", "date", 20_240_101);
     assert_optimization_improves(partitioned);
 }
 
@@ -978,7 +979,7 @@ fn test_sqlite_partial_index_match() {
     // SQLite: Partial index usage
     let query = scan("table").filter(and(
         eq(col("status"), int(1)),
-        gt(col("date"), int(20240101)),
+        gt(col("date"), int(20_240_101)),
     ));
     assert_optimization_improves(query);
 }

@@ -4,7 +4,7 @@
 //! that the expected transformation was applied (not just "something
 //! changed"). These tests catch regressions in rule semantics.
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 mod helpers;
 
@@ -64,11 +64,15 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::Window { input, .. }
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::TopK { input, .. }
-        | RelExpr::VectorFilter { input, .. } => collect_tables_rec(input, out),
+        | RelExpr::VectorFilter { input, .. }
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => collect_tables_rec(input, out),
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => {
+        | RelExpr::Except { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. } => {
             collect_tables_rec(left, out);
             collect_tables_rec(right, out);
         }
@@ -94,9 +98,6 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_tables_rec(inp, out);
             }
         }
-        RelExpr::RowPattern { input, .. } => {
-            collect_tables_rec(input, out);
-        }
         RelExpr::IndexScan { table, .. }
         | RelExpr::BitmapIndexScan { table, .. }
         | RelExpr::IndexOnlyScan { table, .. }
@@ -115,19 +116,19 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_tables_rec(inp, out);
             }
         }
-        RelExpr::ParallelHashJoin { left, right, .. } => {
-            collect_tables_rec(left, out);
-            collect_tables_rec(right, out);
-        }
-        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
-            collect_tables_rec(input, out);
-        }
     }
 }
 
 fn depth(expr: &RelExpr) -> usize {
     match expr {
-        RelExpr::Scan { .. } | RelExpr::Values { .. } => 1,
+        RelExpr::Scan { .. }
+        | RelExpr::Values { .. }
+        | RelExpr::MultiUnnest { .. }
+        | RelExpr::IndexScan { .. }
+        | RelExpr::BitmapIndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
+        | RelExpr::ParallelScan { .. }
+        | RelExpr::MvScan { .. } => 1,
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
@@ -137,11 +138,15 @@ fn depth(expr: &RelExpr) -> usize {
         | RelExpr::Window { input, .. }
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::TopK { input, .. }
-        | RelExpr::VectorFilter { input, .. } => 1 + depth(input),
+        | RelExpr::VectorFilter { input, .. }
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => 1 + depth(input),
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => 1 + depth(left).max(depth(right)),
+        | RelExpr::Except { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. } => 1 + depth(left).max(depth(right)),
         RelExpr::CTE {
             definition, body, ..
         } => 1 + depth(definition).max(depth(body)),
@@ -155,21 +160,10 @@ fn depth(expr: &RelExpr) -> usize {
             Some(inp) => 1 + depth(inp),
             None => 1,
         },
-        RelExpr::MultiUnnest { .. } => 1,
-        RelExpr::RowPattern { input, .. } => 1 + depth(input),
-        RelExpr::IndexScan { .. }
-        | RelExpr::BitmapIndexScan { .. }
-        | RelExpr::ParallelScan { .. }
-        | RelExpr::MvScan { .. } => 1,
         RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
             1 + inputs.iter().map(|i| depth(i)).max().unwrap_or(0)
         }
         RelExpr::BitmapHeapScan { bitmap, .. } => 1 + depth(bitmap),
-        RelExpr::IndexOnlyScan { .. } => 1,
-        RelExpr::ParallelHashJoin { left, right, .. } => 1 + depth(left).max(depth(right)),
-        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
-            1 + depth(input)
-        }
     }
 }
 

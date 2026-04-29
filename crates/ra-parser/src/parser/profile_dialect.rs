@@ -18,6 +18,7 @@ pub struct ProfileDialect {
 
 impl ProfileDialect {
     /// Create a new profile-aware dialect.
+    #[must_use]
     pub fn new(profile: ParserProfile) -> Self {
         Self {
             profile,
@@ -33,7 +34,7 @@ impl Dialect for ProfileDialect {
             .profile
             .syntax
             .get("backticks")
-            .map_or(false, |v| v == "true")
+            .is_some_and(|v| v == "true")
         {
             ch == '`' || self.base_dialect.is_delimited_identifier_start(ch)
         } else {
@@ -74,10 +75,7 @@ impl Dialect for ProfileDialect {
 
     fn supports_connect_by(&self) -> bool {
         // Enable for Oracle dialect
-        self.profile
-            .vendor
-            .as_ref()
-            .map_or(false, |v| v == "oracle")
+        self.profile.vendor.as_ref().is_some_and(|v| v == "oracle")
     }
 
     fn parse_prefix(
@@ -88,9 +86,9 @@ impl Dialect for ProfileDialect {
         let token = parser.peek_token();
 
         // Handle @ operators for BSON/JSONB
-        if let Some(ref tok_str) = token.to_string().strip_prefix('@') {
+        if let Some(tok_str) = token.to_string().strip_prefix('@') {
             // Check if this operator is in our profile
-            let op = format!("@{}", tok_str);
+            let op = format!("@{tok_str}");
             if self.profile.operators.iter().any(|o| o.starts_with(&op)) {
                 // Let the base parser handle it
                 return self.base_dialect.parse_prefix(parser);
@@ -118,7 +116,7 @@ impl Dialect for ProfileDialect {
         let token_str = token.to_string();
 
         // For operators in our profile, assign appropriate precedence
-        if self.profile.operators.iter().any(|op| *op == token_str) {
+        if self.profile.operators.contains(&token_str) {
             // Vector distance operators (<->, <#>, <=>) - same precedence as comparison
             if token_str == "<->" || token_str == "<#>" || token_str == "<=>" {
                 return Some(Ok(20)); // Comparison precedence

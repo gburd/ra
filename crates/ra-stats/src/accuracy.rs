@@ -91,8 +91,7 @@ impl StatisticsState {
             return Staleness::Unknown;
         }
 
-        let change_rate =
-            self.modifications_since as f64 / self.rows_at_gathering as f64;
+        let change_rate = self.modifications_since as f64 / self.rows_at_gathering as f64;
 
         if change_rate < 0.01 {
             Staleness::Fresh
@@ -120,12 +119,8 @@ impl StatisticsState {
             RefreshThreshold::Never => false,
             RefreshThreshold::Age(max_age) => self.age_seconds() > max_age,
             RefreshThreshold::Staleness(max_staleness) => self.staleness() > max_staleness,
-            RefreshThreshold::Modifications(max_mods) => {
-                self.modifications_since > max_mods
-            }
-            RefreshThreshold::Confidence(min_confidence) => {
-                self.confidence < min_confidence
-            }
+            RefreshThreshold::Modifications(max_mods) => self.modifications_since > max_mods,
+            RefreshThreshold::Confidence(min_confidence) => self.confidence < min_confidence,
             RefreshThreshold::Any(thresholds) => {
                 thresholds.iter().any(|t| self.should_refresh(t.clone()))
             }
@@ -213,8 +208,11 @@ impl QualityMetrics {
     }
 }
 
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic stats tests"
+)]
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -230,19 +228,13 @@ mod tests {
 
     #[test]
     fn state_sampled_10_confidence() {
-        let s = StatisticsState::new(
-            StatisticsSource::Sampled { sample_rate: 10 },
-            1_000_000,
-        );
+        let s = StatisticsState::new(StatisticsSource::Sampled { sample_rate: 10 }, 1_000_000);
         assert_eq!(s.confidence, 0.1);
     }
 
     #[test]
     fn state_sampled_100_confidence() {
-        let s = StatisticsState::new(
-            StatisticsSource::Sampled { sample_rate: 100 },
-            1_000,
-        );
+        let s = StatisticsState::new(StatisticsSource::Sampled { sample_rate: 100 }, 1_000);
         assert_eq!(s.confidence, 1.0);
     }
 
@@ -285,30 +277,21 @@ mod tests {
 
     #[test]
     fn staleness_slightly_stale() {
-        let mut s = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            1_000_000,
-        );
+        let mut s = StatisticsState::new(StatisticsSource::ExactCount, 1_000_000);
         s.record_modifications(20_000);
         assert_eq!(s.staleness(), Staleness::SlightlyStale);
     }
 
     #[test]
     fn staleness_moderately_stale() {
-        let mut s = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            1_000_000,
-        );
+        let mut s = StatisticsState::new(StatisticsSource::ExactCount, 1_000_000);
         s.record_modifications(100_000);
         assert_eq!(s.staleness(), Staleness::ModeratelyStale);
     }
 
     #[test]
     fn staleness_very_stale() {
-        let mut s = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            1_000_000,
-        );
+        let mut s = StatisticsState::new(StatisticsSource::ExactCount, 1_000_000);
         s.record_modifications(300_000);
         assert_eq!(s.staleness(), Staleness::VeryStale);
     }
@@ -329,10 +312,7 @@ mod tests {
 
     #[test]
     fn staleness_boundary_1_percent() {
-        let mut s = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            100_000,
-        );
+        let mut s = StatisticsState::new(StatisticsSource::ExactCount, 100_000);
         s.record_modifications(999);
         assert_eq!(s.staleness(), Staleness::Fresh);
         s.record_modifications(1);
@@ -341,10 +321,7 @@ mod tests {
 
     #[test]
     fn staleness_boundary_5_percent() {
-        let mut s = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            100_000,
-        );
+        let mut s = StatisticsState::new(StatisticsSource::ExactCount, 100_000);
         s.record_modifications(4_999);
         assert_eq!(s.staleness(), Staleness::SlightlyStale);
         s.record_modifications(1);
@@ -353,10 +330,7 @@ mod tests {
 
     #[test]
     fn staleness_boundary_20_percent() {
-        let mut s = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            100_000,
-        );
+        let mut s = StatisticsState::new(StatisticsSource::ExactCount, 100_000);
         s.record_modifications(19_999);
         assert_eq!(s.staleness(), Staleness::ModeratelyStale);
         s.record_modifications(1);
@@ -425,21 +399,14 @@ mod tests {
     #[test]
     fn refresh_staleness_not_met() {
         let s = StatisticsState::new(StatisticsSource::ExactCount, 1_000);
-        assert!(
-            !s.should_refresh(RefreshThreshold::Staleness(Staleness::Fresh))
-        );
+        assert!(!s.should_refresh(RefreshThreshold::Staleness(Staleness::Fresh)));
     }
 
     #[test]
     fn refresh_staleness_met() {
-        let mut s = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            1_000,
-        );
+        let mut s = StatisticsState::new(StatisticsSource::ExactCount, 1_000);
         s.record_modifications(500);
-        assert!(s.should_refresh(RefreshThreshold::Staleness(
-            Staleness::Fresh
-        )));
+        assert!(s.should_refresh(RefreshThreshold::Staleness(Staleness::Fresh)));
     }
 
     #[test]
@@ -559,10 +526,7 @@ mod tests {
 
     #[test]
     fn quality_metrics_stale() {
-        let mut s = StatisticsState::new(
-            StatisticsSource::ExactCount,
-            1_000,
-        );
+        let mut s = StatisticsState::new(StatisticsSource::ExactCount, 1_000);
         s.record_modifications(500);
         let m = QualityMetrics::from_state(&s);
         assert_eq!(m.freshness, 0.2);
@@ -577,10 +541,7 @@ mod tests {
 
     #[test]
     fn quality_score_is_average() {
-        let s = StatisticsState::new(
-            StatisticsSource::Sampled { sample_rate: 50 },
-            1_000,
-        );
+        let s = StatisticsState::new(StatisticsSource::Sampled { sample_rate: 50 }, 1_000);
         let m = QualityMetrics::from_state(&s);
         let expected = (m.freshness + m.confidence + m.coverage) / 3.0;
         assert!((m.quality_score - expected).abs() < f64::EPSILON);
@@ -591,20 +552,16 @@ mod tests {
     #[test]
     fn statistics_state_serialize_roundtrip() {
         let s = StatisticsState::new(StatisticsSource::ExactCount, 1_000);
-        let json = serde_json::to_string(&s)
-            .expect("serialize");
-        let d: StatisticsState = serde_json::from_str(&json)
-            .expect("deserialize");
+        let json = serde_json::to_string(&s).expect("serialize");
+        let d: StatisticsState = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(s, d);
     }
 
     #[test]
     fn staleness_serialize_roundtrip() {
         let s = Staleness::ModeratelyStale;
-        let json = serde_json::to_string(&s)
-            .expect("serialize");
-        let d: Staleness = serde_json::from_str(&json)
-            .expect("deserialize");
+        let json = serde_json::to_string(&s).expect("serialize");
+        let d: Staleness = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(s, d);
     }
 
@@ -614,10 +571,8 @@ mod tests {
             RefreshThreshold::Age(3600),
             RefreshThreshold::Modifications(1000),
         ]);
-        let json = serde_json::to_string(&t)
-            .expect("serialize");
-        let d: RefreshThreshold = serde_json::from_str(&json)
-            .expect("deserialize");
+        let json = serde_json::to_string(&t).expect("serialize");
+        let d: RefreshThreshold = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(t, d);
     }
 }

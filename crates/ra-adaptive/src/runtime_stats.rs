@@ -104,9 +104,7 @@ impl ColumnSketch {
         if self.total_count == 0 {
             return 0.0;
         }
-        let frac =
-            self.null_count as f64 / self.total_count as f64;
-        frac
+        self.null_count as f64 / self.total_count as f64
     }
 
     /// Observed selectivity for an equality predicate.
@@ -116,8 +114,7 @@ impl ColumnSketch {
     #[must_use]
     pub fn equality_selectivity(&self) -> f64 {
         if self.approx_distinct > 0 {
-            let sel = 1.0 / self.approx_distinct as f64;
-            sel
+            1.0 / self.approx_distinct as f64
         } else {
             0.1
         }
@@ -133,8 +130,7 @@ impl ColumnSketch {
             if self.total_count == 0 {
                 return false;
             }
-            let fraction =
-                *freq_count as f64 / self.total_count as f64;
+            let fraction = *freq_count as f64 / self.total_count as f64;
             fraction > threshold
         } else {
             false
@@ -163,11 +159,7 @@ impl PlanStats {
     }
 
     /// Register an operator with its estimated row count.
-    pub fn register(
-        &mut self,
-        node_id: NodeId,
-        estimated_rows: f64,
-    ) {
+    pub fn register(&mut self, node_id: NodeId, estimated_rows: f64) {
         self.operators
             .insert(node_id, OperatorStats::with_estimate(estimated_rows));
     }
@@ -175,11 +167,7 @@ impl PlanStats {
     /// Record rows produced by an operator.
     ///
     /// Returns `false` if the `node_id` was not registered.
-    pub fn record_rows(
-        &mut self,
-        node_id: NodeId,
-        count: u64,
-    ) -> bool {
+    pub fn record_rows(&mut self, node_id: NodeId, count: u64) -> bool {
         if let Some(stats) = self.operators.get_mut(&node_id) {
             stats.record_rows(count);
             true
@@ -189,11 +177,7 @@ impl PlanStats {
     }
 
     /// Record elapsed time for an operator.
-    pub fn record_elapsed(
-        &mut self,
-        node_id: NodeId,
-        elapsed: Duration,
-    ) -> bool {
+    pub fn record_elapsed(&mut self, node_id: NodeId, elapsed: Duration) -> bool {
         if let Some(stats) = self.operators.get_mut(&node_id) {
             stats.record_elapsed(elapsed);
             true
@@ -211,19 +195,13 @@ impl PlanStats {
     /// Total rows produced across all operators.
     #[must_use]
     pub fn total_rows(&self) -> u64 {
-        self.operators
-            .values()
-            .map(|s| s.actual_rows)
-            .sum()
+        self.operators.values().map(|s| s.actual_rows).sum()
     }
 
     /// Total elapsed time across all operators.
     #[must_use]
     pub fn total_elapsed(&self) -> Duration {
-        self.operators
-            .values()
-            .map(|s| s.elapsed)
-            .sum()
+        self.operators.values().map(|s| s.elapsed).sum()
     }
 }
 
@@ -272,9 +250,7 @@ mod tests {
     #[test]
     fn column_sketch_null_fraction_empty() {
         let sketch = ColumnSketch::new();
-        assert!(
-            (sketch.null_fraction() - 0.0).abs() < f64::EPSILON
-        );
+        assert!((sketch.null_fraction() - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -285,19 +261,13 @@ mod tests {
             total_count: 100,
             most_frequent: None,
         };
-        assert!(
-            (sketch.equality_selectivity() - 0.02).abs()
-                < f64::EPSILON
-        );
+        assert!((sketch.equality_selectivity() - 0.02).abs() < f64::EPSILON);
     }
 
     #[test]
     fn column_sketch_equality_selectivity_zero_distinct() {
         let sketch = ColumnSketch::new();
-        assert!(
-            (sketch.equality_selectivity() - 0.1).abs()
-                < f64::EPSILON
-        );
+        assert!((sketch.equality_selectivity() - 0.1).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -358,11 +328,9 @@ mod tests {
     #[test]
     fn operator_stats_serialize_roundtrip() {
         let stats = OperatorStats::with_estimate(42.0);
-        let json = serde_json::to_string(&stats)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&stats).expect("serialization should succeed");
         let deserialized: OperatorStats =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(stats, deserialized);
     }
 }

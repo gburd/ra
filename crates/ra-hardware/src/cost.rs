@@ -25,7 +25,7 @@ pub struct HardwareCostModel {
 
 /// Convert a non-negative `f64` to `u64`, clamping to zero and
 /// saturating at `u64::MAX`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn f64_to_u64(v: f64) -> u64 {
     if v <= 0.0 {
         0
@@ -97,8 +97,12 @@ impl HardwareCostModel {
                 let probe_cost = probe_rows * 50e-9;
                 Cost::with_startup(
                     build_cost + probe_cost,
-                    0.0, 0.0, ht_mem,
-                    build_cost, 0.0, 0.0,
+                    0.0,
+                    0.0,
+                    ht_mem,
+                    build_cost,
+                    0.0,
+                    0.0,
                 )
             }
             Device::Gpu => {
@@ -109,8 +113,12 @@ impl HardwareCostModel {
                 let build_transfer = build_bytes / (self.profile.pcie_bandwidth_gbps * 1e9);
                 Cost::with_startup(
                     gpu_build + gpu_probe + transfer,
-                    0.0, 0.0, ht_mem,
-                    gpu_build + build_transfer, 0.0, 0.0,
+                    0.0,
+                    0.0,
+                    ht_mem,
+                    gpu_build + build_transfer,
+                    0.0,
+                    0.0,
                 )
             }
             Device::Fpga => {
@@ -120,9 +128,12 @@ impl HardwareCostModel {
                 let fpga_probe = probe_rows * clock_period;
                 Cost::with_startup(
                     fpga_build + fpga_probe,
-                    0.0, 0.0,
+                    0.0,
+                    0.0,
                     self.profile.fpga_bram_bytes,
-                    fpga_build, 0.0, 0.0,
+                    fpga_build,
+                    0.0,
+                    0.0,
                 )
             }
         }
@@ -135,12 +146,7 @@ impl HardwareCostModel {
     /// cost because all input must be consumed before producing the
     /// first sorted row.
     #[must_use]
-    pub fn sort_cost(
-        &self,
-        row_count: f64,
-        avg_row_size: u64,
-        device: Device,
-    ) -> Cost {
+    pub fn sort_cost(&self, row_count: f64, avg_row_size: u64, device: Device) -> Cost {
         let data_bytes = row_count * avg_row_size as f64;
         let mem = f64_to_u64(data_bytes);
         let n_log_n = if row_count > 1.0 {
@@ -153,27 +159,16 @@ impl HardwareCostModel {
             Device::Cpu => {
                 let cpu_time = n_log_n * 200e-9;
                 // Sort is fully blocking: startup = total
-                Cost::with_startup(
-                    cpu_time, 0.0, 0.0, mem,
-                    cpu_time, 0.0, 0.0,
-                )
+                Cost::with_startup(cpu_time, 0.0, 0.0, mem, cpu_time, 0.0, 0.0)
             }
             Device::Gpu => {
                 let transfer = data_bytes / (self.profile.pcie_bandwidth_gbps * 1e9);
                 let sm = f64::from(self.profile.gpu_sm_count);
                 let gpu_time = n_log_n * 200e-9 / sm;
                 let total = gpu_time + transfer;
-                Cost::with_startup(
-                    total, 0.0, 0.0, mem,
-                    total, 0.0, 0.0,
-                )
+                Cost::with_startup(total, 0.0, 0.0, mem, total, 0.0, 0.0)
             }
-            Device::Fpga => {
-                Cost::with_startup(
-                    f64::INFINITY, 0.0, 0.0, 0,
-                    f64::INFINITY, 0.0, 0.0,
-                )
-            }
+            Device::Fpga => Cost::with_startup(f64::INFINITY, 0.0, 0.0, 0, f64::INFINITY, 0.0, 0.0),
         }
     }
 
@@ -195,25 +190,16 @@ impl HardwareCostModel {
         match device {
             Device::Cpu => {
                 let cpu_time = input_rows * 80e-9;
-                Cost::with_startup(
-                    cpu_time, 0.0, 0.0, group_mem,
-                    cpu_time, 0.0, 0.0,
-                )
+                Cost::with_startup(cpu_time, 0.0, 0.0, group_mem, cpu_time, 0.0, 0.0)
             }
             Device::Gpu => {
                 let transfer = data_bytes / (self.profile.pcie_bandwidth_gbps * 1e9);
                 let sm = f64::from(self.profile.gpu_sm_count);
                 let gpu_time = input_rows * 80e-9 / sm + group_count * 100e-9;
                 let total = gpu_time + transfer;
-                Cost::with_startup(
-                    total, 0.0, 0.0, group_mem,
-                    total, 0.0, 0.0,
-                )
+                Cost::with_startup(total, 0.0, 0.0, group_mem, total, 0.0, 0.0)
             }
-            Device::Fpga => Cost::with_startup(
-                f64::INFINITY, 0.0, 0.0, 0,
-                f64::INFINITY, 0.0, 0.0,
-            ),
+            Device::Fpga => Cost::with_startup(f64::INFINITY, 0.0, 0.0, 0, f64::INFINITY, 0.0, 0.0),
         }
     }
 
@@ -260,7 +246,10 @@ impl CostModel for HardwareCostModel {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "Exact float equality needed for deterministic cost model tests"
+)]
 mod tests {
     use super::*;
     use crate::profile::HardwareProfile;
@@ -385,7 +374,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip() {
         let model = HardwareCostModel::new(HardwareProfile::gpu_server());
         let json = serde_json::to_string(&model).expect("serialization should succeed");

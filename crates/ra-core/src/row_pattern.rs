@@ -77,9 +77,7 @@ pub struct PatternMeasure {
 }
 
 /// Match mode: how many rows to output per match.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MatchMode {
     /// Output one row per match.
     OneRowPerMatch,
@@ -92,9 +90,7 @@ pub enum MatchMode {
 }
 
 /// Skip mode: where to resume after a match.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SkipMode {
     /// Resume after the last row of the match.
     PastLastRow,
@@ -121,14 +117,12 @@ impl PatternExpr {
     fn collect_variables<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             Self::Var(name) => out.push(name),
-            Self::Sequence(parts)
-            | Self::Alternation(parts) => {
+            Self::Sequence(parts) | Self::Alternation(parts) => {
                 for part in parts {
                     part.collect_variables(out);
                 }
             }
-            Self::Quantified(inner, _)
-            | Self::Group(inner) => {
+            Self::Quantified(inner, _) | Self::Group(inner) => {
                 inner.collect_variables(out);
             }
         }
@@ -139,9 +133,7 @@ impl PatternExpr {
     pub fn estimate_dfa_states(&self) -> usize {
         match self {
             Self::Var(_) => 2,
-            Self::Sequence(parts) => {
-                parts.iter().map(Self::estimate_dfa_states).sum()
-            }
+            Self::Sequence(parts) => parts.iter().map(Self::estimate_dfa_states).sum(),
             Self::Alternation(branches) => branches
                 .iter()
                 .map(Self::estimate_dfa_states)
@@ -151,12 +143,9 @@ impl PatternExpr {
                 let base = inner.estimate_dfa_states();
                 match quant {
                     Quantifier::ZeroOrOne => base + 1,
-                    Quantifier::ZeroOrMore
-                    | Quantifier::OneOrMore => base * 2,
+                    Quantifier::ZeroOrMore | Quantifier::OneOrMore => base * 2,
                     Quantifier::Exactly(n) => base * n,
-                    Quantifier::Range(min, max) => {
-                        base * max.unwrap_or(min + 10)
-                    }
+                    Quantifier::Range(min, max) => base * max.unwrap_or(min + 10),
                 }
             }
             Self::Group(inner) => inner.estimate_dfa_states(),
@@ -168,12 +157,8 @@ impl PatternExpr {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Var(_) => false,
-            Self::Sequence(parts) | Self::Alternation(parts) => {
-                parts.is_empty()
-            }
-            Self::Quantified(inner, _) | Self::Group(inner) => {
-                inner.is_empty()
-            }
+            Self::Sequence(parts) | Self::Alternation(parts) => parts.is_empty(),
+            Self::Quantified(inner, _) | Self::Group(inner) => inner.is_empty(),
         }
     }
 }
@@ -183,13 +168,11 @@ impl std::fmt::Display for PatternExpr {
         match self {
             Self::Var(name) => write!(f, "{name}"),
             Self::Sequence(parts) => {
-                let strs: Vec<String> =
-                    parts.iter().map(ToString::to_string).collect();
+                let strs: Vec<String> = parts.iter().map(ToString::to_string).collect();
                 write!(f, "{}", strs.join(" "))
             }
             Self::Alternation(branches) => {
-                let strs: Vec<String> =
-                    branches.iter().map(ToString::to_string).collect();
+                let strs: Vec<String> = branches.iter().map(ToString::to_string).collect();
                 write!(f, "{}", strs.join(" | "))
             }
             Self::Quantified(inner, quant) => {
@@ -223,10 +206,7 @@ impl std::fmt::Display for MatchMode {
                 write!(f, "ALL ROWS PER MATCH")
             }
             Self::AllRowsPerMatchWithUnmatched => {
-                write!(
-                    f,
-                    "ALL ROWS PER MATCH WITH UNMATCHED ROWS"
-                )
+                write!(f, "ALL ROWS PER MATCH WITH UNMATCHED ROWS")
             }
         }
     }
@@ -249,6 +229,7 @@ impl std::fmt::Display for SkipMode {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,12 +272,10 @@ mod tests {
     #[test]
     fn pattern_group_quantified_display() {
         let p = PatternExpr::Quantified(
-            Box::new(PatternExpr::Group(Box::new(
-                PatternExpr::Sequence(vec![
-                    PatternExpr::Var("A".to_owned()),
-                    PatternExpr::Var("B".to_owned()),
-                ]),
-            ))),
+            Box::new(PatternExpr::Group(Box::new(PatternExpr::Sequence(vec![
+                PatternExpr::Var("A".to_owned()),
+                PatternExpr::Var("B".to_owned()),
+            ])))),
             Quantifier::ZeroOrMore,
         );
         assert_eq!(p.to_string(), "(A B)*");
@@ -309,10 +288,7 @@ mod tests {
 
     #[test]
     fn quantifier_range_display() {
-        assert_eq!(
-            Quantifier::Range(2, Some(5)).to_string(),
-            "{2,5}"
-        );
+        assert_eq!(Quantifier::Range(2, Some(5)).to_string(), "{2,5}");
         assert_eq!(Quantifier::Range(2, None).to_string(), "{2,}");
     }
 
@@ -348,12 +324,10 @@ mod tests {
 
     #[test]
     fn pattern_variables_nested_group() {
-        let p = PatternExpr::Group(Box::new(
-            PatternExpr::Sequence(vec![
-                PatternExpr::Var("A".to_owned()),
-                PatternExpr::Var("B".to_owned()),
-            ]),
-        ));
+        let p = PatternExpr::Group(Box::new(PatternExpr::Sequence(vec![
+            PatternExpr::Var("A".to_owned()),
+            PatternExpr::Var("B".to_owned()),
+        ])));
         assert_eq!(p.variables(), vec!["A", "B"]);
     }
 
@@ -415,13 +389,9 @@ mod tests {
             variable: "A".to_owned(),
             condition: Expr::BinOp {
                 op: BinOp::Lt,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("price"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("price"))),
                 right: Box::new(Expr::PatternPrev(
-                    Box::new(Expr::Column(
-                        ColumnRef::new("price"),
-                    )),
+                    Box::new(Expr::Column(ColumnRef::new("price"))),
                     1,
                 )),
             },
@@ -433,9 +403,7 @@ mod tests {
     fn pattern_measure_construction() {
         let measure = PatternMeasure {
             expr: Expr::PatternFirst(
-                Box::new(Expr::Column(
-                    ColumnRef::new("price"),
-                )),
+                Box::new(Expr::Column(ColumnRef::new("price"))),
                 "A".to_owned(),
             ),
             alias: "start_price".to_owned(),
@@ -445,14 +413,8 @@ mod tests {
 
     #[test]
     fn match_mode_display() {
-        assert_eq!(
-            MatchMode::OneRowPerMatch.to_string(),
-            "ONE ROW PER MATCH"
-        );
-        assert_eq!(
-            MatchMode::AllRowsPerMatch.to_string(),
-            "ALL ROWS PER MATCH"
-        );
+        assert_eq!(MatchMode::OneRowPerMatch.to_string(), "ONE ROW PER MATCH");
+        assert_eq!(MatchMode::AllRowsPerMatch.to_string(), "ALL ROWS PER MATCH");
         assert_eq!(
             MatchMode::AllRowsPerMatchWithUnmatched.to_string(),
             "ALL ROWS PER MATCH WITH UNMATCHED ROWS"
@@ -461,14 +423,8 @@ mod tests {
 
     #[test]
     fn skip_mode_display() {
-        assert_eq!(
-            SkipMode::PastLastRow.to_string(),
-            "SKIP PAST LAST ROW"
-        );
-        assert_eq!(
-            SkipMode::ToNextRow.to_string(),
-            "SKIP TO NEXT ROW"
-        );
+        assert_eq!(SkipMode::PastLastRow.to_string(), "SKIP PAST LAST ROW");
+        assert_eq!(SkipMode::ToNextRow.to_string(), "SKIP TO NEXT ROW");
     }
 
     #[test]
@@ -483,10 +439,9 @@ mod tests {
                 Quantifier::Range(2, Some(5)),
             ),
         ]);
-        let json = serde_json::to_string(&p)
-            .expect("serialization should succeed");
-        let deser: PatternExpr = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&p).expect("serialization should succeed");
+        let deser: PatternExpr =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(p, deser);
     }
 
@@ -501,10 +456,9 @@ mod tests {
             Quantifier::Range(3, None),
         ];
         for q in &quantifiers {
-            let json = serde_json::to_string(q)
-                .expect("serialization should succeed");
-            let deser: Quantifier = serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            let json = serde_json::to_string(q).expect("serialization should succeed");
+            let deser: Quantifier =
+                serde_json::from_str(&json).expect("deserialization should succeed");
             assert_eq!(*q, deser);
         }
     }
@@ -515,10 +469,9 @@ mod tests {
             variable: "A".to_owned(),
             condition: Expr::Const(Const::Bool(true)),
         };
-        let json = serde_json::to_string(&define)
-            .expect("serialization should succeed");
-        let deser: PatternDefine = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&define).expect("serialization should succeed");
+        let deser: PatternDefine =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(define, deser);
     }
 

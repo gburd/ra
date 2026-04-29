@@ -1,0 +1,62 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Test coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a  # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
+
+      - name: Generate coverage report
+        run: |
+          nix develop --command cargo llvm-cov \
+            --all-features \
+            --workspace \
+            --exclude ra-pg-extension \
+            --lcov \
+            --output-path lcov.info
+
+      - name: Generate text summary
+        run: |
+          nix develop --command cargo llvm-cov \
+            --all-features \
+            --workspace \
+            --exclude ra-pg-extension \
+            --text \
+            | tee coverage-summary.txt
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: coverage-report
+          path: |
+            lcov.info
+            coverage-summary.txt
+          retention-days: 30
+
+      - name: Check coverage threshold
+        run: |
+          # Extract overall line coverage percentage
+          COVERAGE=$(tail -1 coverage-summary.txt \
+            | grep -oP '[\d.]+%' | head -1 | tr -d '%')
+          echo "Overall line coverage: ${COVERAGE}%"
+          # Fail if below 50% (increase threshold as coverage improves)
+          if [ "$(echo "$COVERAGE < 50" | bc -l)" = "1" ]; then
+            echo "::error::Coverage ${COVERAGE}% is below 50% threshold"
+            exit 1
+          fi

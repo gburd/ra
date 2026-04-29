@@ -57,7 +57,7 @@ pub struct DistributedTableInfo {
 /// Storage format for a table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageType {
-    /// Standard PostgreSQL heap (row-oriented).
+    /// Standard `PostgreSQL` heap (row-oriented).
     Row,
     /// Citus columnar storage (column-oriented, compressed).
     Columnar,
@@ -568,6 +568,7 @@ impl CitusOptimizer {
     }
 
     /// Annotate a scan with Citus distribution info.
+    #[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other annotate methods")]
     fn annotate_scan(
         &self,
         table: &str,
@@ -738,20 +739,17 @@ impl CitusOptimizer {
             return false;
         }
 
-        let left_dist_col = match self.metadata.distribution_column(left_table) {
-            Some(col) => col,
-            None => return false,
+        let Some(left_dist_col) = self.metadata.distribution_column(left_table) else {
+            return false;
         };
-        let right_dist_col = match self.metadata.distribution_column(right_table) {
-            Some(col) => col,
-            None => return false,
+        let Some(right_dist_col) = self.metadata.distribution_column(right_table) else {
+            return false;
         };
 
         condition_has_equality_on(condition, left_dist_col, right_dist_col)
     }
 
     /// Annotate an aggregate with distributed pushdown awareness.
-    #[allow(clippy::too_many_lines)]
     fn annotate_aggregate(
         &self,
         input: &RelExpr,
@@ -811,8 +809,7 @@ impl CitusOptimizer {
     #[must_use]
     pub fn estimate_cost(&self, plan: &CitusOptimizedPlan) -> Cost {
         let base_cost = match &plan.strategy {
-            CitusStrategy::ColocatedJoin => Cost::ZERO,
-            CitusStrategy::ReferenceJoin => Cost::ZERO,
+            CitusStrategy::ColocatedJoin | CitusStrategy::ReferenceJoin => Cost::ZERO,
             CitusStrategy::DistributedAggregation => {
                 let workers = self.metadata.active_worker_count().max(1);
                 let agg_cpu = 100.0 / f64::from(workers);
@@ -1015,6 +1012,8 @@ fn aggregates_are_pushdownable(aggregates: &[AggregateExpr]) -> bool {
 // ------------------------------------------------------------------
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use ra_core::algebra::{AggregateExpr, AggregateFunction};

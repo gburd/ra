@@ -306,6 +306,7 @@ impl TimelineOptimizer {
 }
 
 /// Detect schema changes between snapshots.
+#[must_use]
 pub fn detect_schema_changes(
     prev: &SchemaSnapshot,
     current: &SchemaSnapshot,
@@ -405,6 +406,7 @@ pub fn detect_schema_changes(
 }
 
 /// Detect statistics changes between snapshots.
+#[must_use]
 pub fn detect_stats_changes(
     prev: &StatisticsSnapshot,
     current: &StatisticsSnapshot,
@@ -482,6 +484,7 @@ pub fn detect_stats_changes(
 }
 
 /// Detect hardware profile changes.
+#[must_use]
 pub fn detect_hardware_changes(
     prev: &HardwareProfile,
     current: &HardwareProfile,
@@ -558,6 +561,7 @@ pub fn detect_hardware_changes(
 }
 
 /// Detect fact changes between snapshots.
+#[must_use]
 pub fn detect_fact_changes(
     prev: &crate::timeline_config::FactsSnapshot,
     current: &crate::timeline_config::FactsSnapshot,
@@ -614,8 +618,7 @@ pub fn detect_fact_changes(
                     change_type: ChangeType::Facts,
                     severity: ChangeSeverity::Medium,
                     description: format!(
-                        "Work memory changed from {} to {} bytes (ratio: {:.2}x)",
-                        p, c, ratio
+                        "Work memory changed from {p} to {c} bytes (ratio: {ratio:.2}x)"
                     ),
                 });
             }
@@ -696,52 +699,53 @@ impl TimelineOptimizationResult {
     }
 
     /// Format as Markdown report.
+    #[must_use]
     pub fn to_markdown(&self) -> String {
+        use std::fmt::Write;
         let mut md = String::new();
 
-        md.push_str(&format!(
+        let _ = write!(
+            md,
             "# Timeline Optimization Report: {}\n\n",
             self.timeline_config.metadata.name
-        ));
-        md.push_str(&format!(
-            "{}\n\n",
-            self.timeline_config.metadata.description
-        ));
+        );
+        let _ = write!(md, "{}\n\n", self.timeline_config.metadata.description);
 
         if let Some(query) = &self.timeline_config.metadata.query {
-            md.push_str(&format!("**Query:** `{query}`\n\n"));
+            let _ = write!(md, "**Query:** `{query}`\n\n");
         }
 
-        md.push_str(&format!(
-            "**Snapshots:** {}\n\n",
-            self.snapshot_results.len()
-        ));
-        md.push_str(&format!(
+        let _ = write!(md, "**Snapshots:** {}\n\n", self.snapshot_results.len());
+        let _ = write!(
+            md,
             "**Duration:** {} seconds\n\n",
             self.timeline_config.metadata.duration_seconds.unwrap_or(0)
-        ));
+        );
 
         md.push_str("## Snapshots\n\n");
 
         for result in &self.snapshot_results {
-            md.push_str(&format!(
+            let _ = write!(
+                md,
                 "### Snapshot {} (t={}s)\n\n",
                 result.snapshot_index, result.time_offset
-            ));
+            );
 
             if let Some(label) = &result.label {
-                md.push_str(&format!("**Label:** {label}\n\n"));
+                let _ = write!(md, "**Label:** {label}\n\n");
             }
 
-            md.push_str(&format!("- **Cost:** {:.2}\n", result.cost));
-            md.push_str(&format!(
-                "- **Optimization time:** {}ms\n",
+            let _ = writeln!(md, "- **Cost:** {:.2}", result.cost);
+            let _ = writeln!(
+                md,
+                "- **Optimization time:** {}ms",
                 result.optimization_time_ms
-            ));
-            md.push_str(&format!(
-                "- **Changes detected:** {}\n",
+            );
+            let _ = writeln!(
+                md,
+                "- **Changes detected:** {}",
                 result.changes_from_previous.len()
-            ));
+            );
 
             if !result.changes_from_previous.is_empty() {
                 md.push_str("\n**Changes from previous snapshot:**\n\n");
@@ -752,43 +756,48 @@ impl TimelineOptimizationResult {
                         ChangeSeverity::High => "🔴",
                         ChangeSeverity::Critical => "🚨",
                     };
-                    md.push_str(&format!(
-                        "- {severity_icon} [{:?}] {}\n",
+                    let _ = writeln!(
+                        md,
+                        "- {severity_icon} [{:?}] {}",
                         change.change_type, change.description
-                    ));
+                    );
                 }
             }
 
-            md.push_str("\n");
+            md.push('\n');
         }
 
         md
     }
 
     /// Format as text with ASCII tables.
+    #[must_use]
     pub fn to_text(&self) -> String {
+        use std::fmt::Write;
         let mut text = String::new();
 
-        text.push_str(&format!(
-            "Timeline Optimization Report: {}\n",
+        let _ = writeln!(
+            text,
+            "Timeline Optimization Report: {}",
             self.timeline_config.metadata.name
-        ));
-        text.push_str(&format!("{}\n", self.timeline_config.metadata.description));
-        text.push_str(&format!("Snapshots: {}\n\n", self.snapshot_results.len()));
+        );
+        let _ = writeln!(text, "{}", self.timeline_config.metadata.description);
+        let _ = writeln!(text, "Snapshots: {}\n", self.snapshot_results.len());
 
         text.push_str("┌──────┬─────────┬──────────┬──────────┬──────────┐\n");
         text.push_str("│ Snap │ Time(s) │   Cost   │  Time(ms)│  Changes │\n");
         text.push_str("├──────┼─────────┼──────────┼──────────┼──────────┤\n");
 
         for result in &self.snapshot_results {
-            text.push_str(&format!(
-                "│ {:>4} │ {:>7} │ {:>8.2} │ {:>8} │ {:>8} │\n",
+            let _ = writeln!(
+                text,
+                "│ {:>4} │ {:>7} │ {:>8.2} │ {:>8} │ {:>8} │",
                 result.snapshot_index,
                 result.time_offset,
                 result.cost,
                 result.optimization_time_ms,
                 result.changes_from_previous.len()
-            ));
+            );
         }
 
         text.push_str("└──────┴─────────┴──────────┴──────────┴──────────┘\n");
@@ -867,8 +876,8 @@ mod tests {
             has_gpu: false,
             gpu_memory: None,
             l1_cache_size: 32768,
-            l2_cache_size: 262144,
-            l3_cache_size: 8388608,
+            l2_cache_size: 262_144,
+            l3_cache_size: 8_388_608,
         };
 
         let snapshot1 = FingerPrintSnapshot {
@@ -1021,8 +1030,8 @@ mod tests {
             has_gpu: false,
             gpu_memory: None,
             l1_cache_size: 32768,
-            l2_cache_size: 262144,
-            l3_cache_size: 8388608,
+            l2_cache_size: 262_144,
+            l3_cache_size: 8_388_608,
         };
 
         let current = HardwareProfile {
@@ -1033,8 +1042,8 @@ mod tests {
             has_gpu: false,
             gpu_memory: None,
             l1_cache_size: 32768,
-            l2_cache_size: 262144,
-            l3_cache_size: 8388608,
+            l2_cache_size: 262_144,
+            l3_cache_size: 8_388_608,
         };
 
         let changes = detect_hardware_changes(&prev, &current);

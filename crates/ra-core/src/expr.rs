@@ -185,10 +185,7 @@ impl ColumnRef {
 
     /// Create a table-qualified column reference.
     #[must_use]
-    pub fn qualified(
-        table: impl Into<String>,
-        column: impl Into<String>,
-    ) -> Self {
+    pub fn qualified(table: impl Into<String>, column: impl Into<String>) -> Self {
         Self {
             table: Some(table.into()),
             column: column.into(),
@@ -304,6 +301,7 @@ impl std::fmt::Display for UnaryOp {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,7 +323,10 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::approx_constant, reason = "3.14 is test data, not mathematical constant")]
+    #[expect(
+        clippy::approx_constant,
+        reason = "3.14 is test data, not mathematical constant"
+    )]
     fn const_variants() {
         let null = Const::Null;
         let b = Const::Bool(true);
@@ -365,10 +366,7 @@ mod tests {
 
         if let Expr::BinOp { op, left, right } = &expr {
             assert_eq!(*op, BinOp::Eq);
-            assert_eq!(
-                *left.as_ref(),
-                Expr::Column(ColumnRef::new("age"))
-            );
+            assert_eq!(*left.as_ref(), Expr::Column(ColumnRef::new("age")));
             assert_eq!(*right.as_ref(), Expr::Const(Const::Int(21)));
         } else {
             panic!("expected BinOp variant");
@@ -388,9 +386,7 @@ mod tests {
                 },
                 Expr::Const(Const::String("positive".into())),
             )],
-            else_result: Some(Box::new(Expr::Const(
-                Const::String("non-positive".into()),
-            ))),
+            else_result: Some(Box::new(Expr::Const(Const::String("non-positive".into())))),
         };
 
         if let Expr::Case {
@@ -414,10 +410,160 @@ mod tests {
             right: Box::new(Expr::Const(Const::Int(1))),
         };
 
-        let json = serde_json::to_string(&expr)
-            .expect("serialization should succeed");
-        let deserialized: Expr = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&expr).expect("serialization should succeed");
+        let deserialized: Expr =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(expr, deserialized);
+    }
+
+    #[test]
+    fn binop_display_all_variants() {
+        assert_eq!(BinOp::Add.to_string(), "+");
+        assert_eq!(BinOp::Sub.to_string(), "-");
+        assert_eq!(BinOp::Mul.to_string(), "*");
+        assert_eq!(BinOp::Div.to_string(), "/");
+        assert_eq!(BinOp::Eq.to_string(), "=");
+        assert_eq!(BinOp::Ne.to_string(), "!=");
+        assert_eq!(BinOp::Lt.to_string(), "<");
+        assert_eq!(BinOp::Le.to_string(), "<=");
+        assert_eq!(BinOp::Gt.to_string(), ">");
+        assert_eq!(BinOp::Ge.to_string(), ">=");
+        assert_eq!(BinOp::And.to_string(), "AND");
+        assert_eq!(BinOp::Or.to_string(), "OR");
+        assert_eq!(BinOp::Mod.to_string(), "%");
+        assert_eq!(BinOp::Concat.to_string(), "||");
+        assert_eq!(BinOp::JsonAccess.to_string(), "->>");
+    }
+
+    #[test]
+    fn unaryop_display_all_variants() {
+        assert_eq!(UnaryOp::Not.to_string(), "NOT");
+        assert_eq!(UnaryOp::IsNull.to_string(), "IS NULL");
+        assert_eq!(UnaryOp::IsNotNull.to_string(), "IS NOT NULL");
+        assert_eq!(UnaryOp::Neg.to_string(), "-");
+    }
+
+    #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
+    fn build_unary_expression() {
+        let expr = Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(Expr::Column(ColumnRef::new("active"))),
+        };
+
+        if let Expr::UnaryOp { op, operand } = &expr {
+            assert_eq!(*op, UnaryOp::Not);
+            assert_eq!(*operand.as_ref(), Expr::Column(ColumnRef::new("active")));
+        } else {
+            panic!("expected UnaryOp variant");
+        }
+    }
+
+    #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
+    fn build_function_expression() {
+        let expr = Expr::Function {
+            name: "UPPER".into(),
+            args: vec![Expr::Column(ColumnRef::new("name"))],
+        };
+
+        if let Expr::Function { name, args } = &expr {
+            assert_eq!(name, "UPPER");
+            assert_eq!(args.len(), 1);
+        } else {
+            panic!("expected Function variant");
+        }
+    }
+
+    #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
+    fn build_cast_expression() {
+        let expr = Expr::Cast {
+            expr: Box::new(Expr::Column(ColumnRef::new("price"))),
+            target_type: "DECIMAL(10,2)".into(),
+        };
+
+        if let Expr::Cast { target_type, .. } = &expr {
+            assert_eq!(target_type, "DECIMAL(10,2)");
+        } else {
+            panic!("expected Cast variant");
+        }
+    }
+
+    #[test]
+    fn build_array_expression() {
+        let expr = Expr::Array(vec![
+            Expr::Const(Const::Int(1)),
+            Expr::Const(Const::Int(2)),
+            Expr::Const(Const::Int(3)),
+        ]);
+
+        if let Expr::Array(elements) = &expr {
+            assert_eq!(elements.len(), 3);
+        }
+    }
+
+    #[test]
+    fn column_ref_equality() {
+        let a = ColumnRef::new("id");
+        let b = ColumnRef::new("id");
+        let c = ColumnRef::new("name");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn column_ref_qualified_equality() {
+        let a = ColumnRef::qualified("t", "id");
+        let b = ColumnRef::qualified("t", "id");
+        let c = ColumnRef::qualified("u", "id");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn const_null_equality() {
+        assert_eq!(Const::Null, Const::Null);
+        assert_ne!(Const::Null, Const::Bool(false));
+    }
+
+    #[test]
+    fn subquery_type_variants() {
+        let types = [
+            SubQueryType::Scalar,
+            SubQueryType::Exists,
+            SubQueryType::In,
+            SubQueryType::Any,
+            SubQueryType::All,
+        ];
+        for (i, t) in types.iter().enumerate() {
+            for (j, u) in types.iter().enumerate() {
+                if i == j {
+                    assert_eq!(t, u);
+                } else {
+                    assert_ne!(t, u);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn serialize_column_ref_roundtrip() {
+        let col = ColumnRef::qualified("t", "id");
+        let json = serde_json::to_string(&col).expect("serialization should succeed");
+        let deserialized: ColumnRef =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(col, deserialized);
+    }
+
+    #[test]
+    fn column_ref_hash_consistency() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(ColumnRef::new("id"));
+        set.insert(ColumnRef::new("id"));
+        assert_eq!(set.len(), 1);
+        set.insert(ColumnRef::qualified("t", "id"));
+        assert_eq!(set.len(), 2);
     }
 }

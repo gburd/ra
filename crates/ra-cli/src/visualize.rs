@@ -655,7 +655,7 @@ mod tests {
         assert!(out.contains("Row Counts"));
         assert!(out.contains("t=0"));
         assert!(out.contains("t=180"));
-        assert!(out.contains("#"));
+        assert!(out.contains('#'));
     }
 
     #[test]
@@ -747,9 +747,9 @@ mod tests {
     fn ascii_table_empty_rows() {
         let headers = vec!["A", "B"];
         let out = render_ascii_table(&headers, &[]);
-        assert!(out.contains("A"));
-        assert!(out.contains("B"));
-        assert!(out.contains("-"));
+        assert!(out.contains('A'));
+        assert!(out.contains('B'));
+        assert!(out.contains('-'));
     }
 
     #[test]

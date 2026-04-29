@@ -26,9 +26,7 @@ pub struct TriggerEvent {
 }
 
 /// Categories of reoptimization triggers.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TriggerKind {
     /// Actual cardinality far exceeds the estimate (underestimate).
     CardinalityUnderestimate,
@@ -41,17 +39,10 @@ pub enum TriggerKind {
 }
 
 impl std::fmt::Display for TriggerKind {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let label = match self {
-            Self::CardinalityUnderestimate => {
-                "cardinality underestimate"
-            }
-            Self::CardinalityOverestimate => {
-                "cardinality overestimate"
-            }
+            Self::CardinalityUnderestimate => "cardinality underestimate",
+            Self::CardinalityOverestimate => "cardinality overestimate",
             Self::SkewDetected => "skew detected",
             Self::MemoryPressure => "memory pressure",
         };
@@ -129,11 +120,7 @@ impl TriggerSet {
 
     /// Check a single operator for cardinality misestimates.
     #[must_use]
-    pub fn check_operator(
-        &self,
-        node_id: NodeId,
-        stats: &OperatorStats,
-    ) -> Vec<TriggerEvent> {
+    pub fn check_operator(&self, node_id: NodeId, stats: &OperatorStats) -> Vec<TriggerEvent> {
         let mut events = Vec::new();
         self.check_cardinality(node_id, stats, &mut events);
         self.check_skew(node_id, stats, &mut events);
@@ -147,8 +134,7 @@ impl TriggerSet {
         stats: &OperatorStats,
         events: &mut Vec<TriggerEvent>,
     ) {
-        if stats.actual_rows < self.config.min_rows_for_cardinality
-        {
+        if stats.actual_rows < self.config.min_rows_for_cardinality {
             return;
         }
         let Some(ratio) = stats.cardinality_ratio() else {
@@ -162,10 +148,7 @@ impl TriggerSet {
                 threshold: self.config.cardinality_overcount_ratio,
             });
         }
-        if ratio > 0.0
-            && (1.0 / ratio)
-                > self.config.cardinality_undercount_ratio
-        {
+        if ratio > 0.0 && (1.0 / ratio) > self.config.cardinality_undercount_ratio {
             events.push(TriggerEvent {
                 node_id,
                 kind: TriggerKind::CardinalityOverestimate,
@@ -175,26 +158,16 @@ impl TriggerSet {
         }
     }
 
-    fn check_skew(
-        &self,
-        node_id: NodeId,
-        stats: &OperatorStats,
-        events: &mut Vec<TriggerEvent>,
-    ) {
+    fn check_skew(&self, node_id: NodeId, stats: &OperatorStats, events: &mut Vec<TriggerEvent>) {
         for sketch in stats.column_sketches.values() {
             if sketch.is_skewed(self.config.skew_fraction) {
-                let deviation = sketch
-                    .most_frequent
-                    .as_ref()
-                    .map_or(0.0, |(_, count)| {
-                        if sketch.total_count == 0 {
-                            0.0
-                        } else {
-                            let d = *count as f64
-                                / sketch.total_count as f64;
-                            d
-                        }
-                    });
+                let deviation = sketch.most_frequent.as_ref().map_or(0.0, |(_, count)| {
+                    if sketch.total_count == 0 {
+                        0.0
+                    } else {
+                        *count as f64 / sketch.total_count as f64
+                    }
+                });
                 events.push(TriggerEvent {
                     node_id,
                     kind: TriggerKind::SkewDetected,
@@ -206,24 +179,18 @@ impl TriggerSet {
         }
     }
 
-    fn check_memory(
-        &self,
-        node_id: NodeId,
-        stats: &OperatorStats,
-        events: &mut Vec<TriggerEvent>,
-    ) {
+    fn check_memory(&self, node_id: NodeId, stats: &OperatorStats, events: &mut Vec<TriggerEvent>) {
         if stats.estimated_rows.abs() < f64::EPSILON {
             return;
         }
         // Estimate budgeted memory as proportional to estimated rows
         // (8 bytes per row as a baseline).
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "legacy allow")]
         let budgeted = (stats.estimated_rows * 8.0) as u64;
         if budgeted == 0 {
             return;
         }
-        let ratio =
-            stats.peak_memory_bytes as f64 / budgeted as f64;
+        let ratio = stats.peak_memory_bytes as f64 / budgeted as f64;
         if ratio > self.config.memory_ratio {
             events.push(TriggerEvent {
                 node_id,
@@ -246,10 +213,7 @@ mod tests {
     use super::*;
     use crate::runtime_stats::{ColumnSketch, OperatorStats, PlanStats};
 
-    fn make_stats(
-        actual: u64,
-        estimated: f64,
-    ) -> OperatorStats {
+    fn make_stats(actual: u64, estimated: f64) -> OperatorStats {
         let mut s = OperatorStats::with_estimate(estimated);
         s.record_rows(actual);
         s
@@ -260,8 +224,9 @@ mod tests {
         let triggers = TriggerSet::new();
         let stats = make_stats(200_000, 1_000.0);
         let events = triggers.check_operator(1, &stats);
-        assert!(events.iter().any(|e| e.kind
-            == TriggerKind::CardinalityUnderestimate));
+        assert!(events
+            .iter()
+            .any(|e| e.kind == TriggerKind::CardinalityUnderestimate));
     }
 
     #[test]
@@ -269,8 +234,9 @@ mod tests {
         let triggers = TriggerSet::new();
         let stats = make_stats(1_000, 100_000.0);
         let events = triggers.check_operator(1, &stats);
-        assert!(events.iter().any(|e| e.kind
-            == TriggerKind::CardinalityOverestimate));
+        assert!(events
+            .iter()
+            .any(|e| e.kind == TriggerKind::CardinalityOverestimate));
     }
 
     #[test]
@@ -281,10 +247,8 @@ mod tests {
         let cardinality_events: Vec<_> = events
             .iter()
             .filter(|e| {
-                e.kind
-                    == TriggerKind::CardinalityUnderestimate
-                    || e.kind
-                        == TriggerKind::CardinalityOverestimate
+                e.kind == TriggerKind::CardinalityUnderestimate
+                    || e.kind == TriggerKind::CardinalityOverestimate
             })
             .collect();
         assert!(cardinality_events.is_empty());
@@ -298,10 +262,8 @@ mod tests {
         let cardinality_events: Vec<_> = events
             .iter()
             .filter(|e| {
-                e.kind
-                    == TriggerKind::CardinalityUnderestimate
-                    || e.kind
-                        == TriggerKind::CardinalityOverestimate
+                e.kind == TriggerKind::CardinalityUnderestimate
+                    || e.kind == TriggerKind::CardinalityOverestimate
             })
             .collect();
         assert!(cardinality_events.is_empty());
@@ -317,13 +279,9 @@ mod tests {
             total_count: 10_000,
             most_frequent: Some(("hot_value".into(), 6000)),
         };
-        stats
-            .column_sketches
-            .insert("key_col".into(), sketch);
+        stats.column_sketches.insert("key_col".into(), sketch);
         let events = triggers.check_operator(1, &stats);
-        assert!(events
-            .iter()
-            .any(|e| e.kind == TriggerKind::SkewDetected));
+        assert!(events.iter().any(|e| e.kind == TriggerKind::SkewDetected));
     }
 
     #[test]
@@ -336,13 +294,9 @@ mod tests {
             total_count: 10_000,
             most_frequent: Some(("common".into(), 200)),
         };
-        stats
-            .column_sketches
-            .insert("col".into(), sketch);
+        stats.column_sketches.insert("col".into(), sketch);
         let events = triggers.check_operator(1, &stats);
-        assert!(events
-            .iter()
-            .all(|e| e.kind != TriggerKind::SkewDetected));
+        assert!(events.iter().all(|e| e.kind != TriggerKind::SkewDetected));
     }
 
     #[test]
@@ -352,9 +306,7 @@ mod tests {
         // Budget = 1000 * 8 = 8000 bytes; actual = 100_000
         stats.record_memory(100_000);
         let events = triggers.check_operator(1, &stats);
-        assert!(events
-            .iter()
-            .any(|e| e.kind == TriggerKind::MemoryPressure));
+        assert!(events.iter().any(|e| e.kind == TriggerKind::MemoryPressure));
     }
 
     #[test]
@@ -368,12 +320,13 @@ mod tests {
 
         let events = triggers.evaluate(&plan);
         // Node 1: 50000 actual vs 100 estimated = 500x underestimate
-        assert!(events.iter().any(|e| e.node_id == 1
-            && e.kind
-                == TriggerKind::CardinalityUnderestimate));
+        assert!(events
+            .iter()
+            .any(|e| e.node_id == 1 && e.kind == TriggerKind::CardinalityUnderestimate));
         // Node 2: within threshold
-        assert!(events.iter().all(|e| e.node_id != 2
-            || e.kind == TriggerKind::MemoryPressure));
+        assert!(events
+            .iter()
+            .all(|e| e.node_id != 2 || e.kind == TriggerKind::MemoryPressure));
     }
 
     #[test]
@@ -388,8 +341,9 @@ mod tests {
         let triggers = TriggerSet::with_config(config);
         let stats = make_stats(5_000, 2_000.0);
         let events = triggers.check_operator(1, &stats);
-        assert!(events.iter().any(|e| e.kind
-            == TriggerKind::CardinalityUnderestimate));
+        assert!(events
+            .iter()
+            .any(|e| e.kind == TriggerKind::CardinalityUnderestimate));
     }
 
     #[test]
@@ -398,10 +352,7 @@ mod tests {
             TriggerKind::CardinalityUnderestimate.to_string(),
             "cardinality underestimate"
         );
-        assert_eq!(
-            TriggerKind::SkewDetected.to_string(),
-            "skew detected"
-        );
+        assert_eq!(TriggerKind::SkewDetected.to_string(), "skew detected");
     }
 
     #[test]
@@ -412,10 +363,9 @@ mod tests {
             deviation: 15.5,
             threshold: 10.0,
         };
-        let json = serde_json::to_string(&event)
-            .expect("serialization should succeed");
-        let deserialized: TriggerEvent = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&event).expect("serialization should succeed");
+        let deserialized: TriggerEvent =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(event, deserialized);
     }
 }

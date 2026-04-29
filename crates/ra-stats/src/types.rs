@@ -135,7 +135,7 @@ pub struct MultiColumnNdv {
 pub struct MultiDimHistogram {
     /// Column identifiers tracked by this histogram.
     pub columns: Vec<ColumnId>,
-    /// Number of dimensions (should match columns.len()).
+    /// Number of dimensions (should match `columns.len()`).
     pub dimensions: usize,
     /// Bucket boundaries for each dimension.
     /// Each inner vec contains sorted boundary values for that dimension.
@@ -307,9 +307,7 @@ impl TableStats {
     /// Dead tuple ratio (0.0 to 1.0).
     pub fn dead_tuple_ratio(&self) -> f64 {
         match (self.live_tuples, self.dead_tuples) {
-            (Some(live), Some(dead)) if live + dead > 0 => {
-                dead as f64 / (live + dead) as f64
-            }
+            (Some(live), Some(dead)) if live + dead > 0 => dead as f64 / (live + dead) as f64,
             _ => 0.0,
         }
     }
@@ -367,10 +365,8 @@ impl IndexStats {
         let selectivity = selectivity.clamp(0.0, 1.0);
         let min_pages = (total_pages as f64 * selectivity) as u64;
         let max_pages = total_pages;
-        let factor = self.clustering_factor
-            / (self.distinct_keys.max(1) as f64);
-        let pages = min_pages as f64
-            + (max_pages - min_pages) as f64 * factor.min(1.0);
+        let factor = self.clustering_factor / (self.distinct_keys.max(1) as f64);
+        let pages = min_pages as f64 + (max_pages - min_pages) as f64 * factor.min(1.0);
         (pages as u64).min(max_pages).max(1)
     }
 }
@@ -380,9 +376,7 @@ impl Histogram {
     pub fn bucket_count(&self) -> usize {
         match self {
             Self::EquiWidth { counts, .. } => counts.len(),
-            Self::EquiDepth { boundaries, .. } => {
-                boundaries.len().saturating_sub(1)
-            }
+            Self::EquiDepth { boundaries, .. } => boundaries.len().saturating_sub(1),
             Self::EndBiased { boundaries, .. } => boundaries.len(),
             Self::TDigest { centroids, .. } => centroids.len(),
         }
@@ -400,9 +394,7 @@ impl Histogram {
                 buckets * rows_per_bucket
             }
             Self::EndBiased { .. } => 0,
-            Self::TDigest { centroids, .. } => {
-                centroids.iter().map(|(_, w)| w).sum()
-            }
+            Self::TDigest { centroids, .. } => centroids.iter().map(|(_, w)| w).sum(),
         }
     }
 }
@@ -487,7 +479,7 @@ impl std::hash::Hash for OrderedFloat {
 }
 
 impl MultiColumnStats {
-    /// Correlation ratio: distinct_count / product(individual NDVs).
+    /// Correlation ratio: `distinct_count` / product(individual NDVs).
     /// Values closer to 0 indicate stronger correlation.
     /// Value of 1.0 means complete independence.
     pub fn correlation_ratio(&self, individual_ndvs: &[u64]) -> f64 {
@@ -566,8 +558,11 @@ impl MultiDimHistogram {
     }
 }
 
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic stats tests"
+)]
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -658,10 +653,8 @@ mod tests {
     #[test]
     fn table_stats_serialize_roundtrip() {
         let s = sample_table();
-        let json = serde_json::to_string(&s)
-            .expect("serialize");
-        let d: TableStats = serde_json::from_str(&json)
-            .expect("deserialize");
+        let json = serde_json::to_string(&s).expect("serialize");
+        let d: TableStats = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(s, d);
     }
 
@@ -696,7 +689,10 @@ mod tests {
 
     #[test]
     fn column_equality_selectivity_zero_ndv() {
-        let c = ColumnStats { ndv: 0, ..sample_column() };
+        let c = ColumnStats {
+            ndv: 0,
+            ..sample_column()
+        };
         assert_eq!(c.equality_selectivity(), 1.0);
     }
 
@@ -733,13 +729,19 @@ mod tests {
 
     #[test]
     fn column_is_high_cardinality() {
-        let c = ColumnStats { ndv: 950, ..sample_column() };
+        let c = ColumnStats {
+            ndv: 950,
+            ..sample_column()
+        };
         assert!(c.is_high_cardinality(1000));
     }
 
     #[test]
     fn column_is_not_high_cardinality() {
-        let c = ColumnStats { ndv: 10, ..sample_column() };
+        let c = ColumnStats {
+            ndv: 10,
+            ..sample_column()
+        };
         assert!(!c.is_high_cardinality(1000));
     }
 
@@ -766,8 +768,7 @@ mod tests {
     fn column_stats_serialize_roundtrip() {
         let c = sample_column();
         let json = serde_json::to_string(&c).expect("serialize");
-        let d: ColumnStats = serde_json::from_str(&json)
-            .expect("deserialize");
+        let d: ColumnStats = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(c, d);
     }
 
@@ -1038,7 +1039,11 @@ mod tests {
             precision: 14,
             registers: vec![0; 16384],
         };
-        if let Sketch::HyperLogLog { precision, registers } = &s {
+        if let Sketch::HyperLogLog {
+            precision,
+            registers,
+        } = &s
+        {
             assert_eq!(*precision, 14);
             assert_eq!(registers.len(), 16384);
         }
@@ -1064,7 +1069,10 @@ mod tests {
             num_hashes: 7,
             bits: vec![false; 10_000],
         };
-        if let Sketch::BloomFilter { size, num_hashes, .. } = &s {
+        if let Sketch::BloomFilter {
+            size, num_hashes, ..
+        } = &s
+        {
             assert_eq!(*size, 10_000);
             assert_eq!(*num_hashes, 7);
         }
@@ -1119,14 +1127,8 @@ mod tests {
         ws.record_query("SELECT * FROM users");
         ws.record_query("SELECT * FROM users");
         ws.record_query("SELECT * FROM orders");
-        assert_eq!(
-            ws.query_frequencies.get("SELECT * FROM users"),
-            Some(&2)
-        );
-        assert_eq!(
-            ws.query_frequencies.get("SELECT * FROM orders"),
-            Some(&1)
-        );
+        assert_eq!(ws.query_frequencies.get("SELECT * FROM users"), Some(&2));
+        assert_eq!(ws.query_frequencies.get("SELECT * FROM orders"), Some(&1));
     }
 
     #[test]
@@ -1326,10 +1328,7 @@ mod tests {
     fn multi_dim_histogram_2d_creation() {
         let hist = MultiDimHistogram::new(
             vec!["x".to_string(), "y".to_string()],
-            vec![
-                vec![0.0, 10.0, 20.0],
-                vec![0.0, 5.0, 10.0],
-            ],
+            vec![vec![0.0, 10.0, 20.0], vec![0.0, 5.0, 10.0]],
             vec![100, 200, 150, 250],
         );
         assert_eq!(hist.dimensions, 2);
@@ -1340,10 +1339,7 @@ mod tests {
     fn multi_dim_histogram_buckets_per_dimension() {
         let hist = MultiDimHistogram::new(
             vec!["x".to_string(), "y".to_string()],
-            vec![
-                vec![0.0, 10.0, 20.0],
-                vec![0.0, 5.0, 10.0, 15.0],
-            ],
+            vec![vec![0.0, 10.0, 20.0], vec![0.0, 5.0, 10.0, 15.0]],
             vec![100, 200, 150, 250, 80, 90],
         );
         let buckets = hist.buckets_per_dimension();
@@ -1354,10 +1350,7 @@ mod tests {
     fn multi_dim_histogram_total_cells() {
         let hist = MultiDimHistogram::new(
             vec!["x".to_string(), "y".to_string()],
-            vec![
-                vec![0.0, 10.0, 20.0],
-                vec![0.0, 5.0, 10.0],
-            ],
+            vec![vec![0.0, 10.0, 20.0], vec![0.0, 5.0, 10.0]],
             vec![100, 200, 150, 250],
         );
         assert_eq!(hist.total_cells(), 4);
@@ -1367,10 +1360,7 @@ mod tests {
     fn multi_dim_histogram_get_count() {
         let hist = MultiDimHistogram::new(
             vec!["x".to_string(), "y".to_string()],
-            vec![
-                vec![0.0, 10.0, 20.0],
-                vec![0.0, 5.0, 10.0],
-            ],
+            vec![vec![0.0, 10.0, 20.0], vec![0.0, 5.0, 10.0]],
             vec![100, 200, 150, 250],
         );
         assert_eq!(hist.get_count(&[0, 0]), 100);
@@ -1383,10 +1373,7 @@ mod tests {
     fn multi_dim_histogram_get_count_out_of_bounds() {
         let hist = MultiDimHistogram::new(
             vec!["x".to_string(), "y".to_string()],
-            vec![
-                vec![0.0, 10.0, 20.0],
-                vec![0.0, 5.0, 10.0],
-            ],
+            vec![vec![0.0, 10.0, 20.0], vec![0.0, 5.0, 10.0]],
             vec![100, 200, 150, 250],
         );
         assert_eq!(hist.get_count(&[2, 2]), 0);

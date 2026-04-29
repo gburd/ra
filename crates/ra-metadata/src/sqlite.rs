@@ -476,7 +476,7 @@ impl DatabaseConnector for SqliteConnector {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
 
@@ -593,12 +593,6 @@ mod tests {
 
     #[test]
     fn explain_query_sqlite() {
-        let connector = setup_test_db();
-        let plan = connector
-            .explain_query("SELECT * FROM users WHERE id = 1")
-            .expect("should explain query");
-
-        // The plan should reference users somewhere in the tree
         fn has_table(node: &crate::explain::ExplainNode, name: &str) -> bool {
             if node.relation.as_deref() == Some(name) {
                 return true;
@@ -610,6 +604,12 @@ mod tests {
             }
             node.children.iter().any(|c| has_table(c, name))
         }
+
+        let connector = setup_test_db();
+        let plan = connector
+            .explain_query("SELECT * FROM users WHERE id = 1")
+            .expect("should explain query");
+
         assert!(
             has_table(&plan.root, "users"),
             "plan should reference users table"

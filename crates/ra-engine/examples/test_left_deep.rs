@@ -1,6 +1,6 @@
 //! Quick test to verify left-deep path is used for JOB queries.
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used, clippy::print_stdout)]
 
 use ra_core::statistics::Statistics;
 use ra_engine::left_deep::can_use_left_deep;

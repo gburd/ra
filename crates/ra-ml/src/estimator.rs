@@ -24,9 +24,7 @@ pub struct CardinalityEstimate {
 }
 
 /// Trait for cardinality estimation strategies.
-pub trait CardinalityEstimator:
-    std::fmt::Debug + Send + Sync
-{
+pub trait CardinalityEstimator: std::fmt::Debug + Send + Sync {
     /// Estimate the output cardinality of the given expression.
     fn estimate(
         &self,
@@ -56,23 +54,26 @@ impl CardinalityEstimator for HeuristicEstimator {
     }
 }
 
-fn estimate_heuristic(
-    expr: &RelExpr,
-    stats: &dyn StatisticsProvider,
-) -> f64 {
+#[expect(
+    clippy::too_many_lines,
+    reason = "Heuristic estimation requires handling many RelExpr variants"
+)]
+fn estimate_heuristic(expr: &RelExpr, stats: &dyn StatisticsProvider) -> f64 {
     match expr {
-        RelExpr::Scan { table, .. } | RelExpr::IndexOnlyScan { table, .. } => stats
-            .get_statistics(table)
-            .map_or(1000.0, |s| s.row_count),
+        RelExpr::Scan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. }
+        | RelExpr::ParallelScan { table, .. } => {
+            stats.get_statistics(table).map_or(1000.0, |s| s.row_count)
+        }
         RelExpr::Filter { input, .. } => {
             let input_rows = estimate_heuristic(input, stats);
             input_rows * Statistics::default_selectivity()
         }
         RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }
-        | RelExpr::IncrementalSort { input, .. } => {
-            estimate_heuristic(input, stats)
-        }
+        | RelExpr::IncrementalSort { input, .. }
+        | RelExpr::Window { input, .. }
+        | RelExpr::Gather { input, .. } => estimate_heuristic(input, stats),
         RelExpr::Join {
             join_type,
             left,
@@ -81,11 +82,14 @@ fn estimate_heuristic(
         } => {
             let left_rows = estimate_heuristic(left, stats);
             let right_rows = estimate_heuristic(right, stats);
-            estimate_join_cardinality(
-                *join_type, left_rows, right_rows,
-            )
+            estimate_join_cardinality(*join_type, left_rows, right_rows)
         }
-        RelExpr::Aggregate { group_by, input, .. } => {
+        RelExpr::Aggregate {
+            group_by, input, ..
+        }
+        | RelExpr::ParallelAggregate {
+            group_by, input, ..
+        } => {
             let input_rows = estimate_heuristic(input, stats);
             if group_by.is_empty() {
                 1.0
@@ -100,8 +104,7 @@ fn estimate_heuristic(
             ..
         } => {
             let input_rows = estimate_heuristic(input, stats);
-            let available =
-                (input_rows - *offset as f64).max(0.0);
+            let available = (input_rows - *offset as f64).max(0.0);
             available.min(*count as f64)
         }
         RelExpr::Union { left, right, .. } => {
@@ -119,12 +122,7 @@ fn estimate_heuristic(
             let right_rows = estimate_heuristic(right, stats);
             (left_rows - right_rows * 0.5).max(0.0)
         }
-        RelExpr::CTE { body, .. } => {
-            estimate_heuristic(body, stats)
-        }
-        RelExpr::Window { input, .. } => {
-            estimate_heuristic(input, stats)
-        }
+        RelExpr::CTE { body, .. } => estimate_heuristic(body, stats),
         RelExpr::Distinct { input, .. } => {
             let input_rows = estimate_heuristic(input, stats);
             (input_rows * 0.75).max(1.0)
@@ -145,9 +143,7 @@ fn estimate_heuristic(
             }
             None => 10.0,
         },
-        RelExpr::MultiUnnest { exprs, .. } => {
-            exprs.len().max(1) as f64 * 10.0
-        }
+        RelExpr::MultiUnnest { exprs, .. } => exprs.len().max(1) as f64 * 10.0,
         RelExpr::TableFunction { input, .. } => match input {
             Some(inp) => estimate_heuristic(inp, stats),
             None => 100.0,
@@ -161,49 +157,30 @@ fn estimate_heuristic(
             .get_statistics(table)
             .map_or(1000.0, |s| s.row_count * 0.1),
         RelExpr::BitmapAnd { inputs } => {
-            let min_rows = inputs.iter()
+            let min_rows = inputs
+                .iter()
                 .map(|b| estimate_heuristic(b, stats))
-                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .min_by(f64::total_cmp)
                 .unwrap_or(1.0);
             min_rows
         }
         RelExpr::BitmapOr { inputs } => {
-            let total_rows: f64 = inputs.iter()
-                .map(|b| estimate_heuristic(b, stats))
-                .sum();
+            let total_rows: f64 = inputs.iter().map(|b| estimate_heuristic(b, stats)).sum();
             total_rows * 0.8 // account for overlap
         }
-        RelExpr::BitmapHeapScan { bitmap, .. } => {
-            estimate_heuristic(bitmap, stats)
-        }
-        RelExpr::ParallelScan { table, .. } => stats
-            .get_statistics(table)
-            .map_or(1000.0, |s| s.row_count),
+        RelExpr::BitmapHeapScan { bitmap, .. } => estimate_heuristic(bitmap, stats),
         RelExpr::ParallelHashJoin { left, right, .. } => {
             let left_rows = estimate_heuristic(left, stats);
             let right_rows = estimate_heuristic(right, stats);
             left_rows * right_rows * 0.1
         }
-        RelExpr::ParallelAggregate { group_by, input, .. } => {
-            let input_rows = estimate_heuristic(input, stats);
-            if group_by.is_empty() {
-                1.0
-            } else {
-                (input_rows / 10.0).max(1.0)
-            }
+        RelExpr::IndexScan { table, .. } => {
+            stats.get_statistics(table).map_or(1.0, |s| s.row_count)
         }
-        RelExpr::Gather { input, .. } => {
-            estimate_heuristic(input, stats)
+        RelExpr::MvScan { view_name, .. } => {
+            stats.get_statistics(view_name).map_or(1.0, |s| s.row_count)
         }
-        RelExpr::IndexScan { table, .. } => stats
-            .get_statistics(table)
-            .map_or(1.0, |s| s.row_count),
-        RelExpr::MvScan { view_name, .. } => stats
-            .get_statistics(view_name)
-            .map_or(1.0, |s| s.row_count),
-        RelExpr::TopK { k, input, .. } => {
-            (*k as f64).min(estimate_heuristic(input, stats))
-        }
+        RelExpr::TopK { k, input, .. } => (*k as f64).min(estimate_heuristic(input, stats)),
         RelExpr::VectorFilter { input, .. } => {
             // Assume vector distance filter is selective (10% by default)
             estimate_heuristic(input, stats) * 0.1
@@ -211,16 +188,11 @@ fn estimate_heuristic(
     }
 }
 
-fn estimate_join_cardinality(
-    join_type: JoinType,
-    left_rows: f64,
-    right_rows: f64,
-) -> f64 {
+fn estimate_join_cardinality(join_type: JoinType, left_rows: f64, right_rows: f64) -> f64 {
     match join_type {
         JoinType::Inner => {
             let larger = left_rows.max(right_rows);
-            let sel =
-                if larger > 0.0 { 1.0 / larger } else { 0.1 };
+            let sel = if larger > 0.0 { 1.0 / larger } else { 0.1 };
             left_rows * right_rows * sel
         }
         JoinType::LeftOuter => left_rows.max(left_rows * 0.8),
@@ -246,10 +218,7 @@ pub struct MlEstimator {
 impl MlEstimator {
     /// Create a new ML estimator with the given model and schema.
     #[must_use]
-    pub fn new(
-        model: FeedForwardNet,
-        schema: FeatureSchema,
-    ) -> Self {
+    pub fn new(model: FeedForwardNet, schema: FeatureSchema) -> Self {
         Self {
             model,
             schema,
@@ -262,17 +231,9 @@ impl MlEstimator {
     /// deterministic weights; real accuracy requires loading
     /// trained weights.
     #[must_use]
-    pub fn with_default_model(
-        tables: &[&str],
-        columns: &[&str],
-    ) -> Self {
+    pub fn with_default_model(tables: &[&str], columns: &[&str]) -> Self {
         let schema = FeatureSchema::new(tables, columns);
-        let model = crate::nn::build_default_mlp(&[
-            schema.total_features,
-            64,
-            32,
-            1,
-        ]);
+        let model = crate::nn::build_default_mlp(&[schema.total_features, 64, 32, 1]);
         Self::new(model, schema)
     }
 }
@@ -283,8 +244,7 @@ impl CardinalityEstimator for MlEstimator {
         expr: &RelExpr,
         stats_provider: &dyn StatisticsProvider,
     ) -> CardinalityEstimate {
-        let stats_map =
-            collect_table_stats(expr, stats_provider);
+        let stats_map = collect_table_stats(expr, stats_provider);
         let features = self.schema.extract(expr, &stats_map);
 
         match self.model.forward(&features) {
@@ -326,7 +286,9 @@ fn collect_tables_recursive(
     match expr {
         RelExpr::Scan { table, .. }
         | RelExpr::IndexScan { table, .. }
-        | RelExpr::IndexOnlyScan { table, .. } => {
+        | RelExpr::IndexOnlyScan { table, .. }
+        | RelExpr::BitmapIndexScan { table, .. }
+        | RelExpr::ParallelScan { table, .. } => {
             if let Some(s) = provider.get_statistics(table) {
                 map.insert(table.clone(), s.clone());
             }
@@ -338,13 +300,19 @@ fn collect_tables_recursive(
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::Distinct { input, .. } => {
+        | RelExpr::Distinct { input, .. }
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => {
             collect_tables_recursive(input, provider, map);
         }
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => {
+        | RelExpr::Except { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. } => {
             collect_tables_recursive(left, provider, map);
             collect_tables_recursive(right, provider, map);
         }
@@ -364,20 +332,10 @@ fn collect_tables_recursive(
             collect_tables_recursive(recursive_case, provider, map);
             collect_tables_recursive(body, provider, map);
         }
-        RelExpr::Values { .. }
-        | RelExpr::MultiUnnest { .. } => {}
-        RelExpr::Unnest { input, .. }
-        | RelExpr::TableFunction { input, .. } => {
+        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_tables_recursive(inp, provider, map);
-            }
-        }
-        RelExpr::RowPattern { input, .. } => {
-            collect_tables_recursive(input, provider, map);
-        }
-        RelExpr::BitmapIndexScan { table, .. } => {
-            if let Some(s) = provider.get_statistics(table) {
-                map.insert(table.clone(), s.clone());
             }
         }
         RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
@@ -391,25 +349,10 @@ fn collect_tables_recursive(
             }
             collect_tables_recursive(bitmap, provider, map);
         }
-        RelExpr::ParallelScan { table, .. } => {
-            if let Some(s) = provider.get_statistics(table) {
-                map.insert(table.clone(), s.clone());
-            }
-        }
-        RelExpr::ParallelHashJoin { left, right, .. } => {
-            collect_tables_recursive(left, provider, map);
-            collect_tables_recursive(right, provider, map);
-        }
-        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
-            collect_tables_recursive(input, provider, map);
-        }
         RelExpr::MvScan { view_name, .. } => {
             if let Some(s) = provider.get_statistics(view_name) {
                 map.insert(view_name.clone(), s.clone());
             }
-        }
-        RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
-            collect_tables_recursive(input, provider, map);
         }
     }
 }
@@ -450,12 +393,13 @@ impl<E: CardinalityEstimator> MlCostModel<E> {
 }
 
 impl<E: CardinalityEstimator> CostModel for MlCostModel<E> {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
-    fn estimate(
-        &self,
-        expr: &RelExpr,
-        statistics: &dyn StatisticsProvider,
-    ) -> Cost {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "Cost calculation requires numeric conversions for model compatibility"
+    )]
+    fn estimate(&self, expr: &RelExpr, statistics: &dyn StatisticsProvider) -> Cost {
         let card = self.estimator.estimate(expr, statistics);
         let rows = card.rows;
 
@@ -493,9 +437,7 @@ pub fn q_error_summary(errors: &[f64]) -> QErrorSummary {
     }
 
     let mut sorted = errors.to_vec();
-    sorted.sort_by(|a, b| {
-        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let n = sorted.len();
     let mean = sorted.iter().sum::<f64>() / n as f64;
@@ -527,10 +469,14 @@ pub struct QErrorSummary {
     pub mean: f64,
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "Percentile calculation requires index conversion from f64"
+)]
 fn percentile(sorted: &[f64], p: f64) -> f64 {
-    let idx =
-        (p / 100.0 * (sorted.len() - 1) as f64).round() as usize;
+    let idx = (p / 100.0 * (sorted.len() - 1) as f64).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
 }
 
@@ -550,11 +496,7 @@ impl SimpleStatsProvider {
     }
 
     /// Add statistics for a table.
-    pub fn add(
-        &mut self,
-        table: &str,
-        statistics: Statistics,
-    ) {
+    pub fn add(&mut self, table: &str, statistics: Statistics) {
         self.stats.insert(table.to_string(), statistics);
     }
 }
@@ -566,10 +508,7 @@ impl Default for SimpleStatsProvider {
 }
 
 impl StatisticsProvider for SimpleStatsProvider {
-    fn get_statistics(
-        &self,
-        table: &str,
-    ) -> Option<&Statistics> {
+    fn get_statistics(&self, table: &str) -> Option<&Statistics> {
         self.stats.get(table)
     }
 }
@@ -578,9 +517,7 @@ impl StatisticsProvider for SimpleStatsProvider {
 mod tests {
     use super::*;
     use ra_core::algebra::RelExpr;
-    use ra_core::expr::{
-        BinOp as ExprBinOp, ColumnRef, Const, Expr,
-    };
+    use ra_core::expr::{BinOp as ExprBinOp, ColumnRef, Const, Expr};
 
     fn setup_provider() -> SimpleStatsProvider {
         let mut provider = SimpleStatsProvider::new();
@@ -619,12 +556,8 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: ExprBinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("users", "id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("orders", "user_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
             },
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
@@ -679,10 +612,7 @@ mod tests {
 
     #[test]
     fn ml_cost_model() {
-        let ml = MlEstimator::with_default_model(
-            &["users"],
-            &["id"],
-        );
+        let ml = MlEstimator::with_default_model(&["users"], &["id"]);
         let cost_model = MlCostModel::new(ml);
         let provider = setup_provider();
         let expr = RelExpr::scan("users");
@@ -712,30 +642,22 @@ mod tests {
     #[test]
     fn q_error_summary_single() {
         let summary = q_error_summary(&[2.0]);
-        assert!(
-            (summary.median - 2.0).abs() < f64::EPSILON
-        );
+        assert!((summary.median - 2.0).abs() < f64::EPSILON);
         assert!((summary.mean - 2.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn q_error_summary_empty() {
         let summary = q_error_summary(&[]);
-        assert!(
-            (summary.median - 0.0).abs() < f64::EPSILON
-        );
+        assert!((summary.median - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn q_error_summary_multiple_basic() {
         let errors = vec![1.0, 1.5, 2.0, 3.0, 10.0];
         let summary = q_error_summary(&errors);
-        assert!(
-            (summary.median - 2.0).abs() < f64::EPSILON
-        );
-        assert!(
-            (summary.max - 10.0).abs() < f64::EPSILON
-        );
+        assert!((summary.median - 2.0).abs() < f64::EPSILON);
+        assert!((summary.max - 10.0).abs() < f64::EPSILON);
         assert!(summary.p90 >= summary.median);
         assert!(summary.p99 >= summary.p90);
     }
@@ -755,9 +677,7 @@ mod tests {
             input: Box::new(RelExpr::scan("users")),
         };
         let card = est.estimate(&expr, &provider);
-        assert!(
-            (card.rows - 1000.0).abs() < f64::EPSILON
-        );
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -769,17 +689,12 @@ mod tests {
             input: Box::new(RelExpr::scan("users")),
         };
         let card = est.estimate(&expr, &provider);
-        assert!(
-            (card.rows - 1000.0).abs() < f64::EPSILON
-        );
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn ml_cost_model_custom_rates() {
-        let ml = MlEstimator::with_default_model(
-            &["users"],
-            &["id"],
-        );
+        let ml = MlEstimator::with_default_model(&["users"], &["id"]);
         let cost_model = MlCostModel::new(ml)
             .with_cpu_per_row(0.5)
             .with_io_per_row(1.0);

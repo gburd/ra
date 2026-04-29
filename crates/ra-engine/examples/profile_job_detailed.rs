@@ -1,10 +1,14 @@
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "example binary uses stdout/stderr"
+)]
 //! Detailed profiling of JOB queries showing optimizer phases.
 //!
 //! Run with:
-//!   RUST_LOG=ra_engine=info cargo run --release \
-//!     --example profile_job_detailed 2>&1
+//!   `RUST_LOG=ra_engine=info cargo run --release --example profile_job_detailed 2>&1`
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use egg::{EGraph, Runner};
 use ra_core::statistics::Statistics;

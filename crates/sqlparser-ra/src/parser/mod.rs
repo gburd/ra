@@ -1860,8 +1860,7 @@ impl<'a> Parser<'a> {
         self.expect_token(&Token::LParen)?;
         let mut trim_where = None;
         if let Token::Word(word) = self.peek_token().token {
-            if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING].contains(&word.keyword)
-            {
+            if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING].contains(&word.keyword) {
                 trim_where = Some(self.parse_trim_where()?);
             }
         }
@@ -2875,7 +2874,9 @@ impl<'a> Parser<'a> {
         // check for end
         if self.consume_token(&Token::RBracket) {
             if let Some(lower_bound) = lower_bound {
-                return Ok(Subscript::Index { index: Box::new(lower_bound) });
+                return Ok(Subscript::Index {
+                    index: Box::new(lower_bound),
+                });
             };
             return Ok(Subscript::Slice {
                 lower_bound: lower_bound.map(Box::new),
@@ -6154,7 +6155,9 @@ impl<'a> Parser<'a> {
         } else if dialect_of!(self is ClickHouseDialect| GenericDialect)
             && self.parse_keyword(Keyword::MATERIALIZED)
         {
-            Ok(Some(ColumnOption::Materialized(Box::new(self.parse_expr()?))))
+            Ok(Some(ColumnOption::Materialized(Box::new(
+                self.parse_expr()?,
+            ))))
         } else if dialect_of!(self is ClickHouseDialect| GenericDialect)
             && self.parse_keyword(Keyword::ALIAS)
         {
@@ -6167,7 +6170,9 @@ impl<'a> Parser<'a> {
             if matches!(self.peek_token().token, Token::Comma | Token::RParen) {
                 Ok(Some(ColumnOption::Ephemeral(None)))
             } else {
-                Ok(Some(ColumnOption::Ephemeral(Some(Box::new(self.parse_expr()?)))))
+                Ok(Some(ColumnOption::Ephemeral(Some(Box::new(
+                    self.parse_expr()?,
+                )))))
             }
         } else if self.parse_keywords(&[Keyword::PRIMARY, Keyword::KEY]) {
             let characteristics = self.parse_constraint_characteristics()?;

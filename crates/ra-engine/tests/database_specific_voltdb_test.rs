@@ -1,4 +1,4 @@
-//! Tests for VoltDB in-memory OLTP optimization rules.
+//! Tests for `VoltDB` in-memory OLTP optimization rules.
 
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Expr};

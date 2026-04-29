@@ -6,9 +6,10 @@
 //! - Parallel strategy (small limit)
 //! - Varying alpha weights (0.1, 0.3, 0.5, 0.7, 0.9)
 //! - Different distance metrics (L2, cosine, inner product)
-//! - Different ranking algorithms (BM25, TF-IDF, ts_rank)
+//! - Different ranking algorithms (BM25, TF-IDF, `ts_rank`)
 //! - Edge cases (empty results, no matches, single result)
 //! - Performance under load (1K, 10K, 100K documents)
+#![expect(clippy::float_cmp, reason = "exact float comparisons in tests")]
 
 mod test_data;
 
@@ -375,7 +376,7 @@ fn test_empty_result_set() {
 #[test]
 fn test_single_result() {
     // Very selective query returning 1 result
-    let strategy = choose_hybrid_strategy(0.000001, 0.000001, Some(1), 1_000_000.0);
+    let strategy = choose_hybrid_strategy(0.000_001, 0.000_001, Some(1), 1_000_000.0);
     // With extremely low selectivity, FTS-first is chosen as the tiebreaker
     assert_eq!(strategy, HybridStrategy::FTSFirst);
 }
@@ -417,7 +418,7 @@ fn test_extremely_high_selectivity() {
 #[test]
 fn test_extremely_low_selectivity() {
     // Both modalities match almost nothing
-    let strategy = choose_hybrid_strategy(0.000001, 0.000001, None, 1_000_000.0);
+    let strategy = choose_hybrid_strategy(0.000_001, 0.000_001, None, 1_000_000.0);
     assert_eq!(strategy, HybridStrategy::FTSFirst);
 }
 
@@ -489,7 +490,7 @@ fn test_score_fusion_overhead() {
 fn test_fts_first_cost_factor_reasonable() {
     let factor = hybrid_fts_first_cost_factor();
     assert!(
-        factor >= 1.0 && factor <= 2.0,
+        (1.0..=2.0).contains(&factor),
         "FTS-first cost factor should be 1-2x"
     );
 }
@@ -498,7 +499,7 @@ fn test_fts_first_cost_factor_reasonable() {
 fn test_vector_first_cost_factor_reasonable() {
     let factor = hybrid_vector_first_cost_factor();
     assert!(
-        factor >= 1.0 && factor <= 2.0,
+        (1.0..=2.0).contains(&factor),
         "Vector-first cost factor should be 1-2x"
     );
 }
@@ -507,7 +508,7 @@ fn test_vector_first_cost_factor_reasonable() {
 fn test_parallel_cost_factor_reasonable() {
     let factor = hybrid_parallel_cost_factor();
     assert!(
-        factor >= 1.0 && factor <= 3.0,
+        (1.0..=3.0).contains(&factor),
         "Parallel cost factor should be 1-3x"
     );
 }
@@ -603,7 +604,7 @@ fn test_full_pipeline_with_generated_data() {
     let distance = l2_distance(&doc.embedding, &query.embedding);
     let combined = fuse_scores(bm25, distance, ScoreFusion::WeightedAverage, 0.5, 60);
 
-    assert!(combined >= 0.0 && combined <= 1.0);
+    assert!((0.0..=1.0).contains(&combined));
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! Integration tests for hybrid search with PostgreSQL RUM + pgvector.
+//! Integration tests for hybrid search with `PostgreSQL` RUM + pgvector.
 //!
 //! These tests verify that the hybrid search optimizer correctly:
 //! 1. Chooses the appropriate strategy based on selectivity estimates
@@ -6,7 +6,7 @@
 //! 3. Produces cost estimates that guide execution strategy selection
 //!
 //! Prerequisites:
-//! - PostgreSQL 14+ with RUM and pgvector extensions
+//! - `PostgreSQL` 14+ with RUM and pgvector extensions
 //! - Test database with sample data
 //!
 //! Run with: `cargo test -p ra-engine --test hybrid_search_postgres`
@@ -58,25 +58,22 @@ fn test_cost_factors_are_reasonable() {
     // FTS-first should have minimal overhead over pure FTS
     let fts_factor = hybrid_fts_first_cost_factor();
     assert!(
-        fts_factor >= 1.0 && fts_factor <= 1.5,
-        "FTS-first should have 0-50% overhead, got {}",
-        fts_factor
+        (1.0..=1.5).contains(&fts_factor),
+        "FTS-first should have 0-50% overhead, got {fts_factor}",
     );
 
     // Vector-first should have minimal overhead over pure vector
     let vector_factor = hybrid_vector_first_cost_factor();
     assert!(
-        vector_factor >= 1.0 && vector_factor <= 1.5,
-        "Vector-first should have 0-50% overhead, got {}",
-        vector_factor
+        (1.0..=1.5).contains(&vector_factor),
+        "Vector-first should have 0-50% overhead, got {vector_factor}",
     );
 
     // Parallel should have moderate overhead due to merge
     let parallel_factor = hybrid_parallel_cost_factor();
     assert!(
-        parallel_factor >= 1.2 && parallel_factor <= 2.0,
-        "Parallel should have 20-100% overhead, got {}",
-        parallel_factor
+        (1.2..=2.0).contains(&parallel_factor),
+        "Parallel should have 20-100% overhead, got {parallel_factor}",
     );
 }
 
@@ -104,8 +101,8 @@ fn test_cost_factor_scales_with_selectivity() {
 
 #[test]
 fn test_score_fusion_methods() {
-    let bm25_scores = vec![15.0, 10.0, 5.0, 2.0, 1.0];
-    let vector_scores = vec![0.1, 0.3, 0.5, 0.8, 1.2];
+    let bm25_scores = [15.0, 10.0, 5.0, 2.0, 1.0];
+    let vector_scores = [0.1, 0.3, 0.5, 0.8, 1.2];
     let alpha = 0.7;
     let k = 60;
 
@@ -163,7 +160,7 @@ fn test_score_fusion_methods() {
 }
 
 #[test]
-#[ignore] // Hybrid search rules are disabled pending cost model integration
+#[ignore = "hybrid search rules disabled pending cost model integration"]
 fn test_hybrid_rules_exist() {
     let rules = hybrid_search_rules();
     assert!(!rules.is_empty(), "Should have hybrid search rewrite rules");
@@ -293,7 +290,8 @@ fn test_weighted_alpha_effect() {
 
     // Verify alpha has meaningful effect
     assert!(
-        pure_bm25 != balanced && balanced != pure_vector,
+        (pure_bm25 - balanced).abs() > f64::EPSILON
+            && (balanced - pure_vector).abs() > f64::EPSILON,
         "Alpha should affect weighted average"
     );
 }

@@ -216,7 +216,11 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
         | ra_core::algebra::RelExpr::IncrementalSort { input, .. }
         | ra_core::algebra::RelExpr::Limit { input, .. }
         | ra_core::algebra::RelExpr::Window { input, .. }
-        | ra_core::algebra::RelExpr::Distinct { input, .. } => {
+        | ra_core::algebra::RelExpr::Distinct { input, .. }
+        | ra_core::algebra::RelExpr::ParallelAggregate { input, .. }
+        | ra_core::algebra::RelExpr::Gather { input, .. }
+        | ra_core::algebra::RelExpr::TopK { input, .. }
+        | ra_core::algebra::RelExpr::VectorFilter { input, .. } => {
             collect_tables_recursive(input, out);
         }
         ra_core::algebra::RelExpr::Join { left, right, .. }
@@ -232,10 +236,6 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
             for inp in inputs {
                 collect_tables_recursive(inp, out);
             }
-        }
-        ra_core::algebra::RelExpr::ParallelAggregate { input, .. }
-        | ra_core::algebra::RelExpr::Gather { input, .. } => {
-            collect_tables_recursive(input, out);
         }
         ra_core::algebra::RelExpr::CTE {
             definition, body, ..
@@ -259,9 +259,5 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
         | ra_core::algebra::RelExpr::TableFunction { .. }
         | ra_core::algebra::RelExpr::RowPattern { .. }
         | ra_core::algebra::RelExpr::MvScan { .. } => {}
-        ra_core::algebra::RelExpr::TopK { input, .. }
-        | ra_core::algebra::RelExpr::VectorFilter { input, .. } => {
-            collect_tables_recursive(input, out);
-        }
     }
 }

@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, clippy::float_cmp, reason = "test code")]
 //! Integration tests for network cost model + distribution optimizer.
 //!
 //! Tests that the `DistributedOptimizer` uses topology-aware costs from

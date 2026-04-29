@@ -181,10 +181,7 @@ impl SkewDetector {
     /// `threshold * average_frequency`, sorted by skew ratio
     /// in descending order.
     #[must_use]
-    pub fn detect_hot_keys(
-        &self,
-        histogram: &FrequencyHistogram,
-    ) -> Vec<HotKey> {
+    pub fn detect_hot_keys(&self, histogram: &FrequencyHistogram) -> Vec<HotKey> {
         let avg_freq = histogram.avg_frequency();
         if avg_freq <= 0.0 {
             return Vec::new();
@@ -213,10 +210,7 @@ impl SkewDetector {
 
     /// Classify the severity of skew based on hot key characteristics.
     #[must_use]
-    pub fn classify_severity(
-        &self,
-        hot_keys: &[HotKey],
-    ) -> SkewSeverity {
+    pub fn classify_severity(&self, hot_keys: &[HotKey]) -> SkewSeverity {
         if hot_keys.is_empty() {
             return SkewSeverity::None;
         }
@@ -242,10 +236,7 @@ impl SkewDetector {
     /// - Moderate skew: `ThreePhase` (spread load)
     /// - Mild skew: `TwoPhase` (overhead is manageable)
     #[must_use]
-    pub fn recommend_strategy(
-        &self,
-        hot_keys: &[HotKey],
-    ) -> SkewStrategy {
+    pub fn recommend_strategy(&self, hot_keys: &[HotKey]) -> SkewStrategy {
         if hot_keys.is_empty() {
             return SkewStrategy::TwoPhase;
         }
@@ -253,9 +244,7 @@ impl SkewDetector {
         let severity = self.classify_severity(hot_keys);
 
         match severity {
-            SkewSeverity::None | SkewSeverity::Mild => {
-                SkewStrategy::TwoPhase
-            }
+            SkewSeverity::None | SkewSeverity::Mild => SkewStrategy::TwoPhase,
             SkewSeverity::Moderate => SkewStrategy::ThreePhase,
             SkewSeverity::Severe => {
                 if hot_keys.len() < 5 {
@@ -269,11 +258,7 @@ impl SkewDetector {
 
     /// Run a complete skew analysis on a frequency histogram.
     #[must_use]
-    pub fn analyze(
-        &self,
-        column: &str,
-        histogram: &FrequencyHistogram,
-    ) -> SkewAnalysis {
+    pub fn analyze(&self, column: &str, histogram: &FrequencyHistogram) -> SkewAnalysis {
         let hot_keys = self.detect_hot_keys(histogram);
         let severity = self.classify_severity(&hot_keys);
         let recommended_strategy = self.recommend_strategy(&hot_keys);
@@ -335,10 +320,7 @@ pub fn generate_zipf_histogram(
 
 /// Generate a uniform frequency histogram for testing.
 #[must_use]
-pub fn generate_uniform_histogram(
-    num_values: usize,
-    total_count: u64,
-) -> FrequencyHistogram {
+pub fn generate_uniform_histogram(num_values: usize, total_count: u64) -> FrequencyHistogram {
     if num_values == 0 {
         return FrequencyHistogram::new(Vec::new());
     }
@@ -358,27 +340,47 @@ pub fn generate_uniform_histogram(
     FrequencyHistogram::new(buckets)
 }
 
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic stats tests"
+)]
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn sample_uniform_histogram() -> FrequencyHistogram {
         FrequencyHistogram::new(vec![
-            FrequencyBucket { value: "a".to_owned(), count: 100 },
-            FrequencyBucket { value: "b".to_owned(), count: 100 },
-            FrequencyBucket { value: "c".to_owned(), count: 100 },
-            FrequencyBucket { value: "d".to_owned(), count: 100 },
-            FrequencyBucket { value: "e".to_owned(), count: 100 },
+            FrequencyBucket {
+                value: "a".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "b".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "c".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "d".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "e".to_owned(),
+                count: 100,
+            },
         ])
     }
 
     fn sample_skewed_histogram() -> FrequencyHistogram {
-        // avg = (100000 + 10*100) / 11 = ~9181
+        // avg = (100_000 + 10*100) / 11 = ~9181
         // threshold = 10 * 9181 = ~91818
-        // hot key at 100000 > 91818 => detected
-        let mut buckets = vec![
-            FrequencyBucket { value: "hot".to_owned(), count: 100_000 },
-        ];
+        // hot key at 100_000 > 91818 => detected
+        let mut buckets = vec![FrequencyBucket {
+            value: "hot".to_owned(),
+            count: 100_000,
+        }];
         for i in 0..10 {
             buckets.push(FrequencyBucket {
                 value: format!("val_{i}"),
@@ -390,16 +392,46 @@ mod tests {
 
     fn sample_moderate_skew_histogram() -> FrequencyHistogram {
         FrequencyHistogram::new(vec![
-            FrequencyBucket { value: "x".to_owned(), count: 5000 },
-            FrequencyBucket { value: "y".to_owned(), count: 4000 },
-            FrequencyBucket { value: "z".to_owned(), count: 3000 },
-            FrequencyBucket { value: "a".to_owned(), count: 100 },
-            FrequencyBucket { value: "b".to_owned(), count: 100 },
-            FrequencyBucket { value: "c".to_owned(), count: 100 },
-            FrequencyBucket { value: "d".to_owned(), count: 100 },
-            FrequencyBucket { value: "e".to_owned(), count: 100 },
-            FrequencyBucket { value: "f".to_owned(), count: 100 },
-            FrequencyBucket { value: "g".to_owned(), count: 100 },
+            FrequencyBucket {
+                value: "x".to_owned(),
+                count: 5000,
+            },
+            FrequencyBucket {
+                value: "y".to_owned(),
+                count: 4000,
+            },
+            FrequencyBucket {
+                value: "z".to_owned(),
+                count: 3000,
+            },
+            FrequencyBucket {
+                value: "a".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "b".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "c".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "d".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "e".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "f".to_owned(),
+                count: 100,
+            },
+            FrequencyBucket {
+                value: "g".to_owned(),
+                count: 100,
+            },
         ])
     }
 
@@ -427,11 +459,8 @@ mod tests {
     fn histogram_avg_frequency_skewed() {
         let h = sample_skewed_histogram();
         let avg = h.avg_frequency();
-        // (100000 + 10*100) / 11 = 101000/11 ~= 9181.8
-        assert!(
-            (avg - 9181.8).abs() < 1.0,
-            "Expected ~9181.8, got {avg}"
-        );
+        // (100_000 + 10*100) / 11 = 101000/11 ~= 9181.8
+        assert!((avg - 9181.8).abs() < 1.0, "Expected ~9181.8, got {avg}");
     }
 
     #[test]
@@ -507,15 +536,30 @@ mod tests {
     #[test]
     fn hot_keys_sorted_by_skew_ratio_desc() {
         let h = FrequencyHistogram::new(vec![
-            FrequencyBucket { value: "a".to_owned(), count: 50_000 },
-            FrequencyBucket { value: "b".to_owned(), count: 100_000 },
-            FrequencyBucket { value: "c".to_owned(), count: 10 },
-            FrequencyBucket { value: "d".to_owned(), count: 5 },
-            FrequencyBucket { value: "e".to_owned(), count: 5 },
+            FrequencyBucket {
+                value: "a".to_owned(),
+                count: 50_000,
+            },
+            FrequencyBucket {
+                value: "b".to_owned(),
+                count: 100_000,
+            },
+            FrequencyBucket {
+                value: "c".to_owned(),
+                count: 10,
+            },
+            FrequencyBucket {
+                value: "d".to_owned(),
+                count: 5,
+            },
+            FrequencyBucket {
+                value: "e".to_owned(),
+                count: 5,
+            },
         ]);
         let d = SkewDetector::new(2.0);
         let hot = d.detect_hot_keys(&h);
-        assert!(hot.len() >= 1);
+        assert!(!hot.is_empty());
         if hot.len() >= 2 {
             assert!(hot[0].skew_ratio >= hot[1].skew_ratio);
         }
@@ -533,9 +577,18 @@ mod tests {
     fn hot_keys_respects_max_limit() {
         let d = SkewDetector::default().with_max_hot_keys(1);
         let h = FrequencyHistogram::new(vec![
-            FrequencyBucket { value: "a".to_owned(), count: 50000 },
-            FrequencyBucket { value: "b".to_owned(), count: 40000 },
-            FrequencyBucket { value: "c".to_owned(), count: 10 },
+            FrequencyBucket {
+                value: "a".to_owned(),
+                count: 50000,
+            },
+            FrequencyBucket {
+                value: "b".to_owned(),
+                count: 40000,
+            },
+            FrequencyBucket {
+                value: "c".to_owned(),
+                count: 10,
+            },
         ]);
         let hot = d.detect_hot_keys(&h);
         assert!(hot.len() <= 1);
@@ -576,7 +629,7 @@ mod tests {
         let d = SkewDetector::default();
         let hot = vec![HotKey {
             value: "x".to_owned(),
-            frequency: 100000,
+            frequency: 100_000,
             skew_ratio: 200.0,
         }];
         assert_eq!(d.classify_severity(&hot), SkewSeverity::Severe);
@@ -609,10 +662,7 @@ mod tests {
             frequency: 5000,
             skew_ratio: 75.0,
         }];
-        assert_eq!(
-            d.recommend_strategy(&hot),
-            SkewStrategy::ThreePhase
-        );
+        assert_eq!(d.recommend_strategy(&hot), SkewStrategy::ThreePhase);
     }
 
     #[test]
@@ -621,7 +671,7 @@ mod tests {
         let hot = vec![
             HotKey {
                 value: "NULL".to_owned(),
-                frequency: 100000,
+                frequency: 100_000,
                 skew_ratio: 200.0,
             },
             HotKey {
@@ -630,10 +680,7 @@ mod tests {
                 skew_ratio: 150.0,
             },
         ];
-        assert_eq!(
-            d.recommend_strategy(&hot),
-            SkewStrategy::SkewAware
-        );
+        assert_eq!(d.recommend_strategy(&hot), SkewStrategy::SkewAware);
     }
 
     #[test]
@@ -642,14 +689,11 @@ mod tests {
         let hot: Vec<HotKey> = (0..10)
             .map(|i| HotKey {
                 value: format!("key_{i}"),
-                frequency: 100000,
+                frequency: 100_000,
                 skew_ratio: 200.0,
             })
             .collect();
-        assert_eq!(
-            d.recommend_strategy(&hot),
-            SkewStrategy::ThreePhase
-        );
+        assert_eq!(d.recommend_strategy(&hot), SkewStrategy::ThreePhase);
     }
 
     // --- analyze ---
@@ -662,10 +706,7 @@ mod tests {
         assert_eq!(analysis.column, "country");
         assert!(analysis.hot_keys.is_empty());
         assert_eq!(analysis.severity, SkewSeverity::None);
-        assert_eq!(
-            analysis.recommended_strategy,
-            SkewStrategy::TwoPhase
-        );
+        assert_eq!(analysis.recommended_strategy, SkewStrategy::TwoPhase);
         assert_eq!(analysis.distinct_values, 5);
     }
 
@@ -699,19 +740,14 @@ mod tests {
     fn zipf_histogram_total_approximately_correct() {
         let h = generate_zipf_histogram(100, 1_000_000, 1.0);
         let diff = (h.total_count as i64 - 1_000_000_i64).unsigned_abs();
-        assert!(
-            diff < 1000,
-            "Expected ~1M total, got {}",
-            h.total_count
-        );
+        assert!(diff < 1000, "Expected ~1M total, got {}", h.total_count);
     }
 
     #[test]
     fn zipf_histogram_first_most_frequent() {
         let h = generate_zipf_histogram(10, 100_000, 1.0);
         assert!(!h.buckets.is_empty());
-        let max_count =
-            h.buckets.iter().map(|b| b.count).max().unwrap_or(0);
+        let max_count = h.buckets.iter().map(|b| b.count).max().unwrap_or(0);
         assert_eq!(h.buckets[0].count, max_count);
     }
 
@@ -814,10 +850,8 @@ mod tests {
             frequency: 50000,
             skew_ratio: 125.5,
         };
-        let json = serde_json::to_string(&hk)
-            .expect("serialize should succeed");
-        let d: HotKey = serde_json::from_str(&json)
-            .expect("deserialize should succeed");
+        let json = serde_json::to_string(&hk).expect("serialize should succeed");
+        let d: HotKey = serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(hk, d);
     }
 
@@ -838,10 +872,8 @@ mod tests {
             max_frequency: 80000,
             distinct_values: 50,
         };
-        let json = serde_json::to_string(&analysis)
-            .expect("serialize should succeed");
-        let d: SkewAnalysis = serde_json::from_str(&json)
-            .expect("deserialize should succeed");
+        let json = serde_json::to_string(&analysis).expect("serialize should succeed");
+        let d: SkewAnalysis = serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(analysis, d);
     }
 
@@ -880,10 +912,7 @@ mod tests {
         let analysis = d.analyze("random_col", &h);
         assert!(analysis.hot_keys.is_empty());
         assert_eq!(analysis.severity, SkewSeverity::None);
-        assert_eq!(
-            analysis.recommended_strategy,
-            SkewStrategy::TwoPhase
-        );
+        assert_eq!(analysis.recommended_strategy, SkewStrategy::TwoPhase);
     }
 
     // --- Custom threshold tests ---
@@ -931,8 +960,14 @@ mod tests {
     #[test]
     fn all_zero_counts() {
         let h = FrequencyHistogram::new(vec![
-            FrequencyBucket { value: "a".to_owned(), count: 0 },
-            FrequencyBucket { value: "b".to_owned(), count: 0 },
+            FrequencyBucket {
+                value: "a".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "b".to_owned(),
+                count: 0,
+            },
         ]);
         let d = SkewDetector::default();
         let hot = d.detect_hot_keys(&h);
@@ -942,17 +977,50 @@ mod tests {
     #[test]
     fn one_nonzero_among_zeros() {
         let h = FrequencyHistogram::new(vec![
-            FrequencyBucket { value: "hot".to_owned(), count: 1000 },
-            FrequencyBucket { value: "a".to_owned(), count: 0 },
-            FrequencyBucket { value: "b".to_owned(), count: 0 },
-            FrequencyBucket { value: "c".to_owned(), count: 0 },
-            FrequencyBucket { value: "d".to_owned(), count: 0 },
-            FrequencyBucket { value: "e".to_owned(), count: 0 },
-            FrequencyBucket { value: "f".to_owned(), count: 0 },
-            FrequencyBucket { value: "g".to_owned(), count: 0 },
-            FrequencyBucket { value: "h".to_owned(), count: 0 },
-            FrequencyBucket { value: "i".to_owned(), count: 0 },
-            FrequencyBucket { value: "j".to_owned(), count: 0 },
+            FrequencyBucket {
+                value: "hot".to_owned(),
+                count: 1000,
+            },
+            FrequencyBucket {
+                value: "a".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "b".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "c".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "d".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "e".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "f".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "g".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "h".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "i".to_owned(),
+                count: 0,
+            },
+            FrequencyBucket {
+                value: "j".to_owned(),
+                count: 0,
+            },
         ]);
         let d = SkewDetector::default();
         let hot = d.detect_hot_keys(&h);

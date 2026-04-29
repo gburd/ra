@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use super::{
-    DataFile, FileStats, PartitionSpec, Result, Snapshot,
-    TableFormat, TableFormatError, TableFormatType,
+    DataFile, FileStats, PartitionSpec, Result, Snapshot, TableFormat, TableFormatError,
+    TableFormatType,
 };
 
 /// In-memory registration for a single table.
@@ -73,15 +73,12 @@ impl IcebergFormat {
         );
     }
 
-    fn get_table(
-        &self,
-        table: &str,
-    ) -> Result<&RegisteredTable> {
-        self.tables.get(table).ok_or_else(|| {
-            TableFormatError::TableNotFound {
+    fn get_table(&self, table: &str) -> Result<&RegisteredTable> {
+        self.tables
+            .get(table)
+            .ok_or_else(|| TableFormatError::TableNotFound {
                 name: table.to_owned(),
-            }
-        })
+            })
     }
 }
 
@@ -100,10 +97,7 @@ impl TableFormat for IcebergFormat {
         Ok(self.get_table(table)?.files.clone())
     }
 
-    fn file_statistics(
-        &self,
-        _file: &DataFile,
-    ) -> Option<FileStats> {
+    fn file_statistics(&self, _file: &DataFile) -> Option<FileStats> {
         // Stub: a real implementation would read per-file stats
         // from the Iceberg manifest entries.
         None
@@ -113,29 +107,21 @@ impl TableFormat for IcebergFormat {
         true
     }
 
-    fn partition_spec(
-        &self,
-        table: &str,
-    ) -> Result<Option<PartitionSpec>> {
+    fn partition_spec(&self, table: &str) -> Result<Option<PartitionSpec>> {
         Ok(self.get_table(table)?.partition_spec.clone())
     }
 
-    fn list_snapshots(
-        &self,
-        table: &str,
-    ) -> Result<Vec<Snapshot>> {
+    fn list_snapshots(&self, table: &str) -> Result<Vec<Snapshot>> {
         Ok(self.get_table(table)?.snapshots.clone())
     }
 
-    fn current_snapshot_id(
-        &self,
-        table: &str,
-    ) -> Result<Option<u64>> {
+    fn current_snapshot_id(&self, table: &str) -> Result<Option<u64>> {
         let snapshots = &self.get_table(table)?.snapshots;
         Ok(snapshots.last().map(|s| s.snapshot_id))
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,19 +133,13 @@ mod tests {
                 10 * 1024 * 1024,
                 100_000,
             )
-            .with_partition(
-                "date".to_owned(),
-                "2024-01-15".to_owned(),
-            ),
+            .with_partition("date".to_owned(), "2024-01-15".to_owned()),
             DataFile::new(
                 "data/part-0002.parquet".to_owned(),
                 12 * 1024 * 1024,
                 120_000,
             )
-            .with_partition(
-                "date".to_owned(),
-                "2024-01-16".to_owned(),
-            ),
+            .with_partition("date".to_owned(), "2024-01-16".to_owned()),
         ]
     }
 
@@ -176,15 +156,9 @@ mod tests {
 
     fn sample_snapshots() -> Vec<Snapshot> {
         let mut s1_summary = HashMap::new();
-        s1_summary.insert(
-            "operation".to_owned(),
-            "append".to_owned(),
-        );
+        s1_summary.insert("operation".to_owned(), "append".to_owned());
         let mut s2_summary = HashMap::new();
-        s2_summary.insert(
-            "operation".to_owned(),
-            "overwrite".to_owned(),
-        );
+        s2_summary.insert("operation".to_owned(), "overwrite".to_owned());
 
         vec![
             Snapshot {
@@ -209,11 +183,7 @@ mod tests {
     #[test]
     fn register_and_list_files() {
         let mut fmt = IcebergFormat::new();
-        fmt.register_table(
-            "events".to_owned(),
-            sample_files(),
-            None,
-        );
+        fmt.register_table("events".to_owned(), sample_files(), None);
 
         let files = fmt
             .list_files("events")
@@ -251,9 +221,7 @@ mod tests {
             sample_snapshots(),
         );
 
-        let snapshots = fmt
-            .list_snapshots("events")
-            .expect("should list snapshots");
+        let snapshots = fmt.list_snapshots("events").expect("should list snapshots");
         assert_eq!(snapshots.len(), 2);
         assert_eq!(snapshots[0].snapshot_id, 1);
         assert_eq!(snapshots[1].snapshot_id, 2);
@@ -279,36 +247,27 @@ mod tests {
     #[test]
     fn current_snapshot_none_when_no_snapshots() {
         let mut fmt = IcebergFormat::new();
-        fmt.register_table(
-            "events".to_owned(),
-            sample_files(),
-            None,
-        );
+        fmt.register_table("events".to_owned(), sample_files(), None);
 
-        let id = fmt
-            .current_snapshot_id("events")
-            .expect("should succeed");
+        let id = fmt.current_snapshot_id("events").expect("should succeed");
         assert!(id.is_none());
     }
 
     #[test]
-    #[expect(clippy::unwrap_used, reason = "test code intentionally checks error cases")]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test code intentionally checks error cases"
+    )]
     fn missing_table_errors() {
         let fmt = IcebergFormat::new();
 
         let err = fmt.list_files("missing").unwrap_err();
-        assert!(
-            matches!(err, TableFormatError::TableNotFound { .. })
-        );
+        assert!(matches!(err, TableFormatError::TableNotFound { .. }));
 
         let err = fmt.partition_spec("missing").unwrap_err();
-        assert!(
-            matches!(err, TableFormatError::TableNotFound { .. })
-        );
+        assert!(matches!(err, TableFormatError::TableNotFound { .. }));
 
         let err = fmt.list_snapshots("missing").unwrap_err();
-        assert!(
-            matches!(err, TableFormatError::TableNotFound { .. })
-        );
+        assert!(matches!(err, TableFormatError::TableNotFound { .. }));
     }
 }

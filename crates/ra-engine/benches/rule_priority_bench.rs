@@ -3,7 +3,7 @@
 //! Compares optimization time with and without priority-sorted rules
 //! to measure the impact on complex queries.
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use egg::Runner;

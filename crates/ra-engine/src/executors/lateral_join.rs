@@ -97,20 +97,13 @@ impl LateralJoinExecutor {
     /// Expected output width from the right-hand side.
     fn rhs_width(&self) -> usize {
         match &self.rhs {
-            LateralRhs::Unnest(exec) => {
-                if exec.column_alias().is_empty() {
-                    1
-                } else {
-                    1
-                }
-            }
-            LateralRhs::TableFunction(_) => 1,
+            LateralRhs::Unnest(_) | LateralRhs::TableFunction(_) => 1,
         }
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::expr::{ColumnRef, Expr};

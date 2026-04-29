@@ -3,17 +3,18 @@
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 use crate::AdapterError;
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 
 /// Comparison result for native vs Ra-optimized execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComparisonResult {
     /// Query text.
     pub query: String,
-    /// Native PostgreSQL execution metrics.
+    /// Native `PostgreSQL` execution metrics.
     pub native: ExecutionMetrics,
     /// Ra-optimized execution metrics.
     pub ra: ExecutionMetrics,
-    /// Speedup ratio (native_time / ra_time).
+    /// Speedup ratio (`native_time` / `ra_time`).
     pub speedup: f64,
     /// Performance improvement percentage.
     pub improvement_pct: f64,
@@ -37,7 +38,7 @@ pub struct ExecutionMetrics {
 }
 
 impl ExecutionMetrics {
-    /// Create metrics from PostgreSQL execution result.
+    /// Create metrics from `PostgreSQL` execution result.
     #[cfg(feature = "postgres")]
     #[must_use]
     pub fn from_postgres_result(result: &crate::postgres::ExecutionResult) -> Self {
@@ -51,7 +52,7 @@ impl ExecutionMetrics {
         }
     }
 
-    /// Create metrics from MySQL execution result.
+    /// Create metrics from `MySQL` execution result.
     #[cfg(feature = "mysql")]
     #[must_use]
     pub fn from_mysql_result(result: &crate::mysql::ExecutionResult) -> Self {
@@ -110,7 +111,7 @@ impl ExecutionMetrics {
         }
     }
 
-    /// Enhance metrics with MySQL EXPLAIN plan data.
+    /// Enhance metrics with `MySQL` EXPLAIN plan data.
     #[cfg(feature = "mysql")]
     pub fn with_mysql_plan(&mut self, plan: &crate::mysql::ExplainPlan) {
         if let Some(query_block) = plan.json.get("query_block") {
@@ -161,11 +162,8 @@ impl ExecutionMetrics {
 impl ComparisonResult {
     /// Create a comparison result from native and Ra metrics.
     #[must_use]
-    pub fn new(
-        query: String,
-        native: ExecutionMetrics,
-        ra: ExecutionMetrics,
-    ) -> Self {
+    #[expect(clippy::cast_precision_loss, reason = "timing values fit in f64 mantissa")]
+    pub fn new(query: String, native: ExecutionMetrics, ra: ExecutionMetrics) -> Self {
         let speedup = if ra.execution_time_ms > 0 {
             native.execution_time_ms as f64 / ra.execution_time_ms as f64
         } else {
@@ -228,35 +226,36 @@ pub struct ComparisonReport {
 impl ComparisonReport {
     /// Create a report from comparison results.
     #[must_use]
+    #[expect(clippy::cast_precision_loss, reason = "query counts fit in f64 mantissa")]
     pub fn new(results: Vec<ComparisonResult>) -> Self {
         let total_queries = results.len();
         let improved_queries = results.iter().filter(|r| r.speedup > 1.0).count();
         let regressed_queries = results.iter().filter(|r| r.speedup < 1.0).count();
 
         let speedups: Vec<f64> = results.iter().map(|r| r.speedup).collect();
-        let avg_speedup = if !speedups.is_empty() {
-            speedups.iter().sum::<f64>() / speedups.len() as f64
-        } else {
+        let avg_speedup = if speedups.is_empty() {
             0.0
+        } else {
+            speedups.iter().sum::<f64>() / speedups.len() as f64
         };
 
         let mut sorted_speedups = speedups.clone();
-        sorted_speedups.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let median_speedup = if !sorted_speedups.is_empty() {
-            sorted_speedups[sorted_speedups.len() / 2]
-        } else {
+        sorted_speedups.sort_by(f64::total_cmp);
+        let median_speedup = if sorted_speedups.is_empty() {
             0.0
+        } else {
+            sorted_speedups[sorted_speedups.len() / 2]
         };
 
         let max_speedup = speedups
             .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.total_cmp(b))
             .copied()
             .unwrap_or(0.0);
 
         let min_speedup = speedups
             .iter()
-            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .min_by(|a, b| a.total_cmp(b))
             .copied()
             .unwrap_or(0.0);
 
@@ -274,30 +273,41 @@ impl ComparisonReport {
     }
 
     /// Generate a JSON report.
+    ///
+    /// # Errors
+    ///
+    /// Returns a serialization error if the report cannot be converted to JSON.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
 
     /// Generate a Markdown report.
     #[must_use]
+    #[expect(clippy::cast_precision_loss, reason = "query counts fit in f64 mantissa")]
     pub fn to_markdown(&self) -> String {
         let mut md = String::new();
 
         md.push_str("# PostgreSQL vs Ra Performance Comparison\n\n");
-        md.push_str(&format!("**Generated:** {}\n\n", self.timestamp));
+        let _ = writeln!(md, "**Generated:** {}\n", self.timestamp);
 
         md.push_str("## Summary\n\n");
-        md.push_str(&format!("- **Total Queries:** {}\n", self.total_queries));
-        md.push_str(&format!("- **Improved:** {} ({:.1}%)\n",
+        let _ = writeln!(md, "- **Total Queries:** {}", self.total_queries);
+        let _ = writeln!(
+            md,
+            "- **Improved:** {} ({:.1}%)",
             self.improved_queries,
-            (self.improved_queries as f64 / self.total_queries as f64) * 100.0));
-        md.push_str(&format!("- **Regressed:** {} ({:.1}%)\n",
+            (self.improved_queries as f64 / self.total_queries as f64) * 100.0
+        );
+        let _ = writeln!(
+            md,
+            "- **Regressed:** {} ({:.1}%)",
             self.regressed_queries,
-            (self.regressed_queries as f64 / self.total_queries as f64) * 100.0));
-        md.push_str(&format!("- **Average Speedup:** {:.2}x\n", self.avg_speedup));
-        md.push_str(&format!("- **Median Speedup:** {:.2}x\n", self.median_speedup));
-        md.push_str(&format!("- **Max Speedup:** {:.2}x\n", self.max_speedup));
-        md.push_str(&format!("- **Min Speedup:** {:.2}x\n\n", self.min_speedup));
+            (self.regressed_queries as f64 / self.total_queries as f64) * 100.0
+        );
+        let _ = writeln!(md, "- **Average Speedup:** {:.2}x", self.avg_speedup);
+        let _ = writeln!(md, "- **Median Speedup:** {:.2}x", self.median_speedup);
+        let _ = writeln!(md, "- **Max Speedup:** {:.2}x", self.max_speedup);
+        let _ = writeln!(md, "- **Min Speedup:** {:.2}x\n", self.min_speedup);
 
         md.push_str("## Detailed Results\n\n");
         md.push_str("| Query | Native (ms) | Ra (ms) | Speedup | Improvement |\n");
@@ -310,14 +320,14 @@ impl ComparisonReport {
                 result.query.clone()
             };
 
-            md.push_str(&format!(
-                "| {} | {} | {} | {:.2}x | {:.1}% |\n",
-                query_preview,
+            let _ = writeln!(
+                md,
+                "| {query_preview} | {} | {} | {:.2}x | {:.1}% |",
                 result.native.execution_time_ms,
                 result.ra.execution_time_ms,
                 result.speedup,
                 result.improvement_pct
-            ));
+            );
         }
 
         md.push('\n');
@@ -325,7 +335,7 @@ impl ComparisonReport {
     }
 }
 
-/// Compare queries between native PostgreSQL and Ra-optimized execution.
+/// Compare queries between native `PostgreSQL` and Ra-optimized execution.
 #[cfg(feature = "postgres")]
 pub fn compare_queries(
     adapter: &crate::postgres::PostgresAdapter,
@@ -341,7 +351,7 @@ pub fn compare_queries(
     Ok(ComparisonReport::new(results))
 }
 
-/// Compare a single query between native PostgreSQL and Ra execution.
+/// Compare a single query between native `PostgreSQL` and Ra execution.
 #[cfg(feature = "postgres")]
 pub fn compare_single_query(
     adapter: &crate::postgres::PostgresAdapter,
@@ -367,7 +377,7 @@ pub fn compare_single_query(
     ))
 }
 
-/// Compare queries between native MySQL and Ra-optimized execution.
+/// Compare queries between native `MySQL` and Ra-optimized execution.
 #[cfg(feature = "mysql")]
 pub fn compare_mysql_queries(
     adapter: &crate::mysql::MySQLAdapter,
@@ -383,7 +393,7 @@ pub fn compare_mysql_queries(
     Ok(ComparisonReport::new(results))
 }
 
-/// Compare a single query between native MySQL and Ra execution.
+/// Compare a single query between native `MySQL` and Ra execution.
 #[cfg(feature = "mysql")]
 pub fn compare_single_mysql_query(
     adapter: &crate::mysql::MySQLAdapter,
@@ -406,6 +416,7 @@ pub fn compare_single_mysql_query(
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
 

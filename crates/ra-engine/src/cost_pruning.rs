@@ -36,6 +36,10 @@ impl CostPruner {
     /// // Prune plans that are >50% more expensive than the best
     /// let pruner = CostPruner::new(1.5);
     /// ```
+    /// # Panics
+    ///
+    /// Panics if `threshold` is less than 1.0.
+    #[must_use]
     pub fn new(threshold: f64) -> Self {
         assert!(threshold >= 1.0, "Threshold must be >= 1.0");
         Self {
@@ -47,6 +51,7 @@ impl CostPruner {
     }
 
     /// Create pruner with default threshold (1.5x = 50% worse).
+    #[must_use]
     pub fn default_threshold() -> Self {
         Self::new(1.5)
     }
@@ -93,6 +98,7 @@ impl CostPruner {
     /// Check if a cost should be pruned (without class tracking).
     ///
     /// Useful for pruning individual plan candidates during extraction.
+    #[must_use]
     pub fn should_prune_cost(&self, cost: f64) -> bool {
         if let Some(global_best) = self.global_best {
             cost > global_best * self.threshold
@@ -102,16 +108,19 @@ impl CostPruner {
     }
 
     /// Get the current global best cost.
+    #[must_use]
     pub fn global_best_cost(&self) -> Option<f64> {
         self.global_best
     }
 
     /// Get the best cost for a specific equivalence class.
+    #[must_use]
     pub fn class_best_cost(&self, eclass: Id) -> Option<f64> {
         self.best_costs.get(&eclass).copied()
     }
 
     /// Get statistics about pruning effectiveness.
+    #[must_use]
     pub fn stats(&self) -> PruningStats {
         PruningStats {
             threshold: self.threshold,
@@ -150,6 +159,7 @@ pub struct PruningStats {
 
 impl PruningStats {
     /// Calculate pruning rate as a percentage.
+    #[must_use]
     pub fn pruning_rate(&self) -> f64 {
         if self.classes_evaluated == 0 {
             0.0
@@ -160,6 +170,7 @@ impl PruningStats {
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use egg::Id;

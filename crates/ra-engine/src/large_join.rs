@@ -56,6 +56,7 @@ pub struct JoinNode {
 
 impl JoinNode {
     /// Convert to a scan expression.
+    #[must_use]
     pub fn to_scan(&self) -> RelExpr {
         RelExpr::Scan {
             table: self.table.clone(),
@@ -86,6 +87,11 @@ impl LargeJoinOptimizer {
     }
 
     /// Optimize join ordering using the configured heuristic strategy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the join set is empty or if the configured
+    /// strategy is `EGraph` (which delegates to the standard optimizer).
     pub fn optimize(&self, joins: Vec<JoinNode>) -> Result<RelExpr> {
         match &self.strategy {
             LargeJoinStrategy::Greedy => self.greedy_join_order(joins),
@@ -157,6 +163,8 @@ impl LargeJoinOptimizer {
     }
 
     /// Create a join between two expressions.
+    #[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other methods")]
+    #[expect(clippy::unused_self, reason = "method for API consistency")]
     fn create_join(
         &self,
         left: &RelExpr,
@@ -165,7 +173,7 @@ impl LargeJoinOptimizer {
     ) -> Result<RelExpr> {
         let join_condition = condition
             .cloned()
-            .unwrap_or_else(|| ra_core::expr::Expr::Const(ra_core::expr::Const::Bool(true)));
+            .unwrap_or(ra_core::expr::Expr::Const(ra_core::expr::Const::Bool(true)));
 
         Ok(RelExpr::Join {
             join_type: JoinType::Inner,
@@ -176,6 +184,7 @@ impl LargeJoinOptimizer {
     }
 
     /// Simulated annealing: start with greedy solution, perturb and anneal.
+    #[expect(clippy::needless_pass_by_value, reason = "joins are consumed and mutated internally")]
     fn simulated_annealing(&self, joins: Vec<JoinNode>) -> Result<RelExpr> {
         if joins.is_empty() {
             return Err(anyhow!("No tables to join"));
@@ -205,9 +214,8 @@ impl LargeJoinOptimizer {
         // 3. Annealing loop
         for _iteration in 0..*max_iterations {
             // Perturb: create a neighbor solution
-            let neighbor = match self.perturb_join_order(&current, &joins) {
-                Ok(n) => n,
-                Err(_) => continue, // Skip if perturbation fails
+            let Ok(neighbor) = self.perturb_join_order(&current, &joins) else {
+                continue;
             };
 
             let neighbor_cost = self
@@ -267,26 +275,45 @@ impl LargeJoinOptimizer {
     }
 
     /// Count the number of tables in a relational expression.
+    #[must_use]
     pub fn count_tables(expr: &RelExpr) -> usize {
         match expr {
-            RelExpr::Scan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => 1,
-            RelExpr::Filter { input, .. } => Self::count_tables(input),
-            RelExpr::Project { input, .. } => Self::count_tables(input),
-            RelExpr::Join { left, right, .. } => {
+            RelExpr::Scan { .. }
+            | RelExpr::IndexScan { .. }
+            | RelExpr::IndexOnlyScan { .. }
+            | RelExpr::BitmapIndexScan { .. }
+            | RelExpr::ParallelScan { .. }
+            | RelExpr::MvScan { .. } => 1,
+
+            RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => 0,
+
+            RelExpr::Filter { input, .. }
+            | RelExpr::Project { input, .. }
+            | RelExpr::Aggregate { input, .. }
+            | RelExpr::Sort { input, .. }
+            | RelExpr::Limit { input, .. }
+            | RelExpr::Window { input, .. }
+            | RelExpr::Distinct { input }
+            | RelExpr::RowPattern { input, .. }
+            | RelExpr::IncrementalSort { input, .. }
+            | RelExpr::ParallelAggregate { input, .. }
+            | RelExpr::Gather { input, .. }
+            | RelExpr::TopK { input, .. }
+            | RelExpr::VectorFilter { input, .. } => Self::count_tables(input),
+
+            RelExpr::BitmapHeapScan { bitmap, .. } => Self::count_tables(bitmap),
+
+            RelExpr::Join { left, right, .. }
+            | RelExpr::ParallelHashJoin { left, right, .. } => {
                 Self::count_tables(left) + Self::count_tables(right)
             }
-            RelExpr::Aggregate { input, .. } => Self::count_tables(input),
-            RelExpr::Sort { input, .. } => Self::count_tables(input),
-            RelExpr::Limit { input, .. } => Self::count_tables(input),
-            RelExpr::Union { left, right, .. } => {
+
+            RelExpr::Union { left, right, .. }
+            | RelExpr::Intersect { left, right, .. }
+            | RelExpr::Except { left, right, .. } => {
                 Self::count_tables(left).max(Self::count_tables(right))
             }
-            RelExpr::Intersect { left, right, .. } => {
-                Self::count_tables(left).max(Self::count_tables(right))
-            }
-            RelExpr::Except { left, right, .. } => {
-                Self::count_tables(left).max(Self::count_tables(right))
-            }
+
             RelExpr::RecursiveCTE {
                 base_case,
                 recursive_case,
@@ -298,36 +325,19 @@ impl LargeJoinOptimizer {
             RelExpr::CTE {
                 definition, body, ..
             } => Self::count_tables(definition).max(Self::count_tables(body)),
-            RelExpr::Window { input, .. } => Self::count_tables(input),
-            RelExpr::Distinct { input } => Self::count_tables(input),
-            RelExpr::Values { .. } => 0,
-            RelExpr::RowPattern { input, .. } => Self::count_tables(input),
-            RelExpr::BitmapIndexScan { .. } => 1,
+
             RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
                 inputs.iter().map(|i| Self::count_tables(i)).sum()
             }
-            RelExpr::BitmapHeapScan { bitmap, .. } => Self::count_tables(bitmap),
-            RelExpr::Unnest { input, .. } => input.as_ref().map_or(0, |i| Self::count_tables(i)),
-            RelExpr::MultiUnnest { .. } => 0,
-            RelExpr::TableFunction { input, .. } => {
+
+            RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
                 input.as_ref().map_or(0, |i| Self::count_tables(i))
-            }
-            RelExpr::IncrementalSort { input, .. } => Self::count_tables(input),
-            RelExpr::ParallelScan { .. } => 1,
-            RelExpr::ParallelHashJoin { left, right, .. } => {
-                Self::count_tables(left) + Self::count_tables(right)
-            }
-            RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
-                Self::count_tables(input)
-            }
-            RelExpr::MvScan { .. } => 1,
-            RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
-                Self::count_tables(input)
             }
         }
     }
 
     /// Extract join nodes from a relational expression.
+    #[must_use]
     pub fn extract_joins(expr: &RelExpr) -> Vec<JoinNode> {
         let mut joins = Vec::new();
         Self::extract_joins_recursive(expr, &mut joins);
@@ -361,15 +371,27 @@ impl LargeJoinOptimizer {
             | RelExpr::Limit { input, .. }
             | RelExpr::Window { input, .. }
             | RelExpr::Distinct { input }
-            | RelExpr::RowPattern { input, .. } => {
+            | RelExpr::RowPattern { input, .. }
+            | RelExpr::IncrementalSort { input, .. }
+            | RelExpr::ParallelAggregate { input, .. }
+            | RelExpr::Gather { input, .. }
+            | RelExpr::TopK { input, .. }
+            | RelExpr::VectorFilter { input, .. } => {
                 Self::extract_joins_recursive(input, joins);
             }
+
+            RelExpr::BitmapHeapScan { bitmap, .. } => {
+                Self::extract_joins_recursive(bitmap, joins);
+            }
+
             RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }
-            | RelExpr::Except { left, right, .. } => {
+            | RelExpr::Except { left, right, .. }
+            | RelExpr::ParallelHashJoin { left, right, .. } => {
                 Self::extract_joins_recursive(left, joins);
                 Self::extract_joins_recursive(right, joins);
             }
+
             RelExpr::RecursiveCTE {
                 base_case,
                 recursive_case,
@@ -386,14 +408,19 @@ impl LargeJoinOptimizer {
                 Self::extract_joins_recursive(definition, joins);
                 Self::extract_joins_recursive(body, joins);
             }
-            RelExpr::BitmapHeapScan { bitmap, .. } => {
-                Self::extract_joins_recursive(bitmap, joins);
-            }
+
             RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
                 for input in inputs {
                     Self::extract_joins_recursive(input, joins);
                 }
             }
+
+            RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
+                if let Some(inp) = input {
+                    Self::extract_joins_recursive(inp, joins);
+                }
+            }
+
             RelExpr::Values { .. }
             | RelExpr::BitmapIndexScan { .. }
             | RelExpr::MultiUnnest { .. }
@@ -403,29 +430,12 @@ impl LargeJoinOptimizer {
             | RelExpr::MvScan { .. } => {
                 // Leaf nodes, no joins to extract
             }
-            RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
-                if let Some(inp) = input {
-                    Self::extract_joins_recursive(inp, joins);
-                }
-            }
-            RelExpr::IncrementalSort { input, .. }
-            | RelExpr::ParallelAggregate { input, .. }
-            | RelExpr::Gather { input, .. } => {
-                Self::extract_joins_recursive(input, joins);
-            }
-            RelExpr::ParallelHashJoin { left, right, .. } => {
-                Self::extract_joins_recursive(left, joins);
-                Self::extract_joins_recursive(right, joins);
-            }
-            RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
-                Self::extract_joins_recursive(input, joins);
-            }
         }
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[expect(clippy::unwrap_used, clippy::panic, reason = "test code")]
 mod tests {
     use super::*;
     use ra_core::cost::Cost;

@@ -24,9 +24,8 @@ pub struct MultiColumnConfig {
     pub min_improvement_factor: f64,
 }
 
-impl MultiColumnConfig {
-    /// Default configuration: balanced between accuracy and complexity.
-    pub fn default() -> Self {
+impl Default for MultiColumnConfig {
+    fn default() -> Self {
         Self {
             enabled: true,
             max_column_combinations: 3,
@@ -35,7 +34,9 @@ impl MultiColumnConfig {
             min_improvement_factor: 1.5,
         }
     }
+}
 
+impl MultiColumnConfig {
     /// Aggressive configuration: maximize accuracy, track more combinations.
     pub fn aggressive() -> Self {
         Self {
@@ -116,7 +117,10 @@ impl MultiColumnEstimator {
     }
 
     /// Find best matching statistics for a set of query columns.
-    pub fn find_best_match(&self, columns: &[ColumnId]) -> (MatchQuality, Option<&MultiColumnStats>) {
+    pub fn find_best_match(
+        &self,
+        columns: &[ColumnId],
+    ) -> (MatchQuality, Option<&MultiColumnStats>) {
         if !self.config.enabled || columns.is_empty() {
             return (MatchQuality::NoMatch, None);
         }
@@ -132,7 +136,8 @@ impl MultiColumnEstimator {
         // Try prefix match: find stats where query columns are prefix
         for (stat_cols, stats) in &self.stats {
             if sorted_cols.len() <= stat_cols.len() {
-                let is_prefix = sorted_cols.iter()
+                let is_prefix = sorted_cols
+                    .iter()
                     .zip(stat_cols.iter())
                     .all(|(a, b)| a == b);
                 if is_prefix {
@@ -147,9 +152,7 @@ impl MultiColumnEstimator {
 
         for (stat_cols, stats) in &self.stats {
             if stat_cols.len() < sorted_cols.len() {
-                let coverage = stat_cols.iter()
-                    .filter(|c| sorted_cols.contains(c))
-                    .count();
+                let coverage = stat_cols.iter().filter(|c| sorted_cols.contains(c)).count();
                 if coverage == stat_cols.len() && coverage > best_coverage {
                     best_superset = Some((stat_cols, stats));
                     best_coverage = coverage;
@@ -189,7 +192,7 @@ impl MultiColumnEstimator {
                 // Partial match: blend with independence assumption
                 let multi_estimate = stats.distinct_count;
                 let indep_estimate = self.fallback_estimate(individual_ndvs, total_rows);
-                self.blend_estimates(multi_estimate, indep_estimate, 0.7)
+                Self::blend_estimates(multi_estimate, indep_estimate, 0.7)
             }
             _ => self.fallback_estimate(individual_ndvs, total_rows),
         }
@@ -212,22 +215,23 @@ impl MultiColumnEstimator {
         }
     }
 
-    /// Fallback to independence assumption: NDV = min(product(NDVs), total_rows).
+    /// Fallback to independence assumption: NDV = min(product(NDVs), `total_rows`).
     fn fallback_estimate(&self, individual_ndvs: &[u64], total_rows: u64) -> u64 {
         if !self.config.fallback_to_independence {
             return total_rows;
         }
 
-        let product: u64 = individual_ndvs.iter()
+        let product: u64 = individual_ndvs
+            .iter()
             .copied()
-            .reduce(|a, b| a.saturating_mul(b))
+            .reduce(u64::saturating_mul)
             .unwrap_or(total_rows);
 
         product.min(total_rows)
     }
 
     /// Blend two estimates with given weight for the first (0.0-1.0).
-    fn blend_estimates(&self, estimate1: u64, estimate2: u64, weight1: f64) -> u64 {
+    fn blend_estimates(estimate1: u64, estimate2: u64, weight1: f64) -> u64 {
         let weight1 = weight1.clamp(0.0, 1.0);
         let weight2 = 1.0 - weight1;
         let blended = estimate1 as f64 * weight1 + estimate2 as f64 * weight2;
@@ -291,9 +295,9 @@ mod tests {
 
     // ---- MultiColumnEstimator ----
 
-    fn make_stats(columns: Vec<&str>, distinct_count: u64, total_rows: u64) -> MultiColumnStats {
+    fn make_stats(columns: &[&str], distinct_count: u64, total_rows: u64) -> MultiColumnStats {
         MultiColumnStats {
-            columns: columns.iter().map(|s| s.to_string()).collect(),
+            columns: columns.iter().copied().map(String::from).collect(),
             distinct_count,
             total_rows,
             correlation_matrix: vec![0.9],
@@ -316,7 +320,7 @@ mod tests {
     #[test]
     fn estimator_add_stats() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["city", "state"], 100, 10000);
+        let stats = make_stats(&["city", "state"], 100, 10000);
         est.add_stats(stats);
         assert_eq!(est.stats_count(), 1);
     }
@@ -324,7 +328,7 @@ mod tests {
     #[test]
     fn estimator_exact_match() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["city", "state"], 100, 10000);
+        let stats = make_stats(&["city", "state"], 100, 10000);
         est.add_stats(stats);
 
         let (quality, found) = est.find_best_match(&["city".to_string(), "state".to_string()]);
@@ -335,7 +339,7 @@ mod tests {
     #[test]
     fn estimator_exact_match_order_independent() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["state", "city"], 100, 10000);
+        let stats = make_stats(&["state", "city"], 100, 10000);
         est.add_stats(stats);
 
         let (quality, found) = est.find_best_match(&["city".to_string(), "state".to_string()]);
@@ -346,7 +350,7 @@ mod tests {
     #[test]
     fn estimator_prefix_match() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["city", "state", "zip"], 1000, 100000);
+        let stats = make_stats(&["city", "state", "zip"], 1000, 100_000);
         est.add_stats(stats);
 
         let (quality, found) = est.find_best_match(&["city".to_string(), "state".to_string()]);
@@ -357,14 +361,11 @@ mod tests {
     #[test]
     fn estimator_superset_match() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["city", "state"], 100, 10000);
+        let stats = make_stats(&["city", "state"], 100, 10000);
         est.add_stats(stats);
 
-        let (quality, found) = est.find_best_match(&[
-            "city".to_string(),
-            "state".to_string(),
-            "zip".to_string(),
-        ]);
+        let (quality, found) =
+            est.find_best_match(&["city".to_string(), "state".to_string(), "zip".to_string()]);
         assert_eq!(quality, MatchQuality::Superset);
         assert!(found.is_some());
     }
@@ -372,10 +373,11 @@ mod tests {
     #[test]
     fn estimator_no_match() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["city", "state"], 100, 10000);
+        let stats = make_stats(&["city", "state"], 100, 10000);
         est.add_stats(stats);
 
-        let (quality, found) = est.find_best_match(&["product".to_string(), "category".to_string()]);
+        let (quality, found) =
+            est.find_best_match(&["product".to_string(), "category".to_string()]);
         assert_eq!(quality, MatchQuality::NoMatch);
         assert!(found.is_none());
     }
@@ -383,7 +385,7 @@ mod tests {
     #[test]
     fn estimator_disabled_returns_no_match() {
         let mut est = MultiColumnEstimator::new(MultiColumnConfig::disabled());
-        let stats = make_stats(vec!["city", "state"], 100, 10000);
+        let stats = make_stats(&["city", "state"], 100, 10000);
         est.add_stats(stats);
 
         let (quality, _) = est.find_best_match(&["city".to_string(), "state".to_string()]);
@@ -401,13 +403,13 @@ mod tests {
     #[test]
     fn estimate_exact_match_correlated() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["city", "state"], 100, 100000);
+        let stats = make_stats(&["city", "state"], 100, 100_000);
         est.add_stats(stats);
 
         let cardinality = est.estimate_cardinality(
             &["city".to_string(), "state".to_string()],
             &[100, 50],
-            100000,
+            100_000,
         );
         // Should use multi-column stats (100) not independence (100*50=5000)
         assert!(cardinality < 200);
@@ -419,7 +421,7 @@ mod tests {
         let cardinality = est.estimate_cardinality(
             &["product".to_string(), "category".to_string()],
             &[100, 50],
-            100000,
+            100_000,
         );
         // No stats available, should use independence: 100*50 = 5000
         assert_eq!(cardinality, 5000);
@@ -428,11 +430,8 @@ mod tests {
     #[test]
     fn estimate_fallback_capped_by_total_rows() {
         let est = MultiColumnEstimator::with_defaults();
-        let cardinality = est.estimate_cardinality(
-            &["a".to_string(), "b".to_string()],
-            &[10000, 10000],
-            50000,
-        );
+        let cardinality =
+            est.estimate_cardinality(&["a".to_string(), "b".to_string()], &[10000, 10000], 50000);
         // Independence would give 100M, but capped at total_rows
         assert_eq!(cardinality, 50000);
     }
@@ -440,14 +439,10 @@ mod tests {
     #[test]
     fn estimate_mismatched_lengths() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["a", "b"], 100, 10000);
+        let stats = make_stats(&["a", "b"], 100, 10000);
         est.add_stats(stats);
 
-        let cardinality = est.estimate_cardinality(
-            &["a".to_string()],
-            &[100, 50],
-            10000,
-        );
+        let cardinality = est.estimate_cardinality(&["a".to_string()], &[100, 50], 10000);
         // Mismatched lengths, use fallback
         assert!(cardinality > 0);
     }
@@ -469,29 +464,25 @@ mod tests {
         };
         est.add_stats(stats);
 
-        let cardinality = est.estimate_cardinality(
-            &["x".to_string(), "y".to_string()],
-            &[50, 50],
-            700,
-        );
+        let cardinality =
+            est.estimate_cardinality(&["x".to_string(), "y".to_string()], &[50, 50], 700);
         assert!(cardinality < 500);
     }
 
     #[test]
     fn estimate_low_improvement_factor() {
-        let mut cfg = MultiColumnConfig::default();
-        cfg.min_improvement_factor = 10.0;
+        let cfg = MultiColumnConfig {
+            min_improvement_factor: 10.0,
+            ..MultiColumnConfig::default()
+        };
         let mut est = MultiColumnEstimator::new(cfg);
 
         // Stats show weak correlation (distinct=4500 vs independent=5000)
-        let stats = make_stats(vec!["a", "b"], 4500, 10000);
+        let stats = make_stats(&["a", "b"], 4500, 10000);
         est.add_stats(stats);
 
-        let cardinality = est.estimate_cardinality(
-            &["a".to_string(), "b".to_string()],
-            &[100, 50],
-            10000,
-        );
+        let cardinality =
+            est.estimate_cardinality(&["a".to_string(), "b".to_string()], &[100, 50], 10000);
         // Improvement too low, should fall back to independence
         assert_eq!(cardinality, 5000);
     }
@@ -499,7 +490,7 @@ mod tests {
     #[test]
     fn estimator_clear() {
         let mut est = MultiColumnEstimator::with_defaults();
-        est.add_stats(make_stats(vec!["a", "b"], 100, 1000));
+        est.add_stats(make_stats(&["a", "b"], 100, 1000));
         assert_eq!(est.stats_count(), 1);
         est.clear();
         assert_eq!(est.stats_count(), 0);
@@ -507,46 +498,42 @@ mod tests {
 
     #[test]
     fn blend_estimates_equal_weight() {
-        let est = MultiColumnEstimator::with_defaults();
-        let blended = est.blend_estimates(100, 200, 0.5);
+        let blended = MultiColumnEstimator::blend_estimates(100, 200, 0.5);
         assert_eq!(blended, 150);
     }
 
     #[test]
     fn blend_estimates_full_weight_first() {
-        let est = MultiColumnEstimator::with_defaults();
-        let blended = est.blend_estimates(100, 200, 1.0);
+        let blended = MultiColumnEstimator::blend_estimates(100, 200, 1.0);
         assert_eq!(blended, 100);
     }
 
     #[test]
     fn blend_estimates_full_weight_second() {
-        let est = MultiColumnEstimator::with_defaults();
-        let blended = est.blend_estimates(100, 200, 0.0);
+        let blended = MultiColumnEstimator::blend_estimates(100, 200, 0.0);
         assert_eq!(blended, 200);
     }
 
     #[test]
     fn blend_estimates_clamps_weight() {
-        let est = MultiColumnEstimator::with_defaults();
-        let blended = est.blend_estimates(100, 200, 1.5);
+        let blended = MultiColumnEstimator::blend_estimates(100, 200, 1.5);
         assert_eq!(blended, 100);
     }
 
     #[test]
     fn estimator_multiple_stats() {
         let mut est = MultiColumnEstimator::with_defaults();
-        est.add_stats(make_stats(vec!["a", "b"], 100, 10000));
-        est.add_stats(make_stats(vec!["c", "d"], 200, 20000));
-        est.add_stats(make_stats(vec!["e", "f", "g"], 500, 50000));
+        est.add_stats(make_stats(&["a", "b"], 100, 10000));
+        est.add_stats(make_stats(&["c", "d"], 200, 20000));
+        est.add_stats(make_stats(&["e", "f", "g"], 500, 50000));
         assert_eq!(est.stats_count(), 3);
     }
 
     #[test]
     fn estimator_overwrite_same_columns() {
         let mut est = MultiColumnEstimator::with_defaults();
-        est.add_stats(make_stats(vec!["a", "b"], 100, 10000));
-        est.add_stats(make_stats(vec!["b", "a"], 200, 10000));
+        est.add_stats(make_stats(&["a", "b"], 100, 10000));
+        est.add_stats(make_stats(&["b", "a"], 200, 10000));
         assert_eq!(est.stats_count(), 1);
         let (_, stats) = est.find_best_match(&["a".to_string(), "b".to_string()]);
         assert_eq!(stats.unwrap().distinct_count, 200);
@@ -555,24 +542,16 @@ mod tests {
     #[test]
     fn estimate_empty_individual_ndvs() {
         let est = MultiColumnEstimator::with_defaults();
-        let cardinality = est.estimate_cardinality(
-            &[],
-            &[],
-            10000,
-        );
+        let cardinality = est.estimate_cardinality(&[], &[], 10000);
         assert_eq!(cardinality, 10000);
     }
 
     #[test]
     fn estimate_single_column() {
         let mut est = MultiColumnEstimator::with_defaults();
-        let stats = make_stats(vec!["a"], 100, 10000);
+        let stats = make_stats(&["a"], 100, 10000);
         est.add_stats(stats);
-        let cardinality = est.estimate_cardinality(
-            &["a".to_string()],
-            &[100],
-            10000,
-        );
+        let cardinality = est.estimate_cardinality(&["a".to_string()], &[100], 10000);
         assert_eq!(cardinality, 100);
     }
 
@@ -582,7 +561,7 @@ mod tests {
         let stats = MultiColumnStats {
             columns: vec!["a".to_string(), "b".to_string(), "c".to_string()],
             distinct_count: 200,
-            total_rows: 100000,
+            total_rows: 100_000,
             correlation_matrix: vec![0.9, 0.85, 0.92],
             histogram: None,
         };
@@ -590,28 +569,27 @@ mod tests {
         let cardinality = est.estimate_cardinality(
             &["a".to_string(), "b".to_string(), "c".to_string()],
             &[100, 50, 50],
-            100000,
+            100_000,
         );
         assert!(cardinality < 1000);
     }
 
     #[test]
     fn config_fallback_disabled() {
-        let mut cfg = MultiColumnConfig::default();
-        cfg.fallback_to_independence = false;
+        let cfg = MultiColumnConfig {
+            fallback_to_independence: false,
+            ..MultiColumnConfig::default()
+        };
         let est = MultiColumnEstimator::new(cfg);
-        let cardinality = est.estimate_cardinality(
-            &["a".to_string(), "b".to_string()],
-            &[100, 50],
-            10000,
-        );
+        let cardinality =
+            est.estimate_cardinality(&["a".to_string(), "b".to_string()], &[100, 50], 10000);
         assert_eq!(cardinality, 10000);
     }
 
     #[test]
     fn match_quality_partial_overlap() {
         let mut est = MultiColumnEstimator::with_defaults();
-        est.add_stats(make_stats(vec!["a", "b"], 100, 10000));
+        est.add_stats(make_stats(&["a", "b"], 100, 10000));
         let (quality, _) = est.find_best_match(&["a".to_string(), "c".to_string()]);
         assert_eq!(quality, MatchQuality::NoMatch);
     }
@@ -619,11 +597,8 @@ mod tests {
     #[test]
     fn estimate_zero_total_rows() {
         let est = MultiColumnEstimator::with_defaults();
-        let cardinality = est.estimate_cardinality(
-            &["a".to_string(), "b".to_string()],
-            &[100, 50],
-            0,
-        );
+        let cardinality =
+            est.estimate_cardinality(&["a".to_string(), "b".to_string()], &[100, 50], 0);
         assert_eq!(cardinality, 0);
     }
 
@@ -641,8 +616,8 @@ mod tests {
     #[test]
     fn best_match_prefers_larger_superset() {
         let mut est = MultiColumnEstimator::with_defaults();
-        est.add_stats(make_stats(vec!["a", "b"], 100, 10000));
-        est.add_stats(make_stats(vec!["a", "b", "c"], 150, 10000));
+        est.add_stats(make_stats(&["a", "b"], 100, 10000));
+        est.add_stats(make_stats(&["a", "b", "c"], 150, 10000));
         let (quality, stats) = est.find_best_match(&[
             "a".to_string(),
             "b".to_string(),
@@ -655,8 +630,10 @@ mod tests {
 
     #[test]
     fn config_min_correlation_threshold_filtering() {
-        let mut cfg = MultiColumnConfig::default();
-        cfg.min_correlation_threshold = 0.95;
+        let cfg = MultiColumnConfig {
+            min_correlation_threshold: 0.95,
+            ..MultiColumnConfig::default()
+        };
         let est = MultiColumnEstimator::new(cfg);
         // This would normally use multi-column stats, but correlation too low
         // (This test validates the config is stored; actual filtering would be in a fuller implementation)

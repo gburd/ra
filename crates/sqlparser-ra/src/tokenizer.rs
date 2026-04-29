@@ -1208,7 +1208,7 @@ impl<'a> Tokenizer<'a> {
                             chars.next();
                             match chars.peek() {
                                 Some('=') => self.consume_and_return(chars, Token::AtLessEquals),
-                                _ => Ok(Some(Token::ArrowAt)),  // @< is ArrowAt (contains)
+                                _ => Ok(Some(Token::ArrowAt)), // @< is ArrowAt (contains)
                             }
                         }
                         Some('=') => self.consume_and_return(chars, Token::AtEquals),

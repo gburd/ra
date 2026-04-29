@@ -543,7 +543,7 @@ fn extract_table_name(line: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
 

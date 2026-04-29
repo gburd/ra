@@ -1,7 +1,7 @@
-//! Third-party extension modules for PostgreSQL and other databases.
+//! Third-party extension modules for `PostgreSQL` and other databases.
 //!
 //! These extensions add support for non-standard SQL features provided by
-//! database extensions like PostGIS, TimescaleDB, DocumentDB, pgvector, pg_trgm, sqlite-vec, etc.
+//! database extensions like `PostGIS`, `TimescaleDB`, `DocumentDB`, `pgvector`, `pg_trgm`, `sqlite-vec`, etc.
 
 pub mod documentdb;
 pub mod mysql_fts;

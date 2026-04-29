@@ -1,6 +1,6 @@
 //! Shared helpers for ra-parser integration tests.
 
-#![allow(dead_code)]
+#![allow(dead_code, clippy::panic)]
 
 use std::path::{Path, PathBuf};
 
@@ -45,9 +45,8 @@ pub fn collect_rra_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn walk_rra(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
     for entry in entries.flatten() {
         let path = entry.path();

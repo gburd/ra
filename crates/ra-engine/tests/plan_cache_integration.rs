@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Comprehensive integration tests for the plan cache (RFC 0060).
 //!
 //! Validates cache behavior under realistic OLTP workloads:
@@ -469,11 +470,11 @@ fn plan_cache_direct_oltp_simulation() {
     let mut cache = PlanCache::with_defaults();
 
     let templates: Vec<Box<dyn Fn(i64) -> RelExpr>> = vec![
-        Box::new(|v| point_lookup(v)),
+        Box::new(point_lookup),
         Box::new(|v| range_scan(v, "active")),
-        Box::new(|v| join_with_filter(v)),
-        Box::new(|v| aggregation(v)),
-        Box::new(|v| three_table_join(v)),
+        Box::new(join_with_filter),
+        Box::new(aggregation),
+        Box::new(three_table_join),
     ];
 
     // Seed cache with one instance of each template
@@ -487,7 +488,7 @@ fn plan_cache_direct_oltp_simulation() {
     let mut hits = 0_u32;
     for i in 0..200_u32 {
         let template_idx = (i % 5) as usize;
-        let param = (i * 7 + 13) as i64;
+        let param = i64::from(i * 7 + 13);
         let query = templates[template_idx](param);
         let fp = QueryFingerprint::from_rel_expr(&query);
         if cache.lookup(&fp).is_some() {

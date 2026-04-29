@@ -60,11 +60,7 @@ impl Checkpoint {
 
     /// Create a checkpoint for an in-progress operator.
     #[must_use]
-    pub fn in_progress(
-        node_id: NodeId,
-        sequence: u64,
-        rows_emitted: u64,
-    ) -> Self {
+    pub fn in_progress(node_id: NodeId, sequence: u64, rows_emitted: u64) -> Self {
         Self {
             node_id,
             sequence,
@@ -75,11 +71,7 @@ impl Checkpoint {
 
     /// Create a checkpoint for a completed operator.
     #[must_use]
-    pub fn completed(
-        node_id: NodeId,
-        sequence: u64,
-        total_rows: u64,
-    ) -> Self {
+    pub fn completed(node_id: NodeId, sequence: u64, total_rows: u64) -> Self {
         Self {
             node_id,
             sequence,
@@ -99,12 +91,8 @@ impl Checkpoint {
     pub fn rows_emitted(&self) -> u64 {
         match &self.state {
             CheckpointState::NotStarted => 0,
-            CheckpointState::InProgress { rows_emitted } => {
-                *rows_emitted
-            }
-            CheckpointState::Completed { total_rows } => {
-                *total_rows
-            }
+            CheckpointState::InProgress { rows_emitted } => *rows_emitted,
+            CheckpointState::Completed { total_rows } => *total_rows,
         }
     }
 }
@@ -128,11 +116,7 @@ impl CheckpointManager {
     }
 
     /// Record a checkpoint for the given operator state.
-    pub fn record(
-        &mut self,
-        node_id: NodeId,
-        state: CheckpointState,
-    ) -> &Checkpoint {
+    pub fn record(&mut self, node_id: NodeId, state: CheckpointState) -> &Checkpoint {
         let seq = self.next_sequence;
         self.next_sequence += 1;
         let cp = Checkpoint {
@@ -163,10 +147,7 @@ impl CheckpointManager {
     /// - The operator has a checkpoint (so intermediate state is
     ///   recoverable).
     #[must_use]
-    pub fn is_safe_transition(
-        &self,
-        adaptation: &Adaptation,
-    ) -> bool {
+    pub fn is_safe_transition(&self, adaptation: &Adaptation) -> bool {
         let target_node = match adaptation {
             Adaptation::SwitchJoinStrategy { node_id, .. }
             | Adaptation::SwapJoinInputs { node_id }
@@ -203,10 +184,7 @@ impl CheckpointManager {
     }
 
     /// Mark the latest checkpoint for an operator as materialized.
-    pub fn mark_materialized(
-        &mut self,
-        node_id: NodeId,
-    ) -> bool {
+    pub fn mark_materialized(&mut self, node_id: NodeId) -> bool {
         if let Some(cp) = self
             .checkpoints
             .iter_mut()
@@ -257,10 +235,7 @@ mod tests {
     fn manager_record_and_latest() {
         let mut mgr = CheckpointManager::new();
         mgr.record(1, CheckpointState::NotStarted);
-        mgr.record(
-            1,
-            CheckpointState::InProgress { rows_emitted: 100 },
-        );
+        mgr.record(1, CheckpointState::InProgress { rows_emitted: 100 });
         mgr.record(2, CheckpointState::NotStarted);
 
         let latest = mgr
@@ -284,10 +259,7 @@ mod tests {
     #[test]
     fn safe_transition_in_progress() {
         let mut mgr = CheckpointManager::new();
-        mgr.record(
-            1,
-            CheckpointState::InProgress { rows_emitted: 50 },
-        );
+        mgr.record(1, CheckpointState::InProgress { rows_emitted: 50 });
 
         let adaptation = Adaptation::SwitchJoinStrategy {
             node_id: 1,
@@ -300,10 +272,7 @@ mod tests {
     #[test]
     fn unsafe_transition_completed() {
         let mut mgr = CheckpointManager::new();
-        mgr.record(
-            1,
-            CheckpointState::Completed { total_rows: 1000 },
-        );
+        mgr.record(1, CheckpointState::Completed { total_rows: 1000 });
 
         let adaptation = Adaptation::SwitchJoinStrategy {
             node_id: 1,
@@ -323,12 +292,9 @@ mod tests {
     #[test]
     fn reoptimize_safe_with_checkpoints() {
         let mut mgr = CheckpointManager::new();
-        mgr.record(
-            1,
-            CheckpointState::InProgress { rows_emitted: 10 },
-        );
+        mgr.record(1, CheckpointState::InProgress { rows_emitted: 10 });
         let adaptation = Adaptation::ReoptimizePlan {
-            new_plan: ra_core::algebra::RelExpr::scan("t"),
+            new_plan: Box::new(ra_core::algebra::RelExpr::scan("t")),
         };
         assert!(mgr.is_safe_transition(&adaptation));
     }
@@ -337,7 +303,7 @@ mod tests {
     fn reoptimize_unsafe_no_checkpoints() {
         let mgr = CheckpointManager::new();
         let adaptation = Adaptation::ReoptimizePlan {
-            new_plan: ra_core::algebra::RelExpr::scan("t"),
+            new_plan: Box::new(ra_core::algebra::RelExpr::scan("t")),
         };
         assert!(!mgr.is_safe_transition(&adaptation));
     }
@@ -345,10 +311,7 @@ mod tests {
     #[test]
     fn mark_materialized() {
         let mut mgr = CheckpointManager::new();
-        mgr.record(
-            1,
-            CheckpointState::InProgress { rows_emitted: 50 },
-        );
+        mgr.record(1, CheckpointState::InProgress { rows_emitted: 50 });
         assert!(mgr.mark_materialized(1));
         let cp = mgr.latest_for(1).expect("should exist");
         assert!(cp.materialized);
@@ -373,10 +336,7 @@ mod tests {
     fn all_checkpoints_ordering() {
         let mut mgr = CheckpointManager::new();
         mgr.record(1, CheckpointState::NotStarted);
-        mgr.record(
-            2,
-            CheckpointState::InProgress { rows_emitted: 10 },
-        );
+        mgr.record(2, CheckpointState::InProgress { rows_emitted: 10 });
         let all = mgr.all_checkpoints();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].sequence, 0);
@@ -386,10 +346,9 @@ mod tests {
     #[test]
     fn checkpoint_serialize_roundtrip() {
         let cp = Checkpoint::in_progress(42, 7, 12345);
-        let json = serde_json::to_string(&cp)
-            .expect("serialization should succeed");
-        let deserialized: Checkpoint = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&cp).expect("serialization should succeed");
+        let deserialized: Checkpoint =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(cp.node_id, deserialized.node_id);
         assert_eq!(cp.sequence, deserialized.sequence);
         assert_eq!(cp.state, deserialized.state);

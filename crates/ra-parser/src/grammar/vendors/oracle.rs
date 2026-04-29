@@ -48,7 +48,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct OracleExtension;
 
 impl GrammarExtension for OracleExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "oracle"
     }
 

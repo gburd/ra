@@ -165,6 +165,7 @@ impl FederatedOptimizer {
     /// Check whether the entire query can be shipped to a remote
     /// database.
     #[must_use]
+    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
     pub fn can_ship_query(&self, plan: &RelExpr, capabilities: &QueryCapabilities) -> bool {
         match plan {
             RelExpr::Scan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => {
@@ -244,6 +245,7 @@ impl FederatedOptimizer {
     }
 
     /// Check if a filter expression references a specific table.
+    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
     fn filter_references_table(&self, expr: &Expr, table_name: &str) -> bool {
         match expr {
             Expr::Column(col) => col.table.as_deref() == Some(table_name) || col.table.is_none(),
@@ -263,16 +265,18 @@ impl FederatedOptimizer {
             } => {
                 operand
                     .as_ref()
-                    .map_or(false, |o| self.filter_references_table(o, table_name))
+                    .is_some_and(|o| self.filter_references_table(o, table_name))
                     || when_clauses.iter().any(|(c, r)| {
                         self.filter_references_table(c, table_name)
                             || self.filter_references_table(r, table_name)
                     })
                     || else_result
                         .as_ref()
-                        .map_or(false, |e| self.filter_references_table(e, table_name))
+                        .is_some_and(|e| self.filter_references_table(e, table_name))
             }
-            Expr::Cast { expr, .. } => self.filter_references_table(expr, table_name),
+            Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => {
+                self.filter_references_table(expr, table_name)
+            }
             Expr::Array(elements) => elements
                 .iter()
                 .any(|e| self.filter_references_table(e, table_name)),
@@ -284,7 +288,9 @@ impl FederatedOptimizer {
             | Expr::PatternNext(inner, _)
             | Expr::PatternFirst(inner, _)
             | Expr::PatternLast(inner, _) => self.filter_references_table(inner, table_name),
-            Expr::PatternClassifier | Expr::PatternMatchNumber => false,
+            Expr::PatternClassifier
+            | Expr::PatternMatchNumber
+            | Expr::FullTextMatch { .. } => false,
             Expr::ArraySlice { array, start, end } => {
                 self.filter_references_table(array, table_name)
                     || start
@@ -294,11 +300,9 @@ impl FederatedOptimizer {
                         .as_ref()
                         .is_some_and(|e| self.filter_references_table(e, table_name))
             }
-            Expr::FieldAccess { expr, .. } => self.filter_references_table(expr, table_name),
             Expr::SubQuery { test_expr, .. } => test_expr
                 .as_ref()
-                .map_or(false, |t| self.filter_references_table(t, table_name)),
-            Expr::FullTextMatch { .. } => false,
+                .is_some_and(|t| self.filter_references_table(t, table_name)),
             Expr::VectorDistance { column, target, .. } => {
                 self.filter_references_table(column, table_name)
                     || self.filter_references_table(target, table_name)
@@ -399,6 +403,7 @@ impl FederatedOptimizer {
     }
 
     /// Extract a scan node from a plan tree for a specific table.
+    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
     fn extract_scan(&self, plan: &RelExpr, table_name: &str) -> Option<RelExpr> {
         match plan {
             RelExpr::Scan { table, alias } => {
@@ -429,6 +434,7 @@ impl FederatedOptimizer {
     }
 
     /// Remove a specific filter from a plan tree.
+    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
     fn remove_filter(&self, plan: &RelExpr, target_pred: &Expr) -> Option<RelExpr> {
         match plan {
             RelExpr::Filter { predicate, input } => {
@@ -462,6 +468,7 @@ impl FederatedOptimizer {
     }
 
     /// Generate human-readable execution steps.
+    #[expect(clippy::unused_self, reason = "method for API consistency")]
     fn describe_steps(&self, location: &ExecutionLocation, _query: &FederatedQuery) -> Vec<String> {
         match location {
             ExecutionLocation::ShipQuery { target, .. } => {

@@ -14,10 +14,10 @@ use ra_core::cost::Cost;
 /// FTS index type for cost modeling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FtsIndexType {
-    /// PostgreSQL GIN (Generalized Inverted Index).
+    /// `PostgreSQL` GIN (Generalized Inverted Index).
     /// Fast boolean queries, slower for ranking.
     Gin,
-    /// PostgreSQL RUM (extension).
+    /// `PostgreSQL` RUM (extension).
     /// Optimized for ranked retrieval with positions.
     Rum,
     /// MySQL/MariaDB FULLTEXT index.
@@ -34,7 +34,7 @@ pub enum RankingAlgorithm {
     TfIdf,
     /// Best Match 25 (Okapi BM25).
     Bm25,
-    /// Cover density ranking (PostgreSQL ts_rank_cd).
+    /// Cover density ranking (`PostgreSQL` `ts_rank_cd`).
     CoverDensity,
     /// No ranking, boolean match only.
     None,
@@ -54,8 +54,8 @@ pub enum BooleanOperator {
 /// Estimate cost for inverted index lookup of a single term.
 ///
 /// Cost model:
-/// - Index tree traversal: O(log(total_docs))
-/// - Posting list scan: O(term_frequency)
+/// - Index tree traversal: `O(log(total_docs))`
+/// - Posting list scan: `O(term_frequency)`
 /// - Per-document overhead: decode posting entry
 ///
 /// Returns CPU cost in arbitrary units.
@@ -85,6 +85,7 @@ pub fn inverted_index_lookup_cost(term: &str, total_docs: usize, term_frequency:
 ///
 /// Returns CPU cost in arbitrary units.
 #[must_use]
+#[expect(clippy::similar_names, reason = "list_a and list_b are the standard naming convention")]
 pub fn skip_list_intersection_cost(list_a_size: usize, list_b_size: usize) -> f64 {
     const COMPARISON_COST: f64 = 0.3;
     const SKIP_TRAVERSAL_COST: f64 = 0.5;

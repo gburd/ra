@@ -6,8 +6,7 @@ use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::Statistics;
 use ra_ml::estimator::{
-    CardinalityEstimator, HeuristicEstimator, MlEstimator,
-    SimpleStatsProvider,
+    CardinalityEstimator, HeuristicEstimator, MlEstimator, SimpleStatsProvider,
 };
 
 fn setup_provider() -> SimpleStatsProvider {
@@ -36,12 +35,8 @@ fn two_way_join() -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(ColumnRef::qualified(
-                "users", "id",
-            ))),
-            right: Box::new(Expr::Column(ColumnRef::qualified(
-                "orders", "user_id",
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
         },
         left: Box::new(RelExpr::scan("users")),
         right: Box::new(RelExpr::scan("orders")),
@@ -54,12 +49,8 @@ fn three_way_join() -> RelExpr {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(ColumnRef::qualified(
-                "orders", "product_id",
-            ))),
-            right: Box::new(Expr::Column(ColumnRef::qualified(
-                "products", "id",
-            ))),
+            left: Box::new(Expr::Column(ColumnRef::qualified("orders", "product_id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("products", "id"))),
         },
         left: Box::new(users_orders),
         right: Box::new(RelExpr::scan("products")),

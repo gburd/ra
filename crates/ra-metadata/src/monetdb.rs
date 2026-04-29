@@ -422,7 +422,7 @@ impl MonetDBConnector {
         }
 
         let text = lines.join("\n");
-        parse_monetdb_explain(&text)
+        Ok(parse_monetdb_explain(&text))
     }
 }
 
@@ -444,7 +444,7 @@ impl DatabaseConnector for MonetDBConnector {
     }
 }
 
-/// Parsed MonetDB connection URL parts.
+/// Parsed `MonetDB` connection URL parts.
 struct MonetDBUrlParts {
     host: String,
     port: u16,
@@ -479,8 +479,8 @@ fn parse_monetdb_url(url: &str) -> MetadataResult<MonetDBUrlParts> {
     })
 }
 
-/// Parse MonetDB MAL-based EXPLAIN output into an `ExplainPlan`.
-fn parse_monetdb_explain(text: &str) -> MetadataResult<ExplainPlan> {
+/// Parse `MonetDB` MAL-based EXPLAIN output into an `ExplainPlan`.
+fn parse_monetdb_explain(text: &str) -> ExplainPlan {
     let lines: Vec<&str> = text
         .lines()
         .map(str::trim)
@@ -490,7 +490,7 @@ fn parse_monetdb_explain(text: &str) -> MetadataResult<ExplainPlan> {
     let first = lines.first().copied().unwrap_or("");
     let node_type = classify_monetdb_node(first);
 
-    Ok(ExplainPlan {
+    ExplainPlan {
         root: ExplainNode {
             node_type,
             join_type: None,
@@ -508,7 +508,7 @@ fn parse_monetdb_explain(text: &str) -> MetadataResult<ExplainPlan> {
         query: None,
         total_cost: None,
         total_rows: None,
-    })
+    }
 }
 
 fn classify_monetdb_node(line: &str) -> NodeType {
@@ -523,13 +523,12 @@ fn classify_monetdb_node(line: &str) -> NodeType {
         NodeType::HashAggregate
     } else if lower.contains("sort") || lower.contains("order") {
         NodeType::Sort
-    } else if lower.contains("select") || lower.contains("filter") {
-        NodeType::Other
     } else {
         NodeType::Other
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,7 +569,7 @@ mod tests {
     #[test]
     fn parse_explain_basic() {
         let text = "table.scan on orders\nfilter";
-        let plan = parse_monetdb_explain(text).expect("should parse");
+        let plan = parse_monetdb_explain(text);
         assert_eq!(plan.root.node_type, NodeType::SeqScan);
     }
 

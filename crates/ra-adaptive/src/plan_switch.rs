@@ -23,9 +23,7 @@ use crate::runtime_stats::NodeId;
 use crate::triggers::{TriggerEvent, TriggerKind};
 
 /// A physical join strategy.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum JoinStrategy {
     /// Nested-loop join: iterate outer, probe inner.
     NestedLoop,
@@ -36,10 +34,7 @@ pub enum JoinStrategy {
 }
 
 impl std::fmt::Display for JoinStrategy {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let label = match self {
             Self::NestedLoop => "nested-loop",
             Self::HashJoin => "hash-join",
@@ -71,7 +66,7 @@ pub enum Adaptation {
     ReoptimizePlan {
         /// The new plan produced by re-running the optimizer with
         /// corrected statistics.
-        new_plan: RelExpr,
+        new_plan: Box<RelExpr>,
     },
     /// Signal an operator to spill intermediate state to disk.
     SpillToDisk {
@@ -116,37 +111,24 @@ impl PlanSwitcher {
     ) -> Option<Adaptation> {
         match event.kind {
             TriggerKind::CardinalityUnderestimate => {
-                Self::handle_underestimate(
-                    event,
-                    current_strategy,
-                )
+                Self::handle_underestimate(event, current_strategy)
             }
             TriggerKind::CardinalityOverestimate => {
-                Self::handle_overestimate(
-                    event,
-                    current_strategy,
-                )
+                Self::handle_overestimate(event, current_strategy)
             }
-            TriggerKind::SkewDetected => {
-                Some(Adaptation::SwapJoinInputs {
-                    node_id: event.node_id,
-                })
-            }
-            TriggerKind::MemoryPressure => {
-                Some(Adaptation::SpillToDisk {
-                    node_id: event.node_id,
-                })
-            }
+            TriggerKind::SkewDetected => Some(Adaptation::SwapJoinInputs {
+                node_id: event.node_id,
+            }),
+            TriggerKind::MemoryPressure => Some(Adaptation::SpillToDisk {
+                node_id: event.node_id,
+            }),
         }
     }
 
     /// Choose the best join strategy for the given actual row
     /// count, independent of any trigger.
     #[must_use]
-    pub fn choose_join_strategy(
-        &self,
-        build_side_rows: u64,
-    ) -> JoinStrategy {
+    pub fn choose_join_strategy(&self, build_side_rows: u64) -> JoinStrategy {
         if build_side_rows <= self.hash_join_threshold {
             JoinStrategy::NestedLoop
         } else {
@@ -182,20 +164,15 @@ impl PlanSwitcher {
         }
     }
 
-    fn handle_underestimate(
-        event: &TriggerEvent,
-        current: JoinStrategy,
-    ) -> Option<Adaptation> {
+    fn handle_underestimate(event: &TriggerEvent, current: JoinStrategy) -> Option<Adaptation> {
         // Build side is larger than expected. If we're doing a
         // nested-loop, switch to hash join.
         match current {
-            JoinStrategy::NestedLoop => {
-                Some(Adaptation::SwitchJoinStrategy {
-                    node_id: event.node_id,
-                    from: JoinStrategy::NestedLoop,
-                    to: JoinStrategy::HashJoin,
-                })
-            }
+            JoinStrategy::NestedLoop => Some(Adaptation::SwitchJoinStrategy {
+                node_id: event.node_id,
+                from: JoinStrategy::NestedLoop,
+                to: JoinStrategy::HashJoin,
+            }),
             JoinStrategy::HashJoin => {
                 // Already using hash join; if severely
                 // underestimated, suggest full reoptimization so
@@ -208,37 +185,28 @@ impl PlanSwitcher {
                     })
                 }
             }
-            JoinStrategy::SortMerge => {
-                Some(Adaptation::SwitchJoinStrategy {
-                    node_id: event.node_id,
-                    from: JoinStrategy::SortMerge,
-                    to: JoinStrategy::HashJoin,
-                })
-            }
+            JoinStrategy::SortMerge => Some(Adaptation::SwitchJoinStrategy {
+                node_id: event.node_id,
+                from: JoinStrategy::SortMerge,
+                to: JoinStrategy::HashJoin,
+            }),
         }
     }
 
-    fn handle_overestimate(
-        event: &TriggerEvent,
-        current: JoinStrategy,
-    ) -> Option<Adaptation> {
+    fn handle_overestimate(event: &TriggerEvent, current: JoinStrategy) -> Option<Adaptation> {
         // Build side is smaller than expected. If we're using a
         // hash join, a nested-loop may be cheaper.
         match current {
-            JoinStrategy::HashJoin => {
-                Some(Adaptation::SwitchJoinStrategy {
-                    node_id: event.node_id,
-                    from: JoinStrategy::HashJoin,
-                    to: JoinStrategy::NestedLoop,
-                })
-            }
-            JoinStrategy::SortMerge => {
-                Some(Adaptation::SwitchJoinStrategy {
-                    node_id: event.node_id,
-                    from: JoinStrategy::SortMerge,
-                    to: JoinStrategy::NestedLoop,
-                })
-            }
+            JoinStrategy::HashJoin => Some(Adaptation::SwitchJoinStrategy {
+                node_id: event.node_id,
+                from: JoinStrategy::HashJoin,
+                to: JoinStrategy::NestedLoop,
+            }),
+            JoinStrategy::SortMerge => Some(Adaptation::SwitchJoinStrategy {
+                node_id: event.node_id,
+                from: JoinStrategy::SortMerge,
+                to: JoinStrategy::NestedLoop,
+            }),
             JoinStrategy::NestedLoop => None,
         }
     }
@@ -369,10 +337,7 @@ mod tests {
         let adaptation = switcher
             .recommend(&event, JoinStrategy::HashJoin)
             .expect("should recommend spill");
-        assert!(matches!(
-            adaptation,
-            Adaptation::SpillToDisk { node_id: 6 }
-        ));
+        assert!(matches!(adaptation, Adaptation::SpillToDisk { node_id: 6 }));
     }
 
     #[test]
@@ -392,8 +357,7 @@ mod tests {
     #[test]
     fn choose_join_strategy_at_threshold() {
         let switcher = PlanSwitcher::new();
-        let strategy =
-            switcher.choose_join_strategy(10_000);
+        let strategy = switcher.choose_join_strategy(10_000);
         assert_eq!(strategy, JoinStrategy::NestedLoop);
     }
 
@@ -404,15 +368,12 @@ mod tests {
             condition: Expr::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(Expr::Column(ColumnRef::new("a"))),
-                right: Box::new(Expr::Column(
-                    ColumnRef::new("b"),
-                )),
+                right: Box::new(Expr::Column(ColumnRef::new("b"))),
             },
             left: Box::new(RelExpr::scan("big")),
             right: Box::new(RelExpr::scan("small")),
         };
-        let swapped = PlanSwitcher::swap_join_inputs(&plan)
-            .expect("should swap");
+        let swapped = PlanSwitcher::swap_join_inputs(&plan).expect("should swap");
         assert!(matches!(
             &swapped,
             RelExpr::Join { join_type: JoinType::Inner, left, right, .. }
@@ -429,11 +390,13 @@ mod tests {
             left: Box::new(RelExpr::scan("a")),
             right: Box::new(RelExpr::scan("b")),
         };
-        let swapped = PlanSwitcher::swap_join_inputs(&plan)
-            .expect("should swap");
+        let swapped = PlanSwitcher::swap_join_inputs(&plan).expect("should swap");
         assert!(matches!(
             &swapped,
-            RelExpr::Join { join_type: JoinType::RightOuter, .. }
+            RelExpr::Join {
+                join_type: JoinType::RightOuter,
+                ..
+            }
         ));
     }
 
@@ -445,15 +408,9 @@ mod tests {
 
     #[test]
     fn join_strategy_display() {
-        assert_eq!(
-            JoinStrategy::NestedLoop.to_string(),
-            "nested-loop"
-        );
+        assert_eq!(JoinStrategy::NestedLoop.to_string(), "nested-loop");
         assert_eq!(JoinStrategy::HashJoin.to_string(), "hash-join");
-        assert_eq!(
-            JoinStrategy::SortMerge.to_string(),
-            "sort-merge"
-        );
+        assert_eq!(JoinStrategy::SortMerge.to_string(), "sort-merge");
     }
 
     #[test]
@@ -463,24 +420,16 @@ mod tests {
             from: JoinStrategy::NestedLoop,
             to: JoinStrategy::HashJoin,
         };
-        let json = serde_json::to_string(&adaptation)
-            .expect("serialization should succeed");
-        let deserialized: Adaptation = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&adaptation).expect("serialization should succeed");
+        let deserialized: Adaptation =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(adaptation, deserialized);
     }
 
     #[test]
     fn custom_threshold() {
-        let switcher =
-            PlanSwitcher::with_hash_join_threshold(1_000);
-        assert_eq!(
-            switcher.choose_join_strategy(999),
-            JoinStrategy::NestedLoop
-        );
-        assert_eq!(
-            switcher.choose_join_strategy(1_001),
-            JoinStrategy::HashJoin
-        );
+        let switcher = PlanSwitcher::with_hash_join_threshold(1_000);
+        assert_eq!(switcher.choose_join_strategy(999), JoinStrategy::NestedLoop);
+        assert_eq!(switcher.choose_join_strategy(1_001), JoinStrategy::HashJoin);
     }
 }

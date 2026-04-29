@@ -252,7 +252,10 @@ fn classify_word(word: &str) -> TokenKind {
 // ── Tests ────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[expect(
+    clippy::expect_used,
+    reason = "Test code appropriately uses expect for deterministic lexing"
+)]
 mod tests {
     use super::*;
 

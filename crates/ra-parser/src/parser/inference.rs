@@ -16,6 +16,7 @@ pub struct DialectInference {
 
 impl DialectInference {
     /// Create a new inference engine.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             scores: HashMap::new(),
@@ -25,8 +26,8 @@ impl DialectInference {
     /// Detect dialect from SQL tokens.
     ///
     /// Looks for dialect-specific tokens like:
-    /// - PostgreSQL: `$1`, `::`, `$$`
-    /// - MySQL: backticks, `LIMIT x, y`
+    /// - `PostgreSQL`: `$1`, `::`, `$$`
+    /// - `MySQL`: backticks, `LIMIT x, y`
     /// - Oracle: `(+)`, `DUAL`
     /// - SQL Server: `[brackets]`, `TOP`
     pub fn detect_from_tokens(&mut self, sql: &str) {
@@ -92,8 +93,8 @@ impl DialectInference {
     /// Detect dialect from function names.
     ///
     /// Certain functions are unique to specific databases:
-    /// - PostgreSQL: `string_agg`, `array_agg`, `jsonb_*`
-    /// - MySQL: `GROUP_CONCAT`, `DATE_ADD`
+    /// - `PostgreSQL`: `string_agg`, `array_agg`, `jsonb_*`
+    /// - `MySQL`: `GROUP_CONCAT`, `DATE_ADD`
     /// - Oracle: `NVL`, `DECODE`
     /// - SQL Server: `ISNULL`, `GETDATE`
     pub fn detect_from_functions(&mut self, sql: &str) {
@@ -125,17 +126,17 @@ impl DialectInference {
 
     /// Compute final scores and return the most likely dialect with confidence.
     ///
-    /// Returns (dialect, confidence_score) where confidence is 0.0-1.0.
+    /// Returns (dialect, `confidence_score`) where confidence is 0.0-1.0.
+    #[must_use]
     pub fn compute_scores(&self) -> (String, f64) {
         if self.scores.is_empty() {
             return ("universal".to_string(), 0.5);
         }
 
-        let (dialect, &score) = self
-            .scores
-            .iter()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .unwrap();
+        let Some((dialect, &score)) = self.scores.iter().max_by(|(_, a), (_, b)| a.total_cmp(b))
+        else {
+            return ("universal".to_string(), 0.5);
+        };
 
         let total: f64 = self.scores.values().sum();
         let confidence = if total > 0.0 { score / total } else { 0.0 };

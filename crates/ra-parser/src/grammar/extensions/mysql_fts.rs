@@ -1,6 +1,6 @@
-//! MySQL Full-Text Search extension.
+//! `MySQL` Full-Text Search extension.
 //!
-//! MySQL provides full-text search capabilities through the MATCH...AGAINST syntax.
+//! `MySQL` provides full-text search capabilities through the MATCH...AGAINST syntax.
 //! It supports natural language search, boolean search, and query expansion.
 //!
 //! # Key Features
@@ -52,11 +52,11 @@ use std::error::Error;
 
 use crate::grammar::extension::GrammarExtension;
 
-/// MySQL Full-Text Search extension.
+/// `MySQL` Full-Text Search extension.
 pub struct MySQLFTSExtension;
 
 impl GrammarExtension for MySQLFTSExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "mysql_fts"
     }
 
@@ -96,7 +96,7 @@ impl GrammarExtension for MySQLFTSExtension {
     }
 }
 
-/// MySQL full-text search mode.
+/// `MySQL` full-text search mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MySQLFTSMode {
     /// Natural language mode (default).
@@ -118,7 +118,7 @@ pub struct MySQLMatchExpr {
     pub mode: MySQLFTSMode,
 }
 
-/// Boolean query token for MySQL boolean mode parsing.
+/// Boolean query token for `MySQL` boolean mode parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BooleanToken {
     /// A term that must be present (+term).
@@ -141,7 +141,11 @@ pub enum BooleanToken {
     Group(Vec<BooleanToken>),
 }
 
-/// Parse MySQL boolean mode query string.
+/// Parse `MySQL` boolean mode query string.
+///
+/// # Errors
+///
+/// Returns an error if the query contains invalid syntax.
 ///
 /// # Examples
 ///
@@ -149,6 +153,10 @@ pub enum BooleanToken {
 /// let tokens = parse_boolean_query("+database -slow optim*");
 /// // Returns: [MustHave("database"), MustNotHave("slow"), Wildcard("optim")]
 /// ```
+#[expect(
+    clippy::too_many_lines,
+    reason = "Boolean query parsing requires handling many token types and states"
+)]
 pub fn parse_boolean_query(query: &str) -> Result<Vec<BooleanToken>, String> {
     let mut tokens = Vec::new();
     let mut chars = query.chars().peekable();
@@ -157,7 +165,6 @@ pub fn parse_boolean_query(query: &str) -> Result<Vec<BooleanToken>, String> {
         match ch {
             ' ' | '\t' | '\n' | '\r' => {
                 chars.next();
-                continue;
             }
             '+' => {
                 chars.next();
@@ -316,7 +323,7 @@ fn read_phrase(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<Strin
     let mut phrase = String::new();
     let mut found_closing = false;
 
-    while let Some(ch) = chars.next() {
+    for ch in chars.by_ref() {
         if ch == '"' {
             found_closing = true;
             break;
@@ -337,7 +344,7 @@ fn read_group(
     let mut group_str = String::new();
     let mut depth = 1;
 
-    while let Some(ch) = chars.next() {
+    for ch in chars.by_ref() {
         if ch == '(' {
             depth += 1;
             group_str.push(ch);
@@ -359,6 +366,7 @@ fn read_group(
     parse_boolean_query(&group_str)
 }
 
+#[expect(clippy::unwrap_used, clippy::panic, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

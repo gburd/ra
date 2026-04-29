@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Tests for morsel-driven parallel execution model.
 //!
 //! Morsel-driven execution uses work-stealing parallelism with data chunks

@@ -56,15 +56,13 @@ impl CachedPlan {
     /// Check whether this plan references a table by name.
     #[must_use]
     pub fn references_table(&self, table: &str) -> bool {
-        self.statistics_snapshot.contains_key(table)
-            || plan_scans_table(&self.plan, table)
+        self.statistics_snapshot.contains_key(table) || plan_scans_table(&self.plan, table)
     }
 
     /// Return the list of table names referenced by this plan.
     #[must_use]
     pub fn referenced_tables(&self) -> Vec<String> {
-        let mut tables: Vec<String> =
-            self.statistics_snapshot.keys().cloned().collect();
+        let mut tables: Vec<String> = self.statistics_snapshot.keys().cloned().collect();
         tables.sort();
         tables.dedup();
         tables
@@ -100,8 +98,7 @@ mod tests {
 
     fn make_plan(table: &str) -> CachedPlan {
         let mut snapshot = HashMap::new();
-        snapshot
-            .insert(table.to_owned(), Statistics::new(1000.0));
+        snapshot.insert(table.to_owned(), Statistics::new(1000.0));
         CachedPlan::new(
             RelExpr::scan(table),
             Cost::ZERO,
@@ -125,10 +122,8 @@ mod tests {
     #[test]
     fn referenced_tables_sorted() {
         let mut snapshot = HashMap::new();
-        snapshot
-            .insert("orders".to_owned(), Statistics::new(500.0));
-        snapshot
-            .insert("users".to_owned(), Statistics::new(1000.0));
+        snapshot.insert("orders".to_owned(), Statistics::new(500.0));
+        snapshot.insert("users".to_owned(), Statistics::new(1000.0));
         let plan = CachedPlan::new(
             RelExpr::scan("users"),
             Cost::ZERO,

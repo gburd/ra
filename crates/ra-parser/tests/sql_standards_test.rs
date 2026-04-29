@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Integration tests for SQL standards grammar modules.
 //!
 //! Tests verify that each SQL standard module correctly identifies its keywords,
@@ -201,7 +202,8 @@ fn test_sql_compliance_matrix() {
     // This test documents which SQL standards are supported by major databases
     // Not a runtime test, but serves as documentation
 
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "documentation struct")]
+    #[expect(clippy::struct_excessive_bools, reason = "documentation struct mapping standards to support flags")]
     struct DatabaseCompliance {
         name: &'static str,
         sql_92: bool,
@@ -213,7 +215,7 @@ fn test_sql_compliance_matrix() {
         sql_2023: bool,
     }
 
-    let databases = vec![
+    let databases = [
         DatabaseCompliance {
             name: "PostgreSQL 17",
             sql_92: true,

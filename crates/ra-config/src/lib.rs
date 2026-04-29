@@ -22,9 +22,8 @@ mod loader;
 mod model;
 
 pub use error::ConfigError;
-pub use loader::{ConfigLoader, config_dir, config_path};
+pub use loader::{config_dir, config_path, ConfigLoader};
 pub use model::{
-    EditorConfig, EditorMode, HardwareConfig,
-    IndentStyle, KeywordCase, OutputConfig, OutputFormat,
+    EditorConfig, EditorMode, HardwareConfig, IndentStyle, KeywordCase, OutputConfig, OutputFormat,
     RaConfig, SqlConfig, SqlDialect, TuiConfig, TuiLayout,
 };

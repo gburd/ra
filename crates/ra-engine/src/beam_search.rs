@@ -28,6 +28,7 @@ pub struct BeamSearchConfig {
 
 impl BeamSearchConfig {
     /// Create a new beam search configuration.
+    #[must_use]
     pub fn new(beam_width: usize, warmup_iterations: usize) -> Self {
         Self {
             beam_width,
@@ -37,21 +38,25 @@ impl BeamSearchConfig {
     }
 
     /// Default configuration for complex queries (8+ tables).
+    #[must_use]
     pub fn complex() -> Self {
         Self::new(100, 3)
     }
 
     /// Aggressive configuration for very complex queries (12+ tables).
+    #[must_use]
     pub fn aggressive() -> Self {
         Self::new(50, 2)
     }
 
     /// Conservative configuration (more exploration).
+    #[must_use]
     pub fn conservative() -> Self {
         Self::new(200, 5)
     }
 
     /// Disabled configuration (no beam search).
+    #[must_use]
     pub fn disabled() -> Self {
         Self {
             beam_width: usize::MAX,
@@ -77,7 +82,7 @@ pub struct BeamSearchTracker {
     iteration: usize,
 
     /// Plan costs tracked so far.
-    /// Key: equivalence class ID, Value: (cost, keep_flag)
+    /// Key: equivalence class ID, Value: (cost, `keep_flag`)
     plan_costs: HashMap<Id, (f64, bool)>,
 
     /// Number of plans pruned.
@@ -89,6 +94,7 @@ pub struct BeamSearchTracker {
 
 impl BeamSearchTracker {
     /// Create a new beam search tracker.
+    #[must_use]
     pub fn new(config: BeamSearchConfig) -> Self {
         Self {
             config,
@@ -155,6 +161,7 @@ impl BeamSearchTracker {
     }
 
     /// Check if a plan should be kept (not pruned).
+    #[must_use]
     pub fn should_keep(&self, eclass: Id) -> bool {
         // If beam search disabled, keep everything
         if !self.config.enabled {
@@ -167,13 +174,11 @@ impl BeamSearchTracker {
         }
 
         // Check if marked as kept
-        self.plan_costs
-            .get(&eclass)
-            .map(|(_, keep)| *keep)
-            .unwrap_or(true) // Keep unknown plans (conservative)
+        self.plan_costs.get(&eclass).is_none_or(|(_, keep)| *keep) // Keep unknown plans (conservative)
     }
 
     /// Get statistics about beam search pruning.
+    #[must_use]
     pub fn stats(&self) -> BeamSearchStats {
         BeamSearchStats {
             beam_width: self.config.beam_width,
@@ -216,6 +221,7 @@ pub struct BeamSearchStats {
 
 impl BeamSearchStats {
     /// Calculate pruning rate as a percentage.
+    #[must_use]
     pub fn pruning_rate(&self) -> f64 {
         if self.total_plans == 0 {
             0.0
@@ -225,12 +231,14 @@ impl BeamSearchStats {
     }
 
     /// Check if beam search is active (past warmup).
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.enabled && self.current_iteration >= self.warmup_iterations
     }
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use egg::Id;
@@ -341,7 +349,7 @@ mod tests {
             tracker.record_plan(make_id(3), 300.0);
 
             let pruned = tracker.prune();
-            assert_eq!(pruned, 0, "No pruning during warmup iteration {}", iter);
+            assert_eq!(pruned, 0, "No pruning during warmup iteration {iter}");
         }
 
         // Iteration 3: active pruning

@@ -1,10 +1,10 @@
 //! Test profile definitions and scaling methods.
 
 use chrono::{DateTime, Utc};
-use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 
 /// Hardware-adaptive test profile containing platform info and scale factors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +26,7 @@ pub struct PlatformInfo {
     pub timestamp: DateTime<Utc>,
     /// Operating system name and version
     pub os: String,
-    /// CPU architecture (x86_64, aarch64, riscv64, etc.)
+    /// CPU architecture (`x86_64`, `aarch64`, `riscv64`, etc.)
     pub arch: String,
     /// CPU model name
     pub cpu_model: String,
@@ -63,6 +63,10 @@ pub struct ScaleFactors {
 }
 
 /// Cached current profile loaded once per test run.
+#[expect(
+    clippy::print_stderr,
+    reason = "Profile loading status needs user feedback"
+)]
 static CURRENT_PROFILE: LazyLock<TestProfile> = LazyLock::new(|| {
     // Try to load from .ra-test-profile.toml, fall back to baseline
     if Path::new(".ra-test-profile.toml").exists() {
@@ -76,11 +80,11 @@ static CURRENT_PROFILE: LazyLock<TestProfile> = LazyLock::new(|| {
                     return profile;
                 }
                 Err(e) => {
-                    eprintln!("Failed to parse .ra-test-profile.toml: {}", e);
+                    eprintln!("Failed to parse .ra-test-profile.toml: {e}");
                 }
             },
             Err(e) => {
-                eprintln!("Failed to read .ra-test-profile.toml: {}", e);
+                eprintln!("Failed to read .ra-test-profile.toml: {e}");
             }
         }
     }
@@ -93,6 +97,7 @@ impl TestProfile {
     /// Load the current test profile from .ra-test-profile.toml or return baseline.
     ///
     /// The profile is loaded once and cached for the entire test run.
+    #[must_use]
     pub fn current() -> &'static Self {
         &CURRENT_PROFILE
     }
@@ -105,6 +110,7 @@ impl TestProfile {
     /// let expected_ms = profile.scale_time_ms(1000.0);
     /// assert!(duration.as_millis() < expected_ms as u128);
     /// ```
+    #[must_use]
     pub fn scale_time_ms(&self, baseline_ms: f64) -> f64 {
         baseline_ms * self.scale_factors.time_scale
     }
@@ -117,6 +123,7 @@ impl TestProfile {
     /// let max_iters = profile.scale_iterations(50);
     /// runner.with_iter_limit(max_iters);
     /// ```
+    #[must_use]
     pub fn scale_iterations(&self, baseline: usize) -> usize {
         ((baseline as f64) * self.scale_factors.iteration_scale).ceil() as usize
     }
@@ -129,6 +136,7 @@ impl TestProfile {
     /// let memory_limit = profile.scale_memory(1_000_000_000);
     /// config.set_memory_limit(memory_limit);
     /// ```
+    #[must_use]
     pub fn scale_memory(&self, baseline_bytes: u64) -> u64 {
         ((baseline_bytes as f64) * self.scale_factors.memory_scale).ceil() as u64
     }
@@ -136,6 +144,7 @@ impl TestProfile {
     /// Return the baseline profile for AWS c7i.xlarge (4 vCPU, 8GB RAM).
     ///
     /// This is our reference platform against which all other platforms are scaled.
+    #[must_use]
     pub fn baseline() -> Self {
         TestProfile {
             platform: PlatformInfo {

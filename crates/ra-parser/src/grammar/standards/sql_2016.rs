@@ -16,7 +16,7 @@
 //! );
 //! ```
 //!
-//! ## JSON_TABLE
+//! ## `JSON_TABLE`
 //!
 //! Converts JSON data into a relational table:
 //!
@@ -68,7 +68,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQL2016Extension;
 
 impl GrammarExtension for SQL2016Extension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sql:2016"
     }
 

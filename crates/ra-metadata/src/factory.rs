@@ -40,7 +40,7 @@ pub enum AnyConnector {
     DuckDB(DuckDBConnector),
     /// SQL Server backend (requires `sqlserver-support` feature).
     #[cfg(feature = "sqlserver-support")]
-    SqlServer(SqlServerConnector),
+    SqlServer(Box<SqlServerConnector>),
     /// Oracle backend (requires `oracle-support` feature).
     #[cfg(feature = "oracle-support")]
     Oracle(OracleConnector),
@@ -198,7 +198,7 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
     #[cfg(feature = "sqlserver-support")]
     if url.starts_with("sqlserver://") || url.starts_with("mssql://") {
         let connector = SqlServerConnector::connect(url)?;
-        return Ok(AnyConnector::SqlServer(connector));
+        return Ok(AnyConnector::SqlServer(Box::new(connector)));
     }
 
     #[cfg(feature = "oracle-support")]
@@ -281,6 +281,7 @@ fn has_duckdb_extension(url: &str) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("duckdb"))
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

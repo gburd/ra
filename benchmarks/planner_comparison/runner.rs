@@ -1,14 +1,20 @@
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::panic,
+    reason = "benchmark runner uses stdout/stderr"
+)]
 //! Planner Comparison Benchmark Runner
 //!
-//! Compares Ra optimizer performance against PostgreSQL planner across
+//! Compares Ra optimizer performance against `PostgreSQL` planner across
 //! 120 queries organized into 9 categories.
 //!
 //! Usage:
-//!   cargo run --release --bin planner_comparison_runner
+//!   `cargo run --release --bin planner_comparison_runner`
 //!
 //! Outputs:
-//!   - benchmarks/planner_comparison/results/metrics.json
-//!   - benchmarks/planner_comparison/results/COMPARISON_REPORT.md
+//!   - `benchmarks/planner_comparison/results/metrics.json`
+//!   - `benchmarks/planner_comparison/results/COMPARISON_REPORT.md`
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -347,66 +353,52 @@ fn compute_overall_summary(all_metrics: &[QueryMetrics]) -> OverallSummary {
 }
 
 fn generate_markdown_report(report: &BenchmarkReport) -> String {
+    use std::fmt::Write;
     let mut md = String::with_capacity(16384);
 
     md.push_str("# Planner Comparison Benchmark Report\n\n");
-    md.push_str(&format!("**Generated**: {}\n", report.timestamp));
-    md.push_str(&format!("**Git Commit**: {}\n\n", report.git_commit));
+    let _ = writeln!(md, "**Generated**: {}", report.timestamp);
+    let _ = writeln!(md, "**Git Commit**: {}\n", report.git_commit);
 
+    let s = &report.overall_summary;
     md.push_str("## Overall Summary\n\n");
-    md.push_str(&format!(
-        "- Total queries: {}\n",
-        report.overall_summary.total_queries
-    ));
-    md.push_str(&format!(
-        "- Parsed successfully: {} ({:.1}%)\n",
-        report.overall_summary.parsed_queries, report.overall_summary.parser_success_rate
-    ));
-    md.push_str(&format!(
-        "- Optimized successfully: {} ({:.1}%)\n",
-        report.overall_summary.optimized_queries, report.overall_summary.optimizer_success_rate
-    ));
-    md.push_str(&format!(
-        "- Median plan time: {:.2}ms\n",
-        report.overall_summary.median_plan_time_us as f64 / 1000.0
-    ));
-    md.push_str(&format!(
-        "- P95 plan time: {:.2}ms\n",
-        report.overall_summary.p95_plan_time_us as f64 / 1000.0
-    ));
-    md.push_str(&format!(
-        "- Total plan time: {:.2}ms\n\n",
-        report.overall_summary.total_plan_time_ms
-    ));
+    let _ = writeln!(md, "- Total queries: {}", s.total_queries);
+    let _ = writeln!(md, "- Parsed successfully: {} ({:.1}%)", s.parsed_queries, s.parser_success_rate);
+    let _ = writeln!(md, "- Optimized successfully: {} ({:.1}%)", s.optimized_queries, s.optimizer_success_rate);
+    let _ = writeln!(md, "- Median plan time: {:.2}ms", s.median_plan_time_us as f64 / 1000.0);
+    let _ = writeln!(md, "- P95 plan time: {:.2}ms", s.p95_plan_time_us as f64 / 1000.0);
+    let _ = writeln!(md, "- Total plan time: {:.2}ms\n", s.total_plan_time_ms);
 
     md.push_str("## Results by Category\n\n");
     md.push_str("| Category | Queries | Parsed | Optimized | Median Time | P95 Time | Median Nodes | Median Rules |\n");
     md.push_str("|----------|---------|--------|-----------|-------------|----------|--------------|---------------|\n");
 
     for cat in &report.categories {
-        md.push_str(&format!(
-            "| {} | {} | {} | {} | {:.2}ms | {:.2}ms | {} | {} |\n",
-            cat.category,
-            cat.total_queries,
-            cat.parsed_queries,
-            cat.optimized_queries,
+        let _ = writeln!(
+            md,
+            "| {} | {} | {} | {} | {:.2}ms | {:.2}ms | {} | {} |",
+            cat.category, cat.total_queries, cat.parsed_queries, cat.optimized_queries,
             cat.median_plan_time_us as f64 / 1000.0,
             cat.p95_plan_time_us as f64 / 1000.0,
-            cat.median_egraph_nodes,
-            cat.median_rules_applied,
-        ));
+            cat.median_egraph_nodes, cat.median_rules_applied,
+        );
     }
 
+    write_detailed_results(&mut md, report);
+    write_coverage_and_failures(&mut md, report);
+    md
+}
+
+fn write_detailed_results(md: &mut String, report: &BenchmarkReport) {
+    use std::fmt::Write;
     md.push_str("\n## Detailed Query Results\n\n");
 
     for category in &report.categories {
-        md.push_str(&format!("### {}\n\n", category.category));
+        let _ = writeln!(md, "### {}\n", category.category);
         md.push_str("| Query ID | Plan Time (ms) | Cost | Nodes | Rules | Status |\n");
         md.push_str("|----------|----------------|------|-------|-------|--------|\n");
 
-        let cat_queries: Vec<_> = report
-            .queries
-            .iter()
+        let cat_queries: Vec<_> = report.queries.iter()
             .filter(|q| q.category == category.category)
             .collect();
 
@@ -418,35 +410,24 @@ fn generate_markdown_report(report: &BenchmarkReport) -> String {
             } else {
                 "FAILED"
             };
-
-            md.push_str(&format!(
-                "| {} | {:.2} | {:.0} | {} | {} | {} |\n",
-                q.query_id,
-                q.plan_time_us as f64 / 1000.0,
-                q.plan_cost_estimate,
-                q.egraph_nodes,
-                q.rules_applied,
-                status,
-            ));
+            let _ = writeln!(
+                md, "| {} | {:.2} | {:.0} | {} | {} | {} |",
+                q.query_id, q.plan_time_us as f64 / 1000.0,
+                q.plan_cost_estimate, q.egraph_nodes, q.rules_applied, status,
+            );
         }
-
-        md.push_str("\n");
+        md.push('\n');
     }
+}
 
+fn write_coverage_and_failures(md: &mut String, report: &BenchmarkReport) {
+    use std::fmt::Write;
     md.push_str("## Feature Coverage\n\n");
-    md.push_str(&format!(
-        "- Parser success rate: {:.1}%\n",
-        report.overall_summary.parser_success_rate
-    ));
-    md.push_str(&format!(
-        "- Optimizer success rate: {:.1}%\n",
-        report.overall_summary.optimizer_success_rate
-    ));
+    let _ = writeln!(md, "- Parser success rate: {:.1}%", report.overall_summary.parser_success_rate);
+    let _ = writeln!(md, "- Optimizer success rate: {:.1}%", report.overall_summary.optimizer_success_rate);
 
     md.push_str("\n## Failed Queries\n\n");
-    let failed: Vec<_> = report
-        .queries
-        .iter()
+    let failed: Vec<_> = report.queries.iter()
         .filter(|q| !q.optimizer_success)
         .collect();
 
@@ -455,21 +436,15 @@ fn generate_markdown_report(report: &BenchmarkReport) -> String {
     } else {
         md.push_str("| Query ID | Category | Error |\n");
         md.push_str("|----------|----------|-------|\n");
-
         for q in failed {
             let error = q.error_message.as_deref().unwrap_or("Unknown error");
-            md.push_str(&format!(
-                "| {} | {} | {} |\n",
-                q.query_id, q.category, error
-            ));
+            let _ = writeln!(md, "| {} | {} | {} |", q.query_id, q.category, error);
         }
-
-        md.push_str("\n");
+        md.push('\n');
     }
-
-    md
 }
 
+#[expect(clippy::expect_used, reason = "benchmark binary, panicking on IO failure is acceptable")]
 fn main() {
     let base_dir = PathBuf::from("benchmarks/planner_comparison");
     let results_dir = base_dir.join("results");

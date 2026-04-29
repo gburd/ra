@@ -73,6 +73,7 @@ pub struct SnapshotFactsProvider {
 
 impl SnapshotFactsProvider {
     /// Create a new `SnapshotFactsProvider` from a timeline snapshot.
+    #[must_use]
     pub fn new(snapshot: &FingerPrintSnapshot, hardware_profile: &HardwareProfileDef) -> Self {
         let hardware = hardware_profile.to_hardware_profile();
 
@@ -111,18 +112,21 @@ impl SnapshotFactsProvider {
     }
 
     /// Set database name (override default).
+    #[must_use]
     pub fn with_database_name(mut self, name: String) -> Self {
         self.database_name = name;
         self
     }
 
     /// Set SQL dialect (override default).
+    #[must_use]
     pub fn with_dialect(mut self, dialect: SqlDialect) -> Self {
         self.dialect = dialect;
         self
     }
 
     /// Set optimizer timeout (override default).
+    #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -307,6 +311,8 @@ fn extract_features(snapshot: &FingerPrintSnapshot) -> HashMap<String, bool> {
 }
 
 #[cfg(test)]
+#[expect(clippy::panic, clippy::unwrap_used, reason = "test code")]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use crate::timeline_config::{
@@ -324,8 +330,8 @@ mod tests {
             has_gpu: false,
             gpu_memory: None,
             l1_cache_size: 32768,
-            l2_cache_size: 262144,
-            l3_cache_size: 8388608,
+            l2_cache_size: 262_144,
+            l3_cache_size: 8_388_608,
         }
     }
 

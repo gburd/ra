@@ -204,6 +204,7 @@ pub fn references_table(expr: &Expr, table: &str) -> bool {
 /// - FULL OUTER: filter is null-rejecting and references both sides
 ///   (converts to INNER), or one side (converts to LEFT/RIGHT)
 #[must_use]
+#[expect(clippy::implicit_hasher, reason = "always uses default hasher")]
 pub fn outer_to_inner_conversion(
     join_type: JoinType,
     filter: &Expr,
@@ -588,6 +589,7 @@ pub fn join_transformation_rules(
 }
 
 #[cfg(test)]
+#[expect(clippy::panic, reason = "test assertions")]
 mod tests {
     use super::*;
     use ra_core::expr::Const;

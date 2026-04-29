@@ -20,6 +20,7 @@ use crate::egraph::RelLang;
 /// These rules handle NULL propagation through various operators
 /// according to SQL's three-valued logic semantics.
 #[must_use]
+#[expect(clippy::too_many_lines, reason = "rule collection for NULL simplification patterns")]
 pub fn null_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // ---------------------------------------------------------------

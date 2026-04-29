@@ -125,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(clippy::expect_used, reason = "test code")]
     fn error_serialize_roundtrip() {
         let err = MetadataError::Query {
             message: "test error".into(),

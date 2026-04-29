@@ -31,7 +31,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQL92Extension;
 
 impl GrammarExtension for SQL92Extension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sql-92"
     }
 

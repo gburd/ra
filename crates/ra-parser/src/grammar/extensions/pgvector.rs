@@ -1,6 +1,6 @@
-//! pgvector extension for PostgreSQL - Vector similarity search.
+//! pgvector extension for `PostgreSQL` - Vector similarity search.
 //!
-//! pgvector enables efficient vector similarity search in PostgreSQL, supporting
+//! pgvector enables efficient vector similarity search in `PostgreSQL`, supporting
 //! embedding-based semantic search for AI/ML applications.
 //!
 //! # Key Features
@@ -52,7 +52,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct PgVectorExtension;
 
 impl GrammarExtension for PgVectorExtension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "pgvector"
     }
 

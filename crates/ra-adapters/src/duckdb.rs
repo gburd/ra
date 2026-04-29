@@ -1,16 +1,18 @@
-//! DuckDB database adapter implementation with analytics benchmark capabilities.
+//! `DuckDB` database adapter implementation with analytics benchmark capabilities.
 //!
-//! DuckDB is an embedded analytical database designed for OLAP workloads. This adapter
+//! `DuckDB` is an embedded analytical database designed for OLAP workloads. This adapter
 //! provides both standard database adapter capabilities and specialized benchmarking
-//! features for comparing native DuckDB execution with Ra-optimized execution.
+//! features for comparing native `DuckDB` execution with Ra-optimized execution.
 
-#[cfg_attr(not(feature = "duckdb"), allow(unused_imports))]
-use crate::{AdapterError, ColumnInfo, DatabaseAdapter, DatabaseCapabilities, SchemaInfo, TableInfo};
-#[cfg_attr(not(feature = "duckdb"), allow(unused_imports))]
+#[cfg_attr(not(feature = "duckdb"), expect(unused_imports))]
+use crate::{
+    AdapterError, ColumnInfo, DatabaseAdapter, DatabaseCapabilities, SchemaInfo, TableInfo,
+};
+#[cfg_attr(not(feature = "duckdb"), expect(unused_imports))]
 use ra_core::{FactsProvider, SqlDialect};
-#[cfg_attr(not(feature = "duckdb"), allow(unused_imports))]
+#[cfg_attr(not(feature = "duckdb"), expect(unused_imports))]
 use ra_stats::types::{ColumnStats, TableStats};
-#[cfg_attr(not(feature = "duckdb"), allow(unused_imports))]
+#[cfg_attr(not(feature = "duckdb"), expect(unused_imports))]
 use std::time::Instant;
 
 use std::collections::HashMap;
@@ -20,10 +22,10 @@ use std::time::Duration;
 #[cfg(feature = "duckdb")]
 use duckdb::{Connection, Row};
 
-/// DuckDB database adapter with benchmark capabilities.
+/// `DuckDB` database adapter with benchmark capabilities.
 ///
 /// Provides schema introspection, statistics gathering, and execution timing
-/// for comparing native DuckDB execution with Ra-optimized execution.
+/// for comparing native `DuckDB` execution with Ra-optimized execution.
 ///
 /// # Features
 ///
@@ -37,7 +39,6 @@ pub struct DuckDBAdapter {
     connection_string: Option<String>,
     #[cfg(feature = "duckdb")]
     connection: Option<Mutex<Connection>>,
-    #[allow(dead_code)]
     facts: Mutex<DuckDBFacts>,
 }
 
@@ -47,23 +48,25 @@ impl std::fmt::Debug for DuckDBAdapter {
         debug_struct.field("connection_string", &self.connection_string);
         #[cfg(feature = "duckdb")]
         {
-            debug_struct.field("connection", &self.connection.as_ref().map(|_| "<connected>"));
+            debug_struct.field(
+                "connection",
+                &self.connection.as_ref().map(|_| "<connected>"),
+            );
         }
-        debug_struct.finish()
+        debug_struct.finish_non_exhaustive()
     }
 }
 
 /// Internal storage for gathered facts.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct DuckDBFacts {
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     table_stats: HashMap<String, ra_core::facts::TableStats>,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     column_stats: HashMap<(String, String), ra_core::statistics::ColumnStats>,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     schemas: HashMap<String, ra_core::facts::TableInfo>,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     hardware: ra_core::facts::HardwareProfile,
     features: HashMap<String, bool>,
 }
@@ -115,13 +118,13 @@ pub struct ExplainPlan {
 /// Comparison metrics between native and Ra-optimized execution.
 #[derive(Debug, Clone)]
 pub struct ComparisonMetrics {
-    /// Native DuckDB execution time
+    /// Native `DuckDB` execution time
     pub native_duration: Duration,
     /// Ra-optimized execution time
     pub ra_duration: Duration,
-    /// Speedup factor (native_duration / ra_duration)
+    /// Speedup factor (`native_duration` / `ra_duration`)
     pub speedup: f64,
-    /// Native DuckDB explain plan
+    /// Native `DuckDB` explain plan
     pub native_plan: ExplainPlan,
     /// Ra explain plan
     pub ra_plan: ExplainPlan,
@@ -130,7 +133,7 @@ pub struct ComparisonMetrics {
 }
 
 impl DuckDBAdapter {
-    /// Create a new DuckDB adapter.
+    /// Create a new `DuckDB` adapter.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -141,7 +144,7 @@ impl DuckDBAdapter {
         }
     }
 
-    /// Open a DuckDB database file or in-memory database.
+    /// Open a `DuckDB` database file or in-memory database.
     ///
     /// # Arguments
     ///
@@ -201,7 +204,10 @@ impl DuckDBAdapter {
 
         let column_count = stmt.column_count();
         let column_names: Vec<String> = (0..column_count)
-            .map(|i| stmt.column_name(i).map_or(String::new(), ToString::to_string))
+            .map(|i| {
+                stmt.column_name(i)
+                    .map_or(String::new(), ToString::to_string)
+            })
             .collect();
 
         let rows = stmt
@@ -227,7 +233,7 @@ impl DuckDBAdapter {
         })
     }
 
-    /// Execute query using native DuckDB optimizer.
+    /// Execute query using native `DuckDB` optimizer.
     ///
     /// # Errors
     ///
@@ -281,7 +287,7 @@ impl DuckDBAdapter {
         })
     }
 
-    /// Get table statistics from DuckDB.
+    /// Get table statistics from `DuckDB`.
     ///
     /// # Errors
     ///
@@ -301,7 +307,7 @@ impl DuckDBAdapter {
         Ok(stats)
     }
 
-    /// Compare native DuckDB execution with Ra-optimized execution.
+    /// Compare native `DuckDB` execution with Ra-optimized execution.
     ///
     /// # Errors
     ///
@@ -330,34 +336,39 @@ impl DuckDBAdapter {
         })
     }
 
-    /// Load Parquet file into DuckDB.
+    /// Load Parquet file into `DuckDB`.
     ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be loaded.
     #[cfg(feature = "duckdb")]
     pub fn load_parquet(&self, table_name: &str, file_path: &str) -> Result<(), AdapterError> {
-        let query = format!("CREATE TABLE {table_name} AS SELECT * FROM read_parquet('{file_path}')");
+        let query =
+            format!("CREATE TABLE {table_name} AS SELECT * FROM read_parquet('{file_path}')");
         self.execute(&query)?;
         Ok(())
     }
 
-    /// Load CSV file into DuckDB.
+    /// Load CSV file into `DuckDB`.
     ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be loaded.
     #[cfg(feature = "duckdb")]
     pub fn load_csv(&self, table_name: &str, file_path: &str) -> Result<(), AdapterError> {
-        let query = format!("CREATE TABLE {table_name} AS SELECT * FROM read_csv_auto('{file_path}')");
+        let query =
+            format!("CREATE TABLE {table_name} AS SELECT * FROM read_csv_auto('{file_path}')");
         self.execute(&query)?;
         Ok(())
     }
 
-    /// Detect DuckDB capabilities and features.
+    /// Detect `DuckDB` capabilities and features.
     #[cfg(feature = "duckdb")]
     fn detect_capabilities(&self) -> Result<(), AdapterError> {
-        let mut facts = self.facts.lock().unwrap();
+        let mut facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
 
         // DuckDB always has these features
         facts.features.insert("window_functions".to_string(), true);
@@ -365,11 +376,15 @@ impl DuckDBAdapter {
         facts.features.insert("lateral_join".to_string(), true);
         facts.features.insert("parallel_query".to_string(), true);
         facts.features.insert("columnar_storage".to_string(), true);
-        facts.features.insert("vectorized_execution".to_string(), true);
+        facts
+            .features
+            .insert("vectorized_execution".to_string(), true);
         facts.features.insert("parquet_support".to_string(), true);
         facts.features.insert("csv_support".to_string(), true);
         facts.features.insert("arrow_support".to_string(), true);
-        facts.features.insert("aggregate_pushdown".to_string(), true);
+        facts
+            .features
+            .insert("aggregate_pushdown".to_string(), true);
         facts.features.insert("filter_pushdown".to_string(), true);
 
         Ok(())
@@ -384,7 +399,7 @@ impl DuckDBAdapter {
     }
 }
 
-/// Convert a DuckDB row value to JSON.
+/// Convert a `DuckDB` row value to JSON.
 #[cfg(feature = "duckdb")]
 fn row_value_to_json(row: &Row, idx: usize) -> Result<serde_json::Value, duckdb::Error> {
     use duckdb::types::ValueRef;
@@ -401,12 +416,10 @@ fn row_value_to_json(row: &Row, idx: usize) -> Result<serde_json::Value, duckdb:
         ValueRef::USmallInt(i) => Ok(serde_json::Value::Number(i.into())),
         ValueRef::UInt(i) => Ok(serde_json::Value::Number(i.into())),
         ValueRef::UBigInt(i) => Ok(serde_json::Value::Number(i.into())),
-        ValueRef::Float(f) => Ok(serde_json::Number::from_f64(f as f64)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null)),
+        ValueRef::Float(f) => Ok(serde_json::Number::from_f64(f64::from(f))
+            .map_or(serde_json::Value::Null, serde_json::Value::Number)),
         ValueRef::Double(f) => Ok(serde_json::Number::from_f64(f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null)),
+            .map_or(serde_json::Value::Null, serde_json::Value::Number)),
         ValueRef::Decimal(_) => {
             // Convert decimal to string representation
             let s: String = row.get(idx)?;
@@ -434,7 +447,6 @@ fn row_value_to_json(row: &Row, idx: usize) -> Result<serde_json::Value, duckdb:
 }
 
 /// Simple base64 encoding.
-#[allow(dead_code)]
 fn base64_encode(data: &[u8]) -> String {
     const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
@@ -529,11 +541,16 @@ impl DatabaseAdapter for DuckDBAdapter {
         }
         #[cfg(not(feature = "duckdb"))]
         {
-            Err(AdapterError::UnsupportedFeature("DuckDB feature not enabled".to_string()))
+            Err(AdapterError::UnsupportedFeature(
+                "DuckDB feature not enabled".to_string(),
+            ))
         }
     }
 
-    fn gather_column_stats(&self, table: &str) -> Result<HashMap<String, ColumnStats>, AdapterError> {
+    fn gather_column_stats(
+        &self,
+        table: &str,
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError> {
         #[cfg(feature = "duckdb")]
         {
             let conn_mutex = self
@@ -608,7 +625,9 @@ impl DatabaseAdapter for DuckDBAdapter {
         }
         #[cfg(not(feature = "duckdb"))]
         {
-            Err(AdapterError::UnsupportedFeature("DuckDB feature not enabled".to_string()))
+            Err(AdapterError::UnsupportedFeature(
+                "DuckDB feature not enabled".to_string(),
+            ))
         }
     }
 
@@ -641,7 +660,9 @@ impl DatabaseAdapter for DuckDBAdapter {
                 // Get columns
                 let mut col_stmt = conn
                     .prepare(&format!("DESCRIBE \"{table_name}\""))
-                    .map_err(|e| AdapterError::QueryError(format!("Failed to describe table: {e}")))?;
+                    .map_err(|e| {
+                        AdapterError::QueryError(format!("Failed to describe table: {e}"))
+                    })?;
 
                 let columns: Vec<ColumnInfo> = col_stmt
                     .query_map([], |row| {
@@ -654,7 +675,9 @@ impl DatabaseAdapter for DuckDBAdapter {
                     })
                     .map_err(|e| AdapterError::QueryError(format!("Failed to query columns: {e}")))?
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| AdapterError::QueryError(format!("Failed to collect columns: {e}")))?;
+                    .map_err(|e| {
+                        AdapterError::QueryError(format!("Failed to collect columns: {e}"))
+                    })?;
 
                 tables.insert(
                     table_name.clone(),
@@ -672,12 +695,17 @@ impl DatabaseAdapter for DuckDBAdapter {
         }
         #[cfg(not(feature = "duckdb"))]
         {
-            Err(AdapterError::UnsupportedFeature("DuckDB feature not enabled".to_string()))
+            Err(AdapterError::UnsupportedFeature(
+                "DuckDB feature not enabled".to_string(),
+            ))
         }
     }
 
     fn get_capabilities(&self) -> Result<DatabaseCapabilities, AdapterError> {
-        let facts = self.facts.lock().unwrap();
+        let facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         Ok(DatabaseCapabilities {
             database_name: "DuckDB".to_string(),
             dialect: SqlDialect::Postgres,
@@ -688,7 +716,10 @@ impl DatabaseAdapter for DuckDBAdapter {
     }
 
     fn supports_feature(&self, feature: &str) -> Result<bool, AdapterError> {
-        let facts = self.facts.lock().unwrap();
+        let facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         Ok(facts.features.get(feature).copied().unwrap_or(false))
     }
 
@@ -711,7 +742,11 @@ impl FactsProvider for DuckDBAdapter {
         None
     }
 
-    fn get_column_stats(&self, _table_name: &str, _column_name: &str) -> Option<&ra_core::statistics::ColumnStats> {
+    fn get_column_stats(
+        &self,
+        _table_name: &str,
+        _column_name: &str,
+    ) -> Option<&ra_core::statistics::ColumnStats> {
         None
     }
 
@@ -732,7 +767,9 @@ impl FactsProvider for DuckDBAdapter {
     }
 
     fn supports_feature(&self, feature_name: &str) -> bool {
-        let facts = self.facts.lock().unwrap();
+        let Ok(facts) = self.facts.lock() else {
+            return false;
+        };
         facts.features.get(feature_name).copied().unwrap_or(false)
     }
 
@@ -749,7 +786,6 @@ impl FactsProvider for DuckDBAdapter {
     }
 }
 
-#[allow(dead_code)]
 static DEFAULT_HARDWARE: ra_core::facts::HardwareProfile = ra_core::facts::HardwareProfile {
     cpu_cores: 8,
     available_memory: 8 * 1024 * 1024 * 1024,

@@ -1,5 +1,20 @@
 //! Command-line interface for the relational algebra rule system.
 #![allow(clippy::print_stderr)]
+// CLI application code uses expect/unwrap for infallible operations
+// (regex compilation, serialization of known-good data, etc.).
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+// Doc comments reference SQL/database identifiers that don't need backticks.
+#![allow(clippy::doc_markdown)]
+// CLI command handlers are naturally long match-based dispatchers and
+// accept many parameters forwarded from the argument parser.
+#![allow(clippy::too_many_lines, clippy::too_many_arguments)]
+// CLI flag-forwarding functions pass through boolean args from clap.
+#![allow(clippy::fn_params_excessive_bools)]
+// CLI command functions return Result for uniform error handling even
+// when some paths never fail.
+#![allow(clippy::unnecessary_wraps)]
+// Some CLI functions take &Option<T> from clap struct fields.
+#![allow(clippy::ref_option_ref)]
 
 mod cache_commands;
 mod cli;

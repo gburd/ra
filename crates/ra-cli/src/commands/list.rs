@@ -1,5 +1,6 @@
 //! The `list` subcommand.
 
+use std::fmt::Write;
 use std::path::Path;
 
 use anyhow::{bail, Result};
@@ -63,10 +64,10 @@ pub fn cmd_list(
     if !quiet {
         let mut header = format!("{} rule(s) found", entries.len());
         if let Some(cat) = category_filter {
-            header.push_str(&format!(" in category '{cat}'"));
+            let _ = write!(header, " in category '{cat}'");
         }
         if let Some(tag) = tag_filter {
-            header.push_str(&format!(" with tag '{tag}'"));
+            let _ = write!(header, " with tag '{tag}'");
         }
         print_header(&header);
     }

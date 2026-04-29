@@ -73,17 +73,11 @@ impl StatsdAdapter {
             format!("{}.{name}", self.prefix)
         };
 
-        let mut line = format!(
-            "{full_name}:{value}|{}",
-            metric_type.suffix()
-        );
+        let mut line = format!("{full_name}:{value}|{}", metric_type.suffix());
 
         if !tags.is_empty() {
             use std::fmt::Write;
-            let tag_str: Vec<String> = tags
-                .iter()
-                .map(|(k, v)| format!("{k}:{v}"))
-                .collect();
+            let tag_str: Vec<String> = tags.iter().map(|(k, v)| format!("{k}:{v}")).collect();
             let _ = write!(line, "|#{}", tag_str.join(","));
         }
 
@@ -92,34 +86,18 @@ impl StatsdAdapter {
 }
 
 impl MonitoringAdapter for StatsdAdapter {
-    fn record_gauge(
-        &mut self,
-        name: &str,
-        value: f64,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_gauge(&mut self, name: &str, value: f64, tags: &[(&str, &str)]) {
         let line = self.format(name, value, StatsdType::Gauge, tags);
         self.lines.push(line);
     }
 
-    fn record_histogram(
-        &mut self,
-        name: &str,
-        value: f64,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_histogram(&mut self, name: &str, value: f64, tags: &[(&str, &str)]) {
         let line = self.format(name, value, StatsdType::Timer, tags);
         self.lines.push(line);
     }
 
-    fn record_counter(
-        &mut self,
-        name: &str,
-        delta: u64,
-        tags: &[(&str, &str)],
-    ) {
-        let line =
-            self.format(name, delta as f64, StatsdType::Counter, tags);
+    fn record_counter(&mut self, name: &str, delta: u64, tags: &[(&str, &str)]) {
+        let line = self.format(name, delta as f64, StatsdType::Counter, tags);
         self.lines.push(line);
     }
 
@@ -177,10 +155,7 @@ impl StatsdParser {
     /// Parse a single `StatsD` wire-format line.
     ///
     /// Returns the parsed metric on success.
-    pub fn parse_line(
-        &mut self,
-        line: &str,
-    ) -> Option<ParsedStatsdMetric> {
+    pub fn parse_line(&mut self, line: &str) -> Option<ParsedStatsdMetric> {
         self.parse_count += 1;
 
         let Some(colon_pos) = line.find(':') else {
@@ -222,10 +197,7 @@ impl StatsdParser {
             } else if let Some(tag_str) = segment.strip_prefix('#') {
                 for pair in tag_str.split(',') {
                     if let Some(colon) = pair.find(':') {
-                        tags.push((
-                            pair[..colon].to_string(),
-                            pair[colon + 1..].to_string(),
-                        ));
+                        tags.push((pair[..colon].to_string(), pair[colon + 1..].to_string()));
                     }
                 }
             }
@@ -245,10 +217,7 @@ impl StatsdParser {
                 *self.counters.entry(name).or_insert(0.0) += adjusted;
             }
             StatsdType::Timer => {
-                self.timers
-                    .entry(name)
-                    .or_default()
-                    .push(value);
+                self.timers.entry(name).or_default().push(value);
             }
             StatsdType::Gauge => {
                 self.gauges.insert(name, value);
@@ -361,11 +330,7 @@ mod tests {
     #[test]
     fn tags_appended() {
         let mut s = StatsdAdapter::new("ra");
-        s.record_gauge(
-            "cpu",
-            50.0,
-            &[("host", "db1"), ("env", "prod")],
-        );
+        s.record_gauge("cpu", 50.0, &[("host", "db1"), ("env", "prod")]);
         let line = &s.lines()[0];
         assert!(line.contains("|#host:db1,env:prod"));
     }
@@ -398,16 +363,14 @@ mod tests {
         assert_eq!(m.name, "requests");
         assert!((m.value - 1.0).abs() < f64::EPSILON);
         assert_eq!(m.metric_type, StatsdType::Counter);
-        assert!((parser.counter_value("requests").unwrap() - 1.0)
-            .abs() < f64::EPSILON);
+        assert!((parser.counter_value("requests").unwrap() - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn parse_gauge() {
         let mut parser = StatsdParser::new();
         parser.parse_line("cpu:75.5|g");
-        assert!((parser.gauge_value("cpu").unwrap() - 75.5).abs()
-            < f64::EPSILON);
+        assert!((parser.gauge_value("cpu").unwrap() - 75.5).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -424,9 +387,7 @@ mod tests {
     #[test]
     fn parse_with_tags() {
         let mut parser = StatsdParser::new();
-        let m = parser
-            .parse_line("cpu:50|g|#host:db1,env:prod")
-            .unwrap();
+        let m = parser.parse_line("cpu:50|g|#host:db1,env:prod").unwrap();
         assert_eq!(m.tags.len(), 2);
         assert_eq!(m.tags[0], ("host".into(), "db1".into()));
         assert_eq!(m.tags[1], ("env".into(), "prod".into()));
@@ -438,8 +399,7 @@ mod tests {
         let m = parser.parse_line("hits:1|c|@0.5").unwrap();
         assert!((m.sample_rate - 0.5).abs() < f64::EPSILON);
         // Counter should be adjusted: 1 / 0.5 = 2
-        assert!((parser.counter_value("hits").unwrap() - 2.0).abs()
-            < f64::EPSILON);
+        assert!((parser.counter_value("hits").unwrap() - 2.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -447,8 +407,7 @@ mod tests {
         let mut parser = StatsdParser::new();
         parser.parse_line("reqs:10|c");
         parser.parse_line("reqs:5|c");
-        assert!((parser.counter_value("reqs").unwrap() - 15.0).abs()
-            < f64::EPSILON);
+        assert!((parser.counter_value("reqs").unwrap() - 15.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -456,17 +415,14 @@ mod tests {
         let mut parser = StatsdParser::new();
         parser.parse_line("cpu:50|g");
         parser.parse_line("cpu:75|g");
-        assert!((parser.gauge_value("cpu").unwrap() - 75.0).abs()
-            < f64::EPSILON);
+        assert!((parser.gauge_value("cpu").unwrap() - 75.0).abs() < f64::EPSILON);
         assert_eq!(parser.gauge_count(), 1);
     }
 
     #[test]
     fn parse_batch() {
         let mut parser = StatsdParser::new();
-        let count = parser.parse_batch(
-            "cpu:50|g\nreqs:1|c\nlatency:10|ms\n",
-        );
+        let count = parser.parse_batch("cpu:50|g\nreqs:1|c\nlatency:10|ms\n");
         assert_eq!(count, 3);
         assert_eq!(parser.gauge_count(), 1);
         assert_eq!(parser.counter_count(), 1);
@@ -503,10 +459,8 @@ mod tests {
         for line in adapter.lines() {
             parser.parse_line(line);
         }
-        assert!((parser.gauge_value("ra.cpu").unwrap() - 80.0).abs()
-            < f64::EPSILON);
-        assert!((parser.counter_value("ra.reqs").unwrap() - 5.0).abs()
-            < f64::EPSILON);
+        assert!((parser.gauge_value("ra.cpu").unwrap() - 80.0).abs() < f64::EPSILON);
+        assert!((parser.counter_value("ra.reqs").unwrap() - 5.0).abs() < f64::EPSILON);
         assert_eq!(parser.timer_count(), 1);
     }
 }

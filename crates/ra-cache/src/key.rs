@@ -7,9 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Two queries with the same SQL text but different hardware profiles
 /// or parameter types may produce different optimal plans, so all
 /// three components contribute to the key.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct QueryKey {
     /// Normalized SQL text (whitespace-collapsed, case-folded).
     pub sql: String,
@@ -37,10 +35,7 @@ impl QueryKey {
 }
 
 impl std::fmt::Display for QueryKey {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{}@{}",
@@ -93,16 +88,8 @@ mod tests {
 
     #[test]
     fn different_profiles_differ() {
-        let k1 = QueryKey::new(
-            "SELECT 1".to_owned(),
-            "auto".to_owned(),
-            vec![],
-        );
-        let k2 = QueryKey::new(
-            "SELECT 1".to_owned(),
-            "gpu-server".to_owned(),
-            vec![],
-        );
+        let k1 = QueryKey::new("SELECT 1".to_owned(), "auto".to_owned(), vec![]);
+        let k2 = QueryKey::new("SELECT 1".to_owned(), "gpu-server".to_owned(), vec![]);
         assert_ne!(k1, k2);
     }
 

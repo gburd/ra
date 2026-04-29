@@ -31,7 +31,7 @@ impl StatsCache {
         }
     }
 
-    /// Create a cache from an existing HashMap of statistics.
+    /// Create a cache from an existing `HashMap` of statistics.
     ///
     /// This performs one clone to move data into the Arc, but subsequent
     /// accesses via `clone()` are cheap (just reference count increments).
@@ -72,17 +72,17 @@ impl StatsCache {
         self.inner.len()
     }
 
-    /// Get a reference to the inner HashMap.
+    /// Get a reference to the inner `HashMap`.
     ///
-    /// This allows passing the stats to functions that expect HashMap.
-    /// Since the HashMap is Arc-wrapped, this is a cheap operation.
+    /// This allows passing the stats to functions that expect `HashMap`.
+    /// Since the `HashMap` is Arc-wrapped, this is a cheap operation.
     #[inline]
     #[must_use]
     pub fn as_map(&self) -> &HashMap<String, Statistics> {
         &self.inner
     }
 
-    /// Convert cache to a cloned HashMap.
+    /// Convert cache to a cloned `HashMap`.
     ///
     /// This performs an actual clone of the Statistics objects.
     /// Use this only when mutation is needed; prefer `as_map()` for reads.
@@ -140,9 +140,9 @@ impl StatsCacheBuilder {
         self
     }
 
-    /// Build the final StatsCache.
+    /// Build the final `StatsCache`.
     ///
-    /// This moves the HashMap into an Arc, making future clones cheap.
+    /// This moves the `HashMap` into an Arc, making future clones cheap.
     #[must_use]
     pub fn build(self) -> StatsCache {
         StatsCache::from_map(self.map)
@@ -150,6 +150,8 @@ impl StatsCacheBuilder {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
 

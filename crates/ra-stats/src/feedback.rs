@@ -276,8 +276,8 @@ impl CardinalityErrorTracker {
         let mut sorted: Vec<f64> = self.errors.iter().map(|e| e.q_error).collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let mid = sorted.len() / 2;
-        if sorted.len() % 2 == 0 {
-            (sorted[mid - 1] + sorted[mid]) / 2.0
+        if sorted.len().is_multiple_of(2) {
+            f64::midpoint(sorted[mid - 1], sorted[mid])
         } else {
             sorted[mid]
         }
@@ -358,6 +358,10 @@ impl fmt::Display for ErrorRecommendation {
 /// - High filter errors with no index -> suggest index creation
 /// - Medium scan errors -> histogram for skewed columns
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "All fields are thresholds, postfix provides clarity"
+)]
 pub struct RecommendationEngine {
     /// q-error threshold for suggesting ANALYZE (default: 10.0).
     analyze_threshold: f64,
@@ -425,11 +429,10 @@ impl RecommendationEngine {
                     table: table.clone(),
                     severity: ErrorSeverity::High,
                     message: format!(
-                        "Table '{}' has avg q-error {:.1}, \
-                         statistics are likely stale",
-                        table, avg,
+                        "Table '{table}' has avg q-error {avg:.1}, \
+                         statistics are likely stale"
                     ),
-                    suggestion: format!("ANALYZE {};", table),
+                    suggestion: format!("ANALYZE {table};"),
                     avg_q_error: avg,
                 });
             }
@@ -459,15 +462,13 @@ impl RecommendationEngine {
                 table: table.clone(),
                 severity: classify_error(avg),
                 message: format!(
-                    "Table '{}' has {} join estimation errors \
-                     (avg q-error {:.1}), consider extended \
-                     statistics for correlated join columns",
-                    table, count, avg,
+                    "Table '{table}' has {count} join estimation errors \
+                     (avg q-error {avg:.1}), consider extended \
+                     statistics for correlated join columns"
                 ),
                 suggestion: format!(
                     "CREATE STATISTICS ON <correlated_columns> \
-                     FROM {};",
-                    table,
+                     FROM {table};"
                 ),
                 avg_q_error: avg,
             });
@@ -495,12 +496,11 @@ impl RecommendationEngine {
                 table: table.clone(),
                 severity: classify_error(avg),
                 message: format!(
-                    "Table '{}' has {} filter estimation errors \
-                     (avg q-error {:.1}), a missing index may \
-                     cause poor selectivity estimates",
-                    table, count, avg,
+                    "Table '{table}' has {count} filter estimation errors \
+                     (avg q-error {avg:.1}), a missing index may \
+                     cause poor selectivity estimates"
                 ),
-                suggestion: format!("CREATE INDEX ON {} (<filter_columns>);", table,),
+                suggestion: format!("CREATE INDEX ON {table} (<filter_columns>);"),
                 avg_q_error: avg,
             });
         }
@@ -530,15 +530,13 @@ impl RecommendationEngine {
                 table: table.clone(),
                 severity: classify_error(avg),
                 message: format!(
-                    "Table '{}' has {} moderate scan errors \
-                     (avg q-error {:.1}), histograms may improve \
-                     estimation for skewed columns",
-                    table, count, avg,
+                    "Table '{table}' has {count} moderate scan errors \
+                     (avg q-error {avg:.1}), histograms may improve \
+                     estimation for skewed columns"
                 ),
                 suggestion: format!(
-                    "ALTER TABLE {} ALTER COLUMN <col> \
-                     SET STATISTICS 1000;",
-                    table,
+                    "ALTER TABLE {table} ALTER COLUMN <col> \
+                     SET STATISTICS 1000;"
                 ),
                 avg_q_error: avg,
             });
@@ -553,7 +551,6 @@ impl Default for RecommendationEngine {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -843,7 +840,7 @@ mod tests {
         let mut t = CardinalityErrorTracker::new();
         t.record("a", OperatorKind::Scan, 100.0, 200.0, None); // q=2
         t.record("b", OperatorKind::Scan, 100.0, 500.0, None); // q=5
-        let expected = (2.0 + 5.0) / 2.0;
+        let expected = f64::midpoint(2.0, 5.0);
         assert!((t.median_q_error() - expected).abs() < f64::EPSILON);
     }
 

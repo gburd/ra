@@ -1,14 +1,14 @@
 //! Vector similarity search cost model.
 //!
 //! Implements Phase 4 of RFC 0064: dimension-aware cost formulas for:
-//! - Vector distance calculations (L2, InnerProduct, Cosine)
+//! - Vector distance calculations (L2, `InnerProduct`, Cosine)
 //! - HNSW index scans (logarithmic complexity)
-//! - IVFFlat index scans (quantization + probe cost)
+//! - `IVFFlat` index scans (quantization + probe cost)
 //! - Sequential vector scans (linear complexity)
 //!
 //! Target speedups:
 //! - HNSW: 10-100x faster than sequential
-//! - IVFFlat: 5-50x faster than sequential
+//! - `IVFFlat`: 5-50x faster than sequential
 
 use ra_core::cost::Cost;
 
@@ -51,25 +51,24 @@ pub struct VectorIndexRecommendation {
 ///
 /// Formulas (per RFC 0064 Phase 4):
 /// - L2: dimensions * 0.001
-/// - InnerProduct: dimensions * 0.001
+/// - `InnerProduct`: dimensions * 0.001
 /// - Cosine: dimensions * 0.0015 (includes normalization)
 #[must_use]
 pub fn vector_distance_cost(dimensions: usize, metric: VectorMetric) -> f64 {
     let dims = dimensions as f64;
     match metric {
-        VectorMetric::L2 => dims * 0.001,
-        VectorMetric::InnerProduct => dims * 0.001,
+        VectorMetric::L2 | VectorMetric::InnerProduct => dims * 0.001,
         VectorMetric::Cosine => dims * 0.0015, // Higher due to normalization
     }
 }
 
 /// Cost of HNSW index search.
 ///
-/// Formula: log2(N) * ef_search * distance_cost
+/// Formula: log2(N) * `ef_search` * `distance_cost`
 ///
 /// Where:
-/// - N = total_vectors
-/// - ef_search = search breadth parameter (typically 40-200)
+/// - N = `total_vectors`
+/// - `ef_search` = search breadth parameter (typically 40-200)
 /// - m = max connections per node (affects log base, typically 16)
 /// - k = number of nearest neighbors to return
 ///
@@ -113,16 +112,16 @@ pub fn hnsw_search_cost(
     Cost::new(cpu_cost, io_cost, 0.0, memory as u64)
 }
 
-/// Cost of IVFFlat index search.
+/// Cost of `IVFFlat` index search.
 ///
-/// Formula: (quantization_cost + probes * vectors_per_list * distance_cost)
+/// Formula: (`quantization_cost` + probes * `vectors_per_list` * `distance_cost`)
 ///
 /// Where:
 /// - lists = number of clusters (typically sqrt(N))
 /// - probes = number of clusters to search (typically 1-20)
-/// - total_vectors / lists = vectors_per_list
+/// - `total_vectors` / lists = `vectors_per_list`
 ///
-/// IVFFlat provides constant-factor speedup with tunable recall.
+/// `IVFFlat` provides constant-factor speedup with tunable recall.
 /// Target: 5-50x speedup vs sequential scan.
 #[must_use]
 pub fn ivfflat_search_cost(
@@ -165,7 +164,7 @@ pub fn ivfflat_search_cost(
 
 /// Cost of sequential vector scan (no index).
 ///
-/// Formula: total_vectors * distance_cost
+/// Formula: `total_vectors` * `distance_cost`
 ///
 /// This is the baseline for comparison.
 #[must_use]
@@ -191,10 +190,10 @@ pub fn vector_sequential_scan_cost(
 /// Select the best vector index type for a given workload.
 ///
 /// Decision factors:
-/// - total_vectors: Large datasets favor HNSW (>100K), medium favor IVFFlat (10K-100K)
+/// - `total_vectors`: Large datasets favor HNSW (>100K), medium favor `IVFFlat` (10K-100K)
 /// - dimensions: High dimensions (>100) favor HNSW
-/// - query_frequency: High frequency favors HNSW (better amortization of build cost)
-/// - recall_requirement: High recall (>0.95) favors HNSW
+/// - `query_frequency`: High frequency favors HNSW (better amortization of build cost)
+/// - `recall_requirement`: High recall (>0.95) favors HNSW
 ///
 /// Returns recommendation with expected speedup and recall.
 #[must_use]
@@ -229,8 +228,7 @@ pub fn select_vector_index_type(
             speedup_factor: speedup,
             estimated_recall: 0.98,
             reason: format!(
-                "High recall requirement ({:.2}) favors HNSW with ef_search=80",
-                recall_requirement
+                "High recall requirement ({recall_requirement:.2}) favors HNSW with ef_search=80"
             ),
         };
     }
@@ -251,10 +249,7 @@ pub fn select_vector_index_type(
             index_type: VectorIndexType::HNSW,
             speedup_factor: 45.0,
             estimated_recall: 0.94,
-            reason: format!(
-                "High dimensionality ({}) with significant dataset size",
-                dimensions
-            ),
+            reason: format!("High dimensionality ({dimensions}) with significant dataset size"),
         };
     }
 
@@ -321,13 +316,13 @@ mod tests {
 
     #[test]
     fn hnsw_logarithmic_scaling() {
-        let cost_10k = hnsw_search_cost(128, 16, 40, 10_000, 10, VectorMetric::L2);
-        let cost_100k = hnsw_search_cost(128, 16, 40, 100_000, 10, VectorMetric::L2);
+        let cost_small = hnsw_search_cost(128, 16, 40, 10_000, 10, VectorMetric::L2);
+        let cost_large = hnsw_search_cost(128, 16, 40, 100_000, 10, VectorMetric::L2);
 
         // Cost should scale roughly logarithmically
         // log2(100k) / log2(10k) ≈ 1.26
-        let ratio = cost_100k.cpu / cost_10k.cpu;
-        assert!(ratio > 1.0 && ratio < 2.0, "Ratio: {}", ratio);
+        let ratio = cost_large.cpu / cost_small.cpu;
+        assert!(ratio > 1.0 && ratio < 2.0, "Ratio: {ratio}");
     }
 
     #[test]
@@ -336,7 +331,7 @@ mod tests {
         let hnsw_cost = hnsw_search_cost(128, 16, 40, 100_000, 10, VectorMetric::L2);
 
         let speedup = seq_cost.total() / hnsw_cost.total();
-        assert!(speedup >= 10.0, "HNSW speedup {} below target 10x", speedup);
+        assert!(speedup >= 10.0, "HNSW speedup {speedup} below target 10x");
     }
 
     #[test]
@@ -346,7 +341,7 @@ mod tests {
 
         // Cost should scale roughly linearly with probes
         let ratio = cost_10_probes.cpu / cost_1_probe.cpu;
-        assert!(ratio > 5.0 && ratio < 15.0, "Ratio: {}", ratio);
+        assert!(ratio > 5.0 && ratio < 15.0, "Ratio: {ratio}");
     }
 
     #[test]
@@ -355,11 +350,7 @@ mod tests {
         let ivfflat_cost = ivfflat_search_cost(128, 200, 10, 50_000, 10, VectorMetric::L2);
 
         let speedup = seq_cost.total() / ivfflat_cost.total();
-        assert!(
-            speedup >= 5.0,
-            "IVFFlat speedup {} below target 5x",
-            speedup
-        );
+        assert!(speedup >= 5.0, "IVFFlat speedup {speedup} below target 5x");
     }
 
     #[test]

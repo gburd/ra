@@ -59,10 +59,7 @@ pub enum TableFormatError {
 pub type Result<T> = std::result::Result<T, TableFormatError>;
 
 /// Identifies the table format family.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash,
-    Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TableFormatType {
     /// Apache Iceberg.
     Iceberg,
@@ -110,11 +107,7 @@ pub struct DataFile {
 impl DataFile {
     /// Create a new `DataFile` with the required fields.
     #[must_use]
-    pub fn new(
-        path: String,
-        size_bytes: u64,
-        record_count: u64,
-    ) -> Self {
+    pub fn new(path: String, size_bytes: u64, record_count: u64) -> Self {
         Self {
             path,
             size_bytes,
@@ -126,11 +119,7 @@ impl DataFile {
 
     /// Builder-style setter for partition values.
     #[must_use]
-    pub fn with_partition(
-        mut self,
-        column: String,
-        value: String,
-    ) -> Self {
+    pub fn with_partition(mut self, column: String, value: String) -> Self {
         self.partition_values.insert(column, value);
         self
     }
@@ -252,10 +241,7 @@ pub trait TableFormat: Send + Sync + fmt::Debug {
     fn list_files(&self, table: &str) -> Result<Vec<DataFile>>;
 
     /// Return per-file statistics when available.
-    fn file_statistics(
-        &self,
-        file: &DataFile,
-    ) -> Option<FileStats>;
+    fn file_statistics(&self, file: &DataFile) -> Option<FileStats>;
 
     /// Whether the format supports time-travel queries.
     fn supports_time_travel(&self) -> bool;
@@ -266,10 +252,7 @@ pub trait TableFormat: Send + Sync + fmt::Debug {
     ///
     /// Returns [`TableFormatError::TableNotFound`] when the table
     /// does not exist.
-    fn partition_spec(
-        &self,
-        table: &str,
-    ) -> Result<Option<PartitionSpec>>;
+    fn partition_spec(&self, table: &str) -> Result<Option<PartitionSpec>>;
 
     /// List available snapshots for time-travel.
     ///
@@ -279,10 +262,7 @@ pub trait TableFormat: Send + Sync + fmt::Debug {
     ///
     /// Returns [`TableFormatError::TableNotFound`] when the table
     /// does not exist.
-    fn list_snapshots(
-        &self,
-        table: &str,
-    ) -> Result<Vec<Snapshot>>;
+    fn list_snapshots(&self, table: &str) -> Result<Vec<Snapshot>>;
 
     /// Return the current snapshot id, if applicable.
     ///
@@ -290,40 +270,28 @@ pub trait TableFormat: Send + Sync + fmt::Debug {
     ///
     /// Returns [`TableFormatError::TableNotFound`] when the table
     /// does not exist.
-    fn current_snapshot_id(
-        &self,
-        table: &str,
-    ) -> Result<Option<u64>>;
+    fn current_snapshot_id(&self, table: &str) -> Result<Option<u64>>;
 }
 
+#[expect(clippy::unwrap_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::iceberg::IcebergFormat;
+    use super::*;
 
     #[test]
     fn table_format_type_display() {
         assert_eq!(TableFormatType::Iceberg.to_string(), "iceberg");
         assert_eq!(TableFormatType::Hudi.to_string(), "hudi");
-        assert_eq!(
-            TableFormatType::DeltaLake.to_string(),
-            "delta_lake"
-        );
-        assert_eq!(
-            TableFormatType::Traditional.to_string(),
-            "traditional"
-        );
+        assert_eq!(TableFormatType::DeltaLake.to_string(), "delta_lake");
+        assert_eq!(TableFormatType::Traditional.to_string(), "traditional");
     }
 
     #[test]
     fn data_file_builder() {
-        let file = DataFile::new(
-            "data/part-0001.parquet".to_owned(),
-            1024 * 1024,
-            50_000,
-        )
-        .with_partition("date".to_owned(), "2024-01-15".to_owned())
-        .with_file_format("parquet".to_owned());
+        let file = DataFile::new("data/part-0001.parquet".to_owned(), 1024 * 1024, 50_000)
+            .with_partition("date".to_owned(), "2024-01-15".to_owned())
+            .with_file_format("parquet".to_owned());
 
         assert_eq!(file.path, "data/part-0001.parquet");
         assert_eq!(file.size_bytes, 1024 * 1024);
@@ -337,18 +305,9 @@ mod tests {
 
     #[test]
     fn partition_transform_display() {
-        assert_eq!(
-            PartitionTransform::Identity.to_string(),
-            "identity"
-        );
-        assert_eq!(
-            PartitionTransform::Truncate(16).to_string(),
-            "truncate(16)"
-        );
-        assert_eq!(
-            PartitionTransform::Bucket(256).to_string(),
-            "bucket(256)"
-        );
+        assert_eq!(PartitionTransform::Identity.to_string(), "identity");
+        assert_eq!(PartitionTransform::Truncate(16).to_string(), "truncate(16)");
+        assert_eq!(PartitionTransform::Bucket(256).to_string(), "bucket(256)");
         assert_eq!(PartitionTransform::Year.to_string(), "year");
         assert_eq!(PartitionTransform::Month.to_string(), "month");
         assert_eq!(PartitionTransform::Day.to_string(), "day");
@@ -362,15 +321,10 @@ mod tests {
             2 * 1024 * 1024,
             100_000,
         )
-        .with_partition(
-            "region".to_owned(),
-            "us-east-1".to_owned(),
-        );
+        .with_partition("region".to_owned(), "us-east-1".to_owned());
 
-        let json = serde_json::to_string(&file)
-            .expect("serialization should succeed");
-        let deserialized: DataFile = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&file).unwrap();
+        let deserialized: DataFile = serde_json::from_str(&json).unwrap();
         assert_eq!(file, deserialized);
     }
 
@@ -392,25 +346,16 @@ mod tests {
             ],
         };
 
-        let json = serde_json::to_string(&spec)
-            .expect("serialization should succeed");
-        let deserialized: PartitionSpec =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+        let json = serde_json::to_string(&spec).unwrap();
+        let deserialized: PartitionSpec = serde_json::from_str(&json).unwrap();
         assert_eq!(spec, deserialized);
     }
 
     #[test]
     fn serialize_roundtrip_snapshot() {
         let mut summary = HashMap::new();
-        summary.insert(
-            "operation".to_owned(),
-            "append".to_owned(),
-        );
-        summary.insert(
-            "added-records".to_owned(),
-            "50000".to_owned(),
-        );
+        summary.insert("operation".to_owned(), "append".to_owned());
+        summary.insert("added-records".to_owned(), "50000".to_owned());
 
         let snap = Snapshot {
             snapshot_id: 42,
@@ -418,21 +363,15 @@ mod tests {
             summary,
         };
 
-        let json = serde_json::to_string(&snap)
-            .expect("serialization should succeed");
-        let deserialized: Snapshot =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+        let json = serde_json::to_string(&snap).unwrap();
+        let deserialized: Snapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(snap, deserialized);
     }
 
     #[test]
     fn iceberg_stub_format_type() {
         let iceberg = IcebergFormat::new();
-        assert_eq!(
-            iceberg.format_type(),
-            TableFormatType::Iceberg
-        );
+        assert_eq!(iceberg.format_type(), TableFormatType::Iceberg);
     }
 
     #[test]
@@ -442,15 +381,16 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::unwrap_used, reason = "test code intentionally checks error case")]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test code intentionally checks error case"
+    )]
     fn iceberg_stub_list_files_not_found() {
         let iceberg = IcebergFormat::new();
         let result = iceberg.list_files("nonexistent_table");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(
-            matches!(err, TableFormatError::TableNotFound { .. })
-        );
+        assert!(matches!(err, TableFormatError::TableNotFound { .. }));
     }
 
     #[test]
@@ -463,16 +403,14 @@ mod tests {
     #[test]
     fn iceberg_stub_list_snapshots_not_found() {
         let iceberg = IcebergFormat::new();
-        let result =
-            iceberg.list_snapshots("nonexistent_table");
+        let result = iceberg.list_snapshots("nonexistent_table");
         assert!(result.is_err());
     }
 
     #[test]
     fn iceberg_stub_current_snapshot_not_found() {
         let iceberg = IcebergFormat::new();
-        let result =
-            iceberg.current_snapshot_id("nonexistent_table");
+        let result = iceberg.current_snapshot_id("nonexistent_table");
         assert!(result.is_err());
     }
 
@@ -480,16 +418,8 @@ mod tests {
     fn iceberg_with_registered_table() {
         let mut iceberg = IcebergFormat::new();
         let files = vec![
-            DataFile::new(
-                "data/part-0001.parquet".to_owned(),
-                1024,
-                500,
-            ),
-            DataFile::new(
-                "data/part-0002.parquet".to_owned(),
-                2048,
-                1000,
-            ),
+            DataFile::new("data/part-0001.parquet".to_owned(), 1024, 500),
+            DataFile::new("data/part-0002.parquet".to_owned(), 2048, 1000),
         ];
         let spec = PartitionSpec {
             spec_id: 0,
@@ -500,34 +430,22 @@ mod tests {
             }],
         };
 
-        iceberg.register_table(
-            "sales".to_owned(),
-            files.clone(),
-            Some(spec.clone()),
-        );
+        iceberg.register_table("sales".to_owned(), files.clone(), Some(spec.clone()));
 
-        let listed = iceberg
-            .list_files("sales")
-            .expect("registered table should be listable");
+        let listed = iceberg.list_files("sales").unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].path, "data/part-0001.parquet");
 
-        let part = iceberg
-            .partition_spec("sales")
-            .expect("partition spec lookup should succeed");
+        let part = iceberg.partition_spec("sales").unwrap();
         assert!(part.is_some());
-        let part = part.expect("already checked is_some");
+        let part = part.unwrap();
         assert_eq!(part.fields.len(), 1);
     }
 
     #[test]
     fn iceberg_file_statistics_returns_none_for_stub() {
         let iceberg = IcebergFormat::new();
-        let file = DataFile::new(
-            "data/part-0001.parquet".to_owned(),
-            1024,
-            500,
-        );
+        let file = DataFile::new("data/part-0001.parquet".to_owned(), 1024, 500);
         assert!(iceberg.file_statistics(&file).is_none());
     }
 
@@ -535,10 +453,7 @@ mod tests {
     fn trait_object_usage() {
         let iceberg = IcebergFormat::new();
         let format: &dyn TableFormat = &iceberg;
-        assert_eq!(
-            format.format_type(),
-            TableFormatType::Iceberg
-        );
+        assert_eq!(format.format_type(), TableFormatType::Iceberg);
         assert!(format.supports_time_travel());
     }
 

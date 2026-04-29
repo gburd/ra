@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, clippy::float_cmp, reason = "test code")]
 //! Integration tests for federated query optimization with
 //! network-aware cost modeling.
 //!
@@ -845,8 +846,7 @@ fn transfer_size_display_formatting() {
     let display = cost.transfer_size_display();
     assert!(
         display.contains("GB"),
-        "1.5B bytes should display as GB: {}",
-        display,
+        "1.5B bytes should display as GB: {display}",
     );
 }
 
@@ -864,7 +864,6 @@ fn savings_percent_calculation() {
     let savings = cost.savings_percent(100.0);
     assert!(
         (savings - 35.0).abs() < 0.01,
-        "65ms vs 100ms should be 35% savings: {}",
-        savings,
+        "65ms vs 100ms should be 35% savings: {savings}",
     );
 }

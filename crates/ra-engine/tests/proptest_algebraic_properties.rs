@@ -10,8 +10,6 @@
 //! - Limit/sort interactions: redundant sort elimination
 //! - Aggregate-sort independence: sort below aggregate is irrelevant
 
-#![allow(clippy::expect_used)]
-
 use egg::{EGraph, Runner};
 use proptest::prelude::*;
 
@@ -84,13 +82,11 @@ fn arb_agg_func() -> impl Strategy<Value = AggregateFunction> {
 // ---------------------------------------------------------------
 
 fn in_same_eclass(a: &RelExpr, b: &RelExpr) -> bool {
-    let rec_a = match to_rec_expr(a) {
-        Ok(r) => r,
-        Err(_) => return false,
+    let Ok(rec_a) = to_rec_expr(a) else {
+        return false;
     };
-    let rec_b = match to_rec_expr(b) {
-        Ok(r) => r,
-        Err(_) => return false,
+    let Ok(rec_b) = to_rec_expr(b) else {
+        return false;
     };
 
     let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
@@ -109,9 +105,8 @@ fn in_same_eclass(a: &RelExpr, b: &RelExpr) -> bool {
 /// Verify that an expression can survive roundtrip through e-graph
 /// conversion and that rules don't crash.
 fn rules_dont_crash(expr: &RelExpr) -> bool {
-    let rec = match to_rec_expr(expr) {
-        Ok(r) => r,
-        Err(_) => return true, // unsupported construct is fine
+    let Ok(rec) = to_rec_expr(expr) else {
+        return true; // unsupported construct is fine
     };
     let _runner: Runner<RelLang, RelAnalysis> = Runner::default()
         .with_expr(&rec)

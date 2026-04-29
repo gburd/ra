@@ -4,7 +4,7 @@
 //! for various delta sizes (small, medium, large).
 
 #![cfg(feature = "timeline")]
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::{JoinType, RelExpr};

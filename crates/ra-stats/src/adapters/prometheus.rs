@@ -78,20 +78,12 @@ impl PrometheusAdapter {
                 .iter()
                 .map(|(k, v)| format!("{k}=\"{v}\""))
                 .collect();
-            format!(
-                "{}{{{}}} {}\n",
-                m.name,
-                labels.join(","),
-                m.value
-            )
+            format!("{}{{{}}} {}\n", m.name, labels.join(","), m.value)
         }
     }
 
     fn key(name: &str, tags: &[(&str, &str)]) -> String {
-        let mut parts: Vec<String> = tags
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
+        let mut parts: Vec<String> = tags.iter().map(|(k, v)| format!("{k}={v}")).collect();
         parts.sort();
         format!("{name}:{}", parts.join(","))
     }
@@ -114,12 +106,7 @@ impl PrometheusAdapter {
 }
 
 impl MonitoringAdapter for PrometheusAdapter {
-    fn record_gauge(
-        &mut self,
-        name: &str,
-        value: f64,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_gauge(&mut self, name: &str, value: f64, tags: &[(&str, &str)]) {
         let key = Self::key(name, tags);
         let entry = self.gauges.entry(key).or_insert_with(|| PromMetric {
             name: name.to_string(),
@@ -131,12 +118,7 @@ impl MonitoringAdapter for PrometheusAdapter {
         entry.value = value;
     }
 
-    fn record_histogram(
-        &mut self,
-        name: &str,
-        value: f64,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_histogram(&mut self, name: &str, value: f64, tags: &[(&str, &str)]) {
         self.histograms.push(PromMetric {
             name: name.to_string(),
             labels: Self::labels_from(tags),
@@ -146,21 +128,15 @@ impl MonitoringAdapter for PrometheusAdapter {
         });
     }
 
-    fn record_counter(
-        &mut self,
-        name: &str,
-        delta: u64,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_counter(&mut self, name: &str, delta: u64, tags: &[(&str, &str)]) {
         let key = Self::key(name, tags);
-        let entry =
-            self.counters.entry(key).or_insert_with(|| PromMetric {
-                name: name.to_string(),
-                labels: Self::labels_from(tags),
-                value: 0.0,
-                help: None,
-                metric_type: PromType::Counter,
-            });
+        let entry = self.counters.entry(key).or_insert_with(|| PromMetric {
+            name: name.to_string(),
+            labels: Self::labels_from(tags),
+            value: 0.0,
+            help: None,
+            metric_type: PromType::Counter,
+        });
         entry.value += delta as f64;
     }
 
@@ -241,29 +217,23 @@ impl PromScraper {
     }
 
     fn parse_sample_line(&self, line: &str) -> Option<ScrapedMetric> {
-        let (name_and_labels, value_str) =
-            if let Some(brace_start) = line.find('{') {
-                let brace_end = line.find('}')?;
-                let after_brace = line[brace_end + 1..].trim();
-                let value_str =
-                    after_brace.split_whitespace().next()?;
-                let name = &line[..brace_start];
-                let label_str = &line[brace_start + 1..brace_end];
-                let labels = Self::parse_labels(label_str);
-                (
-                    (name.to_string(), labels),
-                    value_str.to_string(),
-                )
-            } else {
-                let mut parts = line.split_whitespace();
-                let name = parts.next()?.to_string();
-                let value_str = parts.next()?.to_string();
-                ((name, Vec::new()), value_str)
-            };
+        let (name_and_labels, value_str) = if let Some(brace_start) = line.find('{') {
+            let brace_end = line.find('}')?;
+            let after_brace = line[brace_end + 1..].trim();
+            let value_str = after_brace.split_whitespace().next()?;
+            let name = &line[..brace_start];
+            let label_str = &line[brace_start + 1..brace_end];
+            let labels = Self::parse_labels(label_str);
+            ((name.to_string(), labels), value_str.to_string())
+        } else {
+            let mut parts = line.split_whitespace();
+            let name = parts.next()?.to_string();
+            let value_str = parts.next()?.to_string();
+            ((name, Vec::new()), value_str)
+        };
 
         let value: f64 = value_str.parse().ok()?;
-        let metric_type =
-            self.type_hints.get(&name_and_labels.0).copied();
+        let metric_type = self.type_hints.get(&name_and_labels.0).copied();
 
         Some(ScrapedMetric {
             name: name_and_labels.0,
@@ -283,9 +253,7 @@ impl PromScraper {
             if let Some(eq_pos) = pair.find('=') {
                 let key = pair[..eq_pos].trim().to_string();
                 let val_raw = pair[eq_pos + 1..].trim();
-                let val = val_raw
-                    .trim_matches('"')
-                    .to_string();
+                let val = val_raw.trim_matches('"').to_string();
                 labels.push((key, val));
             }
         }
@@ -383,9 +351,7 @@ mod tests {
     #[test]
     fn scraper_parses_counter() {
         let mut scraper = PromScraper::new();
-        scraper.parse(
-            "# TYPE http_requests counter\nhttp_requests 1234\n",
-        );
+        scraper.parse("# TYPE http_requests counter\nhttp_requests 1234\n");
         let counters = scraper.counters();
         assert_eq!(counters.len(), 1);
         assert!((counters[0].value - 1234.0).abs() < f64::EPSILON);

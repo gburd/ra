@@ -73,13 +73,18 @@ impl egg::Condition<RelLang, RelAnalysis> for IsNotConstBool {
 /// Since egg's pattern matching cannot access external metadata
 /// (the facts provider), we introduce index scans optimistically
 /// with a sentinel "auto" index name. The cost model then:
-/// 1. Checks if an appropriate index exists via FactsProvider
+/// 1. Checks if an appropriate index exists via `FactsProvider`
 /// 2. Estimates index scan cost vs sequential scan cost
 /// 3. Assigns ∞ cost if no index exists or seq scan is cheaper
 ///
 /// This way the e-graph explores both scan strategies and the
 /// extractor picks the best one.
+/// # Panics
+///
+/// Cannot panic in practice; the `expect` is on a compile-time constant
+/// string parse inside the `rewrite!` macro.
 #[must_use]
+#[expect(clippy::expect_used, reason = "constant string parse inside rewrite! macro cannot fail")]
 pub fn index_selection_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Basic bitmap index scan introduction:

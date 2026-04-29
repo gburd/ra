@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 // Tests for physical join algorithm selection.
 //!
 //! Tests cover hash join variants, nested loop joins, sort-merge joins,

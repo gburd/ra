@@ -1,5 +1,7 @@
+#![expect(clippy::print_stdout, reason = "CLI output")]
 //! ML model management commands.
 
+use std::fmt::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -281,6 +283,7 @@ pub async fn handle_ml_command(cmd: MlCommands) -> Result<()> {
     }
 }
 
+#[expect(clippy::unused_async, reason = "matches async interface of other ML commands")]
 async fn train_model(
     _dataset: PathBuf,
     _output: Option<PathBuf>,
@@ -293,13 +296,11 @@ async fn train_model(
 
     let table_names: Vec<&str> = tables
         .as_ref()
-        .map(|s| s.split(',').collect())
-        .unwrap_or_else(|| vec!["users", "orders"]);
+        .map_or_else(|| vec!["users", "orders"], |s| s.split(',').collect());
 
     let column_names: Vec<&str> = columns
         .as_ref()
-        .map(|s| s.split(',').collect())
-        .unwrap_or_else(|| vec!["id", "name", "amount"]);
+        .map_or_else(|| vec!["id", "name", "amount"], |s| s.split(',').collect());
 
     let schema = FeatureSchema::new(&table_names, &column_names);
     let model = build_default_mlp(&[schema.total_features, 64, 32, 1]);
@@ -481,8 +482,7 @@ async fn show_stats(
             stat.observation_count,
             stat.mean_improvement * 100.0,
             stat.mean_q_error
-                .map(|e| format!("{e:.2}"))
-                .unwrap_or_else(|| "N/A".to_string())
+                .map_or_else(|| "N/A".to_string(), |e| format!("{e:.2}"))
         );
     }
 
@@ -545,15 +545,16 @@ async fn export_model(
             let mut csv = String::from("rule_id,observation_count,improvement_prob,mean_improvement,std_improvement,mean_q_error\n");
 
             for stat in network.all_statistics() {
-                csv.push_str(&format!(
-                    "{},{},{},{},{},{}\n",
+                let _ = writeln!(
+                    csv,
+                    "{},{},{},{},{},{}",
                     stat.rule_id,
                     stat.observation_count,
                     stat.prior_improvement_prob,
                     stat.mean_improvement,
                     stat.std_improvement,
                     stat.mean_q_error.unwrap_or(0.0)
-                ));
+                );
             }
 
             std::fs::write(output, csv).context("Failed to write CSV file")?;

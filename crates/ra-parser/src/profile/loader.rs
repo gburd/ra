@@ -34,8 +34,7 @@ struct ProfileMetadata {
     #[serde(default)]
     inherits_from: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)] // Metadata field for documentation purposes
-    description: Option<String>,
+    _description: Option<String>,
 }
 
 /// Validation configuration from [validation] section.
@@ -76,23 +75,27 @@ impl ProfileLoader {
     ///
     /// Returns the loaded profile or an error if the file doesn't exist
     /// or cannot be parsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the profile file is not found or cannot be parsed.
     pub fn load(&self, name: &str) -> Result<ParserProfile, Box<dyn Error>> {
-        let path = Path::new(&self.profile_dir).join(format!("{}.toml", name));
+        let path = Path::new(&self.profile_dir).join(format!("{name}.toml"));
 
         if !path.exists() {
             // Try vendor subdirectories
             let vendor_path = Path::new(&self.profile_dir)
                 .join("vendors")
-                .join(format!("{}.toml", name));
+                .join(format!("{name}.toml"));
 
             if vendor_path.exists() {
-                return self.load_from_path(&vendor_path);
+                return Self::load_from_path(&vendor_path);
             }
 
-            return Err(format!("Profile '{}' not found", name).into());
+            return Err(format!("Profile '{name}' not found").into());
         }
 
-        self.load_from_path(&path)
+        Self::load_from_path(&path)
     }
 
     /// Load an extension profile from the extensions/ subdirectory.
@@ -100,20 +103,24 @@ impl ProfileLoader {
     /// # Arguments
     ///
     /// * `name` - Extension name (e.g., "postgis", "timescaledb")
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the extension profile is not found or cannot be parsed.
     pub fn load_extension(&self, name: &str) -> Result<ParserProfile, Box<dyn Error>> {
         let extension_path = Path::new(&self.profile_dir)
             .join("extensions")
-            .join(format!("{}.toml", name));
+            .join(format!("{name}.toml"));
 
         if !extension_path.exists() {
-            return Err(format!("Extension profile '{}' not found", name).into());
+            return Err(format!("Extension profile '{name}' not found").into());
         }
 
-        self.load_from_path(&extension_path)
+        Self::load_from_path(&extension_path)
     }
 
     /// Load a profile from a specific file path.
-    fn load_from_path(&self, path: &Path) -> Result<ParserProfile, Box<dyn Error>> {
+    fn load_from_path(path: &Path) -> Result<ParserProfile, Box<dyn Error>> {
         let contents = fs::read_to_string(path)?;
         let toml: ProfileToml = toml::from_str(&contents)?;
 
@@ -158,6 +165,11 @@ impl ProfileLoader {
     ///
     /// If the profile specifies `inherits_from`, recursively load and merge
     /// parent profiles.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any profile in the inheritance chain is not found
+    /// or cannot be parsed.
     pub fn load_with_inheritance(&self, name: &str) -> Result<ParserProfile, Box<dyn Error>> {
         let mut profile = self.load(name)?;
 
@@ -175,6 +187,10 @@ impl ProfileLoader {
     }
 
     /// List all available profiles in the profile directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the profile directory cannot be read.
     pub fn list_profiles(&self) -> Result<Vec<String>, Box<dyn Error>> {
         let mut profiles = Vec::new();
         let path = Path::new(&self.profile_dir);
@@ -184,12 +200,12 @@ impl ProfileLoader {
         }
 
         // List profiles in root directory
-        self.collect_profiles(path, &mut profiles)?;
+        Self::collect_profiles(path, &mut profiles)?;
 
         // List profiles in vendors subdirectory
         let vendors_path = path.join("vendors");
         if vendors_path.exists() {
-            self.collect_profiles(&vendors_path, &mut profiles)?;
+            Self::collect_profiles(&vendors_path, &mut profiles)?;
         }
 
         profiles.sort();
@@ -198,11 +214,7 @@ impl ProfileLoader {
     }
 
     /// Collect profile names from a directory.
-    fn collect_profiles(
-        &self,
-        dir: &Path,
-        profiles: &mut Vec<String>,
-    ) -> Result<(), Box<dyn Error>> {
+    fn collect_profiles(dir: &Path, profiles: &mut Vec<String>) -> Result<(), Box<dyn Error>> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
@@ -219,6 +231,7 @@ impl ProfileLoader {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

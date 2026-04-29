@@ -134,7 +134,9 @@ fn compare_node(
         RelExpr::Project { input, .. }
         | RelExpr::Distinct { input }
         | RelExpr::Limit { input, .. }
-        | RelExpr::Window { input, .. } => {
+        | RelExpr::Window { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => {
             compare_node(input, db, agreements, disagreements);
         }
         RelExpr::Union { left, right, .. }
@@ -166,9 +168,6 @@ fn compare_node(
         | RelExpr::ParallelAggregate { .. }
         | RelExpr::Gather { .. }
         | RelExpr::MvScan { .. } => {}
-        RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
-            compare_node(input, db, agreements, disagreements);
-        }
     }
 }
 

@@ -382,6 +382,7 @@ impl PlanCache {
             return;
         }
 
+        #[expect(clippy::expect_used, reason = "guarded by is_empty check above")]
         let lru_idx = self
             .entries
             .iter()
@@ -409,7 +410,7 @@ impl std::fmt::Debug for PlanCache {
             .field("entries", &self.entries.len())
             .field("max_entries", &self.config.max_entries)
             .field("stats", &self.stats)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -617,7 +618,7 @@ mod tests {
         let fp = QueryFingerprint::from_rel_expr(&plan);
         cache.insert(fp.clone(), plan);
 
-        cache.invalidate(&[fp.clone()]);
+        cache.invalidate(std::slice::from_ref(&fp));
         assert!(cache.lookup(&fp).is_none());
         assert_eq!(cache.stats().hard_invalidations, 1);
     }
@@ -638,7 +639,7 @@ mod tests {
         let _ = cache.lookup(&fp);
         let _ = cache.lookup(&fp);
 
-        cache.invalidate(&[fp.clone()]);
+        cache.invalidate(std::slice::from_ref(&fp));
 
         // Entry still exists but marked stale
         let result = cache.lookup(&fp).expect("should still hit");
@@ -658,7 +659,7 @@ mod tests {
         cache.insert(fp.clone(), plan);
         let _ = cache.lookup(&fp);
 
-        cache.invalidate(&[fp.clone()]);
+        cache.invalidate(std::slice::from_ref(&fp));
         let r1 = cache.lookup(&fp).expect("hit");
         assert_eq!(r1.match_type, CacheMatchType::Stale);
 

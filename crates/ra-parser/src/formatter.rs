@@ -191,7 +191,8 @@ impl SqlFormatter {
                 let is_subclause = matches!(upper.as_str(), "AND" | "OR");
 
                 if is_clause && i > 0 {
-                    result = result.trim_end().to_owned();
+                    let trimmed_len = result.trim_end().len();
+                    result.truncate(trimmed_len);
                     result.push('\n');
                     if self.config.align_keywords {
                         let padding = align_width.saturating_sub(token.len());
@@ -200,13 +201,9 @@ impl SqlFormatter {
                         }
                     }
                     result.push_str(token);
-                } else if is_join && i > 0 {
-                    result = result.trim_end().to_owned();
-                    result.push('\n');
-                    result.push_str(&indent);
-                    result.push_str(token);
-                } else if is_subclause && i > 0 {
-                    result = result.trim_end().to_owned();
+                } else if (is_join || is_subclause) && i > 0 {
+                    let trimmed_len = result.trim_end().len();
+                    result.truncate(trimmed_len);
                     result.push('\n');
                     result.push_str(&indent);
                     result.push_str(token);
@@ -231,6 +228,10 @@ impl SqlFormatter {
 
 /// Capitalize SQL keywords while preserving identifiers and
 /// string literals.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keyword capitalization requires handling many SQL keywords"
+)]
 fn capitalize_keywords(sql: &str) -> String {
     let keywords: &[&str] = &[
         "SELECT",
@@ -442,6 +443,7 @@ fn tokenize_for_formatting(sql: &str) -> Vec<String> {
     tokens
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

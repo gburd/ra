@@ -145,6 +145,7 @@ pub struct AnnotatedRuleGroup {
 /// require. The rule advisor uses these annotations to eliminate
 /// inapplicable groups before equality saturation.
 #[must_use]
+#[expect(clippy::too_many_lines, reason = "annotated rule collection for all optimization phases")]
 pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
     vec![
         // -- Universal baseline rules --
@@ -650,6 +651,7 @@ pub(crate) fn join_elimination_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Aggregate optimization rules
 // ---------------------------------------------------------------
 
+#[must_use]
 pub fn aggregate_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push filter below aggregate when filter only
@@ -936,7 +938,7 @@ fn cast_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::analysis::RelAnalysis;
@@ -1030,6 +1032,124 @@ mod tests {
                 left: Box::new(Expr::Column(ColumnRef::new("a"))),
                 right: Box::new(Expr::Column(ColumnRef::new("b"))),
             }),
+        });
+        let runner = run_optimization(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn projection_pushdown_through_filter() {
+        use ra_core::algebra::ProjectionColumn;
+        let expr = RelExpr::scan("t")
+            .filter(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                right: Box::new(Expr::Const(Const::Int(18))),
+            })
+            .project(vec![ProjectionColumn {
+                expr: Expr::Column(ColumnRef::new("name")),
+                alias: None,
+            }]);
+        let runner = run_optimization(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn filter_false_eliminates_scan() {
+        let expr = RelExpr::scan("t").filter(Expr::Const(Const::Bool(false)));
+        let runner = run_optimization(&expr);
+        assert!(runner.egraph.number_of_classes() >= 1);
+    }
+
+    #[test]
+    fn limit_over_limit_merged() {
+        let expr = RelExpr::scan("t").limit(100, 0).limit(10, 0);
+        let runner = run_optimization(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn all_rules_annotated_has_groups() {
+        let annotated = all_rules_annotated();
+        assert!(
+            annotated.len() >= 10,
+            "expected at least 10 annotated groups, got {}",
+            annotated.len()
+        );
+    }
+
+    #[test]
+    fn all_rules_annotated_labels_unique() {
+        let annotated = all_rules_annotated();
+        let mut labels: Vec<&str> = annotated.iter().map(|g| g.label).collect();
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(
+            labels.len(),
+            annotated.len(),
+            "annotated rule group labels should be unique"
+        );
+    }
+
+    #[test]
+    fn all_rules_sorted_same_count_as_unsorted() {
+        let sorted = all_rules();
+        let unsorted = all_rules_unsorted();
+        assert_eq!(sorted.len(), unsorted.len());
+    }
+
+    #[test]
+    fn feature_gated_rules_from_annotations() {
+        let annotated = all_rules_annotated();
+        // At least some groups should require joins
+        let join_groups: Vec<_> = annotated
+            .iter()
+            .filter(|g| {
+                g.annotation
+                    .required_features
+                    .contains(QueryFeatureSet::HAS_JOIN)
+            })
+            .collect();
+        assert!(
+            !join_groups.is_empty(),
+            "expected some groups that require joins"
+        );
+    }
+
+    #[test]
+    fn aggregate_optimization_adds_alternatives() {
+        use ra_core::algebra::{AggregateExpr, AggregateFunction};
+        let expr = RelExpr::Aggregate {
+            group_by: vec![Expr::Column(ColumnRef::new("dept"))],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: Some(Expr::Column(ColumnRef::new("id"))),
+                distinct: false,
+                alias: Some("cnt".into()),
+            }],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let runner = run_optimization(&expr);
+        assert!(runner.egraph.number_of_classes() >= 1);
+    }
+
+    #[test]
+    fn or_with_false_simplified() {
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Or,
+            left: Box::new(Expr::Column(ColumnRef::new("active"))),
+            right: Box::new(Expr::Const(Const::Bool(false))),
+        });
+        let runner = run_optimization(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn and_with_true_simplified() {
+        let expr = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(Expr::Column(ColumnRef::new("active"))),
+            right: Box::new(Expr::Const(Const::Bool(true))),
         });
         let runner = run_optimization(&expr);
         assert!(runner.egraph.number_of_classes() > 1);

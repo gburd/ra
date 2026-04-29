@@ -1,14 +1,18 @@
+#![expect(
+    clippy::panic,
+    clippy::needless_pass_by_value,
+    reason = "test assertions"
+)]
 //! TPC-H optimizer test suite.
 //!
 //! Validates that the RA optimizer successfully handles all 22 TPC-H
-//! query patterns. Each test constructs the equivalent RelExpr tree
+//! query patterns. Each test constructs the equivalent `RelExpr` tree
 //! and verifies the optimizer produces a valid, cost-reducing plan.
 //!
 //! The TPC-H benchmark represents a comprehensive set of analytical
 //! query patterns: aggregation, multi-way joins, correlated subqueries,
 //! set operations, and complex predicates.
 
-#![allow(clippy::expect_used)]
 #![allow(clippy::too_many_lines)]
 
 use ra_core::algebra::{

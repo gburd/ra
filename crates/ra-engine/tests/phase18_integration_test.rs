@@ -4,7 +4,7 @@
 //! budget system and that all profiles, overflow strategies, and
 //! customization options behave as expected end-to-end.
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use std::time::Duration;
 

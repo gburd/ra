@@ -1,9 +1,10 @@
+#![expect(clippy::panic, reason = "benchmark assertions")]
 //! Benchmarks for the optimization engine.
 //!
 //! Measures optimization latency for typical query patterns to
 //! verify the <100ms performance target.
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ra_core::algebra::{

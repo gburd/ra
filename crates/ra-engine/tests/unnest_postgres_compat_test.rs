@@ -1,10 +1,10 @@
-//! PostgreSQL compatibility tests for UNNEST.
+//! `PostgreSQL` compatibility tests for UNNEST.
 //!
 //! These tests verify that our UNNEST implementation produces
-//! the same results as PostgreSQL for various query patterns.
-//! Tests marked `#[ignore]` require a running PostgreSQL instance.
+//! the same results as `PostgreSQL` for various query patterns.
+//! Tests marked `#[ignore]` require a running `PostgreSQL` instance.
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use ra_core::expr::{Const, Expr};
 use ra_engine::executors::table_function::TableFunctionExecutor;
@@ -12,7 +12,7 @@ use ra_engine::executors::unnest::{MultiUnnestExecutor, UnnestExecutor};
 
 /// Verifies basic UNNEST of integer array matches PG semantics.
 ///
-/// PostgreSQL:
+/// `PostgreSQL`:
 /// ```sql
 /// SELECT * FROM unnest(array[1,2,3]);
 /// -- Returns: 1, 2, 3
@@ -33,7 +33,7 @@ fn compat_unnest_integer_array() {
 
 /// Verifies UNNEST with ordinality matches PG.
 ///
-/// PostgreSQL:
+/// `PostgreSQL`:
 /// ```sql
 /// SELECT * FROM unnest(array['a','b','c'])
 ///     WITH ORDINALITY;
@@ -65,7 +65,7 @@ fn compat_unnest_with_ordinality() {
 
 /// Verifies multi-argument UNNEST matches PG.
 ///
-/// PostgreSQL:
+/// `PostgreSQL`:
 /// ```sql
 /// SELECT * FROM unnest(
 ///   ARRAY[1,2,3],
@@ -108,9 +108,9 @@ fn compat_multi_unnest_parallel() {
 }
 
 /// Verifies multi-arg UNNEST with different-length arrays
-/// pads with NULL (PostgreSQL behavior).
+/// pads with NULL (`PostgreSQL` behavior).
 ///
-/// PostgreSQL:
+/// `PostgreSQL`:
 /// ```sql
 /// SELECT * FROM unnest(
 ///   ARRAY[1,2,3],
@@ -138,9 +138,9 @@ fn compat_multi_unnest_null_padding() {
     assert_eq!(rows[2].values[1], Const::Null);
 }
 
-/// Verifies generate_series matches PG.
+/// Verifies `generate_series` matches PG.
 ///
-/// PostgreSQL:
+/// `PostgreSQL`:
 /// ```sql
 /// SELECT * FROM generate_series(1, 5);
 /// -- Returns: 1, 2, 3, 4, 5
@@ -166,9 +166,9 @@ fn compat_generate_series() {
     assert_eq!(values, vec![1, 2, 3, 4, 5]);
 }
 
-/// Verifies json_array_elements matches PG.
+/// Verifies `json_array_elements` matches PG.
 ///
-/// PostgreSQL:
+/// `PostgreSQL`:
 /// ```sql
 /// SELECT * FROM json_array_elements('[1,2,3]');
 /// -- Returns: 1, 2, 3
@@ -186,9 +186,9 @@ fn compat_json_array_elements() {
     assert_eq!(rows[2].values[0], Const::Int(3));
 }
 
-/// Verifies json_to_recordset matches PG.
+/// Verifies `json_to_recordset` matches PG.
 ///
-/// PostgreSQL:
+/// `PostgreSQL`:
 /// ```sql
 /// SELECT * FROM json_to_recordset(
 ///     '[{"a":1,"b":"foo"},{"a":2,"b":"bar"}]'
@@ -209,7 +209,7 @@ fn compat_json_to_recordset() {
 }
 
 #[test]
-#[ignore] // Requires PostgreSQL
+#[ignore = "Requires PostgreSQL instance"]
 fn compare_unnest_with_postgres() {
     // This test would connect to PostgreSQL and compare results.
     // Placeholder for actual PG integration testing.

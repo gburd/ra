@@ -42,6 +42,7 @@ pub trait DatabaseConnector {
     fn explain_query(&self, sql: &str) -> MetadataResult<ExplainPlan>;
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

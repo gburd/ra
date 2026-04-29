@@ -416,7 +416,7 @@ fn test_dp_join_enumeration_small() {
 #[test]
 fn test_greedy_join_ordering_large() {
     // 5+ tables - should use greedy heuristic
-    let tables: Vec<RelExpr> = (1..=6).map(|i| scan(&format!("table{}", i))).collect();
+    let tables: Vec<RelExpr> = (1..=6).map(|i| scan(&format!("table{i}"))).collect();
 
     let mut current = tables[0].clone();
     for table in tables.iter().skip(1) {

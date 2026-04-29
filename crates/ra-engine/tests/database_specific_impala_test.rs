@@ -99,7 +99,7 @@ fn test_impala_parquet_column_pruning() {
 #[test]
 fn test_impala_parquet_predicate_pushdown() {
     let optimizer = create_optimizer();
-    let plan = filter(scan("parquet_data"), lt_pred("timestamp", 1000000));
+    let plan = filter(scan("parquet_data"), lt_pred("timestamp", 1_000_000));
     assert!(optimizer.optimize(&plan).is_ok());
 }
 

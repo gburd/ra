@@ -71,6 +71,7 @@ pub struct RuleEntry {
 
 impl RuleRegistry {
     /// Create an empty registry
+    #[must_use]
     pub fn new() -> Self {
         Self {
             rules: HashMap::new(),
@@ -101,6 +102,10 @@ impl RuleRegistry {
     }
 
     /// Recursively scan a directory for .rra files
+    #[expect(
+        clippy::only_used_in_recursion,
+        reason = "base_dir reserved for future relative path resolution"
+    )]
     fn scan_directory(&mut self, base_dir: &Path, current_dir: &Path) -> Result<(), RegistryError> {
         let entries = fs::read_dir(current_dir).map_err(|source| RegistryError::DirectoryRead {
             path: current_dir.to_path_buf(),
@@ -179,7 +184,7 @@ impl RuleRegistry {
         Ok(())
     }
 
-    /// Convert parser RuleMetadata to core RuleMetadata
+    /// Convert parser `RuleMetadata` to core `RuleMetadata`
     fn convert_metadata(meta: &RuleMetadata) -> CoreRuleMetadata {
         // Parse category into enum
         let category = if meta.category.starts_with("logical") {
@@ -202,6 +207,7 @@ impl RuleRegistry {
     }
 
     /// Get a rule by ID
+    #[must_use]
     pub fn get(&self, id: &str) -> Option<&RuleEntry> {
         self.rules.get(id)
     }
@@ -228,6 +234,7 @@ impl RuleRegistry {
     }
 
     /// Get statistics about the registry
+    #[must_use]
     pub fn stats(&self) -> RegistryStats {
         let mut by_category = HashMap::new();
         let mut by_database = HashMap::new();
@@ -276,26 +283,29 @@ impl std::fmt::Display for RegistryStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Rule Registry Statistics:")?;
         writeln!(f, "  Total rules: {}", self.total_rules)?;
+        #[expect(clippy::cast_precision_loss, reason = "rule count is always small")]
+        let precondition_pct =
+            100.0 * self.rules_with_preconditions as f64 / self.total_rules as f64;
         writeln!(
             f,
-            "  Rules with preconditions: {} ({:.1}%)",
+            "  Rules with preconditions: {} ({precondition_pct:.1}%)",
             self.rules_with_preconditions,
-            100.0 * self.rules_with_preconditions as f64 / self.total_rules as f64
         )?;
         writeln!(f, "\n  By category:")?;
         for (cat, count) in &self.by_category {
-            writeln!(f, "    {:?}: {}", cat, count)?;
+            writeln!(f, "    {cat:?}: {count}")?;
         }
         writeln!(f, "\n  By database (top 10):")?;
         let mut db_vec: Vec<_> = self.by_database.iter().collect();
         db_vec.sort_by(|a, b| b.1.cmp(a.1));
         for (db, count) in db_vec.iter().take(10) {
-            writeln!(f, "    {}: {}", db, count)?;
+            writeln!(f, "    {db}: {count}")?;
         }
         Ok(())
     }
 }
 
+#[expect(clippy::unwrap_used, clippy::print_stderr, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

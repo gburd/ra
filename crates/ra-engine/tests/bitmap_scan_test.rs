@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Tests for bitmap index scan support (RFC 0018).
 //!
 //! Validates that the optimizer can combine multiple index scans using

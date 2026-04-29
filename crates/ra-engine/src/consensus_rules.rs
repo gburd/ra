@@ -1,4 +1,4 @@
-//! Consensus optimization rules implemented by both DataFusion and Calcite.
+//! Consensus optimization rules implemented by both `DataFusion` and Calcite.
 //!
 //! These rules are present in every production query optimizer:
 //!
@@ -36,7 +36,7 @@ pub fn consensus_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 ///
 /// # References
 ///
-/// - DataFusion: `extract_equijoin_predicate.rs`
+/// - `DataFusion`: `extract_equijoin_predicate.rs`
 /// - Calcite: `JoinExtractFilterRule`
 fn extract_equijoin_predicate_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
@@ -61,7 +61,7 @@ fn extract_equijoin_predicate_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 ///
 /// # References
 ///
-/// - DataFusion: `filter_null_join_keys.rs`
+/// - `DataFusion`: `filter_null_join_keys.rs`
 fn filter_null_join_keys_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Add IS NOT NULL on left join key
@@ -85,7 +85,7 @@ fn filter_null_join_keys_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 ///
 /// # References
 ///
-/// - DataFusion: `propagate_empty_relation.rs`
+/// - `DataFusion`: `propagate_empty_relation.rs`
 /// - Calcite: `PruneEmptyRules`
 fn propagate_empty_relation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
@@ -182,7 +182,7 @@ fn propagate_empty_relation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::analysis::RelAnalysis;

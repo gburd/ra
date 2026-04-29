@@ -45,26 +45,14 @@ impl RaConfig {
         match key {
             "editor.mode" => Ok(self.editor.mode.to_string()),
             "editor.theme" => Ok(self.editor.theme.clone()),
-            "sql.capitalize" => {
-                Ok(self.sql.capitalize.to_string())
-            }
-            "sql.indent_style" => {
-                Ok(self.sql.indent_style.to_string())
-            }
+            "sql.capitalize" => Ok(self.sql.capitalize.to_string()),
+            "sql.indent_style" => Ok(self.sql.indent_style.to_string()),
             "sql.dialect" => Ok(self.sql.dialect.to_string()),
-            "sql.line_width" => {
-                Ok(self.sql.line_width.to_string())
-            }
+            "sql.line_width" => Ok(self.sql.line_width.to_string()),
             "tui.layout" => Ok(self.tui.layout.to_string()),
-            "tui.refresh_rate_ms" => {
-                Ok(self.tui.refresh_rate_ms.to_string())
-            }
-            "hardware.profile" => {
-                Ok(self.hardware.profile.clone())
-            }
-            "output.format" => {
-                Ok(self.output.format.to_string())
-            }
+            "tui.refresh_rate_ms" => Ok(self.tui.refresh_rate_ms.to_string()),
+            "hardware.profile" => Ok(self.hardware.profile.clone()),
+            "output.format" => Ok(self.output.format.to_string()),
             "output.color" => Ok(self.output.color.to_string()),
             _ => Err(ConfigError::UnknownKey(key.to_owned())),
         }
@@ -79,11 +67,7 @@ impl RaConfig {
     /// Returns [`ConfigError::UnknownKey`] if the key is not recognized,
     /// or [`ConfigError::InvalidValue`] if the value is not valid for
     /// the given key.
-    pub fn set(
-        &mut self,
-        key: &str,
-        value: &str,
-    ) -> Result<(), ConfigError> {
+    pub fn set(&mut self, key: &str, value: &str) -> Result<(), ConfigError> {
         match key {
             "editor.mode" => {
                 self.editor.mode = parse_enum(key, value)?;
@@ -101,27 +85,20 @@ impl RaConfig {
                 self.sql.dialect = parse_enum(key, value)?;
             }
             "sql.line_width" => {
-                self.sql.line_width = value
-                    .parse()
-                    .map_err(|_| ConfigError::InvalidValue {
-                        key: key.to_owned(),
-                        reason: format!(
-                            "expected integer, got '{value}'"
-                        ),
-                    })?;
+                self.sql.line_width = value.parse().map_err(|_| ConfigError::InvalidValue {
+                    key: key.to_owned(),
+                    reason: format!("expected integer, got '{value}'"),
+                })?;
             }
             "tui.layout" => {
                 self.tui.layout = parse_enum(key, value)?;
             }
             "tui.refresh_rate_ms" => {
-                self.tui.refresh_rate_ms = value.parse().map_err(
-                    |_| ConfigError::InvalidValue {
+                self.tui.refresh_rate_ms =
+                    value.parse().map_err(|_| ConfigError::InvalidValue {
                         key: key.to_owned(),
-                        reason: format!(
-                            "expected integer, got '{value}'"
-                        ),
-                    },
-                )?;
+                        reason: format!("expected integer, got '{value}'"),
+                    })?;
             }
             "hardware.profile" => {
                 value.clone_into(&mut self.hardware.profile);
@@ -130,14 +107,10 @@ impl RaConfig {
                 self.output.format = parse_enum(key, value)?;
             }
             "output.color" => {
-                self.output.color = value
-                    .parse()
-                    .map_err(|_| ConfigError::InvalidValue {
-                        key: key.to_owned(),
-                        reason: format!(
-                            "expected true/false, got '{value}'"
-                        ),
-                    })?;
+                self.output.color = value.parse().map_err(|_| ConfigError::InvalidValue {
+                    key: key.to_owned(),
+                    reason: format!("expected true/false, got '{value}'"),
+                })?;
             }
             _ => return Err(ConfigError::UnknownKey(key.to_owned())),
         }
@@ -217,24 +190,18 @@ impl RaConfig {
     ///
     /// Returns [`ConfigError::SerializeToml`] if serialization fails.
     pub fn to_toml(&self) -> Result<String, ConfigError> {
-        toml::to_string_pretty(self)
-            .map_err(ConfigError::SerializeToml)
+        toml::to_string_pretty(self).map_err(ConfigError::SerializeToml)
     }
 }
 
 /// Parse a string into an enum that implements `ParseFromStr`.
-fn parse_enum<T: ParseFromStr>(
-    key: &str,
-    value: &str,
-) -> Result<T, ConfigError> {
-    T::parse_from_str(value).ok_or_else(|| {
-        ConfigError::InvalidValue {
-            key: key.to_owned(),
-            reason: format!(
-                "unknown value '{value}'; valid options: {}",
-                T::valid_options()
-            ),
-        }
+fn parse_enum<T: ParseFromStr>(key: &str, value: &str) -> Result<T, ConfigError> {
+    T::parse_from_str(value).ok_or_else(|| ConfigError::InvalidValue {
+        key: key.to_owned(),
+        reason: format!(
+            "unknown value '{value}'; valid options: {}",
+            T::valid_options()
+        ),
     })
 }
 
@@ -274,10 +241,7 @@ fn default_theme() -> String {
 }
 
 /// Editor keybinding mode.
-#[derive(
-    Debug, Clone, Copy, Default, Serialize, Deserialize,
-    PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EditorMode {
     /// Standard editor mode.
@@ -352,10 +316,7 @@ fn default_line_width() -> u32 {
 }
 
 /// SQL keyword capitalization.
-#[derive(
-    Debug, Clone, Copy, Default, Serialize, Deserialize,
-    PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum KeywordCase {
     /// Keep keywords as written.
@@ -397,10 +358,7 @@ impl ParseFromStr for KeywordCase {
 }
 
 /// Indentation style.
-#[derive(
-    Debug, Clone, Copy, Default, Serialize, Deserialize,
-    PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum IndentStyle {
     /// Two spaces.
@@ -440,10 +398,7 @@ impl ParseFromStr for IndentStyle {
 }
 
 /// SQL dialect for parser features.
-#[derive(
-    Debug, Clone, Copy, Default, Serialize, Deserialize,
-    PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SqlDialect {
     /// ANSI SQL standard.
@@ -480,15 +435,11 @@ impl ParseFromStr for SqlDialect {
     fn parse_from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "ansi" | "standard" => Some(Self::Ansi),
-            "postgresql" | "postgres" | "pg" => {
-                Some(Self::Postgresql)
-            }
+            "postgresql" | "postgres" | "pg" => Some(Self::Postgresql),
             "mysql" => Some(Self::Mysql),
             "sqlite" => Some(Self::Sqlite),
             "oracle" => Some(Self::Oracle),
-            "sqlserver" | "mssql" | "tsql" => {
-                Some(Self::Sqlserver)
-            }
+            "sqlserver" | "mssql" | "tsql" => Some(Self::Sqlserver),
             _ => None,
         }
     }
@@ -526,10 +477,7 @@ fn default_refresh_rate() -> u32 {
 }
 
 /// TUI panel layout presets.
-#[derive(
-    Debug, Clone, Copy, Default, Serialize, Deserialize,
-    PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TuiLayout {
     /// Standard 4-panel editor layout.
@@ -620,10 +568,7 @@ fn default_color() -> bool {
 }
 
 /// Output format for CLI commands.
-#[derive(
-    Debug, Clone, Copy, Default, Serialize, Deserialize,
-    PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
     /// Human-readable text.
@@ -668,11 +613,8 @@ mod tests {
     #[test]
     fn default_config_roundtrips_through_toml() {
         let config = RaConfig::default();
-        let toml_str =
-            toml::to_string_pretty(&config)
-                .expect("serialize");
-        let parsed: RaConfig =
-            toml::from_str(&toml_str).expect("deserialize");
+        let toml_str = toml::to_string_pretty(&config).expect("serialize");
+        let parsed: RaConfig = toml::from_str(&toml_str).expect("deserialize");
         assert_eq!(config, parsed);
     }
 
@@ -681,10 +623,7 @@ mod tests {
         let config = RaConfig::default();
         for key in RaConfig::keys() {
             let val = config.get(key);
-            assert!(
-                val.is_ok(),
-                "get({key}) failed: {val:?}"
-            );
+            assert!(val.is_ok(), "get({key}) failed: {val:?}");
         }
     }
 
@@ -705,9 +644,7 @@ mod tests {
     #[test]
     fn set_sql_line_width() {
         let mut config = RaConfig::default();
-        config
-            .set("sql.line_width", "120")
-            .expect("set width");
+        config.set("sql.line_width", "120").expect("set width");
         assert_eq!(config.sql.line_width, 120);
     }
 
@@ -790,8 +727,7 @@ mod tests {
 [editor]
 mode = "vi"
 "#;
-        let config: RaConfig =
-            toml::from_str(partial).expect("parse");
+        let config: RaConfig = toml::from_str(partial).expect("parse");
         assert_eq!(config.editor.mode, EditorMode::Vi);
         assert_eq!(config.sql.line_width, 80);
     }

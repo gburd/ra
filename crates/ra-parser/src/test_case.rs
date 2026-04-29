@@ -234,12 +234,14 @@ fn parse_marked_cases(lines: &[&str], rule_id: &str, block_index: usize) -> Vec<
             flush_case(
                 &mut cases,
                 &mut current_sql,
-                current_negative,
-                current_desc.take(),
-                current_expectation.take(),
-                rule_id,
-                block_index,
-                sub_index,
+                FlushCaseParams {
+                    negative: current_negative,
+                    description: current_desc.take(),
+                    expectation: current_expectation.take(),
+                    rule_id,
+                    block_index,
+                    sub_index,
+                },
             );
             sub_index += 1;
             current_negative = false;
@@ -251,12 +253,14 @@ fn parse_marked_cases(lines: &[&str], rule_id: &str, block_index: usize) -> Vec<
             flush_case(
                 &mut cases,
                 &mut current_sql,
-                current_negative,
-                current_desc.take(),
-                current_expectation.take(),
-                rule_id,
-                block_index,
-                sub_index,
+                FlushCaseParams {
+                    negative: current_negative,
+                    description: current_desc.take(),
+                    expectation: current_expectation.take(),
+                    rule_id,
+                    block_index,
+                    sub_index,
+                },
             );
             sub_index += 1;
             current_negative = true;
@@ -291,33 +295,34 @@ fn parse_marked_cases(lines: &[&str], rule_id: &str, block_index: usize) -> Vec<
     flush_case(
         &mut cases,
         &mut current_sql,
-        current_negative,
-        current_desc,
-        current_expectation,
-        rule_id,
-        block_index,
-        sub_index,
+        FlushCaseParams {
+            negative: current_negative,
+            description: current_desc,
+            expectation: current_expectation,
+            rule_id,
+            block_index,
+            sub_index,
+        },
     );
 
     cases
 }
 
-#[allow(clippy::too_many_arguments)]
-fn flush_case(
-    cases: &mut Vec<TestCase>,
-    sql: &mut String,
+struct FlushCaseParams<'a> {
     negative: bool,
     description: Option<String>,
     expectation: Option<TestExpectation>,
-    rule_id: &str,
+    rule_id: &'a str,
     block_index: usize,
     sub_index: u32,
-) {
+}
+
+fn flush_case(cases: &mut Vec<TestCase>, sql: &mut String, params: FlushCaseParams<'_>) {
     let trimmed = sql.trim().to_owned();
     if trimmed.is_empty() {
         return;
     }
-    let expected = expectation.unwrap_or(if negative {
+    let expected = params.expectation.unwrap_or(if params.negative {
         TestExpectation::PlanUnchanged
     } else {
         TestExpectation::PlanChanged
@@ -325,9 +330,13 @@ fn flush_case(
     cases.push(TestCase {
         input_sql: trimmed,
         expected,
-        description: description
-            .or_else(|| Some(format!("{rule_id}::block_{block_index}_{sub_index}"))),
-        negative,
+        description: params.description.or_else(|| {
+            Some(format!(
+                "{}::block_{}_{}",
+                params.rule_id, params.block_index, params.sub_index
+            ))
+        }),
+        negative: params.negative,
     });
     sql.clear();
 }
@@ -425,7 +434,6 @@ fn strip_comment_prefix<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

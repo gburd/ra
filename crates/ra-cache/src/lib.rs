@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 //! Plan cache with LRU/LFU/adaptive eviction and
 //! statistics-driven reoptimization.
 //!
@@ -33,9 +34,7 @@ pub use eviction::EvictionPolicy;
 pub use key::QueryKey;
 pub use metrics::CacheMetrics;
 pub use plan::CachedPlan;
-pub use validity::{
-    DriftDimension, DriftReport, DriftStatus, PlanDrift, TableDrift,
-};
+pub use validity::{DriftDimension, DriftReport, DriftStatus, PlanDrift, TableDrift};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -123,17 +122,12 @@ impl PlanCache {
     ///
     /// Returns `None` on miss. On hit, updates access metadata
     /// (last-accessed time, use count) for eviction tracking.
-    pub fn get(
-        &self,
-        key: &QueryKey,
-    ) -> Result<Option<CachedPlan>, CacheError> {
-        let mut inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+    pub fn get(&self, key: &QueryKey) -> Result<Option<CachedPlan>, CacheError> {
+        let mut inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         if inner.entries.contains_key(key) {
             if let Some(entry) = inner.entries.get_mut(key) {
                 entry.last_accessed = Instant::now();
-                entry.use_count =
-                    entry.use_count.saturating_add(1);
+                entry.use_count = entry.use_count.saturating_add(1);
             }
             let cloned = inner.entries.get(key).cloned();
             inner.metrics.record_hit();
@@ -148,17 +142,10 @@ impl PlanCache {
     ///
     /// If the cache is at capacity, evicts one entry according to
     /// the configured [`EvictionPolicy`] before inserting.
-    pub fn put(
-        &self,
-        key: QueryKey,
-        plan: CachedPlan,
-    ) -> Result<(), CacheError> {
-        let mut inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+    pub fn put(&self, key: QueryKey, plan: CachedPlan) -> Result<(), CacheError> {
+        let mut inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
 
-        if inner.entries.len() >= self.config.max_entries
-            && !inner.entries.contains_key(&key)
-        {
+        if inner.entries.len() >= self.config.max_entries && !inner.entries.contains_key(&key) {
             self.evict_one(&mut inner);
         }
 
@@ -170,25 +157,18 @@ impl PlanCache {
     }
 
     /// Remove a specific entry from the cache.
-    pub fn remove(
-        &self,
-        key: &QueryKey,
-    ) -> Result<Option<CachedPlan>, CacheError> {
-        let mut inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+    pub fn remove(&self, key: &QueryKey) -> Result<Option<CachedPlan>, CacheError> {
+        let mut inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         let removed = inner.entries.remove(key);
         if removed.is_some() {
-            inner
-                .insertion_order
-                .retain(|k| k != key);
+            inner.insertion_order.retain(|k| k != key);
         }
         Ok(removed)
     }
 
     /// Clear all entries from the cache.
     pub fn clear(&self) -> Result<(), CacheError> {
-        let mut inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+        let mut inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         inner.entries.clear();
         inner.insertion_order.clear();
         inner.metrics.record_clear();
@@ -196,22 +176,15 @@ impl PlanCache {
     }
 
     /// Clear entries whose plans reference the given table name.
-    pub fn clear_table(
-        &self,
-        table: &str,
-    ) -> Result<usize, CacheError> {
-        let mut inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+    pub fn clear_table(&self, table: &str) -> Result<usize, CacheError> {
+        let mut inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         let before = inner.entries.len();
-        inner.entries.retain(|_, plan| {
-            !plan.references_table(table)
-        });
-        let removed = before - inner.entries.len();
-        let remaining_keys: std::collections::HashSet<_> =
-            inner.entries.keys().cloned().collect();
         inner
-            .insertion_order
-            .retain(|k| remaining_keys.contains(k));
+            .entries
+            .retain(|_, plan| !plan.references_table(table));
+        let removed = before - inner.entries.len();
+        let remaining_keys: std::collections::HashSet<_> = inner.entries.keys().cloned().collect();
+        inner.insertion_order.retain(|k| remaining_keys.contains(k));
         Ok(removed)
     }
 
@@ -223,16 +196,12 @@ impl PlanCache {
         &self,
         current_stats: &dyn StatisticsProvider,
     ) -> Result<DriftReport, CacheError> {
-        let inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+        let inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         let mut report = DriftReport::new();
 
         for (key, plan) in &inner.entries {
-            let drift = validity::check_plan_drift(
-                plan,
-                current_stats,
-                self.config.drift_threshold,
-            );
+            let drift =
+                validity::check_plan_drift(plan, current_stats, self.config.drift_threshold);
             if drift.status != DriftStatus::Fresh {
                 report.stale_plans.push((key.clone(), drift));
             }
@@ -251,11 +220,7 @@ impl PlanCache {
         current_stats: &dyn StatisticsProvider,
         optimizer: &Optimizer,
     ) -> Result<usize, CacheError> {
-        self.reoptimize_with_threshold(
-            current_stats,
-            optimizer,
-            self.config.drift_threshold,
-        )
+        self.reoptimize_with_threshold(current_stats, optimizer, self.config.drift_threshold)
     }
 
     /// Reoptimize stale plans using a custom drift threshold.
@@ -265,18 +230,11 @@ impl PlanCache {
         optimizer: &Optimizer,
         threshold: f64,
     ) -> Result<usize, CacheError> {
-        let stale_keys = self.find_stale_keys(
-            current_stats,
-            threshold,
-        )?;
+        let stale_keys = self.find_stale_keys(current_stats, threshold)?;
 
         let mut reoptimized = 0;
         for key in &stale_keys {
-            if self.try_reoptimize_entry(
-                key,
-                current_stats,
-                optimizer,
-            )? {
+            if self.try_reoptimize_entry(key, current_stats, optimizer)? {
                 reoptimized += 1;
             }
         }
@@ -285,11 +243,8 @@ impl PlanCache {
     }
 
     /// Return a list of all cached plans with their keys.
-    pub fn list(
-        &self,
-    ) -> Result<Vec<(QueryKey, CachedPlan)>, CacheError> {
-        let inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+    pub fn list(&self) -> Result<Vec<(QueryKey, CachedPlan)>, CacheError> {
+        let inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         Ok(inner
             .entries
             .iter()
@@ -299,8 +254,7 @@ impl PlanCache {
 
     /// Return current cache metrics.
     pub fn metrics(&self) -> Result<CacheMetrics, CacheError> {
-        let inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+        let inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         let mut m = inner.metrics.clone();
         m.current_entries = inner.entries.len();
         m.max_entries = self.config.max_entries;
@@ -309,8 +263,7 @@ impl PlanCache {
 
     /// Return the number of entries currently in the cache.
     pub fn len(&self) -> Result<usize, CacheError> {
-        let inner =
-            self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+        let inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         Ok(inner.entries.len())
     }
 
@@ -324,17 +277,10 @@ impl PlanCache {
         current_stats: &dyn StatisticsProvider,
         threshold: f64,
     ) -> Result<Vec<QueryKey>, CacheError> {
-        let inner = self
-            .inner
-            .lock()
-            .map_err(|_| CacheError::LockPoisoned)?;
+        let inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         let mut keys = Vec::new();
         for (key, plan) in &inner.entries {
-            let drift = validity::check_plan_drift(
-                plan,
-                current_stats,
-                threshold,
-            );
+            let drift = validity::check_plan_drift(plan, current_stats, threshold);
             if drift.status != DriftStatus::Fresh {
                 keys.push(key.clone());
             }
@@ -349,36 +295,23 @@ impl PlanCache {
         optimizer: &Optimizer,
     ) -> Result<bool, CacheError> {
         let sql = {
-            let inner = self
-                .inner
-                .lock()
-                .map_err(|_| CacheError::LockPoisoned)?;
-            inner
-                .entries
-                .get(key)
-                .map(|e| e.original_sql.clone())
+            let inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
+            inner.entries.get(key).map(|e| e.original_sql.clone())
         };
 
         let Some(sql) = sql else {
             return Ok(false);
         };
 
-        let Ok(parsed_plan) = ra_parser::sql_to_relexpr(&sql)
-        else {
+        let Ok(parsed_plan) = ra_parser::sql_to_relexpr(&sql) else {
             return Ok(false);
         };
 
         match optimizer.optimize(&parsed_plan) {
             Ok(new_plan) => {
-                let new_snapshot =
-                    build_snapshot(&parsed_plan, current_stats);
+                let new_snapshot = build_snapshot(&parsed_plan, current_stats);
                 let new_cost = estimate_simple_cost(&new_plan);
-                self.update_entry(
-                    key,
-                    new_plan,
-                    new_cost,
-                    new_snapshot,
-                )?;
+                self.update_entry(key, new_plan, new_cost, new_snapshot)?;
                 Ok(true)
             }
             Err(e) => {
@@ -399,41 +332,26 @@ impl PlanCache {
         new_cost: Cost,
         new_snapshot: HashMap<String, Statistics>,
     ) -> Result<(), CacheError> {
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| CacheError::LockPoisoned)?;
+        let mut inner = self.inner.lock().map_err(|_| CacheError::LockPoisoned)?;
         if let Some(entry) = inner.entries.get_mut(key) {
             entry.plan = new_plan;
             entry.cost = new_cost;
             entry.statistics_snapshot = new_snapshot;
             entry.optimized_at = Instant::now();
-            entry.reoptimization_count =
-                entry.reoptimization_count.saturating_add(1);
+            entry.reoptimization_count = entry.reoptimization_count.saturating_add(1);
         }
         Ok(())
     }
 
-    fn evict_one(
-        &self,
-        inner: &mut CacheInner,
-    ) {
+    fn evict_one(&self, inner: &mut CacheInner) {
         if inner.entries.is_empty() {
             return;
         }
 
         let victim_key = match self.config.eviction_policy {
-            EvictionPolicy::Lru => eviction::find_lru_victim(
-                &inner.entries,
-            ),
-            EvictionPolicy::Lfu => eviction::find_lfu_victim(
-                &inner.entries,
-            ),
-            EvictionPolicy::Adaptive => {
-                eviction::find_adaptive_victim(
-                    &inner.entries,
-                )
-            }
+            EvictionPolicy::Lru => eviction::find_lru_victim(&inner.entries),
+            EvictionPolicy::Lfu => eviction::find_lfu_victim(&inner.entries),
+            EvictionPolicy::Adaptive => eviction::find_adaptive_victim(&inner.entries),
         };
 
         if let Some(key) = victim_key {
@@ -505,7 +423,6 @@ fn count_nodes(plan: &RelExpr) -> usize {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::statistics::Statistics;
@@ -521,9 +438,7 @@ mod tests {
         }
     }
 
-    fn make_provider(
-        pairs: &[(&str, f64)],
-    ) -> TestStatsProvider {
+    fn make_provider(pairs: &[(&str, f64)]) -> TestStatsProvider {
         let mut tables = HashMap::new();
         for &(name, rows) in pairs {
             tables.insert(name.to_owned(), Statistics::new(rows));
@@ -553,10 +468,7 @@ mod tests {
     fn put_and_get() {
         let cache = PlanCache::new();
         let key = make_key("SELECT * FROM users");
-        let plan = make_plan(
-            "SELECT * FROM users",
-            &[("users", 1000.0)],
-        );
+        let plan = make_plan("SELECT * FROM users", &[("users", 1000.0)]);
 
         cache.put(key.clone(), plan).expect("put should succeed");
         let fetched = cache
@@ -570,8 +482,7 @@ mod tests {
     fn miss_returns_none() {
         let cache = PlanCache::new();
         let key = make_key("SELECT 1");
-        let result =
-            cache.get(&key).expect("get should succeed");
+        let result = cache.get(&key).expect("get should succeed");
         assert!(result.is_none());
     }
 
@@ -609,21 +520,14 @@ mod tests {
         let cache = PlanCache::new();
         let k1 = make_key("SELECT * FROM users");
         let k2 = make_key("SELECT * FROM orders");
-        let p1 = make_plan(
-            "SELECT * FROM users",
-            &[("users", 1000.0)],
-        );
-        let p2 = make_plan(
-            "SELECT * FROM orders",
-            &[("orders", 500.0)],
-        );
+        let p1 = make_plan("SELECT * FROM users", &[("users", 1000.0)]);
+        let p2 = make_plan("SELECT * FROM orders", &[("orders", 500.0)]);
 
         cache.put(k1.clone(), p1).expect("put");
         cache.put(k2.clone(), p2).expect("put");
         assert_eq!(cache.len().expect("len"), 2);
 
-        let removed =
-            cache.clear_table("users").expect("clear_table");
+        let removed = cache.clear_table("users").expect("clear_table");
         assert_eq!(removed, 1);
         assert_eq!(cache.len().expect("len"), 1);
     }
@@ -700,16 +604,12 @@ mod tests {
     fn check_validity_detects_drift() {
         let cache = PlanCache::new();
         let key = make_key("SELECT * FROM users");
-        let plan = make_plan(
-            "SELECT * FROM users",
-            &[("users", 1000.0)],
-        );
+        let plan = make_plan("SELECT * FROM users", &[("users", 1000.0)]);
         cache.put(key, plan).expect("put");
 
         // Current stats show users grew 50% (1000 -> 1500)
         let provider = make_provider(&[("users", 1500.0)]);
-        let report =
-            cache.check_validity(&provider).expect("check");
+        let report = cache.check_validity(&provider).expect("check");
         assert!(
             !report.stale_plans.is_empty(),
             "50% drift should exceed 20% threshold"
@@ -720,16 +620,12 @@ mod tests {
     fn check_validity_fresh_within_threshold() {
         let cache = PlanCache::new();
         let key = make_key("SELECT * FROM users");
-        let plan = make_plan(
-            "SELECT * FROM users",
-            &[("users", 1000.0)],
-        );
+        let plan = make_plan("SELECT * FROM users", &[("users", 1000.0)]);
         cache.put(key, plan).expect("put");
 
         // Only 10% change -- within threshold
         let provider = make_provider(&[("users", 1100.0)]);
-        let report =
-            cache.check_validity(&provider).expect("check");
+        let report = cache.check_validity(&provider).expect("check");
         assert!(
             report.stale_plans.is_empty(),
             "10% drift should be within 20% threshold"
@@ -775,8 +671,7 @@ mod tests {
         let plan = make_plan("SELECT 1", &[("t", 100.0)]);
 
         cache.put(key.clone(), plan).expect("put");
-        let removed =
-            cache.remove(&key).expect("remove");
+        let removed = cache.remove(&key).expect("remove");
         assert!(removed.is_some());
         assert!(cache.is_empty().expect("is_empty"));
     }

@@ -1,3 +1,4 @@
+#![expect(clippy::print_stdout, reason = "CLI output")]
 //! CLI commands for timeline-based optimization.
 //!
 //! Provides timeline command for optimizing queries through
@@ -124,14 +125,14 @@ pub fn cmd_timeline(cmd: &TimelineCommand, quiet: bool) -> Result<()> {
 
     // Test mode - validate expectations
     if cmd.test {
-        return run_test_mode(&timeline, query, &snapshot_filter, cmd.verbose, quiet);
+        return run_test_mode(&timeline, query, snapshot_filter.as_deref(), cmd.verbose, quiet);
     }
 
     // Normal mode - optimize and output results
     run_optimize_mode(
         &timeline,
         query,
-        &snapshot_filter,
+        snapshot_filter.as_deref(),
         format,
         cmd.verbose,
         quiet,
@@ -155,7 +156,7 @@ fn parse_snapshot_filter(filter_str: &str) -> Result<Option<Vec<usize>>> {
 fn run_optimize_mode(
     timeline: &TimelineConfig,
     query: &str,
-    snapshot_filter: &Option<Vec<usize>>,
+    snapshot_filter: Option<&[usize]>,
     format: OutputFormat,
     verbose: bool,
     quiet: bool,
@@ -174,7 +175,7 @@ fn run_optimize_mode(
 fn run_test_mode(
     timeline: &TimelineConfig,
     query: &str,
-    snapshot_filter: &Option<Vec<usize>>,
+    snapshot_filter: Option<&[usize]>,
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
@@ -193,7 +194,7 @@ fn run_test_mode(
 
     for expectation in &timeline.expectations {
         // Skip if filtered out
-        if let Some(ref filter) = snapshot_filter {
+        if let Some(filter) = snapshot_filter {
             if !filter.contains(&expectation.snapshot_index) {
                 continue;
             }
@@ -261,7 +262,7 @@ fn run_test_mode(
 fn optimize_snapshots(
     timeline: &TimelineConfig,
     query: &str,
-    snapshot_filter: &Option<Vec<usize>>,
+    snapshot_filter: Option<&[usize]>,
     verbose: bool,
     quiet: bool,
 ) -> Result<Vec<SnapshotResult>> {
@@ -269,7 +270,7 @@ fn optimize_snapshots(
 
     for (idx, snapshot) in timeline.snapshots.iter().enumerate() {
         // Skip if filtered out
-        if let Some(ref filter) = snapshot_filter {
+        if let Some(filter) = snapshot_filter {
             if !filter.contains(&idx) {
                 continue;
             }
@@ -303,9 +304,8 @@ fn optimize_single_snapshot(
     // Get hardware profile - use predefined profiles for now
     // TODO: Map HardwareProfileDef to HardwareProfile properly
     let hardware = match snapshot.hardware_profile.to_lowercase().as_str() {
-        "laptop" | "mobile" | "desktop" => HardwareProfile::cpu_only(),
-        "server" | "cloud" => HardwareProfile::cpu_only(),
         "gpu-server" | "gpu" => HardwareProfile::gpu_server(),
+        // All other profiles (laptop, mobile, desktop, server, cloud, etc.)
         _ => HardwareProfile::cpu_only(),
     };
 
@@ -314,9 +314,11 @@ fn optimize_single_snapshot(
 
     // Create optimizer with snapshot facts
     // TODO: Integrate SnapshotFactsProvider when API is available
-    let mut optimizer_config = OptimizerConfig::default();
-    optimizer_config.iter_limit = 20;
-    optimizer_config.node_limit = 100_000;
+    let optimizer_config = OptimizerConfig {
+        iter_limit: 20,
+        node_limit: 100_000,
+        ..OptimizerConfig::default()
+    };
 
     let mut optimizer = Optimizer::with_config(optimizer_config);
     optimizer.set_hardware_profile(hardware.clone());

@@ -34,11 +34,7 @@ pub struct DialectVersion {
 impl DialectVersion {
     /// Create a new dialect version.
     #[must_use]
-    pub fn new(
-        dialect: Dialect,
-        major: u16,
-        minor: u16,
-    ) -> Self {
+    pub fn new(dialect: Dialect, major: u16, minor: u16) -> Self {
         Self {
             dialect,
             major,
@@ -151,11 +147,7 @@ impl DialectTranslator {
 
     /// Create a translator with a specific backend.
     #[must_use]
-    pub fn with_backend(
-        source: Dialect,
-        target: Dialect,
-        backend: TranslationBackend,
-    ) -> Self {
+    pub fn with_backend(source: Dialect, target: Dialect, backend: TranslationBackend) -> Self {
         Self {
             source,
             target,
@@ -167,10 +159,7 @@ impl DialectTranslator {
 
     /// Create a translator with specific dialect versions.
     #[must_use]
-    pub fn with_versions(
-        source: DialectVersion,
-        target: DialectVersion,
-    ) -> Self {
+    pub fn with_versions(source: DialectVersion, target: DialectVersion) -> Self {
         Self {
             source: source.dialect,
             target: target.dialect,
@@ -220,9 +209,7 @@ impl DialectTranslator {
     pub fn translate(&self, sql: &str) -> Result<TranslationResult, TranslationError> {
         // Delegate to the configured backend
         let backend_impl: Box<dyn Backend> = match self.backend {
-            TranslationBackend::Native => {
-                Box::new(crate::backends::native::NativeBackend)
-            }
+            TranslationBackend::Native => Box::new(crate::backends::native::NativeBackend),
             #[cfg(feature = "polyglot-backend")]
             TranslationBackend::Polyglot => {
                 Box::new(crate::backends::polyglot_backend::PolyglotBackend)
@@ -549,10 +536,7 @@ mod tests {
 
     #[test]
     fn distinct_translation() {
-        let result = pg_to(
-            Dialect::MySql,
-            "SELECT DISTINCT name FROM users",
-        );
+        let result = pg_to(Dialect::MySql, "SELECT DISTINCT name FROM users");
         assert!(
             result.sql.contains("DISTINCT"),
             "Expected DISTINCT in: {}",
@@ -605,11 +589,7 @@ mod tests {
              IN (SELECT id FROM customers WHERE active = TRUE)",
         );
         // ra-parser wraps IN subquery as a special function
-        assert!(
-            result.sql.contains("IN"),
-            "Expected IN in: {}",
-            result.sql
-        );
+        assert!(result.sql.contains("IN"), "Expected IN in: {}", result.sql);
     }
 
     #[test]
@@ -720,10 +700,7 @@ mod tests {
 
     #[test]
     fn double_colon_cast_to_mysql() {
-        let result = pg_to(
-            Dialect::MySql,
-            "SELECT age::int FROM users",
-        );
+        let result = pg_to(Dialect::MySql, "SELECT age::int FROM users");
         assert!(
             result.sql.contains("CAST"),
             "Expected CAST in: {}",
@@ -733,10 +710,7 @@ mod tests {
 
     #[test]
     fn double_colon_cast_stays_for_postgres() {
-        let result = pg_to(
-            Dialect::PostgreSql,
-            "SELECT age::int FROM users",
-        );
+        let result = pg_to(Dialect::PostgreSql, "SELECT age::int FROM users");
         // PostgreSQL supports ::, so it should stay as-is
         assert!(
             result.sql.contains("::") || result.sql.contains("CAST"),
@@ -756,11 +730,7 @@ mod tests {
              SELECT DISTINCT name FROM ranked \
              WHERE rn <= 10",
         );
-        assert!(
-            result.sql.contains("WITH"),
-            "Expected WITH: {}",
-            result.sql
-        );
+        assert!(result.sql.contains("WITH"), "Expected WITH: {}", result.sql);
         assert!(
             result.sql.contains("ROW_NUMBER"),
             "Expected ROW_NUMBER: {}",
@@ -776,11 +746,7 @@ mod tests {
     #[test]
     fn translator_with_backend() {
         let backend = TranslationBackend::Native;
-        let t = DialectTranslator::with_backend(
-            Dialect::PostgreSql,
-            Dialect::MySql,
-            backend,
-        );
+        let t = DialectTranslator::with_backend(Dialect::PostgreSql, Dialect::MySql, backend);
         assert_eq!(t.source(), Dialect::PostgreSql);
         assert_eq!(t.target(), Dialect::MySql);
         let result = t.translate("SELECT 1").expect("should translate");

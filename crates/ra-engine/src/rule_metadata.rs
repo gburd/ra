@@ -84,7 +84,7 @@ impl BenefitRange {
     /// Expected benefit (midpoint of range).
     #[must_use]
     pub fn expected(&self) -> f64 {
-        (self.min + self.max) / 2.0
+        f64::midpoint(self.min, self.max)
     }
 }
 
@@ -171,6 +171,10 @@ pub struct ParsedRule {
 ///
 /// # Rule documentation...
 /// ```
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or has invalid format.
 pub fn parse_rra_file(path: &Path) -> Result<ParsedRule> {
     let contents = fs::read_to_string(path)
         .with_context(|| format!("Failed to read rule file: {}", path.display()))?;
@@ -198,6 +202,11 @@ pub fn parse_rra_file(path: &Path) -> Result<ParsedRule> {
 }
 
 /// Load all .rra files from a directory recursively.
+///
+/// # Errors
+///
+/// Returns an error if directory traversal fails or individual files
+/// cannot be parsed.
 #[cfg(feature = "file-discovery")]
 pub fn load_rules_from_directory(dir: &Path) -> Result<Vec<ParsedRule>> {
     let mut rules = Vec::new();
@@ -210,7 +219,7 @@ pub fn load_rules_from_directory(dir: &Path) -> Result<Vec<ParsedRule>> {
     for entry in walkdir::WalkDir::new(dir)
         .follow_links(true)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
     {
         if entry.file_type().is_file() {
             if let Some(ext) = entry.path().extension() {
@@ -324,9 +333,9 @@ fn evaluate_precondition(precond: &Precondition, facts: &dyn FactsProvider) -> b
 /// Evaluate a predicate condition string.
 ///
 /// Supports simple expressions like:
-/// - "has_gpu()"
-/// - "cpu_cores() >= 4"
-/// - "available_memory() > 8000000000"
+/// - "`has_gpu()`"
+/// - "`cpu_cores()` >= 4"
+/// - "`available_memory()` > 8000000000"
 fn evaluate_predicate_condition(condition: &str, facts: &dyn FactsProvider) -> bool {
     let condition = condition.trim();
 
@@ -351,7 +360,7 @@ fn evaluate_predicate_condition(condition: &str, facts: &dyn FactsProvider) -> b
     true
 }
 
-/// Parse a comparison expression like "cpu_cores() >= 4".
+/// Parse a comparison expression like "`cpu_cores()` >= 4".
 fn parse_comparison(expr: &str) -> Option<(String, String, String)> {
     let operators = [">=", "<=", "==", "!=", ">", "<"];
     for op in &operators {
@@ -368,7 +377,7 @@ fn parse_comparison(expr: &str) -> Option<(String, String, String)> {
 fn evaluate_comparison(func: &str, op: &str, value_str: &str, facts: &dyn FactsProvider) -> bool {
     // Get the actual value from facts
     let actual_value: f64 = match func {
-        "cpu_cores()" => facts.cpu_cores() as f64,
+        "cpu_cores()" => f64::from(facts.cpu_cores()),
         "available_memory()" => facts.available_memory() as f64,
         _ => {
             warn!("Unknown function in comparison: {}", func);
@@ -377,12 +386,11 @@ fn evaluate_comparison(func: &str, op: &str, value_str: &str, facts: &dyn FactsP
     };
 
     // Parse expected value
-    let expected_value: f64 = match value_str.parse() {
-        Ok(v) => v,
-        Err(_) => {
-            warn!("Failed to parse comparison value: {}", value_str);
-            return true;
-        }
+    let expected_value: f64 = if let Ok(v) = value_str.parse() {
+        v
+    } else {
+        warn!("Failed to parse comparison value: {}", value_str);
+        return true;
     };
 
     // Perform comparison
@@ -426,7 +434,8 @@ fn evaluate_feature_flag(flag: &str, _facts: &dyn FactsProvider) -> bool {
     true
 }
 
-/// Build a rule ID -> RuleMetadata map for quick lookup.
+/// Build a rule ID -> `RuleMetadata` map for quick lookup.
+#[must_use]
 pub fn build_metadata_index(rules: &[ParsedRule]) -> HashMap<String, RuleMetadata> {
     rules
         .iter()
@@ -435,7 +444,7 @@ pub fn build_metadata_index(rules: &[ParsedRule]) -> HashMap<String, RuleMetadat
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[expect(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use ra_core::facts::{
@@ -445,7 +454,7 @@ mod tests {
     use ra_core::statistics::ColumnStats;
     use std::time::Duration;
 
-    /// Configurable facts provider for testing rule_metadata.
+    /// Configurable facts provider for testing `rule_metadata`.
     struct TestFacts {
         db_name: &'static str,
         hw: CoreHardwareProfile,

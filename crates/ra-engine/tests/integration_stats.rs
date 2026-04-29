@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, clippy::float_cmp, reason = "test code")]
 //! Integration tests for ra-stats with ra-engine cost models.
 //!
 //! Validates that statistics staleness, confidence, and profiles

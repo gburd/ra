@@ -9,10 +9,7 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
-use crate::benchmark::{
-    BenchmarkConfig, HardwareMeasurements, get_measurements,
-    run_benchmarks,
-};
+use crate::benchmark::{get_measurements, run_benchmarks, BenchmarkConfig, HardwareMeasurements};
 use crate::profile::HardwareProfile;
 
 /// Cached calibrated cost model, computed once.
@@ -157,11 +154,7 @@ impl CalibratedCostModel {
     /// fits in L3 cache. Uses measured cache latencies rather than
     /// static assumptions.
     #[must_use]
-    pub fn hash_table_cache_factor(
-        &self,
-        hash_table_bytes: u64,
-        l3_cache_bytes: u64,
-    ) -> f64 {
+    pub fn hash_table_cache_factor(&self, hash_table_bytes: u64, l3_cache_bytes: u64) -> f64 {
         #[expect(clippy::cast_precision_loss)]
         let ht_mb = hash_table_bytes as f64 / (1024.0 * 1024.0);
         #[expect(clippy::cast_precision_loss)]
@@ -184,9 +177,7 @@ impl CalibratedCostModel {
 /// calls return the cached model.
 #[must_use]
 pub fn get_calibrated_model() -> &'static CalibratedCostModel {
-    CALIBRATED_MODEL.get_or_init(|| {
-        CalibratedCostModel::from_measurements(get_measurements())
-    })
+    CALIBRATED_MODEL.get_or_init(|| CalibratedCostModel::from_measurements(get_measurements()))
 }
 
 /// Run calibration with custom config.
@@ -249,9 +240,7 @@ mod tests {
 
     #[test]
     fn hdd_strongly_prefers_sequential() {
-        let hdd = CalibratedCostModel::from_measurements(
-            &HardwareMeasurements::default_hdd(),
-        );
+        let hdd = CalibratedCostModel::from_measurements(&HardwareMeasurements::default_hdd());
         // For a 1000-page table, compare sequential vs index scan cost
         let seq_cost = 1000.0 * hdd.seq_page_cost();
         // 100 random lookups (10% selectivity)
@@ -266,9 +255,7 @@ mod tests {
 
     #[test]
     fn nvme_can_prefer_index_scan() {
-        let nvme = CalibratedCostModel::from_measurements(
-            &HardwareMeasurements::default_nvme(),
-        );
+        let nvme = CalibratedCostModel::from_measurements(&HardwareMeasurements::default_nvme());
         // For a 1000-page table, compare sequential vs index scan
         let seq_cost = 1000.0 * nvme.seq_page_cost();
         // 10 random lookups (1% selectivity)
@@ -284,16 +271,14 @@ mod tests {
     #[test]
     fn cache_factor_fits_in_l3() {
         let model = CalibratedCostModel::reference();
-        let factor =
-            model.hash_table_cache_factor(1024 * 1024, 8 * 1024 * 1024);
+        let factor = model.hash_table_cache_factor(1024 * 1024, 8 * 1024 * 1024);
         assert!((factor - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn cache_factor_exceeds_l3() {
         let model = CalibratedCostModel::reference();
-        let factor = model
-            .hash_table_cache_factor(100 * 1024 * 1024, 8 * 1024 * 1024);
+        let factor = model.hash_table_cache_factor(100 * 1024 * 1024, 8 * 1024 * 1024);
         assert!(factor > 1.0);
     }
 
@@ -315,25 +300,18 @@ mod tests {
     #[test]
     fn calibration_serialization_roundtrip() {
         let model = CalibratedCostModel::reference();
-        let json = serde_json::to_string(&model)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&model).expect("serialization should succeed");
         let deserialized: CalibratedCostModel =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(model, deserialized);
     }
 
     #[test]
     fn all_three_profiles_differ() {
-        let nvme = CalibratedCostModel::from_measurements(
-            &HardwareMeasurements::default_nvme(),
-        );
-        let sata = CalibratedCostModel::from_measurements(
-            &HardwareMeasurements::default_sata_ssd(),
-        );
-        let hdd = CalibratedCostModel::from_measurements(
-            &HardwareMeasurements::default_hdd(),
-        );
+        let nvme = CalibratedCostModel::from_measurements(&HardwareMeasurements::default_nvme());
+        let sata =
+            CalibratedCostModel::from_measurements(&HardwareMeasurements::default_sata_ssd());
+        let hdd = CalibratedCostModel::from_measurements(&HardwareMeasurements::default_hdd());
 
         // Sequential cost should increase: `NVMe` < SATA < HDD
         assert!(nvme.sequential_io_cost < sata.sequential_io_cost);

@@ -249,8 +249,11 @@ pub enum GatheringPriority {
     Critical,
 }
 
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic stats tests"
+)]
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -556,20 +559,16 @@ mod tests {
             interference_factor: 0.5,
             wall_time_ms: 200,
         };
-        let json = serde_json::to_string(&c)
-            .expect("serialize");
-        let d: GatheringCost = serde_json::from_str(&json)
-            .expect("deserialize");
+        let json = serde_json::to_string(&c).expect("serialize");
+        let d: GatheringCost = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(c, d);
     }
 
     #[test]
     fn gathering_method_serialize_roundtrip() {
         let m = GatheringMethod::BlockSample { sample_rate: 10 };
-        let json = serde_json::to_string(&m)
-            .expect("serialize");
-        let d: GatheringMethod = serde_json::from_str(&json)
-            .expect("deserialize");
+        let json = serde_json::to_string(&m).expect("serialize");
+        let d: GatheringMethod = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(m, d);
     }
 }

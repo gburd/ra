@@ -356,4 +356,216 @@ mod tests {
             "expected filter rule conflicts"
         );
     }
+
+    #[test]
+    fn compute_dependencies_empty_analyzer() {
+        let analyzer = Analyzer::new();
+        assert!(analyzer.compute_dependencies().is_empty());
+    }
+
+    #[test]
+    fn compute_dependencies_single_rule() {
+        let mut analyzer = Analyzer::new();
+        analyzer.add_rule(RuleInfo {
+            name: "only".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Filter]),
+            writes: HashSet::from([OperatorKind::Filter]),
+        });
+        // A single rule cannot depend on itself.
+        assert!(analyzer.compute_dependencies().is_empty());
+    }
+
+    #[test]
+    fn compute_dependencies_no_overlap() {
+        let mut analyzer = Analyzer::new();
+        analyzer.add_rule(RuleInfo {
+            name: "a".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Filter]),
+            writes: HashSet::from([OperatorKind::Filter]),
+        });
+        analyzer.add_rule(RuleInfo {
+            name: "b".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Join]),
+            writes: HashSet::from([OperatorKind::Join]),
+        });
+        // No overlap: a writes Filter, b reads Join (not Filter).
+        assert!(analyzer.compute_dependencies().is_empty());
+    }
+
+    #[test]
+    fn affected_by_rule_with_empty_writes() {
+        let mut analyzer = Analyzer::new();
+        analyzer.add_rule(RuleInfo {
+            name: "no-writes".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Filter]),
+            writes: HashSet::new(),
+        });
+        analyzer.add_rule(RuleInfo {
+            name: "reader".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Filter]),
+            writes: HashSet::from([OperatorKind::Filter]),
+        });
+        // no-writes has empty writes, so nothing is affected by it.
+        assert!(analyzer.affected_by("no-writes").is_empty());
+    }
+
+    #[test]
+    fn detect_conflicts_no_write_overlap() {
+        let mut analyzer = Analyzer::new();
+        analyzer.add_rule(RuleInfo {
+            name: "a".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Filter]),
+            writes: HashSet::from([OperatorKind::Filter]),
+        });
+        analyzer.add_rule(RuleInfo {
+            name: "b".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Join]),
+            writes: HashSet::from([OperatorKind::Join]),
+        });
+        assert!(analyzer.detect_conflicts().is_empty());
+    }
+
+    #[test]
+    fn detect_conflicts_empty_analyzer() {
+        let analyzer = Analyzer::new();
+        assert!(analyzer.detect_conflicts().is_empty());
+    }
+
+    #[test]
+    fn add_rule_overwrites_existing() {
+        let mut analyzer = Analyzer::new();
+        analyzer.add_rule(RuleInfo {
+            name: "r".into(),
+            category: "cat-a".into(),
+            reads: HashSet::new(),
+            writes: HashSet::new(),
+        });
+        analyzer.add_rule(RuleInfo {
+            name: "r".into(),
+            category: "cat-b".into(),
+            reads: HashSet::new(),
+            writes: HashSet::new(),
+        });
+        assert_eq!(analyzer.rule_count(), 1);
+        assert_eq!(
+            analyzer.get_rule("r").map(|r| r.category.as_str()),
+            Some("cat-b")
+        );
+    }
+
+    #[test]
+    fn rules_in_category_sorted() {
+        let analyzer = setup_analyzer();
+        let rules = analyzer.rules_in_category("predicate-pushdown");
+        let mut sorted = rules.clone();
+        sorted.sort_unstable();
+        assert_eq!(rules, sorted);
+    }
+
+    #[test]
+    fn affected_by_returns_sorted() {
+        let analyzer = setup_analyzer();
+        let affected = analyzer.affected_by("filter-merge");
+        let mut sorted = affected.clone();
+        sorted.sort();
+        assert_eq!(affected, sorted);
+    }
+
+    #[test]
+    fn dependency_shared_operators_correct() {
+        let mut analyzer = Analyzer::new();
+        analyzer.add_rule(RuleInfo {
+            name: "producer".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Scan]),
+            writes: HashSet::from([OperatorKind::Filter, OperatorKind::Join]),
+        });
+        analyzer.add_rule(RuleInfo {
+            name: "consumer".into(),
+            category: "test".into(),
+            reads: HashSet::from([OperatorKind::Filter, OperatorKind::Sort]),
+            writes: HashSet::from([OperatorKind::Sort]),
+        });
+
+        let deps = analyzer.compute_dependencies();
+        let dep = deps
+            .iter()
+            .find(|d| d.producer == "producer" && d.consumer == "consumer");
+        assert!(dep.is_some(), "expected a dependency");
+        // Only Filter should be shared (producer writes Filter+Join,
+        // consumer reads Filter+Sort).
+        if let Some(dep) = dep {
+            assert_eq!(dep.shared_operators, HashSet::from([OperatorKind::Filter]));
+        }
+    }
+
+    #[test]
+    fn all_operator_kinds_in_enum() {
+        // Verify every variant can be constructed and compared.
+        let all = [
+            OperatorKind::Scan,
+            OperatorKind::Filter,
+            OperatorKind::Project,
+            OperatorKind::Join,
+            OperatorKind::Aggregate,
+            OperatorKind::Sort,
+            OperatorKind::Limit,
+            OperatorKind::SetOp,
+        ];
+        let set: HashSet<_> = all.iter().collect();
+        assert_eq!(set.len(), 8);
+    }
+
+    #[test]
+    fn rule_info_fields_accessible() {
+        let info = RuleInfo {
+            name: "test-name".into(),
+            category: "test-cat".into(),
+            reads: HashSet::from([OperatorKind::Scan]),
+            writes: HashSet::from([OperatorKind::Filter]),
+        };
+        assert_eq!(info.name, "test-name");
+        assert_eq!(info.category, "test-cat");
+        assert!(info.reads.contains(&OperatorKind::Scan));
+        assert!(info.writes.contains(&OperatorKind::Filter));
+    }
+
+    #[test]
+    fn rule_dependency_fields_accessible() {
+        let dep = RuleDependency {
+            producer: "p".into(),
+            consumer: "c".into(),
+            shared_operators: HashSet::from([OperatorKind::Join]),
+        };
+        assert_eq!(dep.producer, "p");
+        assert_eq!(dep.consumer, "c");
+        assert!(dep.shared_operators.contains(&OperatorKind::Join));
+    }
+
+    #[test]
+    fn rule_info_clone() {
+        let info = RuleInfo {
+            name: "original".into(),
+            category: "cat".into(),
+            reads: HashSet::from([OperatorKind::Filter]),
+            writes: HashSet::from([OperatorKind::Join]),
+        };
+        let cloned = info.clone();
+        assert_eq!(cloned.name, info.name);
+        assert_eq!(cloned.reads, info.reads);
+    }
+
+    #[test]
+    fn operator_kind_clone_and_eq() {
+        let a = OperatorKind::Filter;
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
 }

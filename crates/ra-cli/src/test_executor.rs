@@ -185,7 +185,7 @@ fn run_file(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "legacy allow")]
 fn run_case(
     case: &TestCase,
     optimizer: &Optimizer,
@@ -355,7 +355,6 @@ fn short_path(path: &Path) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

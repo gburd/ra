@@ -34,8 +34,8 @@ pub struct RelAnalysis {
 impl Analysis<RelLang> for RelAnalysis {
     type Data = RelData;
 
-    #[allow(clippy::match_same_arms)]
-    fn make(egraph: &EGraph<RelLang, Self>, enode: &RelLang) -> Self::Data {
+    #[expect(clippy::match_same_arms, reason = "legacy allow")]
+    fn make(egraph: &mut EGraph<RelLang, Self>, enode: &RelLang, _id: Id) -> Self::Data {
         let mut data = RelData::default();
 
         match enode {
@@ -114,7 +114,7 @@ fn merge_child_tables(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::egraph::to_rec_expr;

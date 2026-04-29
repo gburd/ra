@@ -4,7 +4,7 @@
 //! invalidation overhead. Demonstrates the 1000x reduction in
 //! invalidation overhead for high-throughput OLTP workloads.
 
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used)]
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_core::algebra::RelExpr;

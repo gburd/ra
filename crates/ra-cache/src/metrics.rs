@@ -61,8 +61,7 @@ impl CacheMetrics {
         if total == 0 {
             return 0.0;
         }
-        let rate = self.hits as f64 / total as f64;
-        rate
+        self.hits as f64 / total as f64
     }
 
     /// Cache utilization as a fraction in `[0.0, 1.0]`.
@@ -73,9 +72,7 @@ impl CacheMetrics {
         if self.max_entries == 0 {
             return 0.0;
         }
-        let util =
-            self.current_entries as f64 / self.max_entries as f64;
-        util
+        self.current_entries as f64 / self.max_entries as f64
     }
 }
 

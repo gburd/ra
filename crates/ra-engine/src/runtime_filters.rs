@@ -64,14 +64,14 @@ impl BloomFilterState {
         let expected = expected_elements.max(1);
         let fpr = fpr.clamp(1e-10, 0.5);
         // m = -n * ln(p) / (ln(2))^2
-        #[allow(
+        #[expect(
             clippy::cast_precision_loss,
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss
         )]
         let num_bits = (-(expected as f64) * fpr.ln() / (2.0_f64.ln().powi(2))).ceil() as usize;
         let num_bits = num_bits.max(64);
-        let words = (num_bits + 63) / 64;
+        let words = num_bits.div_ceil(64);
         Self {
             bits: vec![0u64; words],
             num_bits,
@@ -462,8 +462,8 @@ pub struct RuntimeFilterCost {
     pub estimated_selectivity: f64,
     /// Estimated reduction in probe-side rows.
     pub estimated_rows_saved: f64,
-    /// Net benefit: rows_saved * scan_cost_per_row - build_cost
-    /// - apply_cost. Positive means the filter is beneficial.
+    /// Net benefit: `rows_saved` * `scan_cost_per_row` - `build_cost`
+    /// - `apply_cost`. Positive means the filter is beneficial.
     pub net_benefit: f64,
 }
 
@@ -544,10 +544,11 @@ pub struct FilterOpportunity {
 /// For each hash join where the build side is significantly
 /// smaller than the probe side, suggests a runtime filter.
 ///
-/// `join_pairs`: list of (build_table, probe_table, build_col,
-///   probe_col, build_rows, probe_rows, build_ndv, probe_ndv)
+/// `join_pairs`: list of (`build_table`, `probe_table`, `build_col`,
+///   `probe_col`, `build_rows`, `probe_rows`, `build_ndv`, `probe_ndv`)
 /// `scan_cost_per_row`: base cost of reading one probe-side row
 #[must_use]
+#[expect(clippy::type_complexity, reason = "tuple type matches documented parameter list")]
 pub fn identify_filter_opportunities(
     join_pairs: &[(String, String, String, String, f64, f64, f64, f64)],
     scan_cost_per_row: f64,
@@ -588,7 +589,7 @@ pub fn identify_filter_opportunities(
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::float_cmp, reason = "legacy allow")]
 mod tests {
     use super::*;
 
@@ -643,7 +644,7 @@ mod tests {
                 false_positives += 1;
             }
         }
-        let observed_fpr = false_positives as f64 / test_count as f64;
+        let observed_fpr = f64::from(false_positives) / test_count as f64;
         // Should be close to 1%, allow up to 5%
         assert!(observed_fpr < 0.05, "FPR too high: {observed_fpr}");
     }

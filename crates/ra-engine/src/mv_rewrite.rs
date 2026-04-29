@@ -49,7 +49,7 @@ pub fn mv_scan_cost_factor() -> f64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::analysis::RelAnalysis;

@@ -2,6 +2,7 @@ use crate::plan_cache::PlanCacheConfig;
 
 /// Configuration for the equality saturation optimizer.
 #[derive(Debug, Clone)]
+#[expect(clippy::struct_excessive_bools, reason = "configuration struct")]
 pub struct OptimizerConfig {
     /// Maximum number of e-graph nodes before stopping.
     pub node_limit: usize,
@@ -30,7 +31,7 @@ pub struct OptimizerConfig {
     pub beam_search_config: Option<crate::beam_search::BeamSearchConfig>,
     /// Transaction isolation context for isolation-aware cost adjustments.
     /// When set, the optimizer applies penalties for lock footprint,
-    /// snapshot bloat, SubXID overflow, and MultiXact pressure.
+    /// snapshot bloat, `SubXID` overflow, and `MultiXact` pressure.
     /// When `None`, all isolation penalties are zero.
     pub transaction_context: Option<ra_core::isolation::TransactionContext>,
     /// Enable the fingerprint-based plan cache.

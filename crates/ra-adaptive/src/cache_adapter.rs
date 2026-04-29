@@ -20,8 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ra_cache::{
-    CacheConfig, CacheMetrics, CachedPlan, DriftReport,
-    EvictionPolicy, PlanCache, QueryKey,
+    CacheConfig, CacheMetrics, CachedPlan, DriftReport, EvictionPolicy, PlanCache, QueryKey,
 };
 use ra_core::algebra::RelExpr;
 use ra_core::cost::{Cost, StatisticsProvider};
@@ -116,35 +115,19 @@ impl AdaptivePlanCache {
         stats_provider: &dyn StatisticsProvider,
         optimizer: &Optimizer,
     ) -> Result<CachedPlan, AdaptiveCacheError> {
-        let key = QueryKey::new(
-            sql.to_owned(),
-            hardware_profile.to_owned(),
-            vec![],
-        );
+        let key = QueryKey::new(sql.to_owned(), hardware_profile.to_owned(), vec![]);
 
         if let Some(cached) = self.cache.get(&key)? {
             if self.config.reoptimize_on_get {
-                let drift = self.cache.check_validity(
-                    stats_provider,
-                )?;
+                let drift = self.cache.check_validity(stats_provider)?;
                 if !drift.stale_plans.is_empty() {
-                    return self.optimize_and_cache(
-                        sql,
-                        &key,
-                        stats_provider,
-                        optimizer,
-                    );
+                    return self.optimize_and_cache(sql, &key, stats_provider, optimizer);
                 }
             }
             return Ok(cached);
         }
 
-        self.optimize_and_cache(
-            sql,
-            &key,
-            stats_provider,
-            optimizer,
-        )
+        self.optimize_and_cache(sql, &key, stats_provider, optimizer)
     }
 
     /// Force reoptimization of all stale plans.
@@ -165,11 +148,9 @@ impl AdaptivePlanCache {
         optimizer: &Optimizer,
         threshold: f64,
     ) -> Result<usize, AdaptiveCacheError> {
-        Ok(self.cache.reoptimize_with_threshold(
-            stats_provider,
-            optimizer,
-            threshold,
-        )?)
+        Ok(self
+            .cache
+            .reoptimize_with_threshold(stats_provider, optimizer, threshold)?)
     }
 
     /// Check which cached plans have drifted.
@@ -181,17 +162,12 @@ impl AdaptivePlanCache {
     }
 
     /// Return cache metrics.
-    pub fn metrics(
-        &self,
-    ) -> Result<CacheMetrics, AdaptiveCacheError> {
+    pub fn metrics(&self) -> Result<CacheMetrics, AdaptiveCacheError> {
         Ok(self.cache.metrics()?)
     }
 
     /// List all cached plans.
-    pub fn list(
-        &self,
-    ) -> Result<Vec<(QueryKey, CachedPlan)>, AdaptiveCacheError>
-    {
+    pub fn list(&self) -> Result<Vec<(QueryKey, CachedPlan)>, AdaptiveCacheError> {
         Ok(self.cache.list()?)
     }
 
@@ -201,10 +177,7 @@ impl AdaptivePlanCache {
     }
 
     /// Clear plans referencing a specific table.
-    pub fn clear_table(
-        &self,
-        table: &str,
-    ) -> Result<usize, AdaptiveCacheError> {
+    pub fn clear_table(&self, table: &str) -> Result<usize, AdaptiveCacheError> {
         Ok(self.cache.clear_table(table)?)
     }
 
@@ -227,22 +200,17 @@ impl AdaptivePlanCache {
         stats_provider: &dyn StatisticsProvider,
         optimizer: &Optimizer,
     ) -> Result<CachedPlan, AdaptiveCacheError> {
-        let parsed = ra_parser::sql_to_relexpr(sql)
-            .map_err(|e| AdaptiveCacheError::Parse(e.to_string()))?;
+        let parsed =
+            ra_parser::sql_to_relexpr(sql).map_err(|e| AdaptiveCacheError::Parse(e.to_string()))?;
 
-        let optimized = optimizer.optimize(&parsed).map_err(|e| {
-            AdaptiveCacheError::Optimization(e.to_string())
-        })?;
+        let optimized = optimizer
+            .optimize(&parsed)
+            .map_err(|e| AdaptiveCacheError::Optimization(e.to_string()))?;
 
         let snapshot = build_snapshot(&parsed, stats_provider);
         let cost = estimate_cost(&optimized);
 
-        let plan = CachedPlan::new(
-            optimized,
-            cost,
-            snapshot,
-            sql.to_owned(),
-        );
+        let plan = CachedPlan::new(optimized, cost, snapshot, sql.to_owned());
 
         self.cache.put(key.clone(), plan.clone())?;
         Ok(plan)
@@ -309,9 +277,7 @@ impl StatisticsPoller {
     ///
     /// Returns the poller and a handle for stopping it.
     #[must_use]
-    pub fn new(
-        cache: AdaptivePlanCache,
-    ) -> (Self, PollerHandle) {
+    pub fn new(cache: AdaptivePlanCache) -> (Self, PollerHandle) {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let handle = PollerHandle {
             stop_flag: Arc::clone(&stop_flag),
@@ -343,9 +309,7 @@ impl StatisticsPoller {
         }
 
         let now = Instant::now();
-        let should_poll = self
-            .last_poll
-            .map_or(true, |last| now.duration_since(last) >= self.interval);
+        let should_poll = self.last_poll.is_none_or(|last| now.duration_since(last) >= self.interval);
 
         if !should_poll {
             return Ok(None);
@@ -354,22 +318,17 @@ impl StatisticsPoller {
         self.last_poll = Some(now);
         self.stats.polls = self.stats.polls.saturating_add(1);
 
-        let drift =
-            self.cache.check_drift(stats_provider)?;
-        self.stats.last_stale_count =
-            drift.stale_plans.len();
+        let drift = self.cache.check_drift(stats_provider)?;
+        self.stats.last_stale_count = drift.stale_plans.len();
 
         if drift.stale_plans.is_empty() {
             return Ok(Some(0));
         }
 
-        let reoptimized = self
-            .cache
-            .reoptimize_stale(stats_provider, optimizer)?;
+        let reoptimized = self.cache.reoptimize_stale(stats_provider, optimizer)?;
 
         let count = reoptimized as u64;
-        self.stats.total_reoptimized =
-            self.stats.total_reoptimized.saturating_add(count);
+        self.stats.total_reoptimized = self.stats.total_reoptimized.saturating_add(count);
 
         tracing::info!(
             reoptimized,
@@ -411,11 +370,8 @@ fn collect_tables(
     match plan {
         RelExpr::Scan { table, .. } => {
             if !snapshot.contains_key(table) {
-                if let Some(stats) =
-                    provider.get_statistics(table)
-                {
-                    snapshot
-                        .insert(table.clone(), stats.clone());
+                if let Some(stats) = provider.get_statistics(table) {
+                    snapshot.insert(table.clone(), stats.clone());
                 }
             }
         }
@@ -442,7 +398,6 @@ fn count_nodes(plan: &RelExpr) -> usize {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::statistics::Statistics;
@@ -453,23 +408,15 @@ mod tests {
     }
 
     impl StatisticsProvider for TestStats {
-        fn get_statistics(
-            &self,
-            table: &str,
-        ) -> Option<&Statistics> {
+        fn get_statistics(&self, table: &str) -> Option<&Statistics> {
             self.tables.get(table)
         }
     }
 
-    fn make_stats(
-        pairs: &[(&str, f64)],
-    ) -> TestStats {
+    fn make_stats(pairs: &[(&str, f64)]) -> TestStats {
         let mut tables = HashMap::new();
         for &(name, rows) in pairs {
-            tables.insert(
-                name.to_owned(),
-                Statistics::new(rows),
-            );
+            tables.insert(name.to_owned(), Statistics::new(rows));
         }
         TestStats { tables }
     }
@@ -480,12 +427,7 @@ mod tests {
         let optimizer = Optimizer::new();
         let stats = make_stats(&[("users", 1000.0)]);
 
-        let result = cache.get_or_optimize(
-            "SELECT * FROM users",
-            "auto",
-            &stats,
-            &optimizer,
-        );
+        let result = cache.get_or_optimize("SELECT * FROM users", "auto", &stats, &optimizer);
         assert!(result.is_ok());
 
         let metrics = cache.metrics().expect("metrics");
@@ -499,21 +441,11 @@ mod tests {
         let stats = make_stats(&[("users", 1000.0)]);
 
         cache
-            .get_or_optimize(
-                "SELECT * FROM users",
-                "auto",
-                &stats,
-                &optimizer,
-            )
+            .get_or_optimize("SELECT * FROM users", "auto", &stats, &optimizer)
             .expect("first call");
 
         cache
-            .get_or_optimize(
-                "SELECT * FROM users",
-                "auto",
-                &stats,
-                &optimizer,
-            )
+            .get_or_optimize("SELECT * FROM users", "auto", &stats, &optimizer)
             .expect("second call");
 
         let metrics = cache.metrics().expect("metrics");
@@ -528,12 +460,7 @@ mod tests {
         let stats = make_stats(&[("t", 100.0)]);
 
         cache
-            .get_or_optimize(
-                "SELECT * FROM t",
-                "auto",
-                &stats,
-                &optimizer,
-            )
+            .get_or_optimize("SELECT * FROM t", "auto", &stats, &optimizer)
             .expect("optimize");
 
         cache.clear().expect("clear");
@@ -548,17 +475,11 @@ mod tests {
         let initial = make_stats(&[("users", 1000.0)]);
 
         cache
-            .get_or_optimize(
-                "SELECT * FROM users",
-                "auto",
-                &initial,
-                &optimizer,
-            )
+            .get_or_optimize("SELECT * FROM users", "auto", &initial, &optimizer)
             .expect("optimize");
 
         let updated = make_stats(&[("users", 2000.0)]);
-        let drift =
-            cache.check_drift(&updated).expect("drift");
+        let drift = cache.check_drift(&updated).expect("drift");
         assert!(
             !drift.stale_plans.is_empty(),
             "100% growth should trigger drift"
@@ -568,8 +489,7 @@ mod tests {
     #[test]
     fn poller_handle_stops_poller() {
         let cache = AdaptivePlanCache::new();
-        let (poller, handle) =
-            StatisticsPoller::new(cache);
+        let (poller, handle) = StatisticsPoller::new(cache);
         assert!(!poller.is_stopped());
 
         handle.stop();
@@ -586,17 +506,14 @@ mod tests {
         let optimizer = Optimizer::new();
         let stats = make_stats(&[("t", 100.0)]);
 
-        let (mut poller, _handle) =
-            StatisticsPoller::new(cache);
+        let (mut poller, _handle) = StatisticsPoller::new(cache);
 
         // First poll should run
-        let result =
-            poller.poll(&stats, &optimizer).expect("poll");
+        let result = poller.poll(&stats, &optimizer).expect("poll");
         assert!(result.is_some());
 
         // Second poll should skip (interval not elapsed)
-        let result =
-            poller.poll(&stats, &optimizer).expect("poll");
+        let result = poller.poll(&stats, &optimizer).expect("poll");
         assert!(result.is_none());
     }
 
@@ -606,8 +523,7 @@ mod tests {
         let optimizer = Optimizer::new();
         let stats = make_stats(&[("t", 100.0)]);
 
-        let (mut poller, _handle) =
-            StatisticsPoller::new(cache);
+        let (mut poller, _handle) = StatisticsPoller::new(cache);
 
         poller.poll(&stats, &optimizer).expect("poll");
         assert_eq!(poller.stats().polls, 1);
@@ -624,22 +540,12 @@ mod tests {
         let initial = make_stats(&[("t", 1000.0)]);
 
         cache
-            .get_or_optimize(
-                "SELECT * FROM t",
-                "auto",
-                &initial,
-                &optimizer,
-            )
+            .get_or_optimize("SELECT * FROM t", "auto", &initial, &optimizer)
             .expect("first");
 
         let updated = make_stats(&[("t", 5000.0)]);
         let plan = cache
-            .get_or_optimize(
-                "SELECT * FROM t",
-                "auto",
-                &updated,
-                &optimizer,
-            )
+            .get_or_optimize("SELECT * FROM t", "auto", &updated, &optimizer)
             .expect("second with drift");
         // Plan was reoptimized so reoptimization_count is 0
         // (it's a fresh entry from re-caching)

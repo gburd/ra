@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Integration tests for statistics caching (Task #243).
 //!
 //! Validates that statistics caching avoids repeated clones during optimization,
@@ -67,7 +68,7 @@ fn make_optimizer_with_stats(table_names: &[&str]) -> Optimizer {
         // Add some column stats to make Statistics objects larger
         // (more expensive to clone)
         for i in 0..10 {
-            let col_name = format!("col{}", i);
+            let col_name = format!("col{i}");
             let col_stats = ra_core::statistics::ColumnStats {
                 distinct_count: 100.0,
                 null_fraction: 0.1,

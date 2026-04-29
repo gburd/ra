@@ -148,7 +148,10 @@ impl FactValue {
     /// # Errors
     ///
     /// Returns error if types are incompatible or operator is unknown
-    #[expect(clippy::cast_precision_loss, reason = "i64 to f64 conversion needed for numeric comparisons; precision loss acceptable for threshold comparisons")]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "i64 to f64 conversion needed for numeric comparisons; precision loss acceptable for threshold comparisons"
+    )]
     pub fn compare(&self, operator: &str, other: &Self) -> Result<bool, String> {
         match (self, other) {
             (Self::Int(a), Self::Int(b)) => Self::compare_numeric(*a as f64, operator, *b as f64),
@@ -157,7 +160,9 @@ impl FactValue {
             (Self::Float(a), Self::Int(b)) => Self::compare_numeric(*a, operator, *b as f64),
             (Self::String(a), Self::String(b)) => Self::compare_string(a, operator, b),
             (Self::Bool(a), Self::Bool(b)) => Self::compare_bool(*a, operator, *b),
-            _ => Err(format!("Type mismatch: cannot compare {self:?} with {other:?}")),
+            _ => Err(format!(
+                "Type mismatch: cannot compare {self:?} with {other:?}"
+            )),
         }
     }
 

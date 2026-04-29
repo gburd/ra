@@ -103,7 +103,7 @@ fn test_presto_fragment_cache_reuse() {
 #[test]
 fn test_presto_dynamic_partition_pruning_basic() {
     let optimizer = create_optimizer();
-    let filtered = filter(scan("partitioned_fact"), lt_pred("date", 20240101));
+    let filtered = filter(scan("partitioned_fact"), lt_pred("date", 20_240_101));
     assert!(optimizer.optimize(&filtered).is_ok());
 }
 

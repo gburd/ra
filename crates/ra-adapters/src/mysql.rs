@@ -1,12 +1,13 @@
-//! MySQL database adapter implementation with r2d2 connection pooling.
+//! `MySQL` database adapter implementation with r2d2 connection pooling.
 
-#[cfg_attr(not(feature = "mysql"), allow(unused_imports))]
-use crate::{AdapterError, ColumnInfo, DatabaseAdapter, DatabaseCapabilities, ForeignKeyInfo, IndexInfo, SchemaInfo, TableInfo};
-#[cfg_attr(not(feature = "mysql"), allow(unused_imports))]
+#[cfg_attr(not(feature = "mysql"), expect(unused_imports))]
+use crate::{
+    AdapterError, ColumnInfo, DatabaseAdapter, DatabaseCapabilities, ForeignKeyInfo, IndexInfo,
+    SchemaInfo, TableInfo,
+};
 use ra_core::{FactsProvider, SqlDialect};
-#[cfg_attr(not(feature = "mysql"), allow(unused_imports))]
 use ra_stats::types::{ColumnStats, TableStats};
-#[cfg_attr(not(feature = "mysql"), allow(unused_imports))]
+#[cfg_attr(not(feature = "mysql"), expect(unused_imports))]
 use std::time::Instant;
 
 use std::collections::HashMap;
@@ -19,7 +20,7 @@ use mysql::{OptsBuilder, Pool};
 #[cfg(feature = "mysql")]
 use mysql::prelude::*;
 
-/// MySQL execution result with timing information.
+/// `MySQL` execution result with timing information.
 #[derive(Debug, Clone)]
 pub struct ExecutionResult {
     /// Number of rows returned or affected.
@@ -30,7 +31,7 @@ pub struct ExecutionResult {
     pub rows: Vec<HashMap<String, serde_json::Value>>,
 }
 
-/// MySQL EXPLAIN output.
+/// `MySQL` EXPLAIN output.
 #[derive(Debug, Clone)]
 pub struct ExplainPlan {
     /// Plan as JSON.
@@ -39,19 +40,19 @@ pub struct ExplainPlan {
     pub text: String,
 }
 
-/// MySQL database adapter.
+/// `MySQL` database adapter.
 ///
-/// Connects to MySQL databases to gather schema information, statistics,
+/// Connects to `MySQL` databases to gather schema information, statistics,
 /// and execute queries with performance metrics.
 ///
 /// # Features
 ///
-/// - Connection pooling via r2d2_mysql
+/// - Connection pooling via `r2d2_mysql`
 /// - Native query execution with timing
 /// - Ra-optimized query execution
 /// - EXPLAIN FORMAT=JSON support
 /// - FULLTEXT index detection
-/// - Table and column statistics from INFORMATION_SCHEMA
+/// - Table and column statistics from `INFORMATION_SCHEMA`
 pub struct MySQLAdapter {
     connection_string: Option<String>,
     #[cfg(feature = "mysql")]
@@ -66,25 +67,24 @@ impl std::fmt::Debug for MySQLAdapter {
             f.debug_struct("MySQLAdapter")
                 .field("connection_string", &self.connection_string)
                 .field("pool", &self.pool.as_ref().map(|_| "<connected>"))
-                .finish()
+                .finish_non_exhaustive()
         }
         #[cfg(not(feature = "mysql"))]
         {
             f.debug_struct("MySQLAdapter")
                 .field("connection_string", &self.connection_string)
-                .finish()
+                .finish_non_exhaustive()
         }
     }
 }
 
 /// Internal storage for gathered facts.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct MySQLFacts {
     table_stats: HashMap<String, ra_core::CoreTableStats>,
     column_stats: HashMap<(String, String), ra_core::ColumnStats>,
     schemas: HashMap<String, ra_core::facts::TableInfo>,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "adapter scaffolding")]
     hardware: ra_core::CoreHardwareProfile,
     features: HashMap<String, bool>,
 }
@@ -112,7 +112,7 @@ impl MySQLFacts {
 }
 
 impl MySQLAdapter {
-    /// Create a new MySQL adapter.
+    /// Create a new `MySQL` adapter.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -123,7 +123,7 @@ impl MySQLAdapter {
         }
     }
 
-    /// Execute a query with native MySQL execution and timing.
+    /// Execute a query with native `MySQL` execution and timing.
     ///
     /// # Errors
     ///
@@ -165,7 +165,11 @@ impl MySQLAdapter {
         })
     }
 
-    /// Execute a query directly against native MySQL (stub when feature disabled).
+    /// Execute a query directly against native `MySQL` (stub when feature disabled).
+    ///
+    /// # Errors
+    ///
+    /// Always returns `AdapterError::UnsupportedFeature` when the mysql feature is disabled.
     #[cfg(not(feature = "mysql"))]
     pub fn execute_native(&self, _query: &str) -> Result<ExecutionResult, AdapterError> {
         Err(AdapterError::UnsupportedFeature(
@@ -176,7 +180,7 @@ impl MySQLAdapter {
     /// Execute a query and return results compatible with ra-web API.
     ///
     /// This method is similar to `execute_native` but returns a structure
-    /// compatible with the PostgreSQL adapter's `execute()` method.
+    /// compatible with the `PostgreSQL` adapter's `execute()` method.
     ///
     /// # Errors
     ///
@@ -220,6 +224,10 @@ impl MySQLAdapter {
     }
 
     /// Execute a query with Ra optimization (stub when feature disabled).
+    ///
+    /// # Errors
+    ///
+    /// Always returns `AdapterError::UnsupportedFeature` when the mysql feature is disabled.
     #[cfg(not(feature = "mysql"))]
     pub fn execute(&self, _query: &str) -> Result<super::postgres::ExecutionResult, AdapterError> {
         Err(AdapterError::UnsupportedFeature(
@@ -230,7 +238,7 @@ impl MySQLAdapter {
     /// Execute a query with Ra optimization.
     ///
     /// This would parse the query, optimize it with Ra, and execute the optimized version.
-    /// For now, this is a placeholder that just calls execute_native.
+    /// For now, this is a placeholder that just calls `execute_native`.
     ///
     /// # Errors
     ///
@@ -300,6 +308,10 @@ impl MySQLAdapter {
     }
 
     /// Get query execution plan (stub when feature disabled).
+    ///
+    /// # Errors
+    ///
+    /// Always returns `AdapterError::UnsupportedFeature` when the mysql feature is disabled.
     #[cfg(not(feature = "mysql"))]
     pub fn get_explain_plan(&self, _query: &str) -> Result<ExplainPlan, AdapterError> {
         Err(AdapterError::UnsupportedFeature(
@@ -326,19 +338,24 @@ impl MySQLAdapter {
         let query = format!(
             "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS \
              WHERE TABLE_SCHEMA = DATABASE() \
-             AND TABLE_NAME = '{}' \
-             AND INDEX_TYPE = 'FULLTEXT'",
-            table
+             AND TABLE_NAME = '{table}' \
+             AND INDEX_TYPE = 'FULLTEXT'"
         );
 
         let indexes: Vec<String> = conn
             .query_map(query, |index_name: String| index_name)
-            .map_err(|e| AdapterError::QueryError(format!("Failed to check FULLTEXT indexes: {e}")))?;
+            .map_err(|e| {
+                AdapterError::QueryError(format!("Failed to check FULLTEXT indexes: {e}"))
+            })?;
 
         Ok(indexes)
     }
 
     /// Check for full-text indexes on a table (stub when feature disabled).
+    ///
+    /// # Errors
+    ///
+    /// Always returns `AdapterError::UnsupportedFeature` when the mysql feature is disabled.
     #[cfg(not(feature = "mysql"))]
     pub fn check_fulltext_indexes(&self, _table: &str) -> Result<Vec<String>, AdapterError> {
         Err(AdapterError::UnsupportedFeature(
@@ -346,7 +363,7 @@ impl MySQLAdapter {
         ))
     }
 
-    /// Get query statistics from MySQL.
+    /// Get query statistics from `MySQL`.
     ///
     /// # Errors
     ///
@@ -398,6 +415,10 @@ impl MySQLAdapter {
     }
 
     /// Get query statistics (stub when feature disabled).
+    ///
+    /// # Errors
+    ///
+    /// Always returns `AdapterError::UnsupportedFeature` when the mysql feature is disabled.
     #[cfg(not(feature = "mysql"))]
     pub fn get_query_stats(&self) -> Result<HashMap<String, u64>, AdapterError> {
         Err(AdapterError::UnsupportedFeature(
@@ -406,7 +427,6 @@ impl MySQLAdapter {
     }
 
     /// Convert `ra_stats::types::TableStats` to `ra_core::CoreTableStats`.
-    #[allow(dead_code)]
     fn to_core_table_stats(stats: &TableStats) -> ra_core::CoreTableStats {
         ra_core::CoreTableStats {
             row_count: stats.row_count as f64,
@@ -422,7 +442,6 @@ impl MySQLAdapter {
     }
 
     /// Convert `ra_stats::types::ColumnStats` to `ra_core::ColumnStats`.
-    #[allow(dead_code)]
     fn to_core_column_stats(stats: &ColumnStats) -> ra_core::ColumnStats {
         ra_core::ColumnStats {
             distinct_count: stats.ndv as f64,
@@ -437,8 +456,7 @@ impl MySQLAdapter {
         }
     }
 
-    /// Map MySQL type names to core `DataType`.
-    #[allow(dead_code)]
+    /// Map `MySQL` type names to core `DataType`.
     fn mysql_to_core_type(mysql_type: &str) -> ra_core::DataType {
         let lower = mysql_type.to_lowercase();
         match lower.as_str() {
@@ -463,7 +481,6 @@ fn mysql_value_to_json(row: &mysql::Row, idx: usize) -> serde_json::Value {
     use mysql::Value;
 
     match row.as_ref(idx) {
-        Some(Value::NULL) => serde_json::Value::Null,
         Some(Value::Bytes(b)) => {
             if let Ok(s) = std::str::from_utf8(b) {
                 serde_json::Value::String(s.to_string())
@@ -474,19 +491,17 @@ fn mysql_value_to_json(row: &mysql::Row, idx: usize) -> serde_json::Value {
         Some(Value::Int(i)) => serde_json::Value::Number((*i).into()),
         Some(Value::UInt(u)) => serde_json::Value::Number((*u).into()),
         Some(Value::Float(f)) => serde_json::Number::from_f64(f64::from(*f))
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
         Some(Value::Double(d)) => serde_json::Number::from_f64(*d)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        Some(Value::Date(y, m, d, h, min, s, _us)) => serde_json::Value::String(format!(
-            "{y:04}-{m:02}-{d:02} {h:02}:{min:02}:{s:02}"
-        )),
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
+        Some(Value::Date(y, m, d, h, min, s, _us)) => {
+            serde_json::Value::String(format!("{y:04}-{m:02}-{d:02} {h:02}:{min:02}:{s:02}"))
+        }
         Some(Value::Time(neg, d, h, m, s, _us)) => {
             let sign = if *neg { "-" } else { "" };
             serde_json::Value::String(format!("{sign}{d} {h:02}:{m:02}:{s:02}"))
         }
-        None => serde_json::Value::Null,
+        Some(Value::NULL) | None => serde_json::Value::Null,
     }
 }
 
@@ -496,7 +511,7 @@ fn mysql_value_to_string(row: &mysql::Row, idx: usize) -> Option<String> {
 
     match row.as_ref(idx) {
         Some(Value::NULL) => Some("NULL".to_string()),
-        Some(Value::Bytes(b)) => std::str::from_utf8(b).ok().map(|s| s.to_string()),
+        Some(Value::Bytes(b)) => std::str::from_utf8(b).ok().map(ToString::to_string),
         Some(Value::Int(i)) => Some(i.to_string()),
         Some(Value::UInt(u)) => Some(u.to_string()),
         Some(Value::Float(f)) => Some(f.to_string()),
@@ -513,7 +528,6 @@ fn mysql_value_to_string(row: &mysql::Row, idx: usize) -> Option<String> {
 }
 
 /// Simple base64 encoding.
-#[allow(dead_code)]
 fn base64_encode(data: &[u8]) -> String {
     const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
@@ -556,13 +570,11 @@ impl DatabaseAdapter for MySQLAdapter {
             mysql::Opts::from_url(connection_string)
                 .map_err(|e| AdapterError::InvalidConfiguration(format!("Invalid URL: {e}")))?,
         )
-        .pool_opts(
-            mysql::PoolOpts::default()
-                .with_constraints(
-                    mysql::PoolConstraints::new(5, 20)
-                        .expect("Valid pool constraints")
-                )
-        );
+        .pool_opts(mysql::PoolOpts::default().with_constraints(
+            mysql::PoolConstraints::new(5, 20).ok_or_else(|| {
+                AdapterError::InvalidConfiguration("Invalid pool constraints".to_string())
+            })?,
+        ));
 
         let pool = Pool::new(opts)
             .map_err(|e| AdapterError::ConnectionError(format!("Failed to create pool: {e}")))?;
@@ -584,12 +596,13 @@ impl DatabaseAdapter for MySQLAdapter {
         self.pool = Some(pool);
 
         // Detect capabilities
-        let mut facts = self.facts.lock().unwrap();
+        let mut facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         facts.features.insert("fulltext".to_string(), true);
         facts.features.insert("json".to_string(), true);
-        facts
-            .features
-            .insert("window_functions".to_string(), true);
+        facts.features.insert("window_functions".to_string(), true);
 
         Ok(())
     }
@@ -626,7 +639,10 @@ impl DatabaseAdapter for MySQLAdapter {
             .map_err(|e| AdapterError::QueryError(format!("Failed to gather statistics: {e}")))?;
 
         let mut stats = HashMap::new();
-        let mut facts = self.facts.lock().unwrap();
+        let mut facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
 
         for (table_name, row_count, data_length, _index_length, avg_row_length, _update_time) in
             results
@@ -647,10 +663,9 @@ impl DatabaseAdapter for MySQLAdapter {
                 last_analyzed: None,
             };
 
-            facts.table_stats.insert(
-                table_name.clone(),
-                Self::to_core_table_stats(&table_stats),
-            );
+            facts
+                .table_stats
+                .insert(table_name.clone(), Self::to_core_table_stats(&table_stats));
 
             stats.insert(table_name, table_stats);
         }
@@ -658,7 +673,10 @@ impl DatabaseAdapter for MySQLAdapter {
         Ok(stats)
     }
 
-    fn gather_column_stats(&self, table: &str) -> Result<HashMap<String, ColumnStats>, AdapterError> {
+    fn gather_column_stats(
+        &self,
+        table: &str,
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError> {
         let pool = self
             .pool
             .as_ref()
@@ -679,7 +697,10 @@ impl DatabaseAdapter for MySQLAdapter {
             .map_err(|e| AdapterError::QueryError(format!("Failed to get columns: {e}")))?;
 
         let mut stats = HashMap::new();
-        let mut facts = self.facts.lock().unwrap();
+        let mut facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
 
         for column in columns {
             // Get distinct count and null fraction
@@ -690,9 +711,8 @@ impl DatabaseAdapter for MySQLAdapter {
                  FROM `{table}`"
             );
 
-            let result: Option<(u64, f64, Option<f64>)> = conn
-                .query_first(stats_query)
-                .map_err(|e| {
+            let result: Option<(u64, f64, Option<f64>)> =
+                conn.query_first(stats_query).map_err(|e| {
                     AdapterError::QueryError(format!("Failed to gather column stats: {e}"))
                 })?;
 
@@ -719,6 +739,7 @@ impl DatabaseAdapter for MySQLAdapter {
         Ok(stats)
     }
 
+    #[expect(clippy::too_many_lines, reason = "schema query assembly")]
     fn get_schema_info(&self) -> Result<SchemaInfo, AdapterError> {
         let pool = self
             .pool
@@ -773,9 +794,10 @@ impl DatabaseAdapter for MySQLAdapter {
                  ORDER BY ORDINAL_POSITION"
             );
 
-            let primary_key: Vec<String> = conn
-                .query_map(pk_query, |col: String| col)
-                .map_err(|e| AdapterError::QueryError(format!("Failed to query primary key: {e}")))?;
+            let primary_key: Vec<String> =
+                conn.query_map(pk_query, |col: String| col).map_err(|e| {
+                    AdapterError::QueryError(format!("Failed to query primary key: {e}"))
+                })?;
 
             // Get foreign keys
             let fk_query = format!(
@@ -798,7 +820,9 @@ impl DatabaseAdapter for MySQLAdapter {
                         }
                     },
                 )
-                .map_err(|e| AdapterError::QueryError(format!("Failed to query foreign keys: {e}")))?;
+                .map_err(|e| {
+                    AdapterError::QueryError(format!("Failed to query foreign keys: {e}"))
+                })?;
 
             // Get indexes
             let idx_query = format!(
@@ -867,7 +891,10 @@ impl DatabaseAdapter for MySQLAdapter {
                 })
                 .collect();
 
-            let mut facts = self.facts.lock().unwrap();
+            let mut facts = self
+                .facts
+                .lock()
+                .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
             facts.schemas.insert(
                 table_name.clone(),
                 ra_core::facts::TableInfo {
@@ -896,7 +923,10 @@ impl DatabaseAdapter for MySQLAdapter {
     }
 
     fn get_capabilities(&self) -> Result<DatabaseCapabilities, AdapterError> {
-        let facts = self.facts.lock().unwrap();
+        let facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         Ok(DatabaseCapabilities {
             database_name: "MySQL".to_string(),
             dialect: SqlDialect::Mysql,
@@ -911,7 +941,10 @@ impl DatabaseAdapter for MySQLAdapter {
     }
 
     fn supports_feature(&self, feature: &str) -> Result<bool, AdapterError> {
-        let facts = self.facts.lock().unwrap();
+        let facts = self
+            .facts
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         Ok(facts.features.get(feature).copied().unwrap_or(false))
     }
 
@@ -943,7 +976,10 @@ impl DatabaseAdapter for MySQLAdapter {
         ))
     }
 
-    fn gather_column_stats(&self, _table: &str) -> Result<HashMap<String, ColumnStats>, AdapterError> {
+    fn gather_column_stats(
+        &self,
+        _table: &str,
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError> {
         Err(AdapterError::UnsupportedFeature(
             "MySQL feature not enabled".to_string(),
         ))
@@ -981,23 +1017,14 @@ impl DatabaseAdapter for MySQLAdapter {
 }
 
 impl FactsProvider for MySQLAdapter {
-    fn get_table_stats(&self, table: &str) -> Option<&ra_core::CoreTableStats> {
-        let facts = self.facts.lock().unwrap();
-        facts.table_stats.get(table).map(|_| {
-            // Cannot return reference from Mutex guard
-            // This needs architecture redesign
-            panic!("Cannot return reference from Mutex - use gather_statistics instead")
-        })
+    fn get_table_stats(&self, _table: &str) -> Option<&ra_core::CoreTableStats> {
+        // Cannot return reference from Mutex guard - use gather_statistics instead
+        None
     }
 
-    fn get_column_stats(&self, table: &str, column: &str) -> Option<&ra_core::ColumnStats> {
-        let facts = self.facts.lock().unwrap();
-        facts
-            .column_stats
-            .get(&(table.to_string(), column.to_string()))
-            .map(|_| {
-                panic!("Cannot return reference from Mutex - use gather_column_stats instead")
-            })
+    fn get_column_stats(&self, _table: &str, _column: &str) -> Option<&ra_core::ColumnStats> {
+        // Cannot return reference from Mutex guard - use gather_column_stats instead
+        None
     }
 
     fn hardware_profile(&self) -> &ra_core::CoreHardwareProfile {
@@ -1005,11 +1032,9 @@ impl FactsProvider for MySQLAdapter {
         &DEFAULT_HARDWARE
     }
 
-    fn get_schema(&self, table: &str) -> Option<&ra_core::facts::TableInfo> {
-        let facts = self.facts.lock().unwrap();
-        facts.schemas.get(table).map(|_| {
-            panic!("Cannot return reference from Mutex - use get_schema_info instead")
-        })
+    fn get_schema(&self, _table: &str) -> Option<&ra_core::facts::TableInfo> {
+        // Cannot return reference from Mutex guard - use get_schema_info instead
+        None
     }
 
     fn runtime_stats(&self, _operator_id: &str) -> Option<&ra_core::facts::OperatorStats> {
@@ -1021,7 +1046,9 @@ impl FactsProvider for MySQLAdapter {
     }
 
     fn supports_feature(&self, feature: &str) -> bool {
-        let facts = self.facts.lock().unwrap();
+        let Ok(facts) = self.facts.lock() else {
+            return false;
+        };
         facts.features.get(feature).copied().unwrap_or(false)
     }
 

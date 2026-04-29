@@ -2,11 +2,11 @@
 //!
 //! Implements Phase 4 of RFC 0064: transformation rules for vector queries:
 //! 1. Vector index scan introduction
-//! 2. TopK optimization (sort + limit → vector_knn_scan)
+//! 2. `TopK` optimization (sort + limit → `vector_knn_scan`)
 //! 3. Pre-filter vs post-filter optimization
 //!
 //! These rules convert distance-based filters and sorting operations into
-//! specialized vector index scans for HNSW and IVFFlat indexes.
+//! specialized vector index scans for HNSW and `IVFFlat` indexes.
 
 use egg::{rewrite as rw, Rewrite};
 
@@ -26,7 +26,7 @@ use crate::vector_cost::{
 ///    → vector_index_scan(table, col, query, threshold)
 ///    ```
 ///
-/// 2. **TopK optimization**: Convert sort + limit to KNN scan
+/// 2. **`TopK` optimization**: Convert sort + limit to KNN scan
 ///    ```text
 ///    limit(k, sort(distance(col, query), scan(table)))
 ///    → vector_knn_scan(table, col, query, k)
@@ -37,6 +37,7 @@ use crate::vector_cost::{
 ///
 /// 4. **Post-filter optimization**: Pull non-vector filters after vector scan
 ///    when filter selectivity is low (<0.1)
+#[must_use]
 pub fn vector_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Rule 1: Sort by vector distance + Limit → KNN scan
@@ -121,13 +122,13 @@ pub fn vector_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 /// - **Post-filter** (apply after vector scan) if:
 ///   - Non-vector filter selectivity < 0.1 (barely selective)
 ///   - Vector scan already reduces candidate set significantly
-///   - Vector index type is HNSW or IVFFlat
+///   - Vector index type is HNSW or `IVFFlat`
 ///
 /// - **Integrated filter** (use index-level filter) if:
 ///   - Index supports predicate pushdown (e.g., pgvector with WHERE clause)
 ///   - Both filters are selective
 ///
-/// Returns: (should_prefilter, should_postfilter, expected_speedup)
+/// Returns: (`should_prefilter`, `should_postfilter`, `expected_speedup`)
 #[must_use]
 pub fn optimize_vector_filter_order(
     non_vector_selectivity: f64,
@@ -168,6 +169,7 @@ pub fn optimize_vector_filter_order(
 ///
 /// Returns the strategy with the lowest estimated cost.
 #[must_use]
+#[expect(clippy::too_many_arguments, reason = "cost model requires all parameters")]
 pub fn estimate_vector_query_cost(
     dimensions: usize,
     total_rows: usize,
@@ -277,9 +279,9 @@ pub struct VectorIndexParams {
     pub hnsw_m: usize,
     /// HNSW: search breadth parameter.
     pub hnsw_ef_search: usize,
-    /// IVFFlat: number of clusters.
+    /// `IVFFlat`: number of clusters.
     pub ivfflat_lists: usize,
-    /// IVFFlat: number of clusters to probe.
+    /// `IVFFlat`: number of clusters to probe.
     pub ivfflat_probes: usize,
 }
 

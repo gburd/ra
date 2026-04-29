@@ -107,6 +107,7 @@ impl UnnestExecutor {
     ///
     /// Currently uses positional index 0 as a fallback when
     /// column name resolution is not available.
+    #[expect(clippy::unused_self, reason = "will use self when schema info is available")]
     fn resolve_column_index(&self, input_rows: &[Row]) -> Result<usize, ExecutionError> {
         if input_rows.is_empty() {
             return Ok(0);
@@ -124,7 +125,7 @@ impl UnnestExecutor {
 
 /// Executor for multi-argument UNNEST (parallel array expansion).
 ///
-/// PostgreSQL allows unnesting multiple arrays in parallel:
+/// `PostgreSQL` allows unnesting multiple arrays in parallel:
 /// `SELECT * FROM unnest(ARRAY[1,2,3], ARRAY['a','b','c'])`.
 /// Shorter arrays are padded with NULL.
 #[derive(Debug)]
@@ -223,7 +224,7 @@ fn eval_const_expr(expr: &Expr) -> Result<Const, ExecutionError> {
 ///
 /// Arrays are represented as `Const::String` with a serialized
 /// format like `{1,2,3}`, or as nested structures depending on
-/// the source. For literal arrays, the UnnestExecutor already
+/// the source. For literal arrays, the `UnnestExecutor` already
 /// has the elements from the `Expr::Array` variant.
 fn extract_array_elements(value: &Const) -> Result<Vec<Const>, ExecutionError> {
     match value {
@@ -265,7 +266,7 @@ fn parse_pg_array_literal(s: &str) -> Result<Vec<Const>, ExecutionError> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::expr::{ColumnRef, Expr};

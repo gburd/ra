@@ -11,9 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 /// SQL standard transaction isolation levels.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum IsolationLevel {
     /// May see uncommitted changes from other transactions.
     ReadUncommitted,
@@ -58,17 +56,7 @@ impl std::fmt::Display for IsolationLevel {
 }
 
 /// Target database backend, determining isolation semantics.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum BackendKind {
     /// `PostgreSQL`: SSI for SERIALIZABLE, MVCC snapshots otherwise.
     #[default]
@@ -101,17 +89,7 @@ impl std::fmt::Display for BackendKind {
 /// When multiple transactions hold shared locks on the same tuple,
 /// `PostgreSQL` stores the lock set in a `MultiXactId`. High pressure
 /// can stall vacuuming and degrade performance.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum MultiXactPressure {
     /// Few active multi-xacts; no concern.
     #[default]
@@ -205,6 +183,7 @@ impl Default for TransactionContext {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,40 +215,22 @@ mod tests {
 
     #[test]
     fn isolation_level_display() {
-        assert_eq!(
-            IsolationLevel::Serializable.to_string(),
-            "SERIALIZABLE"
-        );
-        assert_eq!(
-            IsolationLevel::ReadCommitted.to_string(),
-            "READ COMMITTED"
-        );
+        assert_eq!(IsolationLevel::Serializable.to_string(), "SERIALIZABLE");
+        assert_eq!(IsolationLevel::ReadCommitted.to_string(), "READ COMMITTED");
     }
 
     #[test]
     fn predicate_locks_only_serializable() {
-        assert!(
-            IsolationLevel::Serializable.uses_predicate_locks_pg()
-        );
-        assert!(
-            !IsolationLevel::RepeatableRead.uses_predicate_locks_pg()
-        );
-        assert!(
-            !IsolationLevel::ReadCommitted.uses_predicate_locks_pg()
-        );
+        assert!(IsolationLevel::Serializable.uses_predicate_locks_pg());
+        assert!(!IsolationLevel::RepeatableRead.uses_predicate_locks_pg());
+        assert!(!IsolationLevel::ReadCommitted.uses_predicate_locks_pg());
     }
 
     #[test]
     fn transaction_snapshot_levels() {
-        assert!(
-            IsolationLevel::Serializable.holds_transaction_snapshot()
-        );
-        assert!(
-            IsolationLevel::RepeatableRead.holds_transaction_snapshot()
-        );
-        assert!(
-            !IsolationLevel::ReadCommitted.holds_transaction_snapshot()
-        );
+        assert!(IsolationLevel::Serializable.holds_transaction_snapshot());
+        assert!(IsolationLevel::RepeatableRead.holds_transaction_snapshot());
+        assert!(!IsolationLevel::ReadCommitted.holds_transaction_snapshot());
     }
 
     #[test]
@@ -295,11 +256,9 @@ mod tests {
     #[test]
     fn serde_roundtrip() {
         let ctx = TransactionContext::pg_serializable();
-        let json = serde_json::to_string(&ctx)
-            .expect("serialize should succeed");
+        let json = serde_json::to_string(&ctx).expect("serialize should succeed");
         let deserialized: TransactionContext =
-            serde_json::from_str(&json)
-                .expect("deserialize should succeed");
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(ctx, deserialized);
     }
 }

@@ -6,9 +6,9 @@
 //!
 //! # Architecture
 //!
-//! 1. **LazyQueryPattern** - Analyzes query structure to determine complexity
-//! 2. **RuleCategory** - Groups rules into 14 categories (Scan, Join, Filter, etc.)
-//! 3. **LazyRuleCompiler** - Loads baseline + on-demand rules based on query pattern
+//! 1. **`LazyQueryPattern`** - Analyzes query structure to determine complexity
+//! 2. **`RuleCategory`** - Groups rules into 14 categories (Scan, Join, Filter, etc.)
+//! 3. **`LazyRuleCompiler`** - Loads baseline + on-demand rules based on query pattern
 //!
 //! # Example
 //!
@@ -33,7 +33,8 @@ use ra_core::algebra::RelExpr;
 /// Query pattern classification for lazy rule loading.
 ///
 /// Analyzes query structure to determine which rule categories are needed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[expect(clippy::struct_excessive_bools, reason = "boolean flags represent independent query features")]
 pub struct LazyQueryPattern {
     /// Query contains joins (inner, left, right, full, cross)
     pub has_joins: bool,
@@ -43,7 +44,7 @@ pub struct LazyQueryPattern {
     pub has_subqueries: bool,
     /// Query contains set operations (union, intersect, except)
     pub has_set_ops: bool,
-    /// Query contains window functions (row_number, rank, lag, lead)
+    /// Query contains window functions (`row_number`, rank, lag, lead)
     pub has_window_functions: bool,
     /// Query contains sorting (order by)
     pub has_sorting: bool,
@@ -51,7 +52,7 @@ pub struct LazyQueryPattern {
     pub has_limits: bool,
     /// Query contains distinct operations
     pub has_distinct: bool,
-    /// Query accesses JSON fields (BinOp::JsonAccess or FieldAccess)
+    /// Query accesses JSON fields (`BinOp::JsonAccess` or `FieldAccess`)
     pub has_json_access: bool,
     /// Query calls BSON-specific functions
     pub has_bson_func: bool,
@@ -76,7 +77,7 @@ pub struct LazyQueryPattern {
 impl LazyQueryPattern {
     /// Analyze query structure to determine required rules.
     ///
-    /// Recursively traverses the RelExpr tree to detect query features.
+    /// Recursively traverses the `RelExpr` tree to detect query features.
     #[must_use]
     pub fn analyze(expr: &RelExpr) -> Self {
         let mut pattern = Self::default();
@@ -188,10 +189,7 @@ impl LazyQueryPattern {
                 Self::analyze_recursive(input, pattern, depth);
             }
 
-            // Terminal nodes
-            RelExpr::Values { .. } => {}
-
-            // Fallback for any other variants
+            // Terminal nodes and unhandled variants
             _ => {}
         }
     }
@@ -361,31 +359,6 @@ impl LazyQueryPattern {
     }
 }
 
-impl Default for LazyQueryPattern {
-    fn default() -> Self {
-        Self {
-            has_joins: false,
-            has_aggregates: false,
-            has_subqueries: false,
-            has_set_ops: false,
-            has_window_functions: false,
-            has_sorting: false,
-            has_limits: false,
-            has_distinct: false,
-            has_json_access: false,
-            has_bson_func: false,
-            has_vector_distance: false,
-            has_fts_match: false,
-            has_xml_func: false,
-            has_cte: false,
-            has_recursive_cte: false,
-            has_cast: false,
-            table_count: 0,
-            join_depth: 0,
-        }
-    }
-}
-
 /// Query complexity classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LazyQueryComplexity {
@@ -499,6 +472,7 @@ impl RuleCategory {
 ///
 /// Maintains a cache of rule groups and loads only the categories needed
 /// for the current query pattern.
+#[expect(clippy::type_complexity, reason = "Arc<RwLock<HashMap>> is inherent to concurrent cache")]
 pub struct LazyRuleCompiler {
     /// Cache of compiled rule sets by category
     rule_cache: std::sync::Arc<
@@ -523,6 +497,11 @@ impl LazyRuleCompiler {
     ///
     /// Returns only the rules needed for the query's features.
     /// Rules are cached for reuse across queries.
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
+    #[must_use]
+    #[expect(clippy::expect_used, reason = "RwLock poisoning is unrecoverable")]
     pub fn compile(&self, pattern: &LazyQueryPattern) -> Vec<Rewrite<RelLang, RelAnalysis>> {
         let required = RuleCategory::required_for_pattern(pattern);
         let mut rules = Vec::with_capacity(150); // Typical size for medium queries
@@ -530,7 +509,7 @@ impl LazyRuleCompiler {
         for category in required {
             // Check cache first
             {
-                let cache = self.rule_cache.read().unwrap();
+                let cache = self.rule_cache.read().expect("rule_cache lock poisoned");
                 if let Some(cached_rules) = cache.get(&category) {
                     rules.extend(cached_rules.clone());
                     continue;
@@ -540,7 +519,7 @@ impl LazyRuleCompiler {
             // Not cached, load and cache
             let category_rules = Self::load_category(category);
             {
-                let mut cache = self.rule_cache.write().unwrap();
+                let mut cache = self.rule_cache.write().expect("rule_cache lock poisoned");
                 cache.insert(category, category_rules.clone());
             }
             rules.extend(category_rules);
@@ -591,9 +570,14 @@ impl LazyRuleCompiler {
     }
 
     /// Get statistics about rule loading.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
     #[must_use]
+    #[expect(clippy::expect_used, reason = "RwLock poisoning is unrecoverable")]
     pub fn stats(&self) -> LazyCompilerStats {
-        let cache = self.rule_cache.read().unwrap();
+        let cache = self.rule_cache.read().expect("rule_cache lock poisoned");
         let cached_categories = cache.len();
         let total_cached_rules: usize = cache.values().map(Vec::len).sum();
 
@@ -790,8 +774,10 @@ mod tests {
 
     #[test]
     fn test_join_categories_for_join_query() {
-        let mut pattern = LazyQueryPattern::default();
-        pattern.has_joins = true;
+        let pattern = LazyQueryPattern {
+            has_joins: true,
+            ..LazyQueryPattern::default()
+        };
 
         let categories = RuleCategory::required_for_pattern(&pattern);
 
@@ -850,8 +836,7 @@ mod tests {
         let reduction_pct = ((all.len() - lazy_rules.len()) as f64 / all.len() as f64) * 100.0;
         assert!(
             reduction_pct > 30.0,
-            "Expected >30% reduction, got {:.1}%",
-            reduction_pct
+            "Expected >30% reduction, got {reduction_pct:.1}%",
         );
     }
 }

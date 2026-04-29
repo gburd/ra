@@ -62,7 +62,6 @@ fn schema_info_to_table_stats(
                 is_unique: idx.unique,
                 is_primary,
                 index_type: match idx.index_type.to_lowercase().as_str() {
-                    "btree" => ra_core::facts::IndexType::BTree,
                     "hash" => ra_core::facts::IndexType::Hash,
                     "gin" => ra_core::facts::IndexType::Gin,
                     "gist" => ra_core::facts::IndexType::Gist,
@@ -70,6 +69,7 @@ fn schema_info_to_table_stats(
                     "rum" => ra_core::facts::IndexType::Rum,
                     "hnsw" => ra_core::facts::IndexType::HNSW,
                     "ivfflat" => ra_core::facts::IndexType::IVFFlat,
+                    // "btree" and any unrecognized type default to BTree
                     _ => ra_core::facts::IndexType::BTree,
                 },
                 tuple_count: row_count,
@@ -95,7 +95,7 @@ fn schema_info_to_table_stats(
     result
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "legacy allow")]
 pub fn cmd_optimize(
     query: &str,
     hardware_profile_name: &str,
@@ -239,7 +239,12 @@ pub fn cmd_optimize(
             let snapshot = &timeline.snapshots[snapshot_index];
             let hardware_def = timeline
                 .get_hardware_profile(&snapshot.hardware_profile)
-                .unwrap();
+                .with_context(|| {
+                    format!(
+                        "hardware profile '{}' not found in timeline",
+                        snapshot.hardware_profile
+                    )
+                })?;
             let facts = SnapshotFactsProvider::new(snapshot, hardware_def);
 
             let optimized = optimizer
@@ -342,7 +347,7 @@ pub fn cmd_optimize(
     result
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "legacy allow")]
 fn optimize_bounded(
     optimizer: &Optimizer,
     plan: &ra_core::algebra::RelExpr,
@@ -371,7 +376,7 @@ fn optimize_bounded(
     }
 
     if !quiet {
-        let title = if budget.map_or(false, |b| b.is_unlimited()) {
+        let title = if budget.is_some_and(ra_engine::ResourceBudget::is_unlimited) {
             "Query Optimization"
         } else {
             "Query Optimization (Resource-Bounded)"
@@ -403,7 +408,7 @@ fn optimize_bounded(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "legacy allow")]
 fn optimize_unbounded(
     optimizer: &Optimizer,
     plan: &ra_core::algebra::RelExpr,

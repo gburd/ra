@@ -124,7 +124,9 @@ mod tests {
         let backend = PolyglotBackend;
         let sql = "SELECT * FROM users WHERE age > 18";
 
-        let result = backend.translate(sql, Dialect::PostgreSql, Dialect::MySql).unwrap();
+        let result = backend
+            .translate(sql, Dialect::PostgreSql, Dialect::MySql)
+            .unwrap();
         assert!(!result.sql.is_empty());
         assert_eq!(result.warnings.len(), 1);
     }
@@ -134,7 +136,9 @@ mod tests {
         let backend = PolyglotBackend;
         let sql = "SELECT IFNULL(name, 'Unknown') FROM users";
 
-        let result = backend.translate(sql, Dialect::MySql, Dialect::PostgreSql).unwrap();
+        let result = backend
+            .translate(sql, Dialect::MySql, Dialect::PostgreSql)
+            .unwrap();
         assert!(!result.sql.is_empty());
         // Should translate IFNULL to COALESCE
         assert!(result.sql.contains("COALESCE") || result.sql.contains("coalesce"));
@@ -145,7 +149,9 @@ mod tests {
         let backend = PolyglotBackend;
         let sql = "SELECT * FROM users";
 
-        let result = backend.translate(sql, Dialect::PostgreSql, Dialect::PostgreSql).unwrap();
+        let result = backend
+            .translate(sql, Dialect::PostgreSql, Dialect::PostgreSql)
+            .unwrap();
         assert_eq!(result.sql, sql);
     }
 }

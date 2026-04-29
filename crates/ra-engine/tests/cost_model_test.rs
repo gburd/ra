@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Tests for cost model and statistics-based optimization.
 //!
 //! Cost models are crucial for query optimization, guiding the optimizer
@@ -107,7 +108,7 @@ fn test_multiple_filter_disjunction() {
     // Multiple OR filters combine differently than AND
     let plan = RelExpr::Filter {
         predicate: or(
-            gt(col("salary"), int(100000)),
+            gt(col("salary"), int(100_000)),
             eq(col("title"), string("CEO")),
         ),
         input: Box::new(scan("employees")),
@@ -347,11 +348,11 @@ fn test_selectivity_range_narrow() {
     // Narrow range (e.g., single day) is selective
     let plan = RelExpr::Filter {
         predicate: and(
-            gt(col("date"), int(20240101)),
+            gt(col("date"), int(20_240_101)),
             Expr::BinOp {
                 op: BinOp::Lt,
                 left: Box::new(col("date")),
-                right: Box::new(int(20240102)),
+                right: Box::new(int(20_240_102)),
             },
         ),
         input: Box::new(scan("events")),
@@ -363,7 +364,7 @@ fn test_selectivity_range_narrow() {
 fn test_selectivity_range_wide() {
     // Wide range (e.g., full year) is less selective
     let plan = RelExpr::Filter {
-        predicate: gt(col("date"), int(20230101)),
+        predicate: gt(col("date"), int(20_230_101)),
         input: Box::new(scan("transactions")),
     };
     assert_cost_calculated(plan);
@@ -373,7 +374,7 @@ fn test_selectivity_range_wide() {
 fn test_selectivity_range_open_ended() {
     // Open-ended range uses histogram distribution
     let plan = RelExpr::Filter {
-        predicate: gt(col("salary"), int(150000)),
+        predicate: gt(col("salary"), int(150_000)),
         input: Box::new(scan("employees")),
     };
     assert_cost_calculated(plan);
@@ -515,7 +516,7 @@ fn test_selectivity_independent_columns() {
     let plan = RelExpr::Filter {
         predicate: and(
             eq(col("department"), string("Engineering")),
-            gt(col("salary"), int(100000)),
+            gt(col("salary"), int(100_000)),
         ),
         input: Box::new(scan("employees")),
     };

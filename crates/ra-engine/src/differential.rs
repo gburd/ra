@@ -45,11 +45,11 @@ use crate::timely::{ComputationStats, TimelyConfig};
 /// Used as the join key in differential dataflow invalidation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ResourceId {
-    /// Table row count: "table_name.row_count"
+    /// Table row count: "`table_name.row_count`"
     RowCount(String),
     /// Column distinct count: "table.column.ndistinct"
     NDistinct(String, String),
-    /// Index existence: "table.index_name"
+    /// Index existence: "`table.index_name`"
     Index(String, String),
     /// Column histogram: "table.column.histogram"
     Histogram(String, String),
@@ -120,7 +120,7 @@ impl HistogramDigest {
             kl_pq += p_safe * (p_safe / q_safe).ln();
             kl_qp += q_safe * (q_safe / p_safe).ln();
         }
-        (kl_pq + kl_qp) / 2.0
+        f64::midpoint(kl_pq, kl_qp)
     }
 }
 
@@ -682,10 +682,8 @@ impl IncrementalOptimizer {
                 match self.optimize_and_cache(&original) {
                     Ok(new_optimized) => {
                         if let Some(q) = self.queries.get_mut(id) {
-                            let result_differs = q
-                                .optimized
-                                .as_ref()
-                                .map_or(true, |old| *old != new_optimized);
+                            let result_differs =
+                                q.optimized.as_ref().is_none_or(|old| *old != new_optimized);
                             q.optimized = Some(new_optimized);
                             q.optimized_at_generation = self.generation;
                             if result_differs {
@@ -848,14 +846,14 @@ impl IncrementalOptimizer {
         &self,
         changes: &[ChangeSource],
     ) -> Result<Vec<QueryFingerprint>, IncrementalError> {
-        if changes.is_empty() || self.plan_dependencies.is_empty() {
-            return Ok(Vec::new());
-        }
-
         use std::sync::{Arc, Mutex};
 
         use differential_dataflow::input::Input;
         use differential_dataflow::operators::Join;
+
+        if changes.is_empty() || self.plan_dependencies.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let change_keys: Vec<String> = changes.iter().map(|c| c.resource_id().key()).collect();
 
@@ -1021,6 +1019,7 @@ impl Default for IncrementalOptimizer {
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 #[expect(clippy::unwrap_used)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use ra_core::algebra::RelExpr;

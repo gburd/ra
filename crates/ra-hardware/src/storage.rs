@@ -646,17 +646,24 @@ mod tests {
 
     #[test]
     fn lto_generation_capacity() {
-        assert!(LtoGeneration::LTO9.native_capacity_bytes() > LtoGeneration::LTO8.native_capacity_bytes());
+        assert!(
+            LtoGeneration::LTO9.native_capacity_bytes()
+                > LtoGeneration::LTO8.native_capacity_bytes()
+        );
     }
 
     #[test]
     fn lto_generation_speed() {
-        assert!(LtoGeneration::LTO9.transfer_rate_mbps() > LtoGeneration::LTO8.transfer_rate_mbps());
+        assert!(
+            LtoGeneration::LTO9.transfer_rate_mbps() > LtoGeneration::LTO8.transfer_rate_mbps()
+        );
     }
 
     #[test]
     fn nas_protocol_bandwidth() {
-        assert!(NasProtocol::ISCSI.bandwidth_10gbe_mbps() > NasProtocol::SMB.bandwidth_10gbe_mbps());
+        assert!(
+            NasProtocol::ISCSI.bandwidth_10gbe_mbps() > NasProtocol::SMB.bandwidth_10gbe_mbps()
+        );
     }
 
     #[test]
@@ -665,7 +672,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip() {
         let device = StorageDevice::nvme_gen4_samsung_990_pro();
         let json = serde_json::to_string(&device).expect("serialization should succeed");
@@ -675,7 +685,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip_tape() {
         let device = StorageDevice::tape_lto9();
         let json = serde_json::to_string(&device).expect("serialization should succeed");
@@ -685,7 +698,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip_nas() {
         let device = StorageDevice::nas_nfs_10gbe();
         let json = serde_json::to_string(&device).expect("serialization should succeed");

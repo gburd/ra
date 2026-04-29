@@ -59,7 +59,7 @@ pub struct RuleEvaluation {
 /// Since egg doesn't expose per-rule application statistics, we track
 /// optimization at a high level: whether rules made changes, total nodes
 /// added, and cost improvement.
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub(crate) fn build_simple_tracking(
     available_rules: Vec<String>,
     total_nodes_added: usize,
@@ -76,8 +76,7 @@ pub(crate) fn build_simple_tracking(
     let applied = if total_nodes_added > 0 {
         vec![RuleApplication {
             name: format!(
-                "Aggregate: {} iteration(s) with rule applications",
-                iterations_with_changes
+                "Aggregate: {iterations_with_changes} iteration(s) with rule applications"
             ),
             fired_count: iterations_with_changes,
             nodes_added: total_nodes_added,

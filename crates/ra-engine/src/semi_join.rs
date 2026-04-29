@@ -50,7 +50,7 @@ pub fn semi_join_reduction_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::egraph::{to_rec_expr, RelLang};

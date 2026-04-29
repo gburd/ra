@@ -68,6 +68,7 @@ pub fn structural_hash(expr: &RelExpr) -> u64 {
     hasher.finish()
 }
 
+#[expect(clippy::too_many_lines, reason = "match over all RelExpr variants")]
 fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
     use std::hash::Hash;
     std::mem::discriminant(expr).hash(hasher);

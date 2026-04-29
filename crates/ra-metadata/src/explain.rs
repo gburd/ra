@@ -9,6 +9,7 @@
 //! convert each format into it.
 
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 
 use crate::error::MetadataError;
 
@@ -707,8 +708,8 @@ impl ExplainNode {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -1412,9 +1413,9 @@ mod tests {
 
 // ---- Formatters (RelExpr to EXPLAIN text) ----
 
-/// Format an `ExplainNode` as PostgreSQL EXPLAIN text output.
+/// Format an `ExplainNode` as `PostgreSQL` EXPLAIN text output.
 ///
-/// Generates output matching `EXPLAIN` (text format, not JSON) from PostgreSQL,
+/// Generates output matching `EXPLAIN` (text format, not JSON) from `PostgreSQL`,
 /// including cost estimates, row counts, and indented tree structure.
 ///
 /// # Example
@@ -1463,26 +1464,26 @@ fn format_postgres_node(buf: &mut String, node: &ExplainNode, indent: &str, is_f
     // Cost info
     buf.push_str("  (cost=");
     if let Some(startup) = node.startup_cost {
-        buf.push_str(&format!("{startup:.2}"));
+        let _ = write!(buf, "{startup:.2}");
     } else {
         buf.push_str("0.00");
     }
     buf.push_str("..");
     if let Some(total) = node.total_cost {
-        buf.push_str(&format!("{total:.2}"));
+        let _ = write!(buf, "{total:.2}");
     } else {
         buf.push_str("0.00");
     }
 
     buf.push_str(" rows=");
     if let Some(rows) = node.estimated_rows {
-        buf.push_str(&format!("{}", rows.round() as i64));
+        let _ = write!(buf, "{}", rows.round() as i64);
     } else {
         buf.push('1');
     }
 
     if let Some(width) = node.estimated_width {
-        buf.push_str(&format!(" width={width}"));
+        let _ = write!(buf, " width={width}");
     }
     buf.push_str(")\n");
 
@@ -1524,10 +1525,10 @@ fn format_postgres_node(buf: &mut String, node: &ExplainNode, indent: &str, is_f
     }
 }
 
-/// Format an `ExplainNode` as MySQL EXPLAIN text output.
+/// Format an `ExplainNode` as `MySQL` EXPLAIN text output.
 ///
-/// Generates simple text output similar to `EXPLAIN` (non-JSON) from MySQL.
-/// MySQL text format is less detailed than PostgreSQL.
+/// Generates simple text output similar to `EXPLAIN` (non-JSON) from `MySQL`.
+/// `MySQL` text format is less detailed than `PostgreSQL`.
 pub fn format_mysql_explain(node: &ExplainNode) -> String {
     let mut buf = String::new();
     format_mysql_node(&mut buf, node, 0);
@@ -1553,11 +1554,11 @@ fn format_mysql_node(buf: &mut String, node: &ExplainNode, depth: usize) {
     }
 
     if let Some(rows) = node.estimated_rows {
-        buf.push_str(&format!("  (rows={:.0})", rows));
+        let _ = write!(buf, "  (rows={rows:.0})");
     }
 
     if let Some(cost) = node.total_cost {
-        buf.push_str(&format!(" (cost={cost:.2})"));
+        let _ = write!(buf, " (cost={cost:.2})");
     }
 
     buf.push('\n');
@@ -1574,9 +1575,9 @@ fn format_mysql_node(buf: &mut String, node: &ExplainNode, depth: usize) {
     }
 }
 
-/// Format an `ExplainNode` as SQLite EXPLAIN QUERY PLAN text output.
+/// Format an `ExplainNode` as `SQLite` EXPLAIN QUERY PLAN text output.
 ///
-/// Generates output matching `EXPLAIN QUERY PLAN` from SQLite, which uses
+/// Generates output matching `EXPLAIN QUERY PLAN` from `SQLite`, which uses
 /// a simple indented text format with operation descriptions.
 pub fn format_sqlite_explain(node: &ExplainNode) -> String {
     let mut buf = String::new();
@@ -1656,8 +1657,8 @@ fn format_sqlite_node(buf: &mut String, node: &ExplainNode, depth: usize) {
 /// # Mapping Rules
 ///
 /// - **Scan** → `SeqScan`
-/// - **IndexScan** → `IndexScan`
-/// - **IndexOnlyScan** → `IndexOnlyScan`
+/// - **`IndexScan`** → `IndexScan`
+/// - **`IndexOnlyScan`** → `IndexOnlyScan`
 /// - **Join** → `HashJoin` (Inner/Left/Right/Full) or `NestedLoop` (Cross/Semi/Anti)
 /// - **Aggregate** → `HashAggregate` (no GROUP BY) or `GroupAggregate` (with GROUP BY)
 /// - **Sort/IncrementalSort** → `Sort`
@@ -1669,12 +1670,12 @@ fn format_sqlite_node(buf: &mut String, node: &ExplainNode, depth: usize) {
 /// - **Values** → `ValuesScan`
 /// - **CTE/RecursiveCTE** → `CteScan`
 /// - **Unnest/TableFunction** → `FunctionScan`
-/// - **BitmapIndexScan** → `BitmapIndexScan`
-/// - **BitmapHeapScan** → `BitmapHeapScan`
-/// - **ParallelScan** → `SeqScan` (with parallel workers note)
+/// - **`BitmapIndexScan`** → `BitmapIndexScan`
+/// - **`BitmapHeapScan`** → `BitmapHeapScan`
+/// - **`ParallelScan`** → `SeqScan` (with parallel workers note)
 /// - **Gather** → `Gather`
-/// - **MvScan** → `SeqScan` (with materialized view note)
-/// - **RowPattern** → `Other` (with row pattern note)
+/// - **`MvScan`** → `SeqScan` (with materialized view note)
+/// - **`RowPattern`** → `Other` (with row pattern note)
 ///
 /// # Example
 ///
@@ -1694,6 +1695,10 @@ fn format_sqlite_node(buf: &mut String, node: &ExplainNode, depth: usize) {
 /// let text = format_postgres_explain(&node);
 /// println!("{}", text);
 /// ```
+#[expect(
+    clippy::too_many_lines,
+    reason = "RelExpr to explain node conversion requires handling many RelExpr variants with detailed formatting"
+)]
 pub fn relexpr_to_explain_node(expr: &ra_core::algebra::RelExpr) -> ExplainNode {
     use ra_core::algebra::RelExpr;
 
@@ -1787,10 +1792,7 @@ pub fn relexpr_to_explain_node(expr: &ra_core::algebra::RelExpr) -> ExplainNode 
         },
 
         RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
-            let node_type = match expr {
-                RelExpr::BitmapAnd { .. } => NodeType::BitmapIndexScan,
-                _ => NodeType::BitmapIndexScan,
-            };
+            let node_type = NodeType::BitmapIndexScan;
             ExplainNode {
                 node_type,
                 join_type: None,
@@ -1944,11 +1946,7 @@ pub fn relexpr_to_explain_node(expr: &ra_core::algebra::RelExpr) -> ExplainNode 
         }
 
         RelExpr::Sort { input, .. } | RelExpr::IncrementalSort { input, .. } => {
-            let node_type = if matches!(expr, RelExpr::IncrementalSort { .. }) {
-                NodeType::Sort
-            } else {
-                NodeType::Sort
-            };
+            let node_type = NodeType::Sort;
 
             let raw_detail = if matches!(expr, RelExpr::IncrementalSort { .. }) {
                 Some("Incremental Sort".to_string())
@@ -2426,6 +2424,7 @@ mod formatter_tests {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod relexpr_conversion_tests {
     use super::*;
     use ra_core::algebra::{

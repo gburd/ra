@@ -31,7 +31,7 @@ use ra_core::{
 /// This is optimal for many simple queries and avoids the overhead
 /// of e-graph equality saturation.
 pub struct LeftDeepBuilder {
-    #[allow(dead_code)] // Reserved for future cost-based ordering
+    #[expect(dead_code)] // Reserved for future cost-based ordering
     cost_model: Arc<dyn CostModel>,
     stats_provider: Arc<dyn StatisticsProvider>,
 }
@@ -54,6 +54,16 @@ impl LeftDeepBuilder {
     /// constructs an optimal left-deep tree, then re-wraps it with
     /// any outer operators (Aggregate, Sort, Project, etc.) that sat
     /// above the join tree.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal iterator is unexpectedly empty after a
+    /// length check.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no tables are found in the query.
+    #[expect(clippy::expect_used, reason = "guarded by length checks")]
     pub fn build(&self, expr: &RelExpr) -> Result<RelExpr> {
         // Collect outer operators that sit above the join tree
         let mut outer_ops: Vec<OuterOp> = Vec::new();
@@ -69,7 +79,10 @@ impl LeftDeepBuilder {
         }
 
         if tables.len() == 1 {
-            let result = tables.into_iter().next().unwrap();
+            let result = tables
+                .into_iter()
+                .next()
+                .expect("len()==1 guarantees element");
             return Ok(reapply_outer_ops(result, outer_ops));
         }
 
@@ -84,12 +97,12 @@ impl LeftDeepBuilder {
 
         // Build left-deep tree
         let mut tables_iter = tables.into_iter();
-        let mut current = tables_iter.next().unwrap();
+        let mut current = tables_iter.next().expect("len()>=2 guarantees element");
 
         for table in tables_iter {
             let condition = self
                 .find_join_condition(&current, &table, &conditions)
-                .unwrap_or_else(|| Expr::Const(ra_core::expr::Const::Bool(true)));
+                .unwrap_or(Expr::Const(ra_core::expr::Const::Bool(true)));
 
             current = RelExpr::Join {
                 join_type: JoinType::Inner,
@@ -103,6 +116,7 @@ impl LeftDeepBuilder {
     }
 
     /// Extract all scan nodes and join conditions from an expression.
+    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
     fn extract_tables_and_conditions(
         &self,
         expr: &RelExpr,
@@ -165,6 +179,7 @@ impl LeftDeepBuilder {
     ///
     /// This is a simple heuristic that looks for conditions referencing
     /// columns from both tables.
+    #[expect(clippy::unused_self, reason = "will use self for table statistics lookup")]
     fn find_join_condition(
         &self,
         _left: &RelExpr,
@@ -299,10 +314,11 @@ fn reapply_outer_ops(mut result: RelExpr, ops: Vec<OuterOp>) -> RelExpr {
 ///   tree (scans, joins, filters, projections, aggregates, sorts,
 ///   windows, limits, distinct)
 /// - Has no CTEs, set operations, or recursive queries
+#[must_use]
 pub fn can_use_left_deep(expr: &RelExpr) -> bool {
     let table_count = count_tables(expr);
 
-    if table_count < 2 || table_count > 7 {
+    if !(2..=7).contains(&table_count) {
         return false;
     }
 
@@ -348,17 +364,13 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Distinct { input } => is_left_deep_eligible(input),
-        // CTEs, set ops, and recursive queries need full e-graph
-        RelExpr::CTE { .. }
-        | RelExpr::RecursiveCTE { .. }
-        | RelExpr::Union { .. }
-        | RelExpr::Intersect { .. }
-        | RelExpr::Except { .. } => false,
+        // CTEs, set ops, recursive queries, and other variants need full e-graph
         _ => false,
     }
 }
 
 #[cfg(test)]
+#[expect(clippy::panic, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use ra_core::cost::Cost;

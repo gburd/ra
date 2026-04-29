@@ -29,7 +29,7 @@ pub fn from_egraph_node(
     from_node(egraph, node)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines, reason = "legacy allow")]
 fn from_node(
     egraph: &EGraph<RelLang, RelAnalysis>,
     node: &RelLang,
@@ -188,7 +188,7 @@ fn from_node(
         }
         RelLang::Values(row_ids) => {
             let mut rows = Vec::with_capacity(row_ids.len());
-            for &row_id in row_ids.iter() {
+            for &row_id in row_ids {
                 rows.push(extract_values_row(egraph, row_id)?);
             }
             Ok(RelExpr::Values { rows })
@@ -205,14 +205,14 @@ fn from_node(
         }
         RelLang::BitmapAnd(input_ids) => {
             let mut inputs = Vec::with_capacity(input_ids.len());
-            for &input_id in input_ids.iter() {
+            for &input_id in input_ids {
                 inputs.push(Box::new(from_egraph_node(egraph, input_id)?));
             }
             Ok(RelExpr::BitmapAnd { inputs })
         }
         RelLang::BitmapOr(input_ids) => {
             let mut inputs = Vec::with_capacity(input_ids.len());
-            for &input_id in input_ids.iter() {
+            for &input_id in input_ids {
                 inputs.push(Box::new(from_egraph_node(egraph, input_id)?));
             }
             Ok(RelExpr::BitmapOr { inputs })
@@ -359,7 +359,7 @@ fn extract_scalar_expr(egraph: &EGraph<RelLang, RelAnalysis>, id: Id) -> Result<
     scalar_from_node(egraph, node)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines, reason = "legacy allow")]
 fn scalar_from_node(
     egraph: &EGraph<RelLang, RelAnalysis>,
     node: &RelLang,
@@ -471,7 +471,10 @@ fn scalar_from_node(
         RelLang::FtsMatch([vendor_id, cols_id, query_id, mode_id]) => {
             let vendor = extract_symbol(egraph, *vendor_id)?;
             let cols_str = extract_symbol(egraph, *cols_id)?;
-            let columns = cols_str.split(',').map(|s| s.to_string()).collect();
+            let columns = cols_str
+                .split(',')
+                .map(std::string::ToString::to_string)
+                .collect();
             let query = extract_symbol(egraph, *query_id)?;
             let mode_str = extract_symbol(egraph, *mode_id)?;
             let mode = if mode_str.is_empty() {
@@ -492,7 +495,7 @@ fn scalar_from_node(
             let algo = extract_symbol(egraph, *algo_id)?;
             // FTS rank is represented as a function call in Expr
             Ok(Expr::Function {
-                name: format!("ts_rank_{}", algo),
+                name: format!("ts_rank_{algo}"),
                 args: vec![col, query],
             })
         }
@@ -525,7 +528,7 @@ fn extract_projection_list(
     for node in &egraph[canonical].nodes {
         if let RelLang::List(ids) = node {
             let mut cols = Vec::with_capacity(ids.len());
-            for &child_id in ids.iter() {
+            for &child_id in ids {
                 cols.push(extract_projection_column(egraph, child_id)?);
             }
             return Ok(cols);
@@ -571,7 +574,7 @@ fn extract_expr_list(
     for node in &egraph[canonical].nodes {
         if let RelLang::List(ids) = node {
             let mut exprs = Vec::with_capacity(ids.len());
-            for &child_id in ids.iter() {
+            for &child_id in ids {
                 exprs.push(extract_scalar_expr(egraph, child_id)?);
             }
             return Ok(exprs);
@@ -590,7 +593,7 @@ fn extract_aggregate_list(
     for node in &egraph[canonical].nodes {
         if let RelLang::List(ids) = node {
             let mut aggs = Vec::with_capacity(ids.len());
-            for &child_id in ids.iter() {
+            for &child_id in ids {
                 aggs.push(extract_agg_expr(egraph, child_id)?);
             }
             return Ok(aggs);
@@ -695,7 +698,7 @@ fn extract_window_expr_list(
     for node in &egraph[canonical].nodes {
         if let RelLang::List(ids) = node {
             let mut exprs = Vec::with_capacity(ids.len());
-            for &child_id in ids.iter() {
+            for &child_id in ids {
                 exprs.push(extract_window_expr(egraph, child_id)?);
             }
             return Ok(exprs);
@@ -859,7 +862,7 @@ fn extract_values_row(
     for node in &egraph[canonical].nodes {
         if let RelLang::ValuesRow(ids) = node {
             let mut cells = Vec::with_capacity(ids.len());
-            for &cell_id in ids.iter() {
+            for &cell_id in ids {
                 cells.push(extract_scalar_expr(egraph, cell_id)?);
             }
             return Ok(cells);
@@ -878,7 +881,7 @@ fn extract_sort_key_list(
     for node in &egraph[canonical].nodes {
         if let RelLang::List(ids) = node {
             let mut keys = Vec::with_capacity(ids.len());
-            for &child_id in ids.iter() {
+            for &child_id in ids {
                 keys.push(extract_sort_key(egraph, child_id)?);
             }
             return Ok(keys);

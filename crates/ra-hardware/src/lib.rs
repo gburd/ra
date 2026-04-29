@@ -16,9 +16,6 @@
 //! - [`calibration`] module converting measurements into cost coefficients.
 
 #![warn(missing_docs)]
-#![warn(clippy::pedantic)]
-#![allow(clippy::module_name_repetitions)]
-#![allow(clippy::similar_names)]
 
 pub mod benchmark;
 pub mod calibration;

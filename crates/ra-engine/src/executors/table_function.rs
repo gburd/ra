@@ -36,16 +36,14 @@ impl TableFunctionExecutor {
     pub fn execute(&self, _input: Option<&[Row]>) -> Result<Vec<Row>, ExecutionError> {
         match self.name.as_str() {
             "generate_series" => self.execute_generate_series(),
-            "json_array_elements" | "json_array_elements_text" => {
-                self.execute_json_array_elements()
-            }
+            "json_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements"
+            | "jsonb_array_elements_text" => self.execute_json_array_elements(),
             "json_each" | "jsonb_each" => self.execute_json_each(),
             "json_object_keys" | "jsonb_object_keys" => self.execute_json_object_keys(),
             "json_populate_recordset" => self.execute_json_populate_recordset(),
             "json_to_recordset" | "jsonb_to_recordset" => self.execute_json_to_recordset(),
-            "jsonb_array_elements" | "jsonb_array_elements_text" => {
-                self.execute_json_array_elements()
-            }
             other => Err(ExecutionError::EvalError(format!(
                 "unsupported table function: {other}"
             ))),
@@ -56,7 +54,10 @@ impl TableFunctionExecutor {
     ///
     /// Produces integer rows from `start` to `stop` inclusive,
     /// incrementing by `step` (default 1).
+    #[expect(clippy::similar_names, reason = "stop and step are standard generate_series parameters")]
     fn execute_generate_series(&self) -> Result<Vec<Row>, ExecutionError> {
+        const MAX_ROWS: usize = 1_000_000;
+
         if self.args.len() < 2 {
             return Err(ExecutionError::EvalError(
                 "generate_series requires at least 2 arguments".to_owned(),
@@ -79,9 +80,6 @@ impl TableFunctionExecutor {
 
         let mut rows = Vec::new();
         let mut current = start;
-
-        // Limit output to prevent runaway generation.
-        const MAX_ROWS: usize = 1_000_000;
 
         while (step > 0 && current <= stop) || (step < 0 && current >= stop) {
             if rows.len() >= MAX_ROWS {
@@ -217,8 +215,7 @@ impl TableFunctionExecutor {
             for (col_name, col_type) in &col_names {
                 let val = obj
                     .get(col_name.as_str())
-                    .map(|v| coerce_json_value(v, col_type))
-                    .unwrap_or(Const::Null);
+                    .map_or(Const::Null, |v| coerce_json_value(v, col_type));
                 values.push(val);
             }
             rows.push(Row::new(values));
@@ -272,8 +269,7 @@ impl TableFunctionExecutor {
             for col in &col_names {
                 let val = obj
                     .get(col.as_str())
-                    .map(json_value_to_const)
-                    .unwrap_or(Const::Null);
+                    .map_or(Const::Null, json_value_to_const);
                 values.push(val);
             }
             rows.push(Row::new(values));
@@ -316,7 +312,7 @@ fn parse_type_definition(def: &str) -> Result<Vec<(String, String)>, ExecutionEr
 
     let mut cols = Vec::new();
     for part in inner.split(',') {
-        let tokens: Vec<&str> = part.trim().split_whitespace().collect();
+        let tokens: Vec<&str> = part.split_whitespace().collect();
         if tokens.len() < 2 {
             return Err(ExecutionError::EvalError(format!(
                 "invalid type definition part: {part}"
@@ -339,18 +335,15 @@ fn coerce_json_value(val: &serde_json::Value, target_type: &str) -> Const {
                 }
             }
             serde_json::Value::String(s) => s.parse::<i64>().map_or(Const::Null, Const::Int),
-            serde_json::Value::Null => Const::Null,
             _ => Const::Null,
         },
         "float" | "double" | "real" | "numeric" | "float4" | "float8" => match val {
             serde_json::Value::Number(n) => Const::Float(n.as_f64().unwrap_or(0.0)),
             serde_json::Value::String(s) => s.parse::<f64>().map_or(Const::Null, Const::Float),
-            serde_json::Value::Null => Const::Null,
             _ => Const::Null,
         },
         "bool" | "boolean" => match val {
             serde_json::Value::Bool(b) => Const::Bool(*b),
-            serde_json::Value::Null => Const::Null,
             _ => Const::Null,
         },
         _ => json_value_to_const(val),
@@ -375,7 +368,7 @@ fn json_value_to_const(val: &serde_json::Value) -> Const {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -575,7 +568,7 @@ mod tests {
     fn jsonb_array_elements_basic() {
         let exec = TableFunctionExecutor::new(
             "jsonb_array_elements",
-            vec![Expr::Const(Const::String(r#"[10,20,30]"#.into()))],
+            vec![Expr::Const(Const::String(r"[10,20,30]".into()))],
         );
         let rows = exec.execute(None).expect("should succeed");
         assert_eq!(rows.len(), 3);

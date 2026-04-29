@@ -60,10 +60,10 @@ impl ComparisonMetrics {
             lines.push(format!("RA memory:    {} KB", self.ra_peak_memory / 1024,));
         }
         if let Some(dt) = self.db_plan_time {
-            lines.push(format!("DB plan time: {:?}", dt));
+            lines.push(format!("DB plan time: {dt:?}"));
         }
         if let Some(dt) = self.db_execution_time {
-            lines.push(format!("DB exec time: {:?}", dt));
+            lines.push(format!("DB exec time: {dt:?}"));
         }
         if let Some(ok) = self.results_match {
             lines.push(format!(
@@ -101,6 +101,7 @@ impl ComparisonMetrics {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 

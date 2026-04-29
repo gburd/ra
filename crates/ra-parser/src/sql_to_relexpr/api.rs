@@ -32,7 +32,7 @@ pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
         .collect()
 }
 
-/// Parse SQL and convert to RelExpr.
+/// Parse SQL and convert to `RelExpr`.
 ///
 /// If multiple semicolon-separated statements are provided, returns
 /// the first one that successfully parses as a query.
@@ -64,9 +64,8 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
         }
     }
 
-    Err(SqlConversionError::ParseError(
-        last_err
-            .map(|e| e.join("; "))
-            .unwrap_or_else(|| "no SQL statement found".to_owned()),
-    ))
+    Err(SqlConversionError::ParseError(last_err.map_or_else(
+        || "no SQL statement found".to_owned(),
+        |e| e.join("; "),
+    )))
 }

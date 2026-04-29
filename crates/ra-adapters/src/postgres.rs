@@ -86,8 +86,7 @@ impl std::fmt::Debug for PostgresAdapter {
 #[derive(Debug)]
 struct PostgresFacts {
     table_stats: HashMap<String, ra_core::CoreTableStats>,
-    column_stats:
-        HashMap<(String, String), ra_core::ColumnStats>,
+    column_stats: HashMap<(String, String), ra_core::ColumnStats>,
     schemas: HashMap<String, ra_core::facts::TableInfo>,
     hardware: ra_core::CoreHardwareProfile,
     features: HashMap<String, bool>,
@@ -133,66 +132,33 @@ impl PostgresAdapter {
     }
 
     /// Build version-aware feature map for `PostgreSQL`.
-    fn build_features(
-        version: PgVersion,
-    ) -> HashMap<String, bool> {
+    fn build_features(version: PgVersion) -> HashMap<String, bool> {
         let mut features = HashMap::new();
         let (major, minor, _) = version;
         let ver = (major, minor);
 
         features.insert("lateral_join".into(), ver >= (9, 3));
-        features
-            .insert("cte_recursive".into(), ver >= (8, 4));
-        features
-            .insert("window_functions".into(), ver >= (8, 4));
-        features
-            .insert("parallel_query".into(), ver >= (9, 6));
-        features
-            .insert("bitmap_index_scan".into(), ver >= (8, 1));
+        features.insert("cte_recursive".into(), ver >= (8, 4));
+        features.insert("window_functions".into(), ver >= (8, 4));
+        features.insert("parallel_query".into(), ver >= (9, 6));
+        features.insert("bitmap_index_scan".into(), ver >= (8, 1));
         features.insert("hash_aggregate".into(), true);
         features.insert("merge_join".into(), true);
-        features.insert(
-            "materialized_views".into(),
-            ver >= (9, 3),
-        );
-        features
-            .insert("json_support".into(), ver >= (9, 2));
-        features
-            .insert("jsonb_support".into(), ver >= (9, 4));
-        features
-            .insert("tablesample".into(), ver >= (9, 5));
-        features
-            .insert("grouping_sets".into(), ver >= (9, 5));
-        features.insert(
-            "parallel_index_scan".into(),
-            ver >= (10, 0),
-        );
-        features
-            .insert("partitioning".into(), ver >= (10, 0));
-        features
-            .insert("jit_compilation".into(), ver >= (11, 0));
-        features.insert(
-            "cte_materialized".into(),
-            ver >= (12, 0),
-        );
-        features.insert(
-            "generated_columns".into(),
-            ver >= (12, 0),
-        );
-        features
-            .insert("json_path".into(), ver >= (12, 0));
-        features.insert(
-            "incremental_sort".into(),
-            ver >= (13, 0),
-        );
-        features
-            .insert("parallel_vacuum".into(), ver >= (13, 0));
-        features.insert(
-            "multirange_types".into(),
-            ver >= (14, 0),
-        );
-        features
-            .insert("json_table".into(), ver >= (17, 0));
+        features.insert("materialized_views".into(), ver >= (9, 3));
+        features.insert("json_support".into(), ver >= (9, 2));
+        features.insert("jsonb_support".into(), ver >= (9, 4));
+        features.insert("tablesample".into(), ver >= (9, 5));
+        features.insert("grouping_sets".into(), ver >= (9, 5));
+        features.insert("parallel_index_scan".into(), ver >= (10, 0));
+        features.insert("partitioning".into(), ver >= (10, 0));
+        features.insert("jit_compilation".into(), ver >= (11, 0));
+        features.insert("cte_materialized".into(), ver >= (12, 0));
+        features.insert("generated_columns".into(), ver >= (12, 0));
+        features.insert("json_path".into(), ver >= (12, 0));
+        features.insert("incremental_sort".into(), ver >= (13, 0));
+        features.insert("parallel_vacuum".into(), ver >= (13, 0));
+        features.insert("multirange_types".into(), ver >= (14, 0));
+        features.insert("json_table".into(), ver >= (17, 0));
 
         features
     }
@@ -202,10 +168,8 @@ impl PostgresAdapter {
 
 #[cfg(any(feature = "postgres", test))]
 impl PostgresAdapter {
-    /// Parse PostgreSQL version string into (major, minor, patch).
-    fn parse_version(
-        version_str: &str,
-    ) -> Option<PgVersion> {
+    /// Parse `PostgreSQL` version string into (major, minor, patch).
+    fn parse_version(version_str: &str) -> Option<PgVersion> {
         let version_part = version_str
             .strip_prefix("PostgreSQL ")
             .unwrap_or(version_str);
@@ -213,8 +177,7 @@ impl PostgresAdapter {
             .split(|c: char| !c.is_ascii_digit() && c != '.')
             .next()
             .unwrap_or(version_part);
-        let parts: Vec<&str> =
-            version_part.split('.').collect();
+        let parts: Vec<&str> = version_part.split('.').collect();
         match parts.len() {
             1 => {
                 let major = parts[0].parse().ok()?;
@@ -237,20 +200,14 @@ impl PostgresAdapter {
 
     /// Convert `ra_stats::types::TableStats` to
     /// `ra_core::CoreTableStats`.
-    fn to_core_table_stats(
-        stats: &TableStats,
-    ) -> ra_core::CoreTableStats {
+    fn to_core_table_stats(stats: &TableStats) -> ra_core::CoreTableStats {
         ra_core::CoreTableStats {
             row_count: stats.row_count as f64,
             page_count: stats.page_count,
             average_row_size: stats.average_row_size,
             table_size_bytes: stats.table_size_bytes,
-            live_tuples: stats
-                .live_tuples
-                .map(|v| v as f64),
-            dead_tuples: stats
-                .dead_tuples
-                .map(|v| v as f64),
+            live_tuples: stats.live_tuples.map(|v| v as f64),
+            dead_tuples: stats.dead_tuples.map(|v| v as f64),
             last_analyzed: stats.last_analyzed,
             estimated_modifications: 0,
             confidence: 0.9,
@@ -259,9 +216,7 @@ impl PostgresAdapter {
 
     /// Convert `ra_stats::types::ColumnStats` to
     /// `ra_core::ColumnStats`.
-    fn to_core_column_stats(
-        stats: &ColumnStats,
-    ) -> ra_core::ColumnStats {
+    fn to_core_column_stats(stats: &ColumnStats) -> ra_core::ColumnStats {
         ra_core::ColumnStats {
             distinct_count: stats.ndv as f64,
             null_fraction: stats.null_fraction,
@@ -275,7 +230,7 @@ impl PostgresAdapter {
         }
     }
 
-    /// Map a PostgreSQL index access method to an index type
+    /// Map a `PostgreSQL` index access method to an index type
     /// string.
     fn parse_index_type(indexdef: &str) -> String {
         let lower = indexdef.to_lowercase();
@@ -295,9 +250,7 @@ impl PostgresAdapter {
     }
 
     /// Map index type string to the core `IndexType` enum.
-    fn index_type_to_core(
-        idx_type: &str,
-    ) -> ra_core::facts::IndexType {
+    fn index_type_to_core(idx_type: &str) -> ra_core::facts::IndexType {
         match idx_type {
             "hash" => ra_core::facts::IndexType::Hash,
             "gist" => ra_core::facts::IndexType::Gist,
@@ -310,21 +263,13 @@ impl PostgresAdapter {
     }
 
     /// Parse column names from a CREATE INDEX definition.
-    fn parse_index_columns(
-        indexdef: &str,
-    ) -> Vec<String> {
+    fn parse_index_columns(indexdef: &str) -> Vec<String> {
         if let Some(start) = indexdef.rfind('(') {
             if let Some(end) = indexdef.rfind(')') {
                 let cols_str = &indexdef[start + 1..end];
                 return cols_str
                     .split(',')
-                    .map(|s| {
-                        s.trim()
-                            .split_whitespace()
-                            .next()
-                            .unwrap_or("")
-                            .to_string()
-                    })
+                    .map(|s| s.split_whitespace().next().unwrap_or("").to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
             }
@@ -332,28 +277,21 @@ impl PostgresAdapter {
         Vec::new()
     }
 
-    /// Map PostgreSQL type names to core `DataType`.
-    fn pg_to_core_type(
-        pg_type: &str,
-    ) -> ra_core::DataType {
+    /// Map `PostgreSQL` type names to core `DataType`.
+    fn pg_to_core_type(pg_type: &str) -> ra_core::DataType {
         match pg_type {
-            "integer" | "bigint" | "smallint" | "int"
-            | "int4" | "int8" | "int2" | "serial"
+            "integer" | "bigint" | "smallint" | "int" | "int4" | "int8" | "int2" | "serial"
             | "bigserial" => ra_core::DataType::Integer,
 
-            "real" | "double precision" | "numeric"
-            | "decimal" | "float4" | "float8" | "money" => {
+            "real" | "double precision" | "numeric" | "decimal" | "float4" | "float8" | "money" => {
                 ra_core::DataType::Float
             }
 
-            "character varying" | "character" | "text"
-            | "varchar" | "char" | "name" | "citext" => {
+            "character varying" | "character" | "text" | "varchar" | "char" | "name" | "citext" => {
                 ra_core::DataType::String
             }
 
-            "boolean" | "bool" => {
-                ra_core::DataType::Boolean
-            }
+            "boolean" | "bool" => ra_core::DataType::Boolean,
 
             "timestamp without time zone"
             | "timestamp with time zone"
@@ -367,20 +305,11 @@ impl PostgresAdapter {
 
             "json" | "jsonb" => ra_core::DataType::Json,
 
-            other
-                if other.starts_with("array")
-                    || other.contains("[]") =>
-            {
-                ra_core::DataType::Array(Box::new(
-                    ra_core::DataType::Other(
-                        other.to_string(),
-                    ),
-                ))
+            other if other.starts_with("array") || other.contains("[]") => {
+                ra_core::DataType::Array(Box::new(ra_core::DataType::Other(other.to_string())))
             }
 
-            other => {
-                ra_core::DataType::Other(other.to_string())
-            }
+            other => ra_core::DataType::Other(other.to_string()),
         }
     }
 }
@@ -395,27 +324,17 @@ impl Default for PostgresAdapter {
 
 #[cfg(feature = "postgres")]
 impl PostgresAdapter {
-    fn connect_real(
-        &mut self,
-        connection_string: &str,
-    ) -> Result<(), AdapterError> {
-        let client =
-            Client::connect(connection_string, NoTls)
-                .map_err(|e| {
-                    AdapterError::ConnectionError(format!(
-                        "PostgreSQL connection failed: {e}"
-                    ))
-                })?;
+    fn connect_real(&mut self, connection_string: &str) -> Result<(), AdapterError> {
+        let client = Client::connect(connection_string, NoTls).map_err(|e| {
+            AdapterError::ConnectionError(format!("PostgreSQL connection failed: {e}"))
+        })?;
 
         self.client = Some(std::sync::Mutex::new(client));
-        self.connection_string =
-            Some(connection_string.to_string());
+        self.connection_string = Some(connection_string.to_string());
 
         let manager = PostgresConnectionManager::new(
             connection_string.parse().map_err(|e| {
-                AdapterError::ConnectionError(format!(
-                    "Invalid connection string: {e}"
-                ))
+                AdapterError::ConnectionError(format!("Invalid connection string: {e}"))
             })?,
             NoTls,
         );
@@ -429,15 +348,12 @@ impl PostgresAdapter {
                 .max_lifetime(Some(std::time::Duration::from_secs(1800)))
                 .build(manager)
                 .map_err(|e| {
-                    AdapterError::ConnectionError(format!(
-                        "Failed to create connection pool: {e}"
-                    ))
+                    AdapterError::ConnectionError(format!("Failed to create connection pool: {e}"))
                 })?,
         );
 
         let version_str = self.query_version()?;
-        self.version =
-            Self::parse_version(&version_str);
+        self.version = Self::parse_version(&version_str);
 
         if let Some(ver) = self.version {
             self.facts.features = Self::build_features(ver);
@@ -452,54 +368,43 @@ impl PostgresAdapter {
         Ok(())
     }
 
-    fn query_version(
-        &mut self,
-    ) -> Result<String, AdapterError> {
-        let client_mutex =
-            self.client.as_ref().ok_or_else(|| {
-                AdapterError::ConnectionError(
-                    "Not connected".into(),
-                )
-            })?;
-        let mut client = client_mutex.lock().unwrap();
+    fn query_version(&mut self) -> Result<String, AdapterError> {
+        let client_mutex = self
+            .client
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
+        let mut client = client_mutex
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
         let row = client
             .query_one("SELECT version()", &[])
-            .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to query version: {e}"
-                ))
-            })?;
+            .map_err(|e| AdapterError::QueryError(format!("Failed to query version: {e}")))?;
         let version: String = row.get(0);
         Ok(version)
     }
 
     fn ping(&mut self) -> Result<(), AdapterError> {
-        let client_mutex =
-            self.client.as_ref().ok_or_else(|| {
-                AdapterError::ConnectionError(
-                    "Not connected".into(),
-                )
-            })?;
-        let mut client = client_mutex.lock().unwrap();
-        client.query_one("SELECT 1", &[]).map_err(|e| {
-            AdapterError::ConnectionError(format!(
-                "Connection check failed: {e}"
-            ))
-        })?;
+        let client_mutex = self
+            .client
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
+        let mut client = client_mutex
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
+        client
+            .query_one("SELECT 1", &[])
+            .map_err(|e| AdapterError::ConnectionError(format!("Connection check failed: {e}")))?;
         Ok(())
     }
 
-    fn gather_statistics_real(
-        &mut self,
-    ) -> Result<HashMap<String, TableStats>, AdapterError>
-    {
-        let client_mutex =
-            self.client.as_ref().ok_or_else(|| {
-                AdapterError::ConnectionError(
-                    "Not connected".into(),
-                )
-            })?;
-        let mut client = client_mutex.lock().unwrap();
+    fn gather_statistics_real(&mut self) -> Result<HashMap<String, TableStats>, AdapterError> {
+        let client_mutex = self
+            .client
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
+        let mut client = client_mutex
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
 
         let rows = client
             .query(
@@ -524,9 +429,7 @@ impl PostgresAdapter {
                 &[],
             )
             .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to gather table statistics: {e}"
-                ))
+                AdapterError::QueryError(format!("Failed to gather table statistics: {e}"))
             })?;
 
         let mut stats = HashMap::new();
@@ -538,8 +441,7 @@ impl PostgresAdapter {
             let size_bytes: i64 = row.get("size_bytes");
             let live: Option<i64> = row.get("n_live_tup");
             let dead: Option<i64> = row.get("n_dead_tup");
-            let analyzed: Option<i64> =
-                row.get("last_analyzed");
+            let analyzed: Option<i64> = row.get("last_analyzed");
 
             let row_count_u = row_count.max(0) as u64;
             let page_count_u = page_count.max(0) as u64;
@@ -556,17 +458,14 @@ impl PostgresAdapter {
                 page_count: page_count_u,
                 average_row_size: avg_row_size,
                 table_size_bytes: size_u,
-                live_tuples: live
-                    .map(|v| v.max(0) as u64),
-                dead_tuples: dead
-                    .map(|v| v.max(0) as u64),
+                live_tuples: live.map(|v| v.max(0) as u64),
+                dead_tuples: dead.map(|v| v.max(0) as u64),
                 last_analyzed: analyzed,
             };
 
-            self.facts.table_stats.insert(
-                name.clone(),
-                Self::to_core_table_stats(&table_stats),
-            );
+            self.facts
+                .table_stats
+                .insert(name.clone(), Self::to_core_table_stats(&table_stats));
 
             stats.insert(name, table_stats);
         }
@@ -577,15 +476,14 @@ impl PostgresAdapter {
     fn gather_column_stats_real(
         &mut self,
         table: &str,
-    ) -> Result<HashMap<String, ColumnStats>, AdapterError>
-    {
-        let client_mutex =
-            self.client.as_ref().ok_or_else(|| {
-                AdapterError::ConnectionError(
-                    "Not connected".into(),
-                )
-            })?;
-        let mut client = client_mutex.lock().unwrap();
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError> {
+        let client_mutex = self
+            .client
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
+        let mut client = client_mutex
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
 
         let rows = client
             .query(
@@ -620,8 +518,7 @@ impl PostgresAdapter {
             let n_distinct: f32 = row.get("n_distinct");
             let null_frac: f32 = row.get("null_frac");
             let avg_width: i32 = row.get("avg_width");
-            let correlation: Option<f32> =
-                row.get("correlation");
+            let correlation: Option<f32> = row.get("correlation");
 
             // PostgreSQL n_distinct encoding:
             //   > 0: literal count
@@ -630,8 +527,7 @@ impl PostgresAdapter {
             let ndv = if n_distinct > 0.0 {
                 n_distinct as u64
             } else if n_distinct < 0.0 {
-                ((-f64::from(n_distinct)) * row_count)
-                    .max(1.0) as u64
+                ((-f64::from(n_distinct)) * row_count).max(1.0) as u64
             } else {
                 0
             };
@@ -658,35 +554,24 @@ impl PostgresAdapter {
     }
 
     /// Execute a query and return results with timing.
-    pub fn execute(
-        &self,
-        query: &str,
-    ) -> Result<ExecutionResult, AdapterError> {
-        let pool = self.pool.as_ref().ok_or_else(|| {
-            AdapterError::ConnectionError(
-                "Not connected".into(),
-            )
-        })?;
+    pub fn execute(&self, query: &str) -> Result<ExecutionResult, AdapterError> {
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
 
-        let mut conn = pool.get().map_err(|e| {
-            AdapterError::ConnectionError(format!(
-                "Failed to get connection: {e}"
-            ))
-        })?;
+        let mut conn = pool
+            .get()
+            .map_err(|e| AdapterError::ConnectionError(format!("Failed to get connection: {e}")))?;
 
         let start = std::time::Instant::now();
-        let rows = conn.query(query, &[]).map_err(|e| {
-            AdapterError::QueryError(format!(
-                "Query execution failed: {e}"
-            ))
-        })?;
+        let rows = conn
+            .query(query, &[])
+            .map_err(|e| AdapterError::QueryError(format!("Query execution failed: {e}")))?;
         let duration = start.elapsed();
 
         let row_count = rows.len();
-        let results: Vec<serde_json::Value> = rows
-            .iter()
-            .map(Self::row_to_json)
-            .collect();
+        let results: Vec<serde_json::Value> = rows.iter().map(Self::row_to_json).collect();
 
         Ok(ExecutionResult {
             rows: results,
@@ -696,78 +581,51 @@ impl PostgresAdapter {
         })
     }
 
-    /// Execute query directly on PostgreSQL.
-    pub fn execute_native(
-        &self,
-        query: &str,
-    ) -> Result<ExecutionResult, AdapterError> {
+    /// Execute query directly on `PostgreSQL`.
+    pub fn execute_native(&self, query: &str) -> Result<ExecutionResult, AdapterError> {
         self.execute(query)
     }
 
     /// Execute query optimized by Ra.
-    pub fn execute_with_ra(
-        &self,
-        query: &str,
-    ) -> Result<ExecutionResult, AdapterError> {
+    pub fn execute_with_ra(&self, query: &str) -> Result<ExecutionResult, AdapterError> {
         self.execute(query)
     }
 
     /// Get EXPLAIN (FORMAT JSON) output for a query.
-    pub fn get_explain_plan(
-        &self,
-        query: &str,
-    ) -> Result<serde_json::Value, AdapterError> {
-        let pool = self.pool.as_ref().ok_or_else(|| {
-            AdapterError::ConnectionError(
-                "Not connected".into(),
-            )
-        })?;
+    pub fn get_explain_plan(&self, query: &str) -> Result<serde_json::Value, AdapterError> {
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
 
-        let mut conn = pool.get().map_err(|e| {
-            AdapterError::ConnectionError(format!(
-                "Failed to get connection: {e}"
-            ))
-        })?;
+        let mut conn = pool
+            .get()
+            .map_err(|e| AdapterError::ConnectionError(format!("Failed to get connection: {e}")))?;
 
-        let explain_query =
-            format!("EXPLAIN (FORMAT JSON, ANALYZE) {query}");
-        let rows =
-            conn.query(&explain_query, &[]).map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "EXPLAIN failed: {e}"
-                ))
-            })?;
+        let explain_query = format!("EXPLAIN (FORMAT JSON, ANALYZE) {query}");
+        let rows = conn
+            .query(&explain_query, &[])
+            .map_err(|e| AdapterError::QueryError(format!("EXPLAIN failed: {e}")))?;
 
         if rows.is_empty() {
-            return Err(AdapterError::QueryError(
-                "No EXPLAIN output".into(),
-            ));
+            return Err(AdapterError::QueryError("No EXPLAIN output".into()));
         }
 
         let json_str: String = rows[0].get(0);
-        serde_json::from_str(&json_str).map_err(|e| {
-            AdapterError::QueryError(format!(
-                "Failed to parse EXPLAIN JSON: {e}"
-            ))
-        })
+        serde_json::from_str(&json_str)
+            .map_err(|e| AdapterError::QueryError(format!("Failed to parse EXPLAIN JSON: {e}")))
     }
 
     /// Get table statistics, index info.
-    pub fn get_stats(
-        &self,
-        table: &str,
-    ) -> Result<TableStatistics, AdapterError> {
-        let pool = self.pool.as_ref().ok_or_else(|| {
-            AdapterError::ConnectionError(
-                "Not connected".into(),
-            )
-        })?;
+    pub fn get_stats(&self, table: &str) -> Result<TableStatistics, AdapterError> {
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
 
-        let mut conn = pool.get().map_err(|e| {
-            AdapterError::ConnectionError(format!(
-                "Failed to get connection: {e}"
-            ))
-        })?;
+        let mut conn = pool
+            .get()
+            .map_err(|e| AdapterError::ConnectionError(format!("Failed to get connection: {e}")))?;
 
         let query = "SELECT \
             c.relname, \
@@ -777,18 +635,14 @@ impl PostgresAdapter {
         FROM pg_class c \
         WHERE c.relname = $1 AND c.relkind = 'r'";
 
-        let rows = conn.query(query, &[&table]).map_err(
-            |e| {
-                AdapterError::QueryError(format!(
-                    "Failed to get stats: {e}"
-                ))
-            },
-        )?;
+        let rows = conn
+            .query(query, &[&table])
+            .map_err(|e| AdapterError::QueryError(format!("Failed to get stats: {e}")))?;
 
         if rows.is_empty() {
-            return Err(AdapterError::QueryError(
-                format!("Table '{table}' not found"),
-            ));
+            return Err(AdapterError::QueryError(format!(
+                "Table '{table}' not found"
+            )));
         }
 
         let row = &rows[0];
@@ -803,11 +657,7 @@ impl PostgresAdapter {
 
         let index_rows = conn
             .query(index_query, &[&table])
-            .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to get indexes: {e}"
-                ))
-            })?;
+            .map_err(|e| AdapterError::QueryError(format!("Failed to get indexes: {e}")))?;
 
         let indexes: Vec<String> = index_rows
             .iter()
@@ -826,29 +676,22 @@ impl PostgresAdapter {
         })
     }
 
-    /// Check for PostgreSQL extensions.
-    pub fn check_extensions(
-        &self,
-    ) -> Result<HashMap<String, bool>, AdapterError> {
-        let pool = self.pool.as_ref().ok_or_else(|| {
-            AdapterError::ConnectionError(
-                "Not connected".into(),
-            )
-        })?;
+    /// Check for `PostgreSQL` extensions.
+    pub fn check_extensions(&self) -> Result<HashMap<String, bool>, AdapterError> {
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
 
-        let mut conn = pool.get().map_err(|e| {
-            AdapterError::ConnectionError(format!(
-                "Failed to get connection: {e}"
-            ))
-        })?;
+        let mut conn = pool
+            .get()
+            .map_err(|e| AdapterError::ConnectionError(format!("Failed to get connection: {e}")))?;
 
         let query = "SELECT extname \
             FROM pg_extension";
-        let rows = conn.query(query, &[]).map_err(|e| {
-            AdapterError::QueryError(format!(
-                "Failed to check extensions: {e}"
-            ))
-        })?;
+        let rows = conn
+            .query(query, &[])
+            .map_err(|e| AdapterError::QueryError(format!("Failed to check extensions: {e}")))?;
 
         let installed: Vec<String> = rows
             .iter()
@@ -867,41 +710,33 @@ impl PostgresAdapter {
             "pg_trgm".to_string(),
             installed.contains(&"pg_trgm".to_string()),
         );
-        extensions.insert(
-            "rum".to_string(),
-            installed.contains(&"rum".to_string()),
-        );
+        extensions.insert("rum".to_string(), installed.contains(&"rum".to_string()));
 
         Ok(extensions)
     }
 
     fn row_to_json(row: &Row) -> serde_json::Value {
-        let mut map =
-            serde_json::Map::new();
+        let mut map = serde_json::Map::new();
         for (idx, col) in row.columns().iter().enumerate() {
             let name = col.name();
             let value: Option<String> = row.get(idx);
             map.insert(
                 name.to_string(),
-                value
-                    .map(serde_json::Value::String)
-                    .unwrap_or(serde_json::Value::Null),
+                value.map_or(serde_json::Value::Null, serde_json::Value::String),
             );
         }
         serde_json::Value::Object(map)
     }
 
-    #[allow(clippy::too_many_lines)]
-    fn get_schema_info_real(
-        &mut self,
-    ) -> Result<SchemaInfo, AdapterError> {
-        let client_mutex =
-            self.client.as_ref().ok_or_else(|| {
-                AdapterError::ConnectionError(
-                    "Not connected".into(),
-                )
-            })?;
-        let mut client = client_mutex.lock().unwrap();
+    #[expect(clippy::too_many_lines, reason = "legacy allow")]
+    fn get_schema_info_real(&mut self) -> Result<SchemaInfo, AdapterError> {
+        let client_mutex = self
+            .client
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
+        let mut client = client_mutex
+            .lock()
+            .map_err(|e| AdapterError::ConnectionError(format!("Mutex poisoned: {e}")))?;
 
         // 1. Columns
         let col_rows = client
@@ -914,25 +749,16 @@ impl PostgresAdapter {
                  ORDER BY table_name, ordinal_position",
                 &[],
             )
-            .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to query columns: {e}"
-                ))
-            })?;
+            .map_err(|e| AdapterError::QueryError(format!("Failed to query columns: {e}")))?;
 
-        let mut tables: HashMap<String, TableInfo> =
-            HashMap::new();
+        let mut tables: HashMap<String, TableInfo> = HashMap::new();
 
         for row in &col_rows {
-            let table_name: String =
-                row.get("table_name");
-            let col_name: String =
-                row.get("column_name");
+            let table_name: String = row.get("table_name");
+            let col_name: String = row.get("column_name");
             let data_type: String = row.get("data_type");
-            let nullable: String =
-                row.get("is_nullable");
-            let default: Option<String> =
-                row.get("column_default");
+            let nullable: String = row.get("is_nullable");
+            let default: Option<String> = row.get("column_default");
 
             let table = tables
                 .entry(table_name.clone())
@@ -970,20 +796,12 @@ impl PostgresAdapter {
                  ORDER BY kcu.ordinal_position",
                 &[],
             )
-            .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to query primary keys: {e}"
-                ))
-            })?;
+            .map_err(|e| AdapterError::QueryError(format!("Failed to query primary keys: {e}")))?;
 
         for row in &pk_rows {
-            let table_name: String =
-                row.get("table_name");
-            let col_name: String =
-                row.get("column_name");
-            if let Some(table) =
-                tables.get_mut(&table_name)
-            {
+            let table_name: String = row.get("table_name");
+            let col_name: String = row.get("column_name");
+            if let Some(table) = tables.get_mut(&table_name) {
                 table.primary_key.push(col_name);
             }
         }
@@ -1015,44 +833,28 @@ impl PostgresAdapter {
                      AND tc.table_schema = 'public'",
                 &[],
             )
-            .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to query foreign keys: {e}"
-                ))
-            })?;
+            .map_err(|e| AdapterError::QueryError(format!("Failed to query foreign keys: {e}")))?;
 
-        let mut fk_map: HashMap<
-            (String, String),
-            (Vec<String>, String, Vec<String>),
-        > = HashMap::new();
+        #[expect(clippy::type_complexity, reason = "local FK accumulator")]
+        let mut fk_map: HashMap<(String, String), (Vec<String>, String, Vec<String>)> =
+            HashMap::new();
 
         for row in &fk_rows {
-            let from_table: String =
-                row.get("from_table");
-            let from_col: String =
-                row.get("from_column");
-            let constraint: String =
-                row.get("constraint_name");
+            let from_table: String = row.get("from_table");
+            let from_col: String = row.get("from_column");
+            let constraint: String = row.get("constraint_name");
             let to_table: String = row.get("to_table");
             let to_col: String = row.get("to_column");
 
             let entry = fk_map
                 .entry((from_table, constraint))
-                .or_insert_with(|| {
-                    (Vec::new(), to_table, Vec::new())
-                });
+                .or_insert_with(|| (Vec::new(), to_table, Vec::new()));
             entry.0.push(from_col);
             entry.2.push(to_col);
         }
 
-        for (
-            (from_table, constraint_name),
-            (cols, ref_table, ref_cols),
-        ) in &fk_map
-        {
-            if let Some(table) =
-                tables.get_mut(from_table)
-            {
+        for ((from_table, constraint_name), (cols, ref_table, ref_cols)) in &fk_map {
+            if let Some(table) = tables.get_mut(from_table) {
                 table.foreign_keys.push(ForeignKeyInfo {
                     name: constraint_name.clone(),
                     columns: cols.clone(),
@@ -1071,28 +873,18 @@ impl PostgresAdapter {
                  WHERE schemaname = 'public'",
                 &[],
             )
-            .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to query indexes: {e}"
-                ))
-            })?;
+            .map_err(|e| AdapterError::QueryError(format!("Failed to query indexes: {e}")))?;
 
         for row in &idx_rows {
             let indexname: String = row.get("indexname");
             let tablename: String = row.get("tablename");
             let indexdef: String = row.get("indexdef");
 
-            let idx_type =
-                Self::parse_index_type(&indexdef);
-            let is_unique = indexdef
-                .to_lowercase()
-                .contains("unique");
-            let columns =
-                Self::parse_index_columns(&indexdef);
+            let idx_type = Self::parse_index_type(&indexdef);
+            let is_unique = indexdef.to_lowercase().contains("unique");
+            let columns = Self::parse_index_columns(&indexdef);
 
-            if let Some(table) =
-                tables.get_mut(&tablename)
-            {
+            if let Some(table) = tables.get_mut(&tablename) {
                 table.indexes.push(IndexInfo {
                     name: indexname,
                     columns,
@@ -1104,20 +896,10 @@ impl PostgresAdapter {
 
         // Populate core schema facts
         for (name, info) in &tables {
-            let core_columns: Vec<(
-                String,
-                ra_core::DataType,
-            )> = info
+            let core_columns: Vec<(String, ra_core::DataType)> = info
                 .columns
                 .iter()
-                .map(|c| {
-                    (
-                        c.name.clone(),
-                        Self::pg_to_core_type(
-                            &c.data_type,
-                        ),
-                    )
-                })
+                .map(|c| (c.name.clone(), Self::pg_to_core_type(&c.data_type)))
                 .collect();
 
             let core_fks: Vec<ra_core::ForeignKey> = info
@@ -1125,25 +907,17 @@ impl PostgresAdapter {
                 .iter()
                 .map(|fk| ra_core::ForeignKey {
                     columns: fk.columns.clone(),
-                    referenced_table: fk
-                        .referenced_table
-                        .clone(),
-                    referenced_columns: fk
-                        .referenced_columns
-                        .clone(),
+                    referenced_table: fk.referenced_table.clone(),
+                    referenced_columns: fk.referenced_columns.clone(),
                 })
                 .collect();
 
-            let core_indexes: Vec<
-                ra_core::facts::IndexInfo,
-            > = info
+            let core_indexes: Vec<ra_core::facts::IndexInfo> = info
                 .indexes
                 .iter()
                 .map(|idx| ra_core::facts::IndexInfo {
                     name: idx.name.clone(),
-                    index_type: Self::index_type_to_core(
-                        &idx.index_type,
-                    ),
+                    index_type: Self::index_type_to_core(&idx.index_type),
                     columns: idx.columns.clone(),
                     included_columns: vec![],
                     is_unique: idx.unique,
@@ -1171,27 +945,22 @@ impl PostgresAdapter {
 
 #[cfg(not(feature = "postgres"))]
 impl PostgresAdapter {
-    #[allow(clippy::unnecessary_wraps)]
-    fn connect_stub(
-        &mut self,
-        connection_string: &str,
-    ) -> Result<(), AdapterError> {
+    fn connect_stub(&mut self, connection_string: &str) -> Result<(), AdapterError> {
         // Basic validation even in stub mode
         if connection_string.is_empty() {
             return Err(AdapterError::InvalidConfiguration(
-                "Connection string cannot be empty".into()
+                "Connection string cannot be empty".into(),
             ));
         }
 
         // Check for obviously invalid URLs
         if connection_string.starts_with("invalid://") {
-            return Err(AdapterError::ConnectionError(
-                format!("Invalid connection string: {}", connection_string)
-            ));
+            return Err(AdapterError::ConnectionError(format!(
+                "Invalid connection string: {connection_string}"
+            )));
         }
 
-        self.connection_string =
-            Some(connection_string.to_string());
+        self.connection_string = Some(connection_string.to_string());
         tracing::warn!(
             "PostgreSQL feature not enabled; \
              connection stored but not established. \
@@ -1204,10 +973,7 @@ impl PostgresAdapter {
 // ---- DatabaseAdapter trait implementation ----
 
 impl DatabaseAdapter for PostgresAdapter {
-    fn connect(
-        &mut self,
-        connection_string: &str,
-    ) -> Result<(), AdapterError> {
+    fn connect(&mut self, connection_string: &str) -> Result<(), AdapterError> {
         #[cfg(feature = "postgres")]
         {
             self.connect_real(connection_string)
@@ -1218,22 +984,16 @@ impl DatabaseAdapter for PostgresAdapter {
         }
     }
 
-    #[allow(invalid_reference_casting)]
-    fn gather_statistics(
-        &self,
-    ) -> Result<HashMap<String, TableStats>, AdapterError>
-    {
+    fn gather_statistics(&self) -> Result<HashMap<String, TableStats>, AdapterError> {
         #[cfg(feature = "postgres")]
         {
             // The trait requires &self but we need &mut self
             // for the postgres Client. Interior mutability via
             // raw pointer is safe here: we only write to our
             // own facts cache which has no invariants.
-            #[allow(clippy::cast_ref_to_mut)]
-            let this = unsafe {
-                &mut *(std::ptr::from_ref(self)
-                    as *mut Self)
-            };
+
+            #[expect(invalid_reference_casting, reason = "unsafe FFI boundary")]
+            let this = unsafe { &mut *std::ptr::from_ref(self).cast_mut() };
             this.gather_statistics_real()
         }
         #[cfg(not(feature = "postgres"))]
@@ -1246,20 +1006,14 @@ impl DatabaseAdapter for PostgresAdapter {
         }
     }
 
-    #[allow(invalid_reference_casting)]
     fn gather_column_stats(
         &self,
         table: &str,
-    ) -> Result<HashMap<String, ColumnStats>, AdapterError>
-    {
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError> {
         #[cfg(feature = "postgres")]
         {
-            #[allow(clippy::cast_ref_to_mut)]
-            #[allow(invalid_reference_casting)]
-            let this = unsafe {
-                &mut *(std::ptr::from_ref(self)
-                    as *mut Self)
-            };
+            #[expect(invalid_reference_casting, reason = "unsafe FFI boundary")]
+            let this = unsafe { &mut *std::ptr::from_ref(self).cast_mut() };
             this.gather_column_stats_real(table)
         }
         #[cfg(not(feature = "postgres"))]
@@ -1273,18 +1027,11 @@ impl DatabaseAdapter for PostgresAdapter {
         }
     }
 
-    #[allow(invalid_reference_casting)]
-    fn get_schema_info(
-        &self,
-    ) -> Result<SchemaInfo, AdapterError> {
+    fn get_schema_info(&self) -> Result<SchemaInfo, AdapterError> {
         #[cfg(feature = "postgres")]
         {
-            #[allow(clippy::cast_ref_to_mut)]
-            #[allow(invalid_reference_casting)]
-            let this = unsafe {
-                &mut *(std::ptr::from_ref(self)
-                    as *mut Self)
-            };
+            #[expect(invalid_reference_casting, reason = "unsafe FFI boundary")]
+            let this = unsafe { &mut *std::ptr::from_ref(self).cast_mut() };
             this.get_schema_info_real()
         }
         #[cfg(not(feature = "postgres"))]
@@ -1297,9 +1044,7 @@ impl DatabaseAdapter for PostgresAdapter {
         }
     }
 
-    fn get_capabilities(
-        &self,
-    ) -> Result<DatabaseCapabilities, AdapterError> {
+    fn get_capabilities(&self) -> Result<DatabaseCapabilities, AdapterError> {
         let features = if let Some(ver) = self.version {
             Self::build_features(ver)
         } else {
@@ -1322,16 +1067,10 @@ impl DatabaseAdapter for PostgresAdapter {
         })
     }
 
-    fn supports_feature(
-        &self,
-        feature: &str,
-    ) -> Result<bool, AdapterError> {
+    fn supports_feature(&self, feature: &str) -> Result<bool, AdapterError> {
         if let Some(ver) = self.version {
             let features = Self::build_features(ver);
-            Ok(features
-                .get(feature)
-                .copied()
-                .unwrap_or(false))
+            Ok(features.get(feature).copied().unwrap_or(false))
         } else {
             let caps = self.get_capabilities()?;
             Ok(caps.supports(feature))
@@ -1354,39 +1093,24 @@ impl DatabaseAdapter for PostgresAdapter {
 // ---- FactsProvider implementation ----
 
 impl FactsProvider for PostgresFacts {
-    fn get_table_stats(
-        &self,
-        table: &str,
-    ) -> Option<&ra_core::CoreTableStats> {
+    fn get_table_stats(&self, table: &str) -> Option<&ra_core::CoreTableStats> {
         self.table_stats.get(table)
     }
 
-    fn get_column_stats(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> Option<&ra_core::ColumnStats> {
+    fn get_column_stats(&self, table: &str, column: &str) -> Option<&ra_core::ColumnStats> {
         self.column_stats
             .get(&(table.to_string(), column.to_string()))
     }
 
-    fn hardware_profile(
-        &self,
-    ) -> &ra_core::CoreHardwareProfile {
+    fn hardware_profile(&self) -> &ra_core::CoreHardwareProfile {
         &self.hardware
     }
 
-    fn get_schema(
-        &self,
-        table: &str,
-    ) -> Option<&ra_core::facts::TableInfo> {
+    fn get_schema(&self, table: &str) -> Option<&ra_core::facts::TableInfo> {
         self.schemas.get(table)
     }
 
-    fn runtime_stats(
-        &self,
-        _operator_id: &str,
-    ) -> Option<&ra_core::facts::OperatorStats> {
+    fn runtime_stats(&self, _operator_id: &str) -> Option<&ra_core::facts::OperatorStats> {
         None
     }
 
@@ -1395,10 +1119,7 @@ impl FactsProvider for PostgresFacts {
     }
 
     fn supports_feature(&self, feature: &str) -> bool {
-        self.features
-            .get(feature)
-            .copied()
-            .unwrap_or(false)
+        self.features.get(feature).copied().unwrap_or(false)
     }
 
     fn sql_dialect(&self) -> SqlDialect {
@@ -1417,6 +1138,7 @@ impl FactsProvider for PostgresFacts {
 // ---- Unit tests ----
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
 
@@ -1424,10 +1146,7 @@ mod tests {
     fn create_adapter() {
         let adapter = PostgresAdapter::new();
         assert_eq!(adapter.database_name(), "PostgreSQL");
-        assert_eq!(
-            adapter.sql_dialect(),
-            SqlDialect::Postgres
-        );
+        assert_eq!(adapter.sql_dialect(), SqlDialect::Postgres);
     }
 
     #[test]
@@ -1454,9 +1173,7 @@ mod tests {
 
     #[test]
     fn parse_version_major_minor() {
-        let ver = PostgresAdapter::parse_version(
-            "PostgreSQL 15.3",
-        );
+        let ver = PostgresAdapter::parse_version("PostgreSQL 15.3");
         assert_eq!(ver, Some((15, 3, 0)));
     }
 
@@ -1468,72 +1185,30 @@ mod tests {
 
     #[test]
     fn build_features_pg16() {
-        let features =
-            PostgresAdapter::build_features((16, 0, 0));
-        assert_eq!(
-            features.get("lateral_join"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("cte_recursive"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("window_functions"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("parallel_query"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("jit_compilation"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("incremental_sort"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("json_table"),
-            Some(&false)
-        );
+        let features = PostgresAdapter::build_features((16, 0, 0));
+        assert_eq!(features.get("lateral_join"), Some(&true));
+        assert_eq!(features.get("cte_recursive"), Some(&true));
+        assert_eq!(features.get("window_functions"), Some(&true));
+        assert_eq!(features.get("parallel_query"), Some(&true));
+        assert_eq!(features.get("jit_compilation"), Some(&true));
+        assert_eq!(features.get("incremental_sort"), Some(&true));
+        assert_eq!(features.get("json_table"), Some(&false));
     }
 
     #[test]
     fn build_features_pg83() {
-        let features =
-            PostgresAdapter::build_features((8, 3, 0));
-        assert_eq!(
-            features.get("lateral_join"),
-            Some(&false)
-        );
-        assert_eq!(
-            features.get("cte_recursive"),
-            Some(&false)
-        );
-        assert_eq!(
-            features.get("window_functions"),
-            Some(&false)
-        );
+        let features = PostgresAdapter::build_features((8, 3, 0));
+        assert_eq!(features.get("lateral_join"), Some(&false));
+        assert_eq!(features.get("cte_recursive"), Some(&false));
+        assert_eq!(features.get("window_functions"), Some(&false));
     }
 
     #[test]
     fn build_features_pg84() {
-        let features =
-            PostgresAdapter::build_features((8, 4, 0));
-        assert_eq!(
-            features.get("lateral_join"),
-            Some(&false)
-        );
-        assert_eq!(
-            features.get("cte_recursive"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("window_functions"),
-            Some(&true)
-        );
+        let features = PostgresAdapter::build_features((8, 4, 0));
+        assert_eq!(features.get("lateral_join"), Some(&false));
+        assert_eq!(features.get("cte_recursive"), Some(&true));
+        assert_eq!(features.get("window_functions"), Some(&true));
     }
 
     #[test]
@@ -1543,21 +1218,14 @@ mod tests {
         assert!(caps.is_ok());
         let caps = caps.as_ref().ok();
         assert!(caps.is_some());
-        assert_eq!(
-            caps.map(|c| c.database_name.as_str()),
-            Some("PostgreSQL")
-        );
-        assert_eq!(
-            caps.map(|c| c.max_identifier_length),
-            Some(63)
-        );
+        assert_eq!(caps.map(|c| c.database_name.as_str()), Some("PostgreSQL"));
+        assert_eq!(caps.map(|c| c.max_identifier_length), Some(63));
     }
 
     #[test]
     fn supports_feature_without_version() {
         let adapter = PostgresAdapter::new();
-        let result =
-            adapter.supports_feature("lateral_join");
+        let result = adapter.supports_feature("lateral_join");
         assert!(result.is_ok());
     }
 
@@ -1566,20 +1234,10 @@ mod tests {
         let adapter = PostgresAdapter::new();
         let facts = adapter.as_facts_provider();
         assert!(facts.get_table_stats("users").is_none());
-        assert!(
-            facts
-                .get_column_stats("users", "id")
-                .is_none()
-        );
+        assert!(facts.get_column_stats("users", "id").is_none());
         assert!(facts.get_schema("users").is_none());
-        assert_eq!(
-            facts.database_name(),
-            "PostgreSQL"
-        );
-        assert_eq!(
-            facts.sql_dialect(),
-            SqlDialect::Postgres
-        );
+        assert_eq!(facts.database_name(), "PostgreSQL");
+        assert_eq!(facts.sql_dialect(), SqlDialect::Postgres);
     }
 
     #[test]
@@ -1620,9 +1278,7 @@ mod tests {
             "brin"
         );
         assert_eq!(
-            PostgresAdapter::parse_index_type(
-                "CREATE INDEX idx ON t (id)"
-            ),
+            PostgresAdapter::parse_index_type("CREATE INDEX idx ON t (id)"),
             "btree"
         );
     }
@@ -1638,9 +1294,7 @@ mod tests {
             ra_core::DataType::Integer
         );
         assert_eq!(
-            PostgresAdapter::pg_to_core_type(
-                "double precision"
-            ),
+            PostgresAdapter::pg_to_core_type("double precision"),
             ra_core::DataType::Float
         );
         assert_eq!(
@@ -1648,9 +1302,7 @@ mod tests {
             ra_core::DataType::String
         );
         assert_eq!(
-            PostgresAdapter::pg_to_core_type(
-                "character varying"
-            ),
+            PostgresAdapter::pg_to_core_type("character varying"),
             ra_core::DataType::String
         );
         assert_eq!(
@@ -1658,9 +1310,7 @@ mod tests {
             ra_core::DataType::Boolean
         );
         assert_eq!(
-            PostgresAdapter::pg_to_core_type(
-                "timestamp without time zone"
-            ),
+            PostgresAdapter::pg_to_core_type("timestamp without time zone"),
             ra_core::DataType::Timestamp
         );
         assert_eq!(
@@ -1681,9 +1331,7 @@ mod tests {
         );
         assert_eq!(cols, vec!["a", "b", "c"]);
 
-        let cols = PostgresAdapter::parse_index_columns(
-            "CREATE UNIQUE INDEX idx ON t (id DESC)",
-        );
+        let cols = PostgresAdapter::parse_index_columns("CREATE UNIQUE INDEX idx ON t (id DESC)");
         assert_eq!(cols, vec!["id"]);
 
         let cols = PostgresAdapter::parse_index_columns(
@@ -1704,8 +1352,7 @@ mod tests {
             dead_tuples: Some(50),
             last_analyzed: Some(1_700_000_000),
         };
-        let core =
-            PostgresAdapter::to_core_table_stats(&stats);
+        let core = PostgresAdapter::to_core_table_stats(&stats);
         assert_eq!(core.row_count, 1000.0);
         assert_eq!(core.page_count, 100);
         assert_eq!(core.average_row_size, 50.0);
@@ -1726,8 +1373,7 @@ mod tests {
             histogram: None,
             correlation: Some(0.95),
         };
-        let core =
-            PostgresAdapter::to_core_column_stats(&stats);
+        let core = PostgresAdapter::to_core_column_stats(&stats);
         assert_eq!(core.distinct_count, 500.0);
         assert_eq!(core.null_fraction, 0.02);
         assert_eq!(core.avg_length, Some(32.0));
@@ -1762,75 +1408,58 @@ mod tests {
     }
 }
 
-/// Integration tests requiring a real PostgreSQL connection.
+/// Integration tests requiring a real `PostgreSQL` connection.
 /// Run with: `cargo test -p ra-adapters \
 ///   --features postgres -- --ignored`
 #[cfg(test)]
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(feature = "postgres")]
 mod integration_tests {
     use super::*;
 
     fn get_test_url() -> String {
-        std::env::var("TEST_POSTGRES_URL").unwrap_or_else(
-            |_| {
-                "postgresql://localhost/postgres".to_string()
-            },
-        )
+        std::env::var("TEST_POSTGRES_URL")
+            .unwrap_or_else(|_| "postgresql://localhost/postgres".to_string())
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn connect_to_postgres() {
         let mut adapter = PostgresAdapter::new();
         let result = adapter.connect(&get_test_url());
-        assert!(
-            result.is_ok(),
-            "Failed to connect: {result:?}"
-        );
+        assert!(result.is_ok(), "Failed to connect: {result:?}");
         assert!(adapter.version.is_some());
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn gather_table_statistics() {
         let mut adapter = PostgresAdapter::new();
         adapter.connect(&get_test_url()).expect("connect");
         let stats = adapter.gather_statistics();
-        assert!(
-            stats.is_ok(),
-            "Failed to gather stats: {stats:?}"
-        );
+        assert!(stats.is_ok(), "Failed to gather stats: {stats:?}");
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn gather_schema_info() {
         let mut adapter = PostgresAdapter::new();
         adapter.connect(&get_test_url()).expect("connect");
         let schema = adapter.get_schema_info();
-        assert!(
-            schema.is_ok(),
-            "Failed to get schema: {schema:?}"
-        );
+        assert!(schema.is_ok(), "Failed to get schema: {schema:?}");
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn version_based_features() {
         let mut adapter = PostgresAdapter::new();
         adapter.connect(&get_test_url()).expect("connect");
-        assert_eq!(
-            adapter.supports_feature("cte_recursive"),
-            Ok(true)
-        );
-        assert_eq!(
-            adapter.supports_feature("window_functions"),
-            Ok(true)
-        );
+        assert_eq!(adapter.supports_feature("cte_recursive"), Ok(true));
+        assert_eq!(adapter.supports_feature("window_functions"), Ok(true));
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires live PostgreSQL"]
     fn facts_provider_after_gather() {
         let mut adapter = PostgresAdapter::new();
         adapter.connect(&get_test_url()).expect("connect");
@@ -1838,13 +1467,7 @@ mod integration_tests {
         let _ = adapter.get_schema_info();
 
         let facts = adapter.as_facts_provider();
-        assert_eq!(
-            facts.database_name(),
-            "PostgreSQL"
-        );
-        assert_eq!(
-            facts.sql_dialect(),
-            SqlDialect::Postgres
-        );
+        assert_eq!(facts.database_name(), "PostgreSQL");
+        assert_eq!(facts.sql_dialect(), SqlDialect::Postgres);
     }
 }

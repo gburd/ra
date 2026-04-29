@@ -54,7 +54,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQL2023Extension;
 
 impl GrammarExtension for SQL2023Extension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sql:2023"
     }
 

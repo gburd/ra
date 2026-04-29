@@ -264,9 +264,9 @@ mod tests {
         let right = "X";
         let output = render_side_by_side_width(left, right, 120);
         // All left lines should be present
-        assert!(output.contains("A"));
-        assert!(output.contains("E"));
-        assert!(output.contains("X"));
+        assert!(output.contains('A'));
+        assert!(output.contains('E'));
+        assert!(output.contains('X'));
     }
 
     #[test]

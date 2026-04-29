@@ -150,7 +150,7 @@ fn top_k_ranking_benchmark(c: &mut Criterion) {
 
     for (algo_label, algo) in &algorithms {
         for (limit_label, limit) in &limits {
-            let label = format!("{}_{}", algo_label, limit_label);
+            let label = format!("{algo_label}_{limit_label}");
             group.bench_with_input(
                 BenchmarkId::from_parameter(&label),
                 &(algo, limit),
@@ -408,7 +408,7 @@ fn top_k_speedup_comparison(c: &mut Criterion) {
 
     for docs in &matching_docs {
         for limit in &limits {
-            let label = format!("docs_{}_limit_{}", docs, limit);
+            let label = format!("docs_{docs}_limit_{limit}");
             group.bench_with_input(
                 BenchmarkId::from_parameter(&label),
                 &(docs, limit),

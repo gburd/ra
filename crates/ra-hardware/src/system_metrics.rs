@@ -110,14 +110,14 @@ impl SystemMetrics {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            parts.push(format!("I/O: {}", disk_str));
+            parts.push(format!("I/O: {disk_str}"));
         }
 
         if !self.network_io.is_empty() {
             let total_rx: f64 = self.network_io.iter().map(|n| n.rx_bytes_per_sec).sum();
             let total_tx: f64 = self.network_io.iter().map(|n| n.tx_bytes_per_sec).sum();
             let total_kb = (total_rx + total_tx) / 1024.0;
-            parts.push(format!("Net: {:.1} KB/s", total_kb));
+            parts.push(format!("Net: {total_kb:.1} KB/s"));
         }
 
         parts.push(format!("Mem: {:.1}%", self.memory_utilization_percent));
@@ -321,9 +321,7 @@ fn read_diskstats() -> HashMap<String, RawDiskStats> {
             // Filter out virtual and partition devices
             // Keep: sda, nvme0n1, vda, xvda, hda
             // Skip: sda1, loop0, ram0, dm-0
-            if device.starts_with("loop")
-                || device.starts_with("ram")
-                || device.starts_with("dm-")
+            if device.starts_with("loop") || device.starts_with("ram") || device.starts_with("dm-")
             {
                 continue;
             }

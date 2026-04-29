@@ -1,8 +1,11 @@
 //! SQL error formatting with contextual help.
 
+use std::fmt::Write;
+
 use colored::Colorize;
 
-/// Format SQL parsing errors in Rust compiler style with helpful pointers.
+/// Format SQL parsing errors in Rust compiler style
+/// with helpful pointers.
 pub fn format_sql_error(
     err: &ra_parser::SqlConversionError,
     sql: &str,
@@ -27,7 +30,8 @@ fn extract_error_position(
 
     if let Some(line_start) = error_msg.find("Line:") {
         if let Some(line_end) = error_msg[line_start..].find(',') {
-            if let Ok(num) = error_msg[line_start + 5..line_start + line_end]
+            if let Ok(num) = error_msg
+                [line_start + 5..line_start + line_end]
                 .trim()
                 .parse::<usize>()
             {
@@ -61,62 +65,87 @@ fn format_contextual_help(
     if error_msg.contains("expected: an expression")
         && error_msg.contains("found: {")
     {
-        help.push_str(&format!("{}: ", "help".green().bold()));
+        let _ = write!(help, "{}: ", "help".green().bold());
         help.push_str("JSON literals must be quoted strings\n");
-        help.push_str(&format!(
-            "      {} Use '{{\"key\": \"value\"}}' instead of {{key: value}}\n",
+        let _ = writeln!(
+            help,
+            "      {} Use '{{\"key\": \"value\"}}' instead of \
+             {{key: value}}",
             "|".blue()
-        ));
-        help.push_str(&format!(
-            "      {} In bash, escape quotes: '\\'{{...}}\\'' or use $'...' syntax\n",
+        );
+        let _ = writeln!(
+            help,
+            "      {} In bash, escape quotes: \
+             '\\'{{...}}\\'' or use $'...' syntax",
             "|".blue()
-        ));
+        );
     } else if error_line.contains("@=") {
-        help.push_str(&format!("{}: ", "help".green().bold()));
-        help.push_str("@= is not a standard PostgreSQL operator\n");
-        help.push_str(&format!(
-            "      {} Use @> (contains) or @? (path exists) instead\n",
+        let _ = write!(help, "{}: ", "help".green().bold());
+        help.push_str(
+            "@= is not a standard PostgreSQL operator\n",
+        );
+        let _ = writeln!(
+            help,
+            "      {} Use @> (contains) or @? (path exists) \
+             instead",
             "|".blue()
-        ));
-        help.push_str(&format!(
-            "      {} Example: WHERE data @> '{{\"status\": \"active\"}}'\n",
+        );
+        let _ = writeln!(
+            help,
+            "      {} Example: WHERE data @> \
+             '{{\"status\": \"active\"}}'",
             "|".blue()
-        ));
-    } else if error_msg.contains("found: @") && !error_line.contains("@@") {
-        help.push_str(&format!("{}: ", "help".green().bold()));
-        help.push_str("Check PostgreSQL operator syntax\n");
-        help.push_str(&format!(
-            "      {} Supported JSONB operators: @> <@ @? @@\n",
-            "|".blue()
-        ));
-        help.push_str(&format!(
-            "      {} Supported text operators: @@ (tsvector match)\n",
-            "|".blue()
-        ));
-    } else if error_msg.contains("unterminated")
-        || error_line.chars().filter(|&c| c == '\'').count() % 2 != 0
+        );
+    } else if error_msg.contains("found: @")
+        && !error_line.contains("@@")
     {
-        help.push_str(&format!("{}: ", "help".green().bold()));
+        let _ = write!(help, "{}: ", "help".green().bold());
+        help.push_str("Check PostgreSQL operator syntax\n");
+        let _ = writeln!(
+            help,
+            "      {} Supported JSONB operators: @> <@ @? @@",
+            "|".blue()
+        );
+        let _ = writeln!(
+            help,
+            "      {} Supported text operators: @@ \
+             (tsvector match)",
+            "|".blue()
+        );
+    } else if error_msg.contains("unterminated")
+        || error_line
+            .chars()
+            .filter(|&c| c == '\'')
+            .count()
+            % 2
+            != 0
+    {
+        let _ = write!(help, "{}: ", "help".green().bold());
         help.push_str("Check string quote matching\n");
-        help.push_str(&format!(
-            "      {} SQL strings use single quotes: 'text'\n",
+        let _ = writeln!(
+            help,
+            "      {} SQL strings use single quotes: 'text'",
             "|".blue()
-        ));
-        help.push_str(&format!(
-            "      {} Escape quotes in bash: '\\''text'\\'' or \"'text'\"\n",
+        );
+        let _ = writeln!(
+            help,
+            "      {} Escape quotes in bash: \
+             '\\''text'\\'' or \"'text'\"",
             "|".blue()
-        ));
+        );
     } else if !error_msg.contains("unsupported") {
-        help.push_str(&format!("{}: ", "help".green().bold()));
+        let _ = write!(help, "{}: ", "help".green().bold());
         help.push_str("Check SQL syntax\n");
-        help.push_str(&format!(
-            "      {} Ensure proper quoting and operator usage\n",
+        let _ = writeln!(
+            help,
+            "      {} Ensure proper quoting and operator usage",
             "|".blue()
-        ));
-        help.push_str(&format!(
-            "      {} Set DEBUG_RA=2 for full error details\n",
+        );
+        let _ = writeln!(
+            help,
+            "      {} Set DEBUG_RA=2 for full error details",
             "|".blue()
-        ));
+        );
     }
 
     help
@@ -138,70 +167,79 @@ fn format_error_with_location(
         .unwrap_or(0);
 
     if line_idx >= lines.len() {
-        let msg = format!("SQL parse error: {}", error_msg);
+        let msg = format!("SQL parse error: {error_msg}");
         return if debug_level > 1 {
-            anyhow::anyhow!("{}", msg)
+            anyhow::anyhow!("{msg}")
         } else {
             anyhow::Error::msg(msg)
         };
     }
 
     let error_line = lines[line_idx];
-    let col_idx = col_num.saturating_sub(1).min(error_line.len());
+    let col_idx =
+        col_num.saturating_sub(1).clamp(0, error_line.len());
 
     let mut output = String::new();
-    output.push_str(&format!(
-        "{}: SQL parse error\n",
+    let _ = writeln!(
+        output,
+        "{}: SQL parse error",
         "error".red().bold()
-    ));
-    output.push_str(&format!(
-        "  {} {}\n",
+    );
+    let _ = writeln!(
+        output,
+        "  {} {}",
         "-->".blue().bold(),
         "query:".dimmed()
-    ));
+    );
     output.push('\n');
 
     if line_idx > 0 {
-        output.push_str(&format!(
-            "{} {} {}\n",
+        let _ = writeln!(
+            output,
+            "{} {} {}",
             format!("{:4}", line_num - 1).blue().bold(),
             "|".blue().bold(),
             lines[line_idx - 1].dimmed()
-        ));
+        );
     }
 
-    output.push_str(&format!(
-        "{} {} {}\n",
-        format!("{:4}", line_num).blue().bold(),
+    let _ = writeln!(
+        output,
+        "{} {} {}",
+        format!("{line_num:4}").blue().bold(),
         "|".blue().bold(),
         error_line
-    ));
+    );
 
     let pointer_padding = col_idx;
-    output.push_str(&format!(
-        "     {} {}{} {}\n",
+    let caret_len =
+        (error_line.len() - col_idx).clamp(1, 10);
+    let _ = writeln!(
+        output,
+        "     {} {}{} {}",
         "|".blue().bold(),
         " ".repeat(pointer_padding),
-        "^".repeat((error_line.len() - col_idx).min(10).max(1))
-            .red()
-            .bold(),
+        "^".repeat(caret_len).red().bold(),
         error_msg.red()
-    ));
+    );
 
     if line_idx + 1 < lines.len() {
-        output.push_str(&format!(
-            "{} {} {}\n",
+        let _ = writeln!(
+            output,
+            "{} {} {}",
             format!("{:4}", line_num + 1).blue().bold(),
             "|".blue().bold(),
             lines[line_idx + 1].dimmed()
-        ));
+        );
     }
 
-    output.push_str("\n");
-    output.push_str(&format_contextual_help(error_msg, error_line, col_idx));
+    output.push('\n');
+    output.push_str(&format_contextual_help(
+        error_msg, error_line, col_idx,
+    ));
 
     if debug_level > 1 {
-        anyhow::anyhow!("{}", output)
+        anyhow::anyhow!("{output}")
     } else {
         anyhow::Error::msg(output)
     }
@@ -213,36 +251,42 @@ fn format_error_with_context(
     error_msg: &str,
 ) -> anyhow::Error {
     let mut output = String::new();
-    output.push_str(&format!(
-        "{}: SQL parse error\n",
+    let _ = writeln!(
+        output,
+        "{}: SQL parse error",
         "error".red().bold()
-    ));
-    output.push_str(&format!(
-        "  {} {}\n",
+    );
+    let _ = writeln!(
+        output,
+        "  {} {}",
         "-->".blue().bold(),
         "query:".dimmed()
-    ));
+    );
     output.push('\n');
 
     for (i, line) in sql.lines().enumerate() {
-        output.push_str(&format!(
-            "{} {} {}\n",
+        let _ = writeln!(
+            output,
+            "{} {} {}",
             format!("{:4}", i + 1).blue().bold(),
             "|".blue().bold(),
             line
-        ));
+        );
     }
 
-    output.push_str(&format!(
-        "\n{}: {}\n",
+    let _ = writeln!(
+        output,
+        "\n{}: {}",
         "error".red().bold(),
         error_msg
-    ));
+    );
 
     output.push('\n');
     for line in sql.lines() {
         if !line.trim().is_empty() {
-            output.push_str(&format_contextual_help(error_msg, line, 0));
+            output.push_str(&format_contextual_help(
+                error_msg, line, 0,
+            ));
             break;
         }
     }
@@ -253,7 +297,7 @@ fn format_error_with_context(
         .unwrap_or(0);
 
     if debug_level > 1 {
-        anyhow::anyhow!("{}", output)
+        anyhow::anyhow!("{output}")
     } else {
         anyhow::Error::msg(output)
     }

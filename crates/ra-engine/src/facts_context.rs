@@ -39,6 +39,7 @@ pub struct FactsContext {
 
 impl FactsContext {
     /// Create a new empty facts context with a hardware profile
+    #[must_use]
     pub fn new(hardware: HardwareProfile) -> Self {
         Self {
             table_stats: Arc::new(RwLock::new(HashMap::new())),
@@ -75,36 +76,70 @@ impl FactsContext {
     }
 
     /// Add table statistics
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
+    #[expect(clippy::expect_used, reason = "RwLock poisoning is unrecoverable")]
     pub fn add_table_stats(&mut self, table: String, stats: TableStats) {
-        self.table_stats.write().unwrap().insert(table, stats);
+        self.table_stats
+            .write()
+            .expect("table_stats lock poisoned")
+            .insert(table, stats);
     }
 
     /// Add column statistics
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
+    #[expect(clippy::expect_used, reason = "RwLock poisoning is unrecoverable")]
     pub fn add_column_stats(&mut self, table: String, column: String, stats: StatsColumnStats) {
         self.column_stats
             .write()
-            .unwrap()
+            .expect("column_stats lock poisoned")
             .entry(table)
             .or_default()
             .insert(column, stats);
     }
 
     /// Add schema information
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
+    #[expect(clippy::expect_used, reason = "RwLock poisoning is unrecoverable")]
     pub fn add_schema(&mut self, info: TableInfo) {
-        self.schema.write().unwrap().insert(info.name.clone(), info);
+        self.schema
+            .write()
+            .expect("schema lock poisoned")
+            .insert(info.name.clone(), info);
     }
 
     /// Add runtime statistics
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
+    #[expect(clippy::expect_used, reason = "RwLock poisoning is unrecoverable")]
     pub fn add_runtime_stats(&mut self, stats: OperatorStats) {
         self.runtime_stats
             .write()
-            .unwrap()
+            .expect("runtime_stats lock poisoned")
             .insert(stats.operator_id.clone(), stats);
     }
 
     /// Register a supported feature
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
+    #[expect(clippy::expect_used, reason = "RwLock poisoning is unrecoverable")]
     pub fn register_feature(&mut self, feature: String, supported: bool) {
-        self.features.write().unwrap().insert(feature, supported);
+        self.features
+            .write()
+            .expect("features lock poisoned")
+            .insert(feature, supported);
     }
 }
 
@@ -176,10 +211,11 @@ impl FactsProvider for FactsContext {
         Box::leak(self.database_name.clone().into_boxed_str())
     }
 
+    #[expect(clippy::expect_used, reason = "RwLock poisoning is unrecoverable")]
     fn supports_feature(&self, feature: &str) -> bool {
         self.features
             .read()
-            .unwrap()
+            .expect("features lock poisoned")
             .get(feature)
             .copied()
             .unwrap_or(false)
@@ -198,13 +234,14 @@ impl FactsProvider for FactsContext {
     }
 }
 
-/// Builder for constructing FactsContext
+/// Builder for constructing `FactsContext`
 pub struct FactsContextBuilder {
     context: FactsContext,
 }
 
 impl FactsContextBuilder {
     /// Create a new builder with a hardware profile
+    #[must_use]
     pub fn new(hardware: HardwareProfile) -> Self {
         Self {
             context: FactsContext::new(hardware),
@@ -212,24 +249,28 @@ impl FactsContextBuilder {
     }
 
     /// Set the database name
+    #[must_use]
     pub fn database(mut self, name: impl Into<String>) -> Self {
         self.context.set_database_name(name.into());
         self
     }
 
     /// Set the SQL dialect
+    #[must_use]
     pub fn dialect(mut self, dialect: SqlDialect) -> Self {
         self.context.set_dialect(dialect);
         self
     }
 
     /// Add table statistics
+    #[must_use]
     pub fn table_stats(mut self, table: impl Into<String>, stats: TableStats) -> Self {
         self.context.add_table_stats(table.into(), stats);
         self
     }
 
     /// Add column statistics
+    #[must_use]
     pub fn column_stats(
         mut self,
         table: impl Into<String>,
@@ -242,24 +283,28 @@ impl FactsContextBuilder {
     }
 
     /// Register a feature
+    #[must_use]
     pub fn feature(mut self, name: impl Into<String>, supported: bool) -> Self {
         self.context.register_feature(name.into(), supported);
         self
     }
 
     /// Set memory limit
+    #[must_use]
     pub fn memory_limit(mut self, limit: u64) -> Self {
         self.context.set_memory_limit(limit);
         self
     }
 
-    /// Build the FactsContext
+    /// Build the `FactsContext`
+    #[must_use]
     pub fn build(self) -> FactsContext {
         self.context
     }
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 

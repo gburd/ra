@@ -64,7 +64,7 @@ use crate::grammar::extension::GrammarExtension;
 pub struct SQL2011Extension;
 
 impl GrammarExtension for SQL2011Extension {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sql:2011"
     }
 

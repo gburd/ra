@@ -23,7 +23,7 @@ use ra_core::{ColumnStats, Statistics};
 // array.h.
 
 /// Equivalent to C macro `DatumGetArrayTypeP(d)`.
-#[allow(clippy::cast_ptr_alignment)]
+#[expect(clippy::cast_ptr_alignment, reason = "legacy allow")]
 unsafe fn datum_get_array_type_p(
     datum: pg_sys::Datum,
 ) -> *mut pg_sys::ArrayType {
@@ -39,7 +39,7 @@ unsafe fn arr_ndim(a: *mut pg_sys::ArrayType) -> i32 {
 }
 
 /// Equivalent to C macro `ARR_DIMS(a)`.
-#[allow(clippy::cast_ptr_alignment)]
+#[expect(clippy::cast_ptr_alignment, reason = "legacy allow")]
 unsafe fn arr_dims(a: *mut pg_sys::ArrayType) -> *mut i32 {
     // dims start right after the ArrayType header
     (a as *mut u8).add(std::mem::size_of::<pg_sys::ArrayType>())

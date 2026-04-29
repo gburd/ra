@@ -385,7 +385,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Test code appropriately uses expect for known-good serialization"
+    )]
     fn serialize_roundtrip() {
         let config = MemoryConfig::ddr4_dual_socket();
         let json = serde_json::to_string(&config).expect("serialization should succeed");

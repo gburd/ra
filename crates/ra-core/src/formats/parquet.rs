@@ -19,9 +19,8 @@ use parquet::schema::types::Type as SchemaType;
 use crate::facts::DataType;
 
 use super::{
-    ColumnEncoding, ColumnEncodingInfo, CompressionCodec, Field,
-    FileColumnStats, FileFormat, FileMetadata, FormatCapabilities,
-    FormatError, RowGroupMeta, ScalarValue, Schema,
+    ColumnEncoding, ColumnEncodingInfo, CompressionCodec, Field, FileColumnStats, FileFormat,
+    FileMetadata, FormatCapabilities, FormatError, RowGroupMeta, ScalarValue, Schema,
 };
 
 /// Parquet file format implementation.
@@ -56,27 +55,19 @@ impl FileFormat for ParquetFormat {
         "parquet"
     }
 
-    fn read_schema(
-        &self,
-        path: &Path,
-    ) -> Result<Schema, FormatError> {
+    fn read_schema(&self, path: &Path) -> Result<Schema, FormatError> {
         let reader = open_parquet(path)?;
-        let parquet_schema =
-            reader.metadata().file_metadata().schema();
+        let parquet_schema = reader.metadata().file_metadata().schema();
         Ok(convert_schema(parquet_schema))
     }
 
-    fn read_metadata(
-        &self,
-        path: &Path,
-    ) -> Result<FileMetadata, FormatError> {
+    fn read_metadata(&self, path: &Path) -> Result<FileMetadata, FormatError> {
         let reader = open_parquet(path)?;
         let parquet_meta = reader.metadata();
         let file_meta = parquet_meta.file_metadata();
 
         let schema = convert_schema(file_meta.schema());
-        let num_rows = u64::try_from(file_meta.num_rows())
-            .unwrap_or(0);
+        let num_rows = u64::try_from(file_meta.num_rows()).unwrap_or(0);
 
         let row_groups: Vec<RowGroupMeta> = parquet_meta
             .row_groups()
@@ -118,9 +109,7 @@ impl FileFormat for ParquetFormat {
     }
 }
 
-fn open_parquet(
-    path: &Path,
-) -> Result<SerializedFileReader<File>, FormatError> {
+fn open_parquet(path: &Path) -> Result<SerializedFileReader<File>, FormatError> {
     let file = File::open(path).map_err(|source| {
         if source.kind() == std::io::ErrorKind::NotFound {
             FormatError::FileNotFound {
@@ -134,20 +123,15 @@ fn open_parquet(
         }
     })?;
 
-    SerializedFileReader::new(file).map_err(|e| {
-        FormatError::InvalidFormat {
-            path: path.display().to_string(),
-            reason: e.to_string(),
-        }
+    SerializedFileReader::new(file).map_err(|e| FormatError::InvalidFormat {
+        path: path.display().to_string(),
+        reason: e.to_string(),
     })
 }
 
 fn convert_schema(schema: &SchemaType) -> Schema {
     let fields = match schema {
-        SchemaType::GroupType { fields, .. } => fields
-            .iter()
-            .map(|f| convert_field(f))
-            .collect(),
+        SchemaType::GroupType { fields, .. } => fields.iter().map(|f| convert_field(f)).collect(),
         SchemaType::PrimitiveType { .. } => vec![],
     };
     Schema::new(fields)
@@ -162,9 +146,8 @@ fn convert_field(field: &SchemaType) -> Field {
         } => {
             let data_type = map_physical_type(*physical_type);
             let name = basic_info.name().to_string();
-            let nullable = !basic_info.has_repetition()
-                || basic_info.repetition()
-                    == Repetition::OPTIONAL;
+            let nullable =
+                !basic_info.has_repetition() || basic_info.repetition() == Repetition::OPTIONAL;
             if nullable {
                 Field::new(name, data_type)
             } else {
@@ -181,53 +164,41 @@ fn convert_field(field: &SchemaType) -> Field {
 fn map_physical_type(pt: PhysicalType) -> DataType {
     match pt {
         PhysicalType::BOOLEAN => DataType::Boolean,
-        PhysicalType::INT32 | PhysicalType::INT64 => {
-            DataType::Integer
-        }
-        PhysicalType::FLOAT | PhysicalType::DOUBLE => {
-            DataType::Float
-        }
-        PhysicalType::BYTE_ARRAY
-        | PhysicalType::FIXED_LEN_BYTE_ARRAY => DataType::Binary,
+        PhysicalType::INT32 | PhysicalType::INT64 => DataType::Integer,
+        PhysicalType::FLOAT | PhysicalType::DOUBLE => DataType::Float,
+        PhysicalType::BYTE_ARRAY | PhysicalType::FIXED_LEN_BYTE_ARRAY => DataType::Binary,
         PhysicalType::INT96 => DataType::Timestamp,
     }
 }
 
-fn extract_row_group_meta(
-    index: usize,
-    rg: &RowGroupMetaData,
-) -> RowGroupMeta {
+fn extract_row_group_meta(index: usize, rg: &RowGroupMetaData) -> RowGroupMeta {
     let mut column_stats = HashMap::new();
     let mut column_encodings = HashMap::new();
 
     for col in rg.columns() {
         let col_path = col.column_path().string();
         if let Some(stats) = col.statistics() {
-            column_stats
-                .insert(col_path.clone(), convert_statistics(stats));
+            column_stats.insert(col_path.clone(), convert_statistics(stats));
         }
 
         let encoding_info = extract_column_encoding(col);
         column_encodings.insert(col_path, encoding_info);
     }
 
-    let num_rows =
-        u64::try_from(rg.num_rows()).unwrap_or(0);
-    let compressed_size =
-        u64::try_from(rg.compressed_size()).unwrap_or(0);
+    let num_rows = u64::try_from(rg.num_rows()).unwrap_or(0);
+    let compressed_size = u64::try_from(rg.compressed_size()).unwrap_or(0);
 
     // Calculate offset from the first column chunk
-    let offset = rg.columns().first().map_or(0, |c| {
-        u64::try_from(c.file_offset()).unwrap_or(0)
-    });
+    let offset = rg
+        .columns()
+        .first()
+        .map_or(0, |c| u64::try_from(c.file_offset()).unwrap_or(0));
 
     // Sum uncompressed sizes across columns
     let uncompressed_size: u64 = rg
         .columns()
         .iter()
-        .map(|c| {
-            u64::try_from(c.uncompressed_size()).unwrap_or(0)
-        })
+        .map(|c| u64::try_from(c.uncompressed_size()).unwrap_or(0))
         .sum();
 
     RowGroupMeta {
@@ -245,16 +216,14 @@ fn extract_column_encoding(
     col: &parquet::file::metadata::ColumnChunkMetaData,
 ) -> ColumnEncodingInfo {
     let encodings = col.encodings();
-    let is_dict = encodings.iter().any(|e| {
-        *e == Encoding::PLAIN_DICTIONARY
-            || *e == Encoding::RLE_DICTIONARY
-    });
+    let is_dict = encodings
+        .iter()
+        .any(|e| *e == Encoding::PLAIN_DICTIONARY || *e == Encoding::RLE_DICTIONARY);
 
     let encoding = if is_dict {
         ColumnEncoding::Dictionary
     } else if encodings.contains(&Encoding::DELTA_BINARY_PACKED)
-        || encodings
-            .contains(&Encoding::DELTA_LENGTH_BYTE_ARRAY)
+        || encodings.contains(&Encoding::DELTA_LENGTH_BYTE_ARRAY)
         || encodings.contains(&Encoding::DELTA_BYTE_ARRAY)
     {
         ColumnEncoding::DeltaEncoding
@@ -269,10 +238,8 @@ fn extract_column_encoding(
 
     let compression = convert_compression(col.compression());
 
-    let compressed_bytes =
-        u64::try_from(col.compressed_size()).unwrap_or(0);
-    let uncompressed_bytes =
-        u64::try_from(col.uncompressed_size()).unwrap_or(0);
+    let compressed_bytes = u64::try_from(col.compressed_size()).unwrap_or(0);
+    let uncompressed_bytes = u64::try_from(col.uncompressed_size()).unwrap_or(0);
 
     // Parquet doesn't directly expose dictionary size in column
     // chunk metadata, but we can estimate from distinct_count
@@ -293,30 +260,16 @@ fn extract_column_encoding(
     }
 }
 
-fn convert_compression(
-    c: parquet::basic::Compression,
-) -> CompressionCodec {
+fn convert_compression(c: parquet::basic::Compression) -> CompressionCodec {
     match c {
-        parquet::basic::Compression::UNCOMPRESSED => {
-            CompressionCodec::Uncompressed
-        }
-        parquet::basic::Compression::SNAPPY => {
-            CompressionCodec::Snappy
-        }
-        parquet::basic::Compression::GZIP(_) => {
-            CompressionCodec::Gzip
-        }
+        parquet::basic::Compression::UNCOMPRESSED => CompressionCodec::Uncompressed,
+        parquet::basic::Compression::SNAPPY => CompressionCodec::Snappy,
+        parquet::basic::Compression::GZIP(_) => CompressionCodec::Gzip,
         parquet::basic::Compression::LZO => CompressionCodec::Lzo,
-        parquet::basic::Compression::BROTLI(_) => {
-            CompressionCodec::Brotli
-        }
+        parquet::basic::Compression::BROTLI(_) => CompressionCodec::Brotli,
         parquet::basic::Compression::LZ4 => CompressionCodec::Lz4,
-        parquet::basic::Compression::ZSTD(_) => {
-            CompressionCodec::Zstd
-        }
-        parquet::basic::Compression::LZ4_RAW => {
-            CompressionCodec::Lz4Raw
-        }
+        parquet::basic::Compression::ZSTD(_) => CompressionCodec::Zstd,
+        parquet::basic::Compression::LZ4_RAW => CompressionCodec::Lz4Raw,
     }
 }
 
@@ -334,9 +287,7 @@ fn convert_statistics(stats: &ParquetStatistics) -> FileColumnStats {
     }
 }
 
-fn extract_min_max(
-    stats: &ParquetStatistics,
-) -> (Option<ScalarValue>, Option<ScalarValue>) {
+fn extract_min_max(stats: &ParquetStatistics) -> (Option<ScalarValue>, Option<ScalarValue>) {
     match stats {
         ParquetStatistics::Boolean(s) => (
             s.min_opt().map(|v| ScalarValue::Bool(*v)),
@@ -351,10 +302,8 @@ fn extract_min_max(
             s.max_opt().map(|v| ScalarValue::Int64(*v)),
         ),
         ParquetStatistics::Float(s) => (
-            s.min_opt()
-                .map(|v| ScalarValue::Float64(f64::from(*v))),
-            s.max_opt()
-                .map(|v| ScalarValue::Float64(f64::from(*v))),
+            s.min_opt().map(|v| ScalarValue::Float64(f64::from(*v))),
+            s.max_opt().map(|v| ScalarValue::Float64(f64::from(*v))),
         ),
         ParquetStatistics::Double(s) => (
             s.min_opt().map(|v| ScalarValue::Float64(*v)),
@@ -375,22 +324,15 @@ fn extract_min_max(
             }),
         ),
         ParquetStatistics::FixedLenByteArray(s) => (
-            s.min_opt().map(|v| {
-                ScalarValue::Binary(v.data().to_vec())
-            }),
-            s.max_opt().map(|v| {
-                ScalarValue::Binary(v.data().to_vec())
-            }),
+            s.min_opt().map(|v| ScalarValue::Binary(v.data().to_vec())),
+            s.max_opt().map(|v| ScalarValue::Binary(v.data().to_vec())),
         ),
         ParquetStatistics::Int96(_) => (None, None),
     }
 }
 
-fn aggregate_stats(
-    row_groups: &[RowGroupMeta],
-) -> HashMap<String, FileColumnStats> {
-    let mut result: HashMap<String, FileColumnStats> =
-        HashMap::new();
+fn aggregate_stats(row_groups: &[RowGroupMeta]) -> HashMap<String, FileColumnStats> {
+    let mut result: HashMap<String, FileColumnStats> = HashMap::new();
 
     for rg in row_groups {
         for (col_name, col_stats) in &rg.column_stats {
@@ -403,8 +345,7 @@ fn aggregate_stats(
             merge_min(&mut entry.min, col_stats.min.as_ref());
             merge_max(&mut entry.max, col_stats.max.as_ref());
 
-            match (entry.distinct_count, col_stats.distinct_count)
-            {
+            match (entry.distinct_count, col_stats.distinct_count) {
                 (Some(a), Some(b)) => {
                     entry.distinct_count = Some(a.max(b));
                 }
@@ -419,10 +360,7 @@ fn aggregate_stats(
     result
 }
 
-fn merge_min(
-    current: &mut Option<ScalarValue>,
-    candidate: Option<&ScalarValue>,
-) {
+fn merge_min(current: &mut Option<ScalarValue>, candidate: Option<&ScalarValue>) {
     let Some(cand) = candidate else { return };
     match current {
         None => *current = Some(cand.clone()),
@@ -434,10 +372,7 @@ fn merge_min(
     }
 }
 
-fn merge_max(
-    current: &mut Option<ScalarValue>,
-    candidate: Option<&ScalarValue>,
-) {
+fn merge_max(current: &mut Option<ScalarValue>, candidate: Option<&ScalarValue>) {
     let Some(cand) = candidate else { return };
     match current {
         None => *current = Some(cand.clone()),
@@ -453,13 +388,9 @@ fn scalar_lt(a: &ScalarValue, b: &ScalarValue) -> bool {
     match (a, b) {
         (ScalarValue::Bool(a), ScalarValue::Bool(b)) => a < b,
         (ScalarValue::Int64(a), ScalarValue::Int64(b)) => a < b,
-        (ScalarValue::Float64(a), ScalarValue::Float64(b)) => {
-            a < b
-        }
+        (ScalarValue::Float64(a), ScalarValue::Float64(b)) => a < b,
         (ScalarValue::Utf8(a), ScalarValue::Utf8(b)) => a < b,
-        (ScalarValue::Binary(a), ScalarValue::Binary(b)) => {
-            a < b
-        }
+        (ScalarValue::Binary(a), ScalarValue::Binary(b)) => a < b,
         _ => false,
     }
 }
@@ -486,27 +417,17 @@ mod tests {
                 OPTIONAL BOOLEAN active;
             }
         ";
-        let schema =
-            Arc::new(parse_message_type(schema_str).expect(
-                "should parse schema",
-            ));
+        let schema = Arc::new(parse_message_type(schema_str).expect("should parse schema"));
 
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
 
-        let file =
-            File::create(path).expect("should create file");
-        let mut writer = SerializedFileWriter::new(
-            file,
-            schema,
-            Arc::new(props),
-        )
-        .expect("should create writer");
+        let file = File::create(path).expect("should create file");
+        let mut writer =
+            SerializedFileWriter::new(file, schema, Arc::new(props)).expect("should create writer");
 
-        let mut rg_writer = writer
-            .next_row_group()
-            .expect("should create row group");
+        let mut rg_writer = writer.next_row_group().expect("should create row group");
 
         // Write id column
         {
@@ -514,15 +435,12 @@ mod tests {
                 .next_column()
                 .expect("should get column writer")
                 .expect("column writer should exist");
-            let values: Vec<i64> =
-                (0..num_rows as i64).collect();
+            let values: Vec<i64> = (0..num_rows as i64).collect();
             col_writer
                 .typed::<parquet::data_type::Int64Type>()
                 .write_batch(&values, None, None)
                 .expect("should write id column");
-            col_writer
-                .close()
-                .expect("should close column writer");
+            col_writer.close().expect("should close column writer");
         }
 
         // Write name column
@@ -532,19 +450,14 @@ mod tests {
                 .expect("should get column writer")
                 .expect("column writer should exist");
             let values: Vec<ByteArray> = (0..num_rows)
-                .map(|i| {
-                    ByteArray::from(format!("name_{i}").as_str())
-                })
+                .map(|i| ByteArray::from(format!("name_{i}").as_str()))
                 .collect();
-            let def_levels: Vec<i16> =
-                (0..num_rows).map(|_| 1).collect();
+            let def_levels: Vec<i16> = (0..num_rows).map(|_| 1).collect();
             col_writer
                 .typed::<parquet::data_type::ByteArrayType>()
                 .write_batch(&values, Some(&def_levels), None)
                 .expect("should write name column");
-            col_writer
-                .close()
-                .expect("should close column writer");
+            col_writer.close().expect("should close column writer");
         }
 
         // Write score column
@@ -553,16 +466,12 @@ mod tests {
                 .next_column()
                 .expect("should get column writer")
                 .expect("column writer should exist");
-            let values: Vec<f64> = (0..num_rows)
-                .map(|i| i as f64 * 1.5)
-                .collect();
+            let values: Vec<f64> = (0..num_rows).map(|i| i as f64 * 1.5).collect();
             col_writer
                 .typed::<parquet::data_type::DoubleType>()
                 .write_batch(&values, None, None)
                 .expect("should write score column");
-            col_writer
-                .close()
-                .expect("should close column writer");
+            col_writer.close().expect("should close column writer");
         }
 
         // Write active column
@@ -571,59 +480,39 @@ mod tests {
                 .next_column()
                 .expect("should get column writer")
                 .expect("column writer should exist");
-            let values: Vec<bool> =
-                (0..num_rows).map(|i| i % 2 == 0).collect();
-            let def_levels: Vec<i16> =
-                (0..num_rows).map(|_| 1).collect();
+            let values: Vec<bool> = (0..num_rows).map(|i| i % 2 == 0).collect();
+            let def_levels: Vec<i16> = (0..num_rows).map(|_| 1).collect();
             col_writer
                 .typed::<parquet::data_type::BoolType>()
                 .write_batch(&values, Some(&def_levels), None)
                 .expect("should write active column");
-            col_writer
-                .close()
-                .expect("should close column writer");
+            col_writer.close().expect("should close column writer");
         }
 
-        rg_writer
-            .close()
-            .expect("should close row group");
+        rg_writer.close().expect("should close row group");
         writer.close().expect("should close writer");
     }
 
-    fn write_multi_row_group_parquet(
-        path: &Path,
-        rows_per_group: usize,
-        num_groups: usize,
-    ) {
+    fn write_multi_row_group_parquet(path: &Path, rows_per_group: usize, num_groups: usize) {
         let schema_str = "
             message multi_schema {
                 REQUIRED INT64 id;
                 OPTIONAL BYTE_ARRAY label (UTF8);
             }
         ";
-        let schema =
-            Arc::new(parse_message_type(schema_str).expect(
-                "should parse schema",
-            ));
+        let schema = Arc::new(parse_message_type(schema_str).expect("should parse schema"));
 
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
 
-        let file =
-            File::create(path).expect("should create file");
-        let mut writer = SerializedFileWriter::new(
-            file,
-            schema,
-            Arc::new(props),
-        )
-        .expect("should create writer");
+        let file = File::create(path).expect("should create file");
+        let mut writer =
+            SerializedFileWriter::new(file, schema, Arc::new(props)).expect("should create writer");
 
         for g in 0..num_groups {
             let base = (g * rows_per_group) as i64;
-            let mut rg_writer = writer
-                .next_row_group()
-                .expect("should create row group");
+            let mut rg_writer = writer.next_row_group().expect("should create row group");
 
             // id column
             {
@@ -631,9 +520,7 @@ mod tests {
                     .next_column()
                     .expect("should get column writer")
                     .expect("column writer should exist");
-                let values: Vec<i64> = (base
-                    ..base + rows_per_group as i64)
-                    .collect();
+                let values: Vec<i64> = (base..base + rows_per_group as i64).collect();
                 col.typed::<parquet::data_type::Int64Type>()
                     .write_batch(&values, None, None)
                     .expect("should write id");
@@ -646,30 +533,17 @@ mod tests {
                     .next_column()
                     .expect("should get column writer")
                     .expect("column writer should exist");
-                let values: Vec<ByteArray> =
-                    (0..rows_per_group)
-                        .map(|i| {
-                            ByteArray::from(
-                                format!("label_{}", base + i as i64)
-                                    .as_str(),
-                            )
-                        })
-                        .collect();
-                let def_levels: Vec<i16> =
-                    vec![1; rows_per_group];
+                let values: Vec<ByteArray> = (0..rows_per_group)
+                    .map(|i| ByteArray::from(format!("label_{}", base + i as i64).as_str()))
+                    .collect();
+                let def_levels: Vec<i16> = vec![1; rows_per_group];
                 col.typed::<parquet::data_type::ByteArrayType>()
-                    .write_batch(
-                        &values,
-                        Some(&def_levels),
-                        None,
-                    )
+                    .write_batch(&values, Some(&def_levels), None)
                     .expect("should write label");
                 col.close().expect("should close");
             }
 
-            rg_writer
-                .close()
-                .expect("should close row group");
+            rg_writer.close().expect("should close row group");
         }
 
         writer.close().expect("should close writer");
@@ -709,11 +583,9 @@ mod tests {
     #[test]
     fn read_schema_missing_file() {
         let fmt = ParquetFormat::new();
-        let result =
-            fmt.read_schema(Path::new("/nonexistent.parquet"));
+        let result = fmt.read_schema(Path::new("/nonexistent.parquet"));
         assert!(result.is_err());
-        let err =
-            result.expect_err("should fail on missing file");
+        let err = result.expect_err("should fail on missing file");
         assert!(
             matches!(err, FormatError::FileNotFound { .. }),
             "expected FileNotFound, got: {err}"
@@ -722,17 +594,14 @@ mod tests {
 
     #[test]
     fn read_schema_invalid_file() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("bad.parquet");
-        std::fs::write(&path, b"not a parquet file")
-            .expect("should write file");
+        std::fs::write(&path, b"not a parquet file").expect("should write file");
 
         let fmt = ParquetFormat::new();
         let result = fmt.read_schema(&path);
         assert!(result.is_err());
-        let err =
-            result.expect_err("should fail on invalid file");
+        let err = result.expect_err("should fail on invalid file");
         assert!(
             matches!(err, FormatError::InvalidFormat { .. }),
             "expected InvalidFormat, got: {err}"
@@ -741,21 +610,16 @@ mod tests {
 
     #[test]
     fn read_schema_real_parquet() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("test.parquet");
         write_test_parquet(&path, 10);
 
         let fmt = ParquetFormat::new();
-        let schema = fmt
-            .read_schema(&path)
-            .expect("should read schema");
+        let schema = fmt.read_schema(&path).expect("should read schema");
 
         assert_eq!(schema.num_fields(), 4);
 
-        let id = schema
-            .field_by_name("id")
-            .expect("id field should exist");
+        let id = schema.field_by_name("id").expect("id field should exist");
         assert_eq!(id.data_type, DataType::Integer);
         assert!(!id.nullable);
 
@@ -780,15 +644,12 @@ mod tests {
 
     #[test]
     fn read_metadata_row_count() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("test.parquet");
         write_test_parquet(&path, 100);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         assert_eq!(meta.num_rows, 100);
         assert_eq!(meta.row_groups.len(), 1);
@@ -798,22 +659,16 @@ mod tests {
 
     #[test]
     fn read_metadata_column_statistics() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("stats.parquet");
         write_test_parquet(&path, 50);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         let rg = &meta.row_groups[0];
 
-        let id_stats = rg
-            .column_stats
-            .get("id")
-            .expect("id stats should exist");
+        let id_stats = rg.column_stats.get("id").expect("id stats should exist");
         assert_eq!(id_stats.min, Some(ScalarValue::Int64(0)));
         assert_eq!(id_stats.max, Some(ScalarValue::Int64(49)));
         assert_eq!(id_stats.null_count, 0);
@@ -822,66 +677,42 @@ mod tests {
             .column_stats
             .get("score")
             .expect("score stats should exist");
-        assert_eq!(
-            score_stats.min,
-            Some(ScalarValue::Float64(0.0))
-        );
-        assert_eq!(
-            score_stats.max,
-            Some(ScalarValue::Float64(49.0 * 1.5))
-        );
+        assert_eq!(score_stats.min, Some(ScalarValue::Float64(0.0)));
+        assert_eq!(score_stats.max, Some(ScalarValue::Float64(49.0 * 1.5)));
 
         let active_stats = rg
             .column_stats
             .get("active")
             .expect("active stats should exist");
-        assert_eq!(
-            active_stats.min,
-            Some(ScalarValue::Bool(false))
-        );
-        assert_eq!(
-            active_stats.max,
-            Some(ScalarValue::Bool(true))
-        );
+        assert_eq!(active_stats.min, Some(ScalarValue::Bool(false)));
+        assert_eq!(active_stats.max, Some(ScalarValue::Bool(true)));
     }
 
     #[test]
     fn read_metadata_file_level_stats() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("file_stats.parquet");
         write_test_parquet(&path, 30);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         let id_file_stats = meta
             .file_stats
             .get("id")
             .expect("file-level id stats should exist");
-        assert_eq!(
-            id_file_stats.min,
-            Some(ScalarValue::Int64(0))
-        );
-        assert_eq!(
-            id_file_stats.max,
-            Some(ScalarValue::Int64(29))
-        );
+        assert_eq!(id_file_stats.min, Some(ScalarValue::Int64(0)));
+        assert_eq!(id_file_stats.max, Some(ScalarValue::Int64(29)));
     }
 
     #[test]
     fn read_metadata_multiple_row_groups() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("multi_rg.parquet");
         write_multi_row_group_parquet(&path, 100, 3);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         assert_eq!(meta.num_rows, 300);
         assert_eq!(meta.row_groups.len(), 3);
@@ -903,15 +734,12 @@ mod tests {
 
     #[test]
     fn read_metadata_row_group_boundaries() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("boundaries.parquet");
         write_multi_row_group_parquet(&path, 50, 2);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         // First row group: ids 0..49
         let rg0_id = meta.row_groups[0]
@@ -932,30 +760,24 @@ mod tests {
 
     #[test]
     fn read_metadata_has_mtime() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("mtime.parquet");
         write_test_parquet(&path, 5);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         assert!(meta.mtime > SystemTime::UNIX_EPOCH);
     }
 
     #[test]
     fn read_metadata_compressed_size_nonzero() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("compressed.parquet");
         write_test_parquet(&path, 100);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         assert!(meta.row_groups[0].compressed_size > 0);
         assert!(meta.row_groups[0].uncompressed_size > 0);
@@ -963,26 +785,16 @@ mod tests {
 
     #[test]
     fn trait_object_usage() {
-        let fmt: Box<dyn FileFormat> =
-            Box::new(ParquetFormat::new());
+        let fmt: Box<dyn FileFormat> = Box::new(ParquetFormat::new());
         assert_eq!(fmt.name(), "parquet");
         assert!(fmt.capabilities().column_pruning);
     }
 
     #[test]
     fn scalar_comparison() {
-        assert!(scalar_lt(
-            &ScalarValue::Int64(1),
-            &ScalarValue::Int64(2)
-        ));
-        assert!(!scalar_lt(
-            &ScalarValue::Int64(2),
-            &ScalarValue::Int64(1)
-        ));
-        assert!(!scalar_lt(
-            &ScalarValue::Int64(1),
-            &ScalarValue::Int64(1)
-        ));
+        assert!(scalar_lt(&ScalarValue::Int64(1), &ScalarValue::Int64(2)));
+        assert!(!scalar_lt(&ScalarValue::Int64(2), &ScalarValue::Int64(1)));
+        assert!(!scalar_lt(&ScalarValue::Int64(1), &ScalarValue::Int64(1)));
 
         assert!(scalar_lt(
             &ScalarValue::Utf8("a".into()),
@@ -1053,15 +865,12 @@ mod tests {
 
     #[test]
     fn read_metadata_has_encoding_info() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("encoding.parquet");
         write_test_parquet(&path, 50);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         let rg = &meta.row_groups[0];
         // Every column should have encoding info
@@ -1082,15 +891,12 @@ mod tests {
 
     #[test]
     fn read_metadata_compression_ratio() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("ratio.parquet");
         write_test_parquet(&path, 100);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         let ratio = meta.avg_compression_ratio();
         assert!(
@@ -1101,35 +907,25 @@ mod tests {
 
     #[test]
     fn zone_map_pruning_on_parquet() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("zonemap.parquet");
         write_multi_row_group_parquet(&path, 100, 3);
 
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         // Row groups: [0..99], [100..199], [200..299]
         // Looking for id=50: only row group 0 survives
-        let surviving = meta.surviving_row_groups(
-            "id",
-            &ScalarValue::Int64(50),
-        );
+        let surviving = meta.surviving_row_groups("id", &ScalarValue::Int64(50));
         assert_eq!(surviving, vec![0]);
 
-        let pruned = meta.prunable_row_groups(
-            "id",
-            &ScalarValue::Int64(50),
-        );
+        let pruned = meta.prunable_row_groups("id", &ScalarValue::Int64(50));
         assert_eq!(pruned, vec![1, 2]);
     }
 
     #[test]
     fn write_dict_encoded_parquet_and_read_encoding() {
-        let dir =
-            tempfile::tempdir().expect("should create temp dir");
+        let dir = tempfile::tempdir().expect("should create temp dir");
         let path = dir.path().join("dict.parquet");
 
         // Write a parquet file with dictionary encoding enabled
@@ -1138,28 +934,18 @@ mod tests {
                 REQUIRED BYTE_ARRAY status (UTF8);
             }
         ";
-        let schema = Arc::new(
-            parse_message_type(schema_str)
-                .expect("should parse schema"),
-        );
+        let schema = Arc::new(parse_message_type(schema_str).expect("should parse schema"));
 
         let props = WriterProperties::builder()
             .set_dictionary_enabled(true)
             .set_compression(Compression::SNAPPY)
             .build();
 
-        let file =
-            File::create(&path).expect("should create file");
-        let mut writer = SerializedFileWriter::new(
-            file,
-            schema,
-            Arc::new(props),
-        )
-        .expect("should create writer");
+        let file = File::create(&path).expect("should create file");
+        let mut writer =
+            SerializedFileWriter::new(file, schema, Arc::new(props)).expect("should create writer");
 
-        let mut rg_writer = writer
-            .next_row_group()
-            .expect("should create row group");
+        let mut rg_writer = writer.next_row_group().expect("should create row group");
         {
             let mut col = rg_writer
                 .next_column()
@@ -1187,9 +973,7 @@ mod tests {
 
         // Read back and verify encoding
         let fmt = ParquetFormat::new();
-        let meta = fmt
-            .read_metadata(&path)
-            .expect("should read metadata");
+        let meta = fmt.read_metadata(&path).expect("should read metadata");
 
         let rg = &meta.row_groups[0];
         let status_enc = rg

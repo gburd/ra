@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Tests for physical parallelization strategies.
 //!
 //! Tests cover parallel scan, join, aggregation, sort, and various

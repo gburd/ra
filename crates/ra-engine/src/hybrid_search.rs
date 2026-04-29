@@ -1,7 +1,7 @@
 //! Hybrid search optimization combining full-text search (FTS) and vector similarity.
 //!
 //! This module implements cost-based strategy selection and score fusion
-//! for queries that combine BM25-based text search (via PostgreSQL RUM indexes)
+//! for queries that combine BM25-based text search (via `PostgreSQL` RUM indexes)
 //! with vector similarity search (via pgvector). The goal is to achieve
 //! near-optimal performance (< 2x overhead vs single-modality search) while
 //! delivering 2-5x improvement over naive approaches.
@@ -138,11 +138,11 @@ const HIGH_SELECTIVITY_THRESHOLD: f64 = 0.01;
 const SMALL_RESULT_THRESHOLD: usize = 100;
 
 /// Default RRF k constant (empirically validated).
-#[allow(dead_code)]
+#[cfg(test)]
 const DEFAULT_RRF_K: usize = 60;
 
 /// Default alpha for weighted average fusion.
-#[allow(dead_code)]
+#[cfg(test)]
 const DEFAULT_ALPHA: f64 = 0.5;
 
 /// Choose the optimal hybrid search strategy based on selectivity estimates
@@ -212,7 +212,7 @@ pub fn choose_hybrid_strategy(
 ///
 /// Cost model:
 /// - RUM index scan: O(M log N) where M = matches, N = total rows
-/// - BM25 scoring: O(M * avg_term_frequency)
+/// - BM25 scoring: O(M * `avg_term_frequency`)
 ///
 /// Simplified to: `base_cost + selectivity * total_rows * log(total_rows)`
 fn estimate_fts_cost(selectivity: f64, total_rows: f64) -> f64 {
@@ -227,7 +227,7 @@ fn estimate_fts_cost(selectivity: f64, total_rows: f64) -> f64 {
 ///
 /// Cost model:
 /// - HNSW index: O(M * log N) where M = matches
-/// - IVFFlat index: O(M * sqrt(N))
+/// - `IVFFlat` index: O(M * sqrt(N))
 /// - Distance computation: O(M * dimensions)
 ///
 /// Simplified to: `base_cost + selectivity * total_rows * log(total_rows) * dim_factor`

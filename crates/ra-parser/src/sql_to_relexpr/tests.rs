@@ -4,7 +4,7 @@ use ra_core::algebra::{JoinType, NullOrdering, RelExpr, SortDirection};
 use ra_core::expr::{BinOp, Expr};
 
 /// Recursively search for a node matching the predicate.
-fn find_node<'a>(r: &'a RelExpr, pred: fn(&RelExpr) -> bool) -> Option<&'a RelExpr> {
+fn find_node(r: &RelExpr, pred: fn(&RelExpr) -> bool) -> Option<&RelExpr> {
     if pred(r) {
         return Some(r);
     }

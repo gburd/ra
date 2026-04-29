@@ -73,9 +73,7 @@ impl CardinalityAwareCostFn {
     ) -> Self {
         Self {
             estimator: Arc::new(HeuristicEstimator),
-            stats_provider: Arc::new(TableStatsProvider {
-                stats: table_stats,
-            }),
+            stats_provider: Arc::new(TableStatsProvider { stats: table_stats }),
             hardware,
             staleness_map,
             symbol_map: HashMap::new(),
@@ -97,9 +95,7 @@ impl CardinalityAwareCostFn {
     /// Falls back to `DEFAULT_ROW_COUNT` when the table is unknown.
     fn row_count_for(&self, table: &str) -> f64 {
         let scan = ra_core::algebra::RelExpr::scan(table);
-        let est = self
-            .estimator
-            .estimate(&scan, self.stats_provider.as_ref());
+        let est = self.estimator.estimate(&scan, self.stats_provider.as_ref());
         est.rows * self.staleness_factor(table)
     }
 
@@ -125,7 +121,7 @@ impl CardinalityAwareCostFn {
 impl CostFunction<RelLang> for CardinalityAwareCostFn {
     type Cost = f64;
 
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(clippy::cast_precision_loss, reason = "legacy allow")]
     fn cost<C>(&mut self, enode: &RelLang, mut costs: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
@@ -238,6 +234,7 @@ impl CostFunction<RelLang> for CardinalityAwareCostFn {
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use ra_core::algebra::RelExpr;

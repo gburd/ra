@@ -35,7 +35,7 @@ use std::error::Error;
 /// ```
 pub trait GrammarExtension: Send + Sync {
     /// Return the name of this extension.
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Return additional keywords introduced by this extension.
     fn keywords(&self) -> Vec<&str> {
@@ -56,6 +56,10 @@ pub trait GrammarExtension: Send + Sync {
     ///
     /// Returns `None` if this extension doesn't recognize the statement,
     /// allowing other extensions to try parsing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the SQL is syntactically invalid for this extension.
     fn parse_statement(&self, _sql: &str) -> Result<Option<Statement>, Box<dyn Error>> {
         Ok(None)
     }
@@ -78,7 +82,7 @@ mod tests {
     struct TestExtension;
 
     impl GrammarExtension for TestExtension {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "test"
         }
 

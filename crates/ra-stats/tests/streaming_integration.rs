@@ -1,3 +1,12 @@
+#![expect(clippy::expect_used, reason = "test code")]
+#![expect(
+    clippy::float_cmp,
+    reason = "exact float equality needed for deterministic stats tests"
+)]
+#![expect(
+    clippy::cast_lossless,
+    reason = "test code - i32 to f64 casts are clear"
+)]
 //! Integration tests for the streaming statistics pipeline.
 //!
 //! Validates ring buffer performance, percentile accuracy, EWMA
@@ -13,9 +22,7 @@ use ra_stats::adapters::MonitoringAdapter;
 use ra_stats::percentiles::{PercentileTracker, TDigest};
 use ra_stats::ring_buffer::RingBuffer;
 use ra_stats::smoother::{Ewma, SmootherSet};
-use ra_stats::streaming::{
-    ChangeThresholds, MetricKind, StreamingPipeline,
-};
+use ra_stats::streaming::{ChangeThresholds, MetricKind, StreamingPipeline};
 
 // ============================================================
 // 1. Ring Buffer Performance Tests
@@ -292,9 +299,8 @@ fn ewma_noise_filtering() {
 
     // Now feed noisy samples and track the smoothed output
     let noise_amplitudes = [
-        20.0, -15.0, 18.0, -12.0, 19.0, -17.0, 14.0, -20.0, 16.0,
-        -11.0, 20.0, -18.0, 15.0, -13.0, 17.0, -19.0, 12.0, -16.0,
-        20.0, -14.0,
+        20.0, -15.0, 18.0, -12.0, 19.0, -17.0, 14.0, -20.0, 16.0, -11.0, 20.0, -18.0, 15.0, -13.0,
+        17.0, -19.0, 12.0, -16.0, 20.0, -14.0,
     ];
 
     let mut max_deviation = 0.0_f64;
@@ -336,8 +342,7 @@ fn ewma_half_life_decay_verification() {
 fn ewma_alpha_comparison() {
     // Higher alpha = faster tracking, less smoothing
     let alphas = [0.1, 0.3, 0.5];
-    let mut smoothers: Vec<Ewma> =
-        alphas.iter().map(|&a| Ewma::new(a)).collect();
+    let mut smoothers: Vec<Ewma> = alphas.iter().map(|&a| Ewma::new(a)).collect();
 
     // Establish baseline at 50
     for s in &mut smoothers {
@@ -351,10 +356,7 @@ fn ewma_alpha_comparison() {
         s.update(100.0);
     }
 
-    let values: Vec<f64> = smoothers
-        .iter()
-        .map(|s| s.value().expect("val"))
-        .collect();
+    let values: Vec<f64> = smoothers.iter().map(|s| s.value().expect("val")).collect();
 
     // Higher alpha should track closer to 100 after one step
     assert!(
@@ -410,11 +412,7 @@ fn otel_adapter_captures_all_metric_types() {
     let mut adapter = OtelAdapter::new();
 
     adapter.record_gauge("cpu_pct", 75.0, &[("host", "db1")]);
-    adapter.record_histogram(
-        "query_latency_ms",
-        12.5,
-        &[("query_type", "select")],
-    );
+    adapter.record_histogram("query_latency_ms", 12.5, &[("query_type", "select")]);
     adapter.record_counter("total_queries", 42, &[]);
 
     assert_eq!(adapter.pending_count(), 3);
@@ -510,11 +508,7 @@ fn statsd_adapter_line_format() {
 fn statsd_adapter_tags_format() {
     let mut adapter = StatsdAdapter::new("ra");
 
-    adapter.record_gauge(
-        "cpu",
-        80.0,
-        &[("host", "db1"), ("env", "prod")],
-    );
+    adapter.record_gauge("cpu", 80.0, &[("host", "db1"), ("env", "prod")]);
 
     let line = &adapter.lines()[0];
     assert!(line.contains("|#host:db1,env:prod"));
@@ -553,8 +547,7 @@ fn adapter_summary_records_four_percentile_gauges() {
     assert_eq!(adapter.pending_count(), 4);
 
     let metrics = adapter.metrics();
-    let names: Vec<&str> =
-        metrics.iter().map(|m| m.name.as_str()).collect();
+    let names: Vec<&str> = metrics.iter().map(|m| m.name.as_str()).collect();
     assert!(names.contains(&"latency.p50"));
     assert!(names.contains(&"latency.p75"));
     assert!(names.contains(&"latency.p90"));
@@ -567,13 +560,11 @@ fn adapter_summary_records_four_percentile_gauges() {
 
 #[test]
 fn pipeline_updates_on_cpu_threshold() {
-    let mut pipeline = StreamingPipeline::new().with_thresholds(
-        ChangeThresholds {
-            cpu: 0.10,
-            memory: 0.15,
-            io: 0.20,
-        },
-    );
+    let mut pipeline = StreamingPipeline::new().with_thresholds(ChangeThresholds {
+        cpu: 0.10,
+        memory: 0.15,
+        io: 0.20,
+    });
 
     // Establish baseline
     for _ in 0..10 {
@@ -601,22 +592,16 @@ fn pipeline_updates_on_cpu_threshold() {
     );
 
     let u = update.expect("update");
-    assert!(
-        u.cpu > 50.0,
-        "updated CPU should be >50, got {}",
-        u.cpu
-    );
+    assert!(u.cpu > 50.0, "updated CPU should be >50, got {}", u.cpu);
 }
 
 #[test]
 fn pipeline_no_update_below_threshold() {
-    let mut pipeline = StreamingPipeline::new().with_thresholds(
-        ChangeThresholds {
-            cpu: 0.50,   // Very high threshold
-            memory: 0.50,
-            io: 0.50,
-        },
-    );
+    let mut pipeline = StreamingPipeline::new().with_thresholds(ChangeThresholds {
+        cpu: 0.50, // Very high threshold
+        memory: 0.50,
+        io: 0.50,
+    });
 
     // Establish baseline
     for _ in 0..10 {
@@ -654,10 +639,7 @@ fn pipeline_respects_min_interval() {
     }
 
     let update = pipeline.maybe_update();
-    assert!(
-        update.is_none(),
-        "should not update within min interval"
-    );
+    assert!(update.is_none(), "should not update within min interval");
 }
 
 #[test]
@@ -729,10 +711,7 @@ fn end_to_end_load_simulation() {
     std::thread::sleep(Duration::from_millis(110));
 
     let spike_update = pipeline.maybe_update();
-    assert!(
-        spike_update.is_some(),
-        "pipeline should detect load spike"
-    );
+    assert!(spike_update.is_some(), "pipeline should detect load spike");
     let spike = spike_update.expect("spike");
     assert!(spike.cpu > initial.cpu);
     assert!(spike.io > initial.io);
@@ -748,10 +727,7 @@ fn end_to_end_load_simulation() {
     std::thread::sleep(Duration::from_millis(110));
 
     let recovery = pipeline.maybe_update();
-    assert!(
-        recovery.is_some(),
-        "pipeline should detect recovery"
-    );
+    assert!(recovery.is_some(), "pipeline should detect recovery");
     let recovered = recovery.expect("recovered");
     assert!(
         recovered.cpu < spike.cpu,
@@ -863,8 +839,7 @@ fn ingest_throughput_benchmark() {
 #[test]
 fn pipeline_with_otel_adapter() {
     let adapter = OtelAdapter::new();
-    let mut pipeline =
-        StreamingPipeline::new().with_adapter(Box::new(adapter));
+    let mut pipeline = StreamingPipeline::new().with_adapter(Box::new(adapter));
 
     for _ in 0..10 {
         pipeline.ingest(MetricKind::Cpu, 50.0);
@@ -879,8 +854,7 @@ fn pipeline_with_otel_adapter() {
 #[test]
 fn pipeline_with_statsd_adapter() {
     let adapter = StatsdAdapter::new("ra.pipeline");
-    let mut pipeline =
-        StreamingPipeline::new().with_adapter(Box::new(adapter));
+    let mut pipeline = StreamingPipeline::new().with_adapter(Box::new(adapter));
 
     pipeline.ingest(MetricKind::Cpu, 75.0);
     pipeline.ingest(MetricKind::Memory, 2048.0);
@@ -891,8 +865,7 @@ fn pipeline_with_statsd_adapter() {
 #[test]
 fn pipeline_with_prometheus_adapter() {
     let adapter = PrometheusAdapter::new();
-    let mut pipeline =
-        StreamingPipeline::new().with_adapter(Box::new(adapter));
+    let mut pipeline = StreamingPipeline::new().with_adapter(Box::new(adapter));
 
     for _ in 0..10 {
         pipeline.ingest(MetricKind::Cpu, 60.0);
@@ -936,7 +909,7 @@ fn tdigest_two_values_boundary() {
 
     let p50 = td.p50().expect("p50");
     assert!(
-        p50 >= 0.0 && p50 <= 100.0,
+        (0.0..=100.0).contains(&p50),
         "p50={p50} should be in [0, 100]"
     );
 }
@@ -968,12 +941,8 @@ fn pipeline_default_channels() {
 #[test]
 fn pipeline_smoothed_zero_before_ingest() {
     let pipeline = StreamingPipeline::new();
-    assert!(
-        pipeline.smoothed(MetricKind::Cpu).abs() < f64::EPSILON
-    );
-    assert!(
-        pipeline.smoothed(MetricKind::Memory).abs() < f64::EPSILON
-    );
+    assert!(pipeline.smoothed(MetricKind::Cpu).abs() < f64::EPSILON);
+    assert!(pipeline.smoothed(MetricKind::Memory).abs() < f64::EPSILON);
 }
 
 #[test]

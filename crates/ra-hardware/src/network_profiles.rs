@@ -4,9 +4,7 @@
 //! realistic bandwidth, latency, and cost parameters drawn from
 //! published cloud provider pricing and network benchmarks.
 
-use crate::network::{
-    LinkType, Location, NetworkLink, NetworkTopology, NodeId,
-};
+use crate::network::{LinkType, Location, NetworkLink, NetworkTopology, NodeId};
 
 impl NetworkTopology {
     /// Single datacenter cluster: 4 nodes on 2 racks with 10 Gbps links.
@@ -16,9 +14,7 @@ impl NetworkTopology {
     /// Cross-rack links run at 10 Gbps through the aggregate layer.
     #[must_use]
     pub fn single_datacenter_cluster() -> Self {
-        let mut topo = Self::with_default_link(
-            NetworkLink::from_type(LinkType::IntraDatacenter),
-        );
+        let mut topo = Self::with_default_link(NetworkLink::from_type(LinkType::IntraDatacenter));
 
         // 4 nodes across 2 racks
         let n0 = NodeId(0);
@@ -26,22 +22,10 @@ impl NetworkTopology {
         let n2 = NodeId(2);
         let n3 = NodeId(3);
 
-        topo.add_node(
-            n0,
-            Location::with_rack("us-east-1", "dc1", "rack-1"),
-        );
-        topo.add_node(
-            n1,
-            Location::with_rack("us-east-1", "dc1", "rack-1"),
-        );
-        topo.add_node(
-            n2,
-            Location::with_rack("us-east-1", "dc1", "rack-2"),
-        );
-        topo.add_node(
-            n3,
-            Location::with_rack("us-east-1", "dc1", "rack-2"),
-        );
+        topo.add_node(n0, Location::with_rack("us-east-1", "dc1", "rack-1"));
+        topo.add_node(n1, Location::with_rack("us-east-1", "dc1", "rack-1"));
+        topo.add_node(n2, Location::with_rack("us-east-1", "dc1", "rack-2"));
+        topo.add_node(n3, Location::with_rack("us-east-1", "dc1", "rack-2"));
 
         // Intra-rack: 100 Gbps, <1us
         let intra_rack = NetworkLink::from_type(LinkType::IntraRack);
@@ -49,8 +33,7 @@ impl NetworkTopology {
         topo.add_link(n2, n3, intra_rack);
 
         // Cross-rack: 10 Gbps, 5us
-        let cross_rack =
-            NetworkLink::from_type(LinkType::IntraDatacenter);
+        let cross_rack = NetworkLink::from_type(LinkType::IntraDatacenter);
         topo.add_link(n0, n2, cross_rack.clone());
         topo.add_link(n0, n3, cross_rack.clone());
         topo.add_link(n1, n2, cross_rack.clone());
@@ -66,10 +49,9 @@ impl NetworkTopology {
     /// connected at 10 Gbps. Cross-DC links cost $0.01/GB (AWS
     /// cross-AZ pricing).
     #[must_use]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn multi_datacenter() -> Self {
-        let mut topo = Self::with_default_link(
-            NetworkLink::from_type(LinkType::CrossDatacenter),
-        );
+        let mut topo = Self::with_default_link(NetworkLink::from_type(LinkType::CrossDatacenter));
 
         let dcs = [
             ("us-east-1", "us-east-1a"),
@@ -84,11 +66,7 @@ impl NetworkTopology {
             let n1 = NodeId(base + 1);
             topo.add_node(n0, Location::new(region, dc));
             topo.add_node(n1, Location::new(region, dc));
-            topo.add_link(
-                n0,
-                n1,
-                NetworkLink::from_type(LinkType::IntraDatacenter),
-            );
+            topo.add_link(n0, n1, NetworkLink::from_type(LinkType::IntraDatacenter));
         }
 
         // Cross-DC links: 1 Gbps, varying latency based on distance
@@ -129,10 +107,9 @@ impl NetworkTopology {
     /// cloud providers. Each provider has 2 nodes. Cross-cloud
     /// traffic traverses the public internet at higher cost.
     #[must_use]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn cloud_federation() -> Self {
-        let mut topo = Self::with_default_link(
-            NetworkLink::from_type(LinkType::Internet),
-        );
+        let mut topo = Self::with_default_link(NetworkLink::from_type(LinkType::Internet));
 
         let clouds = [
             ("aws-us-east-1", "aws-use1-az1"),
@@ -141,8 +118,7 @@ impl NetworkTopology {
         ];
 
         // 2 nodes per cloud, 6 total (3 clouds, so index fits in u32)
-        for (cloud_idx, &(region, dc)) in clouds.iter().enumerate()
-        {
+        for (cloud_idx, &(region, dc)) in clouds.iter().enumerate() {
             let base = (cloud_idx * 2) as u32;
             let n0 = NodeId(base);
             let n1 = NodeId(base + 1);
@@ -152,12 +128,7 @@ impl NetworkTopology {
             topo.add_link(
                 n0,
                 n1,
-                NetworkLink::new(
-                    1_250_000_000,
-                    1_000,
-                    0.01,
-                    LinkType::IntraDatacenter,
-                ),
+                NetworkLink::new(1_250_000_000, 1_000, 0.01, LinkType::IntraDatacenter),
             );
         }
 
@@ -200,21 +171,13 @@ impl NetworkTopology {
     /// (100-500ms) to a cloud aggregation tier.
     #[must_use]
     pub fn edge_cloud() -> Self {
-        let mut topo = Self::with_default_link(
-            NetworkLink::from_type(LinkType::Internet),
-        );
+        let mut topo = Self::with_default_link(NetworkLink::from_type(LinkType::Internet));
 
         // 2 cloud nodes in a datacenter
         let cloud0 = NodeId(0);
         let cloud1 = NodeId(1);
-        topo.add_node(
-            cloud0,
-            Location::new("us-east-1", "us-east-1a"),
-        );
-        topo.add_node(
-            cloud1,
-            Location::new("us-east-1", "us-east-1a"),
-        );
+        topo.add_node(cloud0, Location::new("us-east-1", "us-east-1a"));
+        topo.add_node(cloud1, Location::new("us-east-1", "us-east-1a"));
         topo.add_link(
             cloud0,
             cloud1,
@@ -224,10 +187,10 @@ impl NetworkTopology {
         // 4 edge nodes with varying connectivity
         let edge_configs = [
             // (node_id, region, dc, bandwidth_bps, latency_us)
-            (2, "edge-nyc", "edge-nyc-1", 10_000_000_u64, 20_000_u64),  // 5G: 10 Mbps, 20ms
-            (3, "edge-chi", "edge-chi-1", 5_000_000, 40_000),            // 5G: 5 Mbps, 40ms
-            (4, "edge-la", "edge-la-1", 2_000_000, 80_000),              // 4G: 2 Mbps, 80ms
-            (5, "edge-rural", "edge-rural-1", 1_000_000, 200_000),       // 4G rural: 1 Mbps, 200ms
+            (2, "edge-nyc", "edge-nyc-1", 10_000_000_u64, 20_000_u64), // 5G: 10 Mbps, 20ms
+            (3, "edge-chi", "edge-chi-1", 5_000_000, 40_000),          // 5G: 5 Mbps, 40ms
+            (4, "edge-la", "edge-la-1", 2_000_000, 80_000),            // 4G: 2 Mbps, 80ms
+            (5, "edge-rural", "edge-rural-1", 1_000_000, 200_000),     // 4G rural: 1 Mbps, 200ms
         ];
 
         for (id, region, dc, bw, lat) in edge_configs {
@@ -268,33 +231,21 @@ impl NetworkTopology {
     /// interconnects, while storage access has higher latency.
     #[must_use]
     pub fn data_warehouse() -> Self {
-        let mut topo = Self::with_default_link(
-            NetworkLink::from_type(LinkType::IntraDatacenter),
-        );
+        let mut topo = Self::with_default_link(NetworkLink::from_type(LinkType::IntraDatacenter));
 
         // 4 compute nodes in same DC
         for i in 0..4 {
             topo.add_node(
                 NodeId(i),
-                Location::with_rack(
-                    "us-east-1",
-                    "us-east-1a",
-                    format!("compute-rack-{}", i / 2),
-                ),
+                Location::with_rack("us-east-1", "us-east-1a", format!("compute-rack-{}", i / 2)),
             );
         }
 
         // 2 storage nodes (representing S3/GCS endpoints)
         let storage0 = NodeId(4);
         let storage1 = NodeId(5);
-        topo.add_node(
-            storage0,
-            Location::new("us-east-1", "s3-endpoint"),
-        );
-        topo.add_node(
-            storage1,
-            Location::new("us-east-1", "s3-endpoint"),
-        );
+        topo.add_node(storage0, Location::new("us-east-1", "s3-endpoint"));
+        topo.add_node(storage1, Location::new("us-east-1", "s3-endpoint"));
 
         // Compute-to-compute: 10 Gbps, 5us
         for i in 0..4_u32 {
@@ -304,11 +255,7 @@ impl NetworkTopology {
                 } else {
                     LinkType::IntraDatacenter
                 };
-                topo.add_link(
-                    NodeId(i),
-                    NodeId(j),
-                    NetworkLink::from_type(link_type),
-                );
+                topo.add_link(NodeId(i), NodeId(j), NetworkLink::from_type(link_type));
             }
         }
 
@@ -377,9 +324,8 @@ mod tests {
     #[test]
     fn single_dc_no_transfer_cost() {
         let topo = NetworkTopology::single_datacenter_cluster();
-        let cost =
-            topo.transfer_cost(NodeId(0), NodeId(1), 1_073_741_824);
-        assert_eq!(cost, 0.0);
+        let cost = topo.transfer_cost(NodeId(0), NodeId(1), 1_073_741_824);
+        assert!(cost.abs() < f64::EPSILON);
     }
 
     #[test]
@@ -428,11 +374,9 @@ mod tests {
         let topo = NetworkTopology::multi_datacenter();
         let bytes = 1_000_000;
         // US-East to US-West: 60ms latency
-        let us_to_us =
-            topo.transfer_time(NodeId(0), NodeId(2), bytes);
+        let us_to_us = topo.transfer_time(NodeId(0), NodeId(2), bytes);
         // US-West to EU-West: 140ms latency
-        let us_to_eu =
-            topo.transfer_time(NodeId(2), NodeId(4), bytes);
+        let us_to_eu = topo.transfer_time(NodeId(2), NodeId(4), bytes);
         assert!(us_to_us < us_to_eu);
     }
 
@@ -455,10 +399,8 @@ mod tests {
     fn cloud_federation_cross_cloud_expensive() {
         let topo = NetworkTopology::cloud_federation();
         let one_gb = 1_073_741_824;
-        let cross_cost =
-            topo.transfer_cost(NodeId(0), NodeId(2), one_gb);
-        let intra_cost =
-            topo.transfer_cost(NodeId(0), NodeId(1), one_gb);
+        let cross_cost = topo.transfer_cost(NodeId(0), NodeId(2), one_gb);
+        let intra_cost = topo.transfer_cost(NodeId(0), NodeId(1), one_gb);
         assert!(cross_cost > intra_cost);
     }
 
@@ -508,10 +450,7 @@ mod tests {
         let topo = NetworkTopology::data_warehouse();
         for i in 0..4_u32 {
             for j in (i + 1)..4 {
-                assert!(
-                    topo.get_explicit_link(NodeId(i), NodeId(j))
-                        .is_some()
-                );
+                assert!(topo.get_explicit_link(NodeId(i), NodeId(j)).is_some());
             }
         }
     }
@@ -520,10 +459,7 @@ mod tests {
     fn data_warehouse_storage_accessible() {
         let topo = NetworkTopology::data_warehouse();
         for i in 0..4_u32 {
-            assert!(
-                topo.get_explicit_link(NodeId(i), NodeId(4))
-                    .is_some()
-            );
+            assert!(topo.get_explicit_link(NodeId(i), NodeId(4)).is_some());
         }
     }
 
@@ -540,7 +476,7 @@ mod tests {
         let topo = NetworkTopology::data_warehouse();
         let one_gb = 1_073_741_824;
         let cost = topo.transfer_cost(NodeId(0), NodeId(1), one_gb);
-        assert_eq!(cost, 0.0);
+        assert!(cost.abs() < f64::EPSILON);
     }
 
     #[test]
@@ -548,10 +484,8 @@ mod tests {
         let topo = NetworkTopology::data_warehouse();
         let bytes = 1_073_741_824;
         // Nodes 0,1 same rack; nodes 0,2 different rack
-        let same_rack =
-            topo.transfer_time(NodeId(0), NodeId(1), bytes);
-        let diff_rack =
-            topo.transfer_time(NodeId(0), NodeId(2), bytes);
+        let same_rack = topo.transfer_time(NodeId(0), NodeId(1), bytes);
+        let diff_rack = topo.transfer_time(NodeId(0), NodeId(2), bytes);
         assert!(same_rack < diff_rack);
     }
 }

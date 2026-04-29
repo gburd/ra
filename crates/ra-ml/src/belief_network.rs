@@ -23,7 +23,7 @@ pub enum BeliefNetworkError {
     #[error("no observations for rule {rule_id}")]
     NoObservations {
         /// Rule identifier
-        rule_id: String
+        rule_id: String,
     },
 
     /// Invalid probability value.
@@ -36,8 +36,7 @@ pub enum BeliefNetworkError {
 }
 
 /// An execution observation recording rule effectiveness.
-#[allow(non_local_definitions)]
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, Abomonation)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Abomonation)]
 pub struct ExecutionObservation {
     /// Rule that was applied.
     pub rule_id: String,
@@ -57,11 +56,22 @@ pub struct ExecutionObservation {
 
 impl Eq for ExecutionObservation {}
 
+impl PartialOrd for ExecutionObservation {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Ord for ExecutionObservation {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.rule_id.cmp(&other.rule_id)
+        self.rule_id
+            .cmp(&other.rule_id)
             .then_with(|| self.timestamp.cmp(&other.timestamp))
-            .then_with(|| self.estimated_time_before.partial_cmp(&other.estimated_time_before).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                self.estimated_time_before
+                    .partial_cmp(&other.estimated_time_before)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     }
 }
 
@@ -130,8 +140,8 @@ impl ConditionalProbabilityTable {
             .map(ExecutionObservation::improvement_ratio)
             .collect();
 
-        self.prior = observations.iter().filter(|o| o.improved).count() as f64
-            / observations.len() as f64;
+        self.prior =
+            observations.iter().filter(|o| o.improved).count() as f64 / observations.len() as f64;
 
         self.observation_count = observations.len();
 
@@ -170,7 +180,10 @@ impl ConditionalProbabilityTable {
     #[must_use]
     pub fn predict(&self, context: &[f64]) -> f64 {
         let context_hash = hash_context(context);
-        self.conditional.get(&context_hash).copied().unwrap_or(self.prior)
+        self.conditional
+            .get(&context_hash)
+            .copied()
+            .unwrap_or(self.prior)
     }
 
     /// Compute expected value of applying this rule.
@@ -225,8 +238,11 @@ impl BeliefNetwork {
     }
 
     /// Add an execution observation.
-    pub fn observe(&self, observation: ExecutionObservation) {
-        let mut obs = self.observations.lock().unwrap_or_else(|e| e.into_inner());
+    pub fn observe(&self, observation: &ExecutionObservation) {
+        let mut obs = self
+            .observations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         obs.push(observation.clone());
 
         if obs.len() > self.max_observations {
@@ -243,15 +259,20 @@ impl BeliefNetwork {
 
         drop(obs);
 
-        let mut cpts = self.cpts.lock().unwrap_or_else(|e| e.into_inner());
-        let cpt = cpts.entry(rule_id.clone()).or_insert_with(|| ConditionalProbabilityTable::new(rule_id));
+        let mut cpts = self
+            .cpts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cpt = cpts
+            .entry(rule_id.clone())
+            .or_insert_with(|| ConditionalProbabilityTable::new(rule_id));
         cpt.update(&rule_obs);
     }
 
     /// Batch add multiple observations.
     pub fn observe_batch(&self, observations: Vec<ExecutionObservation>) {
         for obs in observations {
-            self.observe(obs);
+            self.observe(&obs);
         }
     }
 
@@ -260,7 +281,10 @@ impl BeliefNetwork {
     /// Returns rule IDs sorted by descending expected improvement.
     #[must_use]
     pub fn order_rules(&self, rule_ids: &[String], context: &[f64]) -> Vec<String> {
-        let cpts = self.cpts.lock().unwrap_or_else(|e| e.into_inner());
+        let cpts = self
+            .cpts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let mut scored: Vec<(String, f64)> = rule_ids
             .iter()
@@ -279,14 +303,22 @@ impl BeliefNetwork {
     ///
     /// Returns rule IDs with expected improvement above threshold.
     #[must_use]
-    pub fn filter_rules(&self, rule_ids: &[String], context: &[f64], threshold: f64) -> Vec<String> {
-        let cpts = self.cpts.lock().unwrap_or_else(|e| e.into_inner());
+    pub fn filter_rules(
+        &self,
+        rule_ids: &[String],
+        context: &[f64],
+        threshold: f64,
+    ) -> Vec<String> {
+        let cpts = self
+            .cpts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         rule_ids
             .iter()
             .filter(|id| {
                 cpts.get(*id)
-                    .map_or(true, |cpt| cpt.expected_value(context) >= threshold)
+                    .is_none_or(|cpt| cpt.expected_value(context) >= threshold)
             })
             .cloned()
             .collect()
@@ -298,13 +330,22 @@ impl BeliefNetwork {
     ///
     /// Returns `BeliefNetworkError::NoObservations` if the rule has no data.
     pub fn rule_statistics(&self, rule_id: &str) -> Result<RuleStatistics, BeliefNetworkError> {
-        let cpts = self.cpts.lock().unwrap_or_else(|e| e.into_inner());
-        let cpt = cpts.get(rule_id).ok_or_else(|| BeliefNetworkError::NoObservations {
-            rule_id: rule_id.to_string(),
-        })?;
+        let cpts = self
+            .cpts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cpt = cpts
+            .get(rule_id)
+            .ok_or_else(|| BeliefNetworkError::NoObservations {
+                rule_id: rule_id.to_string(),
+            })?;
 
-        let obs = self.observations.lock().unwrap_or_else(|e| e.into_inner());
-        let rule_obs: Vec<&ExecutionObservation> = obs.iter().filter(|o| o.rule_id == rule_id).collect();
+        let obs = self
+            .observations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let rule_obs: Vec<&ExecutionObservation> =
+            obs.iter().filter(|o| o.rule_id == rule_id).collect();
 
         let q_errors: Vec<f64> = rule_obs.iter().filter_map(|o| o.q_error()).collect();
         let mean_q_error = if q_errors.is_empty() {
@@ -326,7 +367,10 @@ impl BeliefNetwork {
     /// Get statistics for all rules.
     #[must_use]
     pub fn all_statistics(&self) -> Vec<RuleStatistics> {
-        let cpts = self.cpts.lock().unwrap_or_else(|e| e.into_inner());
+        let cpts = self
+            .cpts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         cpts.keys()
             .filter_map(|id| self.rule_statistics(id).ok())
             .collect()
@@ -334,9 +378,15 @@ impl BeliefNetwork {
 
     /// Clear all observations and reset CPTs.
     pub fn reset(&self) {
-        let mut obs = self.observations.lock().unwrap_or_else(|e| e.into_inner());
+        let mut obs = self
+            .observations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         obs.clear();
-        let mut cpts = self.cpts.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cpts = self
+            .cpts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         cpts.clear();
         info!("Belief network reset");
     }
@@ -344,8 +394,14 @@ impl BeliefNetwork {
     /// Export the network state for serialization.
     #[must_use]
     pub fn export(&self) -> BeliefNetworkState {
-        let cpts = self.cpts.lock().unwrap_or_else(|e| e.into_inner());
-        let observations = self.observations.lock().unwrap_or_else(|e| e.into_inner());
+        let cpts = self
+            .cpts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let observations = self
+            .observations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         BeliefNetworkState {
             cpts: cpts.values().cloned().collect(),
@@ -355,13 +411,19 @@ impl BeliefNetwork {
 
     /// Import network state from serialized data.
     pub fn import(&self, state: BeliefNetworkState) {
-        let mut cpts = self.cpts.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cpts = self
+            .cpts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         cpts.clear();
         for cpt in state.cpts {
             cpts.insert(cpt.rule_id.clone(), cpt);
         }
 
-        let mut obs = self.observations.lock().unwrap_or_else(|e| e.into_inner());
+        let mut obs = self
+            .observations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         obs.clear();
         obs.extend(state.recent_observations);
 
@@ -401,11 +463,17 @@ pub struct BeliefNetworkState {
     pub recent_observations: Vec<ExecutionObservation>,
 }
 
+#[expect(clippy::expect_used, clippy::unwrap_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn sample_observation(rule_id: &str, improved: bool, time_before: f64, time_after: f64) -> ExecutionObservation {
+    fn sample_observation(
+        rule_id: &str,
+        improved: bool,
+        time_before: f64,
+        time_after: f64,
+    ) -> ExecutionObservation {
         ExecutionObservation {
             rule_id: rule_id.to_string(),
             estimated_time_before: time_before,
@@ -421,7 +489,7 @@ mod tests {
     fn belief_network_basic() {
         let network = BeliefNetwork::new();
         let obs = sample_observation("rule1", true, 100.0, 50.0);
-        network.observe(obs);
+        network.observe(&obs);
 
         let stats = network.rule_statistics("rule1").expect("should have stats");
         assert_eq!(stats.observation_count, 1);
@@ -432,11 +500,11 @@ mod tests {
     fn belief_network_ordering() {
         let network = BeliefNetwork::new();
 
-        network.observe(sample_observation("rule1", true, 100.0, 50.0));
-        network.observe(sample_observation("rule1", true, 100.0, 40.0));
+        network.observe(&sample_observation("rule1", true, 100.0, 50.0));
+        network.observe(&sample_observation("rule1", true, 100.0, 40.0));
 
-        network.observe(sample_observation("rule2", true, 100.0, 90.0));
-        network.observe(sample_observation("rule2", false, 100.0, 110.0));
+        network.observe(&sample_observation("rule2", true, 100.0, 90.0));
+        network.observe(&sample_observation("rule2", false, 100.0, 110.0));
 
         let context = vec![1.0, 2.0, 3.0];
         let ordered = network.order_rules(&["rule1".into(), "rule2".into()], &context);
@@ -448,11 +516,12 @@ mod tests {
     fn belief_network_filtering() {
         let network = BeliefNetwork::new();
 
-        network.observe(sample_observation("good_rule", true, 100.0, 20.0));
-        network.observe(sample_observation("bad_rule", false, 100.0, 120.0));
+        network.observe(&sample_observation("good_rule", true, 100.0, 20.0));
+        network.observe(&sample_observation("bad_rule", false, 100.0, 120.0));
 
         let context = vec![1.0, 2.0, 3.0];
-        let filtered = network.filter_rules(&["good_rule".into(), "bad_rule".into()], &context, 0.3);
+        let filtered =
+            network.filter_rules(&["good_rule".into(), "bad_rule".into()], &context, 0.3);
 
         assert!(filtered.contains(&"good_rule".to_string()));
     }
@@ -497,7 +566,7 @@ mod tests {
     #[test]
     fn belief_network_export_import() {
         let network = BeliefNetwork::new();
-        network.observe(sample_observation("rule1", true, 100.0, 50.0));
+        network.observe(&sample_observation("rule1", true, 100.0, 50.0));
 
         let state = network.export();
         assert_eq!(state.cpts.len(), 1);
@@ -506,14 +575,16 @@ mod tests {
         let new_network = BeliefNetwork::new();
         new_network.import(state);
 
-        let stats = new_network.rule_statistics("rule1").expect("should have stats");
+        let stats = new_network
+            .rule_statistics("rule1")
+            .expect("should have stats");
         assert_eq!(stats.observation_count, 1);
     }
 
     #[test]
     fn belief_network_reset() {
         let network = BeliefNetwork::new();
-        network.observe(sample_observation("rule1", true, 100.0, 50.0));
+        network.observe(&sample_observation("rule1", true, 100.0, 50.0));
 
         network.reset();
 
@@ -524,9 +595,9 @@ mod tests {
     fn belief_network_max_observations() {
         let network = BeliefNetwork::with_max_observations(2);
 
-        network.observe(sample_observation("rule1", true, 100.0, 50.0));
-        network.observe(sample_observation("rule1", true, 100.0, 50.0));
-        network.observe(sample_observation("rule1", true, 100.0, 50.0));
+        network.observe(&sample_observation("rule1", true, 100.0, 50.0));
+        network.observe(&sample_observation("rule1", true, 100.0, 50.0));
+        network.observe(&sample_observation("rule1", true, 100.0, 50.0));
 
         let obs = network.observations.lock().unwrap();
         assert_eq!(obs.len(), 2);

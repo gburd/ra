@@ -3,7 +3,7 @@
 //! Ensures every committed rule file passes parsing and metadata
 //! validation, has no duplicate IDs, and uses valid category paths.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod helpers;
 
@@ -142,13 +142,11 @@ fn no_duplicate_rule_ids_across_rules_directory() {
     let mut duplicates = Vec::new();
 
     for file in &files {
-        let source = match std::fs::read_to_string(file) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let Ok(source) = std::fs::read_to_string(file) else {
+            continue;
         };
-        let rule = match parse_rule_file(&source) {
-            Ok(r) => r,
-            Err(_) => continue,
+        let Ok(rule) = parse_rule_file(&source) else {
+            continue;
         };
 
         let id = rule.metadata.id.clone();
@@ -165,8 +163,7 @@ fn no_duplicate_rule_ids_across_rules_directory() {
             // subcategories within the same domain, etc.).
             if !relaxed && !first_relaxed && subdir == *first_subdir {
                 duplicates.push(format!(
-                    "id '{}' appears in:\n    {}\n    {}",
-                    id, first_path, path
+                    "id '{id}' appears in:\n    {first_path}\n    {path}",
                 ));
             }
         } else {
@@ -190,13 +187,11 @@ fn all_rule_categories_use_known_prefixes() {
     let mut invalid = Vec::new();
 
     for file in &files {
-        let source = match std::fs::read_to_string(file) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let Ok(source) = std::fs::read_to_string(file) else {
+            continue;
         };
-        let rule = match parse_rule_file(&source) {
-            Ok(r) => r,
-            Err(_) => continue,
+        let Ok(rule) = parse_rule_file(&source) else {
+            continue;
         };
 
         let category = &rule.metadata.category;
@@ -235,13 +230,11 @@ fn rule_file_path_matches_category() {
             continue;
         }
 
-        let source = match std::fs::read_to_string(file) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let Ok(source) = std::fs::read_to_string(file) else {
+            continue;
         };
-        let rule = match parse_rule_file(&source) {
-            Ok(r) => r,
-            Err(_) => continue,
+        let Ok(rule) = parse_rule_file(&source) else {
+            continue;
         };
 
         let rel_path = file.strip_prefix(&rules_dir).unwrap_or(file);

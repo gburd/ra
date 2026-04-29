@@ -11,9 +11,7 @@ use crate::algebra::{NullOrdering, SortDirection};
 use crate::expr::ColumnRef;
 
 /// A physical property that describes how data is organized.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PhysicalProperty {
     /// Data is sorted by the given keys.
     Ordering(Ordering),
@@ -24,18 +22,14 @@ pub enum PhysicalProperty {
 }
 
 /// A sort ordering over one or more columns.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Ordering {
     /// The ordered columns with direction.
     pub columns: Vec<OrderingColumn>,
 }
 
 /// A single column in an ordering specification.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OrderingColumn {
     /// The column reference.
     pub column: ColumnRef,
@@ -46,9 +40,7 @@ pub struct OrderingColumn {
 }
 
 /// A partitioning scheme describing how data is distributed.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Partitioning {
     /// Data is on a single partition (not distributed).
     Single,
@@ -63,9 +55,7 @@ pub enum Partitioning {
 }
 
 /// How data is distributed across cluster nodes.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DistributionProperty {
     /// All data on a single node.
     SingleNode,
@@ -78,9 +68,7 @@ pub enum DistributionProperty {
 }
 
 /// A set of physical properties satisfied by a plan node.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PropertySet {
     /// The properties in this set.
     pub properties: Vec<PhysicalProperty>,
@@ -121,13 +109,9 @@ impl PropertySet {
     /// satisfies the requirement).
     #[must_use]
     pub fn satisfies(&self, required: &Self) -> bool {
-        required.properties.iter().all(|req| {
-            match req {
-                PhysicalProperty::Ordering(req_ord) => {
-                    self.satisfies_ordering(req_ord)
-                }
-                other => self.properties.contains(other),
-            }
+        required.properties.iter().all(|req| match req {
+            PhysicalProperty::Ordering(req_ord) => self.satisfies_ordering(req_ord),
+            other => self.properties.contains(other),
         })
     }
 
@@ -137,10 +121,7 @@ impl PropertySet {
     /// The required ordering is satisfied when it is a prefix of
     /// (or equal to) the provided ordering.
     #[must_use]
-    pub fn satisfies_ordering(
-        &self,
-        required: &Ordering,
-    ) -> bool {
+    pub fn satisfies_ordering(&self, required: &Ordering) -> bool {
         if let Some(provided) = self.ordering() {
             required.is_prefix_of(provided)
         } else {
@@ -222,10 +203,7 @@ impl Ordering {
         if self.columns.len() > other.columns.len() {
             return false;
         }
-        self.columns
-            .iter()
-            .zip(&other.columns)
-            .all(|(a, b)| a == b)
+        self.columns.iter().zip(&other.columns).all(|(a, b)| a == b)
     }
 
     /// Return the common prefix between this ordering and another.
@@ -256,10 +234,7 @@ impl OrderingColumn {
     /// (NULLS LAST for ASC, NULLS FIRST for DESC, matching
     /// `PostgreSQL` defaults).
     #[must_use]
-    pub fn new(
-        column: ColumnRef,
-        direction: SortDirection,
-    ) -> Self {
+    pub fn new(column: ColumnRef, direction: SortDirection) -> Self {
         let nulls = match direction {
             SortDirection::Asc => NullOrdering::Last,
             SortDirection::Desc => NullOrdering::First,
@@ -273,11 +248,7 @@ impl OrderingColumn {
 
     /// Create an ordering column with explicit NULL ordering.
     #[must_use]
-    pub fn with_nulls(
-        column: ColumnRef,
-        direction: SortDirection,
-        nulls: NullOrdering,
-    ) -> Self {
+    pub fn with_nulls(column: ColumnRef, direction: SortDirection, nulls: NullOrdering) -> Self {
         Self {
             column,
             direction,
@@ -286,31 +257,23 @@ impl OrderingColumn {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::algebra::{NullOrdering, SortDirection};
     use crate::expr::ColumnRef;
 
-    fn ordering_col(
-        name: &str,
-        dir: SortDirection,
-    ) -> OrderingColumn {
+    fn ordering_col(name: &str, dir: SortDirection) -> OrderingColumn {
         OrderingColumn::new(ColumnRef::new(name), dir)
     }
 
     #[test]
     fn ordering_column_default_nulls() {
-        let asc = OrderingColumn::new(
-            ColumnRef::new("x"),
-            SortDirection::Asc,
-        );
+        let asc = OrderingColumn::new(ColumnRef::new("x"), SortDirection::Asc);
         assert_eq!(asc.nulls, NullOrdering::Last);
 
-        let desc = OrderingColumn::new(
-            ColumnRef::new("x"),
-            SortDirection::Desc,
-        );
+        let desc = OrderingColumn::new(ColumnRef::new("x"), SortDirection::Desc);
         assert_eq!(desc.nulls, NullOrdering::First);
     }
 
@@ -327,8 +290,7 @@ mod tests {
     #[test]
     fn property_set_add_dedup() {
         let mut ps = PropertySet::new();
-        let prop =
-            PhysicalProperty::Partitioning(Partitioning::Single);
+        let prop = PhysicalProperty::Partitioning(Partitioning::Single);
         ps.add(prop.clone());
         ps.add(prop);
         assert_eq!(ps.properties.len(), 1);
@@ -338,17 +300,14 @@ mod tests {
     fn property_set_is_empty() {
         let ps = PropertySet::new();
         assert!(ps.is_empty());
-        let ps = PropertySet::with_partitioning(
-            Partitioning::Single,
-        );
+        let ps = PropertySet::with_partitioning(Partitioning::Single);
         assert!(!ps.is_empty());
     }
 
     #[test]
     fn property_set_contains() {
         let mut ps = PropertySet::new();
-        let prop =
-            PhysicalProperty::Partitioning(Partitioning::Single);
+        let prop = PhysicalProperty::Partitioning(Partitioning::Single);
         assert!(!ps.contains(&prop));
         ps.add(prop.clone());
         assert!(ps.contains(&prop));
@@ -357,56 +316,45 @@ mod tests {
     #[test]
     fn property_set_satisfies() {
         let mut provided = PropertySet::new();
-        provided.add(PhysicalProperty::Partitioning(
-            Partitioning::Single,
-        ));
-        provided.add(PhysicalProperty::Ordering(Ordering::new(
-            vec![ordering_col("id", SortDirection::Asc)],
-        )));
+        provided.add(PhysicalProperty::Partitioning(Partitioning::Single));
+        provided.add(PhysicalProperty::Ordering(Ordering::new(vec![
+            ordering_col("id", SortDirection::Asc),
+        ])));
 
         let mut required = PropertySet::new();
-        required.add(PhysicalProperty::Partitioning(
-            Partitioning::Single,
-        ));
+        required.add(PhysicalProperty::Partitioning(Partitioning::Single));
         assert!(provided.satisfies(&required));
 
         let mut extra_required = PropertySet::new();
-        extra_required.add(PhysicalProperty::Partitioning(
-            Partitioning::Broadcast,
-        ));
+        extra_required.add(PhysicalProperty::Partitioning(Partitioning::Broadcast));
         assert!(!provided.satisfies(&extra_required));
     }
 
     #[test]
     fn property_set_satisfies_ordering_prefix() {
         let mut provided = PropertySet::new();
-        provided.add(PhysicalProperty::Ordering(Ordering::new(
-            vec![
-                ordering_col("a", SortDirection::Asc),
-                ordering_col("b", SortDirection::Desc),
-            ],
-        )));
+        provided.add(PhysicalProperty::Ordering(Ordering::new(vec![
+            ordering_col("a", SortDirection::Asc),
+            ordering_col("b", SortDirection::Desc),
+        ])));
 
         // Requiring [a ASC] is satisfied by [a ASC, b DESC]
-        let required = PropertySet::with_ordering(Ordering::new(
-            vec![ordering_col("a", SortDirection::Asc)],
-        ));
+        let required =
+            PropertySet::with_ordering(Ordering::new(vec![ordering_col("a", SortDirection::Asc)]));
         assert!(provided.satisfies(&required));
 
         // Requiring [a ASC, b DESC] is satisfied exactly
-        let required_full =
-            PropertySet::with_ordering(Ordering::new(vec![
-                ordering_col("a", SortDirection::Asc),
-                ordering_col("b", SortDirection::Desc),
-            ]));
+        let required_full = PropertySet::with_ordering(Ordering::new(vec![
+            ordering_col("a", SortDirection::Asc),
+            ordering_col("b", SortDirection::Desc),
+        ]));
         assert!(provided.satisfies(&required_full));
 
         // Requiring [a ASC, b ASC] is NOT satisfied
-        let required_wrong =
-            PropertySet::with_ordering(Ordering::new(vec![
-                ordering_col("a", SortDirection::Asc),
-                ordering_col("b", SortDirection::Asc),
-            ]));
+        let required_wrong = PropertySet::with_ordering(Ordering::new(vec![
+            ordering_col("a", SortDirection::Asc),
+            ordering_col("b", SortDirection::Asc),
+        ]));
         assert!(!provided.satisfies(&required_wrong));
     }
 
@@ -426,9 +374,9 @@ mod tests {
     fn property_set_partitioning_accessor() {
         let mut ps = PropertySet::new();
         assert!(ps.partitioning().is_none());
-        ps.add(PhysicalProperty::Partitioning(Partitioning::Hash(
-            vec![ColumnRef::new("id")],
-        )));
+        ps.add(PhysicalProperty::Partitioning(Partitioning::Hash(vec![
+            ColumnRef::new("id"),
+        ])));
         assert!(ps.partitioning().is_some());
     }
 
@@ -439,18 +387,12 @@ mod tests {
         ps.add(PhysicalProperty::Distribution(
             DistributionProperty::Replicated,
         ));
-        assert_eq!(
-            ps.distribution(),
-            Some(&DistributionProperty::Replicated)
-        );
+        assert_eq!(ps.distribution(), Some(&DistributionProperty::Replicated));
     }
 
     #[test]
     fn ordering_prefix() {
-        let short = Ordering::new(vec![ordering_col(
-            "a",
-            SortDirection::Asc,
-        )]);
+        let short = Ordering::new(vec![ordering_col("a", SortDirection::Asc)]);
         let long = Ordering::new(vec![
             ordering_col("a", SortDirection::Asc),
             ordering_col("b", SortDirection::Desc),
@@ -462,14 +404,8 @@ mod tests {
 
     #[test]
     fn ordering_prefix_different_direction() {
-        let a = Ordering::new(vec![ordering_col(
-            "x",
-            SortDirection::Asc,
-        )]);
-        let b = Ordering::new(vec![ordering_col(
-            "x",
-            SortDirection::Desc,
-        )]);
+        let a = Ordering::new(vec![ordering_col("x", SortDirection::Asc)]);
+        let b = Ordering::new(vec![ordering_col("x", SortDirection::Desc)]);
         assert!(!a.is_prefix_of(&b));
     }
 
@@ -493,14 +429,8 @@ mod tests {
 
     #[test]
     fn ordering_common_prefix_empty() {
-        let a = Ordering::new(vec![ordering_col(
-            "x",
-            SortDirection::Asc,
-        )]);
-        let b = Ordering::new(vec![ordering_col(
-            "y",
-            SortDirection::Asc,
-        )]);
+        let a = Ordering::new(vec![ordering_col("x", SortDirection::Asc)]);
+        let b = Ordering::new(vec![ordering_col("y", SortDirection::Asc)]);
         let prefix = a.common_prefix(&b);
         assert!(prefix.is_empty());
     }
@@ -509,10 +439,7 @@ mod tests {
     fn ordering_is_empty() {
         let empty = Ordering::new(vec![]);
         assert!(empty.is_empty());
-        let non_empty = Ordering::new(vec![ordering_col(
-            "a",
-            SortDirection::Asc,
-        )]);
+        let non_empty = Ordering::new(vec![ordering_col("a", SortDirection::Asc)]);
         assert!(!non_empty.is_empty());
     }
 
@@ -530,18 +457,15 @@ mod tests {
 
     #[test]
     fn with_ordering_constructor() {
-        let ps = PropertySet::with_ordering(Ordering::new(vec![
-            ordering_col("id", SortDirection::Asc),
-        ]));
+        let ps =
+            PropertySet::with_ordering(Ordering::new(vec![ordering_col("id", SortDirection::Asc)]));
         assert!(ps.ordering().is_some());
         assert!(ps.partitioning().is_none());
     }
 
     #[test]
     fn with_partitioning_constructor() {
-        let ps = PropertySet::with_partitioning(
-            Partitioning::Hash(vec![ColumnRef::new("id")]),
-        );
+        let ps = PropertySet::with_partitioning(Partitioning::Hash(vec![ColumnRef::new("id")]));
         assert!(ps.partitioning().is_some());
         assert!(ps.ordering().is_none());
     }
@@ -552,19 +476,16 @@ mod tests {
         ps.add(PhysicalProperty::Ordering(Ordering::new(vec![
             ordering_col("id", SortDirection::Asc),
         ])));
-        ps.add(PhysicalProperty::Partitioning(Partitioning::Hash(
-            vec![ColumnRef::new("id")],
-        )));
+        ps.add(PhysicalProperty::Partitioning(Partitioning::Hash(vec![
+            ColumnRef::new("id"),
+        ])));
         ps.add(PhysicalProperty::Distribution(
-            DistributionProperty::HashDistributed(vec![
-                ColumnRef::new("id"),
-            ]),
+            DistributionProperty::HashDistributed(vec![ColumnRef::new("id")]),
         ));
 
-        let json = serde_json::to_string(&ps)
-            .expect("serialization should succeed");
-        let deserialized: PropertySet = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&ps).expect("serialization should succeed");
+        let deserialized: PropertySet =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(ps, deserialized);
     }
 
@@ -572,12 +493,8 @@ mod tests {
     fn distribution_property_variants() {
         let single = DistributionProperty::SingleNode;
         let repl = DistributionProperty::Replicated;
-        let hash = DistributionProperty::HashDistributed(vec![
-            ColumnRef::new("k"),
-        ]);
-        let range = DistributionProperty::RangeDistributed(vec![
-            ColumnRef::new("k"),
-        ]);
+        let hash = DistributionProperty::HashDistributed(vec![ColumnRef::new("k")]);
+        let range = DistributionProperty::RangeDistributed(vec![ColumnRef::new("k")]);
         assert_ne!(single, repl);
         assert_ne!(hash, range);
     }

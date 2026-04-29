@@ -6,16 +6,11 @@
 //! - EWMA smoothing: update overhead measurement
 //! - Adaptive updates: threshold evaluation cost
 
-use criterion::{
-    black_box, criterion_group, criterion_main, BatchSize,
-    Criterion,
-};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use ra_stats::percentiles::TDigest;
 use ra_stats::ring_buffer::RingBuffer;
 use ra_stats::smoother::Ewma;
-use ra_stats::streaming::{
-    ChangeThresholds, MetricKind, StreamingPipeline,
-};
+use ra_stats::streaming::{ChangeThresholds, MetricKind, StreamingPipeline};
 
 // ============================================================
 // 1. Ring Buffer Performance
@@ -80,7 +75,7 @@ fn bench_percentile_queries_1k(c: &mut Criterion) {
     // Build a pre-loaded digest with 1K samples
     let mut td = TDigest::new(200.0);
     for i in 1..=1000 {
-        td.add(i as f64);
+        td.add(f64::from(i));
     }
     // Force compression before benchmarking queries
     td.p50();
@@ -180,8 +175,7 @@ fn bench_pipeline_ingest(c: &mut Criterion) {
 
     c.bench_function("pipeline_ingest_single", |b| {
         b.iter(|| {
-            pipeline
-                .ingest(MetricKind::Cpu, black_box(50.0));
+            pipeline.ingest(MetricKind::Cpu, black_box(50.0));
         });
     });
 }
@@ -205,14 +199,11 @@ fn bench_pipeline_maybe_update(c: &mut Criterion) {
     c.bench_function("pipeline_maybe_update", |b| {
         b.iter_batched(
             || {
-                let mut pipeline =
-                    StreamingPipeline::new().with_thresholds(
-                        ChangeThresholds {
-                            cpu: 0.10,
-                            memory: 0.15,
-                            io: 0.20,
-                        },
-                    );
+                let mut pipeline = StreamingPipeline::new().with_thresholds(ChangeThresholds {
+                    cpu: 0.10,
+                    memory: 0.15,
+                    io: 0.20,
+                });
                 for _ in 0..100 {
                     pipeline.ingest(MetricKind::Cpu, 50.0);
                     pipeline.ingest(MetricKind::Memory, 1024.0);
@@ -247,7 +238,7 @@ fn bench_pipeline_smoothed(c: &mut Criterion) {
 fn bench_pipeline_percentiles(c: &mut Criterion) {
     let mut pipeline = StreamingPipeline::new();
     for i in 1..=1000 {
-        pipeline.ingest(MetricKind::Latency, i as f64);
+        pipeline.ingest(MetricKind::Latency, f64::from(i));
     }
 
     c.bench_function("pipeline_percentiles_1k", |b| {
@@ -260,14 +251,10 @@ fn bench_pipeline_ingest_all_channels(c: &mut Criterion) {
 
     c.bench_function("pipeline_ingest_4_channels", |b| {
         b.iter(|| {
-            pipeline
-                .ingest(MetricKind::Cpu, black_box(50.0));
-            pipeline
-                .ingest(MetricKind::Memory, black_box(1024.0));
-            pipeline
-                .ingest(MetricKind::Io, black_box(100.0));
-            pipeline
-                .ingest(MetricKind::Latency, black_box(5.0));
+            pipeline.ingest(MetricKind::Cpu, black_box(50.0));
+            pipeline.ingest(MetricKind::Memory, black_box(1024.0));
+            pipeline.ingest(MetricKind::Io, black_box(100.0));
+            pipeline.ingest(MetricKind::Latency, black_box(5.0));
         });
     });
 }

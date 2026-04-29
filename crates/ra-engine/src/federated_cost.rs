@@ -408,7 +408,6 @@ impl FederatedCostModel {
         let base_rows = stats.map_or(self.default_row_count, |s| s.row_count);
 
         match expr {
-            RelExpr::Scan { .. } => base_rows,
             RelExpr::Filter { .. } => base_rows * self.default_filter_selectivity,
             RelExpr::Project { input, .. } => self.estimate_output_rows(input, stats),
             RelExpr::Aggregate { .. } => {
@@ -435,12 +434,13 @@ impl FederatedCostModel {
     pub fn estimate_data_size(&self, stats: Option<&Statistics>) -> u64 {
         let row_count = stats.map_or(self.default_row_count, |s| s.row_count);
         let avg_row_size = stats.map_or(self.default_avg_row_size, |s| s.avg_row_size);
-        let size = (row_count * avg_row_size as f64) as u64;
-        size
+
+        (row_count * avg_row_size as f64) as u64
     }
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use std::collections::HashMap;
 

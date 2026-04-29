@@ -1,9 +1,7 @@
 //! Benchmarks for hardware model performance estimation.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use ra_hardware::{
-    CompleteHardwareProfile, CpuModel, GpuModel, MemoryConfig, StorageDevice,
-};
+use ra_hardware::{CompleteHardwareProfile, CpuModel, GpuModel, MemoryConfig, StorageDevice};
 
 fn bench_cpu_models(c: &mut Criterion) {
     c.bench_function("cpu_scan_intel_xeon", |b| {

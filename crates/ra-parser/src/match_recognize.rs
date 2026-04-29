@@ -1,6 +1,6 @@
-//! Parser for SQL:2016 MATCH_RECOGNIZE clause.
+//! Parser for SQL:2016 `MATCH_RECOGNIZE` clause.
 //!
-//! Converts a SQL query containing MATCH_RECOGNIZE into the
+//! Converts a SQL query containing `MATCH_RECOGNIZE` into the
 //! `RowPattern` relational algebra operator. Uses `sqlparser` for
 //! initial SQL parsing, then extracts RPR-specific clauses.
 
@@ -11,7 +11,7 @@ use ra_core::row_pattern::{
 };
 use thiserror::Error;
 
-/// Errors from MATCH_RECOGNIZE parsing.
+/// Errors from `MATCH_RECOGNIZE` parsing.
 #[derive(Debug, Error)]
 pub enum MatchRecognizeError {
     /// The pattern string is syntactically invalid.
@@ -58,6 +58,10 @@ pub fn parse_pattern(input: &str) -> Result<PatternExpr, MatchRecognizeError> {
 ///
 /// Returns error if required fields are missing or defines
 /// reference variables not present in the pattern.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Row pattern building requires many configuration parameters from SQL MATCH_RECOGNIZE clause"
+)]
 pub fn build_row_pattern(
     input: RelExpr,
     partition_by: Vec<Expr>,
@@ -138,8 +142,8 @@ pub fn parse_define_condition(input: &str) -> Result<Expr, MatchRecognizeError> 
         ("=", BinOp::Eq),
     ] {
         if let Some(pos) = find_comparison_op(input, op_str) {
-            let left = parse_simple_expr(&input[..pos].trim())?;
-            let right = parse_simple_expr(&input[pos + op_str.len()..].trim())?;
+            let left = parse_simple_expr(input[..pos].trim())?;
+            let right = parse_simple_expr(input[pos + op_str.len()..].trim())?;
             return Ok(Expr::BinOp {
                 op: *op,
                 left: Box::new(left),
@@ -261,9 +265,9 @@ fn tokenize_pattern(input: &str) -> Result<Vec<PatternToken>, MatchRecognizeErro
     Ok(tokens)
 }
 
-fn parse_alternation<'a>(
-    tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
+fn parse_alternation(
+    tokens: &[PatternToken],
+) -> Result<(PatternExpr, &[PatternToken]), MatchRecognizeError> {
     let (first, mut rest) = parse_sequence(tokens)?;
     let mut branches = vec![first];
 
@@ -280,9 +284,9 @@ fn parse_alternation<'a>(
     }
 }
 
-fn parse_sequence<'a>(
-    tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
+fn parse_sequence(
+    tokens: &[PatternToken],
+) -> Result<(PatternExpr, &[PatternToken]), MatchRecognizeError> {
     let mut parts = Vec::new();
     let mut rest = tokens;
 
@@ -311,17 +315,17 @@ fn parse_sequence<'a>(
     }
 }
 
-fn parse_quantified<'a>(
-    tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
+fn parse_quantified(
+    tokens: &[PatternToken],
+) -> Result<(PatternExpr, &[PatternToken]), MatchRecognizeError> {
     let (base, rest) = parse_atom(tokens)?;
     parse_optional_quantifier(base, rest)
 }
 
-fn parse_optional_quantifier<'a>(
+fn parse_optional_quantifier(
     base: PatternExpr,
-    tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
+    tokens: &[PatternToken],
+) -> Result<(PatternExpr, &[PatternToken]), MatchRecognizeError> {
     if tokens.is_empty() {
         return Ok((base, tokens));
     }
@@ -347,9 +351,9 @@ fn parse_optional_quantifier<'a>(
     }
 }
 
-fn parse_brace_quantifier<'a>(
-    tokens: &'a [PatternToken],
-) -> Result<(Quantifier, &'a [PatternToken]), MatchRecognizeError> {
+fn parse_brace_quantifier(
+    tokens: &[PatternToken],
+) -> Result<(Quantifier, &[PatternToken]), MatchRecognizeError> {
     // Expect: Number [, Number?] }
     let Some(PatternToken::Number(min)) = tokens.first() else {
         return Err(MatchRecognizeError::InvalidPattern(
@@ -391,9 +395,9 @@ fn parse_brace_quantifier<'a>(
     Ok((Quantifier::Range(*min, Some(*max)), &rest[1..]))
 }
 
-fn parse_atom<'a>(
-    tokens: &'a [PatternToken],
-) -> Result<(PatternExpr, &'a [PatternToken]), MatchRecognizeError> {
+fn parse_atom(
+    tokens: &[PatternToken],
+) -> Result<(PatternExpr, &[PatternToken]), MatchRecognizeError> {
     if tokens.is_empty() {
         return Err(MatchRecognizeError::InvalidPattern(
             "unexpected end of pattern".to_owned(),
@@ -580,6 +584,7 @@ fn parse_first_last(inner: &str, is_first: bool) -> Result<Expr, MatchRecognizeE
     }
 }
 
+#[expect(clippy::expect_used, clippy::panic, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;

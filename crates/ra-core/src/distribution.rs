@@ -10,10 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::expr::Expr;
 
 /// Unique identifier for a node in the cluster.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord,
-    Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub u32);
 
 impl std::fmt::Display for NodeId {
@@ -191,10 +188,7 @@ impl DistributedRelExpr {
 
     /// Set the data distribution.
     #[must_use]
-    pub fn with_distribution(
-        mut self,
-        distribution: DataDistribution,
-    ) -> Self {
+    pub fn with_distribution(mut self, distribution: DataDistribution) -> Self {
         self.distribution = distribution;
         self
     }
@@ -208,10 +202,7 @@ impl DistributedRelExpr {
 
     /// Set the input redistribution strategy.
     #[must_use]
-    pub fn with_strategy(
-        mut self,
-        strategy: DistributionStrategy,
-    ) -> Self {
+    pub fn with_strategy(mut self, strategy: DistributionStrategy) -> Self {
         self.input_strategy = Some(strategy);
         self
     }
@@ -238,10 +229,7 @@ impl DistributedRelExpr {
     /// Whether the data lives on a single node.
     #[must_use]
     pub fn is_single_partition(&self) -> bool {
-        matches!(
-            self.distribution,
-            DataDistribution::SinglePartition { .. }
-        )
+        matches!(self.distribution, DataDistribution::SinglePartition { .. })
     }
 }
 
@@ -272,8 +260,7 @@ pub fn check_join_compatibility(
     join_keys_right: &[Expr],
 ) -> DistributionCompatibility {
     // If either side is replicated, no redistribution needed.
-    if matches!(left, DataDistribution::Replicated)
-        || matches!(right, DataDistribution::Replicated)
+    if matches!(left, DataDistribution::Replicated) || matches!(right, DataDistribution::Replicated)
     {
         return DistributionCompatibility::Compatible;
     }
@@ -291,10 +278,7 @@ pub fn check_join_compatibility(
         },
     ) = (left, right)
     {
-        if l_keys == join_keys_left
-            && r_keys == join_keys_right
-            && l_count == r_count
-        {
+        if l_keys == join_keys_left && r_keys == join_keys_right && l_count == r_count {
             return DistributionCompatibility::Compatible;
         }
     }
@@ -334,13 +318,10 @@ pub fn should_broadcast(
     if num_nodes == 0 {
         return false;
     }
-    let broadcast_cost =
-        u128::from(small_bytes) * u128::from(num_nodes);
+    let broadcast_cost = u128::from(small_bytes) * u128::from(num_nodes);
     let shuffle_fraction_num = u128::from(num_nodes - 1);
-    let shuffle_cost =
-        (u128::from(small_bytes) + u128::from(large_bytes))
-            * shuffle_fraction_num
-            / u128::from(num_nodes);
+    let shuffle_cost = (u128::from(small_bytes) + u128::from(large_bytes)) * shuffle_fraction_num
+        / u128::from(num_nodes);
     broadcast_cost < shuffle_cost
 }
 
@@ -369,9 +350,7 @@ pub struct JoinStrategyInput<'a> {
 /// Evaluates broadcast, shuffle, co-located, and partition-wise
 /// strategies and returns the cheapest one.
 #[must_use]
-pub fn select_join_strategy(
-    input: &JoinStrategyInput<'_>,
-) -> DistributionStrategy {
+pub fn select_join_strategy(input: &JoinStrategyInput<'_>) -> DistributionStrategy {
     let JoinStrategyInput {
         left_dist,
         right_dist,
@@ -385,19 +364,12 @@ pub fn select_join_strategy(
     let left_bytes = *left_bytes;
     let right_bytes = *right_bytes;
     let broadcast_threshold = *broadcast_threshold;
-    let compat = check_join_compatibility(
-        left_dist,
-        right_dist,
-        join_keys_left,
-        join_keys_right,
-    );
+    let compat = check_join_compatibility(left_dist, right_dist, join_keys_left, join_keys_right);
 
     // Already compatible - no movement needed.
     if compat == DistributionCompatibility::Compatible {
         // Determine if it is partition-wise (both hash-partitioned).
-        if let DataDistribution::HashPartitioned { keys, .. } =
-            left_dist
-        {
+        if let DataDistribution::HashPartitioned { keys, .. } = left_dist {
             if let Some(key) = keys.first() {
                 return DistributionStrategy::PartitionWise {
                     partition_key: key.clone(),
@@ -408,12 +380,11 @@ pub fn select_join_strategy(
     }
 
     // Try broadcasting the smaller side.
-    let (small_bytes, _large_bytes, broadcast_source) =
-        if left_bytes <= right_bytes {
-            (left_bytes, right_bytes, nodes.first().copied())
-        } else {
-            (right_bytes, left_bytes, nodes.first().copied())
-        };
+    let (small_bytes, _large_bytes, broadcast_source) = if left_bytes <= right_bytes {
+        (left_bytes, right_bytes, nodes.first().copied())
+    } else {
+        (right_bytes, left_bytes, nodes.first().copied())
+    };
 
     if let Some(source) = broadcast_source {
         if should_broadcast(
@@ -444,6 +415,7 @@ pub fn select_join_strategy(
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,10 +492,7 @@ mod tests {
                 },
             ],
         };
-        if let DataDistribution::RangePartitioned {
-            boundaries, ..
-        } = &d
-        {
+        if let DataDistribution::RangePartitioned { boundaries, .. } = &d {
             assert_eq!(boundaries.len(), 2);
         } else {
             panic!("expected RangePartitioned");
@@ -588,10 +557,7 @@ mod tests {
     fn strategy_range_partition() {
         let s = DistributionStrategy::RangePartition {
             partition_key: col("ts"),
-            ranges: vec![
-                ("0".into(), "100".into()),
-                ("100".into(), "200".into()),
-            ],
+            ranges: vec![("0".into(), "100".into()), ("100".into(), "200".into())],
         };
         assert_eq!(s.target_count(), 2);
         assert!(s.requires_network());
@@ -624,8 +590,7 @@ mod tests {
     #[test]
     fn distributed_rel_expr_with_distribution() {
         let plan = crate::algebra::RelExpr::scan("users");
-        let dre = DistributedRelExpr::new(plan)
-            .with_distribution(DataDistribution::Replicated);
+        let dre = DistributedRelExpr::new(plan).with_distribution(DataDistribution::Replicated);
         assert!(dre.is_replicated());
     }
 
@@ -639,24 +604,19 @@ mod tests {
     #[test]
     fn distributed_rel_expr_with_strategy() {
         let plan = crate::algebra::RelExpr::scan("orders");
-        let dre = DistributedRelExpr::new(plan)
-            .with_strategy(DistributionStrategy::CoLocated);
-        assert_eq!(
-            dre.input_strategy,
-            Some(DistributionStrategy::CoLocated)
-        );
+        let dre = DistributedRelExpr::new(plan).with_strategy(DistributionStrategy::CoLocated);
+        assert_eq!(dre.input_strategy, Some(DistributionStrategy::CoLocated));
     }
 
     #[test]
     fn distributed_rel_expr_is_partitioned_on() {
         let plan = crate::algebra::RelExpr::scan("orders");
         let keys = vec![col("region")];
-        let dre = DistributedRelExpr::new(plan).with_distribution(
-            DataDistribution::HashPartitioned {
+        let dre =
+            DistributedRelExpr::new(plan).with_distribution(DataDistribution::HashPartitioned {
                 keys: keys.clone(),
                 partition_count: 4,
-            },
-        );
+            });
         assert!(dre.is_partitioned_on(&keys));
         assert!(!dre.is_partitioned_on(&[col("other")]));
     }
@@ -664,9 +624,8 @@ mod tests {
     #[test]
     fn distributed_rel_expr_is_single_partition() {
         let plan = crate::algebra::RelExpr::scan("small");
-        let dre = DistributedRelExpr::new(plan).with_distribution(
-            DataDistribution::SinglePartition { node: NodeId(0) },
-        );
+        let dre = DistributedRelExpr::new(plan)
+            .with_distribution(DataDistribution::SinglePartition { node: NodeId(0) });
         assert!(dre.is_single_partition());
         assert!(!dre.is_replicated());
     }
@@ -677,12 +636,7 @@ mod tests {
     fn compat_replicated_left() {
         let left = DataDistribution::Replicated;
         let right = DataDistribution::Arbitrary;
-        let result = check_join_compatibility(
-            &left,
-            &right,
-            &[col("id")],
-            &[col("id")],
-        );
+        let result = check_join_compatibility(&left, &right, &[col("id")], &[col("id")]);
         assert_eq!(result, DistributionCompatibility::Compatible);
     }
 
@@ -690,12 +644,7 @@ mod tests {
     fn compat_replicated_right() {
         let left = DataDistribution::Arbitrary;
         let right = DataDistribution::Replicated;
-        let result = check_join_compatibility(
-            &left,
-            &right,
-            &[col("id")],
-            &[col("id")],
-        );
+        let result = check_join_compatibility(&left, &right, &[col("id")], &[col("id")]);
         assert_eq!(result, DistributionCompatibility::Compatible);
     }
 
@@ -711,9 +660,7 @@ mod tests {
             keys: keys_r.clone(),
             partition_count: 8,
         };
-        let result = check_join_compatibility(
-            &left, &right, &keys_l, &keys_r,
-        );
+        let result = check_join_compatibility(&left, &right, &keys_l, &keys_r);
         assert_eq!(result, DistributionCompatibility::Compatible);
     }
 
@@ -728,13 +675,8 @@ mod tests {
             keys: keys.clone(),
             partition_count: 16,
         };
-        let result = check_join_compatibility(
-            &left, &right, &keys, &keys,
-        );
-        assert_eq!(
-            result,
-            DistributionCompatibility::RightMustRedistribute
-        );
+        let result = check_join_compatibility(&left, &right, &keys, &keys);
+        assert_eq!(result, DistributionCompatibility::RightMustRedistribute);
     }
 
     #[test]
@@ -745,13 +687,8 @@ mod tests {
             partition_count: 8,
         };
         let right = DataDistribution::Arbitrary;
-        let result = check_join_compatibility(
-            &left, &right, &keys, &keys,
-        );
-        assert_eq!(
-            result,
-            DistributionCompatibility::RightMustRedistribute
-        );
+        let result = check_join_compatibility(&left, &right, &keys, &keys);
+        assert_eq!(result, DistributionCompatibility::RightMustRedistribute);
     }
 
     #[test]
@@ -762,29 +699,16 @@ mod tests {
             keys: keys.clone(),
             partition_count: 8,
         };
-        let result = check_join_compatibility(
-            &left, &right, &keys, &keys,
-        );
-        assert_eq!(
-            result,
-            DistributionCompatibility::LeftMustRedistribute
-        );
+        let result = check_join_compatibility(&left, &right, &keys, &keys);
+        assert_eq!(result, DistributionCompatibility::LeftMustRedistribute);
     }
 
     #[test]
     fn compat_both_arbitrary() {
         let left = DataDistribution::Arbitrary;
         let right = DataDistribution::Arbitrary;
-        let result = check_join_compatibility(
-            &left,
-            &right,
-            &[col("id")],
-            &[col("id")],
-        );
-        assert_eq!(
-            result,
-            DistributionCompatibility::BothMustRedistribute
-        );
+        let result = check_join_compatibility(&left, &right, &[col("id")], &[col("id")]);
+        assert_eq!(result, DistributionCompatibility::BothMustRedistribute);
     }
 
     #[test]
@@ -797,16 +721,8 @@ mod tests {
             keys: vec![col("b")],
             partition_count: 8,
         };
-        let result = check_join_compatibility(
-            &left,
-            &right,
-            &[col("x")],
-            &[col("y")],
-        );
-        assert_eq!(
-            result,
-            DistributionCompatibility::BothMustRedistribute
-        );
+        let result = check_join_compatibility(&left, &right, &[col("x")], &[col("y")]);
+        assert_eq!(result, DistributionCompatibility::BothMustRedistribute);
     }
 
     // --- should_broadcast ---
@@ -814,20 +730,20 @@ mod tests {
     #[test]
     fn broadcast_small_table() {
         assert!(should_broadcast(
-            1_000_000,    // 1 MB small
+            1_000_000,      // 1 MB small
             10_000_000_000, // 10 GB large
             10,
-            100_000_000,  // 100 MB threshold
+            100_000_000, // 100 MB threshold
         ));
     }
 
     #[test]
     fn broadcast_too_large() {
         assert!(!should_broadcast(
-            200_000_000,  // 200 MB - exceeds threshold
+            200_000_000, // 200 MB - exceeds threshold
             10_000_000_000,
             10,
-            100_000_000,  // 100 MB threshold
+            100_000_000, // 100 MB threshold
         ));
     }
 
@@ -841,8 +757,8 @@ mod tests {
         // When small * nodes > (small + large) * (nodes-1)/nodes,
         // shuffle is cheaper.
         assert!(!should_broadcast(
-            500_000_000,  // 500 MB
-            600_000_000,  // 600 MB
+            500_000_000, // 500 MB
+            600_000_000, // 600 MB
             100,
             1_000_000_000, // 1 GB threshold
         ));
@@ -949,11 +865,9 @@ mod tests {
             source: NodeId(0),
             targets: vec![NodeId(1), NodeId(2)],
         };
-        let json = serde_json::to_string(&s)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&s).expect("serialization should succeed");
         let deserialized: DistributionStrategy =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(s, deserialized);
     }
 
@@ -963,11 +877,9 @@ mod tests {
             keys: vec![col("id")],
             partition_count: 16,
         };
-        let json = serde_json::to_string(&d)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&d).expect("serialization should succeed");
         let deserialized: DataDistribution =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(d, deserialized);
     }
 
@@ -977,11 +889,9 @@ mod tests {
         let dre = DistributedRelExpr::new(plan)
             .with_distribution(DataDistribution::Replicated)
             .on_node(NodeId(0));
-        let json = serde_json::to_string(&dre)
-            .expect("serialization should succeed");
+        let json = serde_json::to_string(&dre).expect("serialization should succeed");
         let deserialized: DistributedRelExpr =
-            serde_json::from_str(&json)
-                .expect("deserialization should succeed");
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(dre, deserialized);
     }
 
@@ -998,20 +908,10 @@ mod tests {
 
     #[test]
     fn compat_single_partition_left() {
-        let left = DataDistribution::SinglePartition {
-            node: NodeId(0),
-        };
+        let left = DataDistribution::SinglePartition { node: NodeId(0) };
         let right = DataDistribution::Arbitrary;
-        let result = check_join_compatibility(
-            &left,
-            &right,
-            &[col("id")],
-            &[col("id")],
-        );
-        assert_eq!(
-            result,
-            DistributionCompatibility::BothMustRedistribute
-        );
+        let result = check_join_compatibility(&left, &right, &[col("id")], &[col("id")]);
+        assert_eq!(result, DistributionCompatibility::BothMustRedistribute);
     }
 
     #[test]

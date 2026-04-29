@@ -61,13 +61,7 @@ impl OtelAdapter {
         std::mem::take(&mut self.buffer)
     }
 
-    fn push(
-        &mut self,
-        name: &str,
-        kind: OtelMetricKind,
-        value: f64,
-        tags: &[(&str, &str)],
-    ) {
+    fn push(&mut self, name: &str, kind: OtelMetricKind, value: f64, tags: &[(&str, &str)]) {
         self.buffer.push(OtelMetric {
             name: name.to_string(),
             kind,
@@ -81,30 +75,15 @@ impl OtelAdapter {
 }
 
 impl MonitoringAdapter for OtelAdapter {
-    fn record_gauge(
-        &mut self,
-        name: &str,
-        value: f64,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_gauge(&mut self, name: &str, value: f64, tags: &[(&str, &str)]) {
         self.push(name, OtelMetricKind::Gauge, value, tags);
     }
 
-    fn record_histogram(
-        &mut self,
-        name: &str,
-        value: f64,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_histogram(&mut self, name: &str, value: f64, tags: &[(&str, &str)]) {
         self.push(name, OtelMetricKind::Histogram, value, tags);
     }
 
-    fn record_counter(
-        &mut self,
-        name: &str,
-        delta: u64,
-        tags: &[(&str, &str)],
-    ) {
+    fn record_counter(&mut self, name: &str, delta: u64, tags: &[(&str, &str)]) {
         self.push(name, OtelMetricKind::Sum, delta as f64, tags);
     }
 

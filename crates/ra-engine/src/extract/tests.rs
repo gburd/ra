@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)]
+#![expect(clippy::expect_used, clippy::panic, clippy::unwrap_used, reason = "test code")]
 
 use std::collections::HashMap;
 
@@ -1264,7 +1264,7 @@ fn extract_window_all_ranking_functions() {
     for wfn in &funcs {
         let expr = RelExpr::Window {
             functions: vec![WExpr {
-                function: wfn.clone(),
+                function: *wfn,
                 arg: Some(Expr::Column(ColumnRef::new("col"))),
                 partition_by: vec![],
                 order_by: vec![],

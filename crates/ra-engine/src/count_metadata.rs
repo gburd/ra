@@ -3,8 +3,8 @@
 //! Rewrites `COUNT(*)` aggregates over bare table scans into
 //! O(1) metadata lookups when safe. This avoids full table scans
 //! for simple row-count queries, mirroring optimizations found in
-//! PostgreSQL (`pg_stat_user_tables.n_live_tup`), SQL Server
-//! (`sys.dm_db_partition_stats.row_count`), and MongoDB
+//! `PostgreSQL` (`pg_stat_user_tables.n_live_tup`), SQL Server
+//! (`sys.dm_db_partition_stats.row_count`), and `MongoDB`
 //! (`estimatedDocumentCount()`).
 //!
 //! The rewrite is only applied when the aggregate has:
@@ -123,7 +123,7 @@ fn is_all_flag(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::egraph::{to_rec_expr, RelLang};
@@ -141,7 +141,7 @@ mod tests {
             .run(&rules)
     }
 
-    /// Build `SELECT COUNT(*) FROM table_name` as a RelExpr.
+    /// Build `SELECT COUNT(*) FROM table_name` as a `RelExpr`.
     fn count_star_query(table_name: &str) -> RelExpr {
         RelExpr::Aggregate {
             group_by: vec![],
@@ -278,7 +278,7 @@ mod tests {
         );
     }
 
-    /// Search all e-classes for a MetadataLookup node.
+    /// Search all e-classes for a `MetadataLookup` node.
     fn egraph_contains_metadata_lookup(runner: &Runner<RelLang, RelAnalysis>) -> bool {
         for class in runner.egraph.classes() {
             for node in &class.nodes {

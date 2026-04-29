@@ -38,11 +38,11 @@ pub struct ParserProfile {
     pub inherits_from: Option<String>,
     /// Feature flags from TOML (e.g., `sql_92 = true`, `sql_2023 = true`)
     pub features: HashMap<String, bool>,
-    /// Custom syntax options (e.g., `backticks = "true"` for MySQL)
+    /// Custom syntax options (e.g., `backticks = "true"` for `MySQL`)
     pub syntax: HashMap<String, String>,
     /// Supported operators (e.g., "@>", "@=", "<->" from vendor/extension profiles)
     pub operators: Vec<String>,
-    /// Supported function names (e.g., "string_agg", "GROUP_CONCAT")
+    /// Supported function names (e.g., `string_agg`, `GROUP_CONCAT`)
     pub functions: Vec<String>,
     /// Validation rules for parsing strictness
     pub validation: ValidationConfig,
@@ -50,11 +50,13 @@ pub struct ParserProfile {
 
 impl ParserProfile {
     /// Get the profile name.
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
     /// Create the universal profile (supports all dialects).
+    #[must_use]
     pub fn universal() -> Self {
         Self {
             name: "universal".to_string(),
@@ -139,6 +141,11 @@ impl ParserProfile {
     /// Infer the best profile from SQL text.
     ///
     /// Returns the detected profile and a confidence score (0.0-1.0).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if dialect detection fails or the inferred profile
+    /// cannot be loaded.
     pub fn infer(sql: &str) -> Result<(Self, f64), Box<dyn Error>> {
         use crate::parser::inference::DialectInference;
 
@@ -163,6 +170,7 @@ impl ParserProfile {
     }
 }
 
+#[expect(clippy::unwrap_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,7 +227,7 @@ mod tests {
 
         // Should detect PostgreSQL
         assert!(profile.name().contains("postgresql"));
-        assert!(confidence > 0.5, "Confidence too low: {}", confidence);
+        assert!(confidence > 0.5, "Confidence too low: {confidence}");
     }
 
     #[test]
@@ -232,6 +240,6 @@ mod tests {
 
         // Should detect MySQL
         assert!(profile.name().contains("mysql"));
-        assert!(confidence > 0.5, "Confidence too low: {}", confidence);
+        assert!(confidence > 0.5, "Confidence too low: {confidence}");
     }
 }

@@ -5,9 +5,9 @@
 //!
 //! These tests are currently ignored because the Lime grammar does not
 //! yet distinguish WITH RECURSIVE from WITH and produces CTE nodes
-//! instead of RecursiveCTE nodes.
+//! instead of `RecursiveCTE` nodes.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use ra_core::algebra::RelExpr;
 use ra_parser::sql_to_relexpr;

@@ -1,7 +1,5 @@
-//! Tests for UNNEST and TableFunction relational algebra operators,
+//! Tests for UNNEST and `TableFunction` relational algebra operators,
 //! and Array/ArrayIndex expression types.
-
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use ra_core::algebra::RelExpr;
 use ra_core::expr::{ColumnRef, Const, Expr};
@@ -12,10 +10,7 @@ use ra_core::expr::{ColumnRef, Const, Expr};
 #[expect(clippy::panic, reason = "test code uses panic for assertions")]
 fn unnest_standalone_has_no_children() {
     let expr = RelExpr::unnest(
-        Expr::Array(vec![
-            Expr::Const(Const::Int(1)),
-            Expr::Const(Const::Int(2)),
-        ]),
+        Expr::Array(vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(2))]),
         Some("val".to_owned()),
     );
 
@@ -60,9 +55,7 @@ fn unnest_lateral_has_input_child() {
 #[expect(clippy::panic, reason = "test code uses panic for assertions")]
 fn unnest_with_ordinality() {
     let expr = RelExpr::Unnest {
-        expr: Expr::Array(vec![
-            Expr::Const(Const::String("a".to_owned())),
-        ]),
+        expr: Expr::Array(vec![Expr::Const(Const::String("a".to_owned()))]),
         alias: None,
         input: None,
         with_ordinality: true,
@@ -85,19 +78,17 @@ fn unnest_with_ordinality() {
 fn table_function_standalone() {
     let expr = RelExpr::table_function(
         "generate_series",
-        vec![
-            Expr::Const(Const::Int(1)),
-            Expr::Const(Const::Int(10)),
-        ],
-        vec![(
-            "generate_series".to_owned(),
-            "Int64".to_owned(),
-        )],
+        vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(10))],
+        vec![("generate_series".to_owned(), "Int64".to_owned())],
     );
 
     assert!(expr.children().is_empty());
     if let RelExpr::TableFunction {
-        name, args, columns, input, ..
+        name,
+        args,
+        columns,
+        input,
+        ..
     } = &expr
     {
         assert_eq!(name, "generate_series");
@@ -151,17 +142,11 @@ fn array_expr_creation() {
 fn array_index_expr_creation() {
     let arr = Expr::Column(ColumnRef::new("my_array"));
     let idx = Expr::Const(Const::Int(2));
-    let access = Expr::ArrayIndex(
-        Box::new(arr),
-        Box::new(idx),
-    );
+    let access = Expr::ArrayIndex(Box::new(arr), Box::new(idx));
 
     if let Expr::ArrayIndex(array, index) = &access {
         assert!(matches!(array.as_ref(), Expr::Column(_)));
-        assert!(matches!(
-            index.as_ref(),
-            Expr::Const(Const::Int(2))
-        ));
+        assert!(matches!(index.as_ref(), Expr::Const(Const::Int(2))));
     } else {
         panic!("expected ArrayIndex");
     }
@@ -171,10 +156,7 @@ fn array_index_expr_creation() {
 
 #[test]
 fn unnest_collects_columns_from_expr() {
-    let expr = RelExpr::unnest(
-        Expr::Column(ColumnRef::qualified("t", "tags")),
-        None,
-    );
+    let expr = RelExpr::unnest(Expr::Column(ColumnRef::qualified("t", "tags")), None);
 
     let cols = expr.referenced_columns();
     assert!(
@@ -209,10 +191,7 @@ fn table_function_collects_columns_from_args() {
 
 #[test]
 fn unnest_does_not_reference_cte() {
-    let expr = RelExpr::unnest(
-        Expr::Array(vec![Expr::Const(Const::Int(1))]),
-        None,
-    );
+    let expr = RelExpr::unnest(Expr::Array(vec![Expr::Const(Const::Int(1))]), None);
     assert!(!expr.references_cte("my_cte"));
 }
 
@@ -222,11 +201,7 @@ fn unnest_lateral_delegates_cte_reference_to_input() {
         table: "my_cte".to_owned(),
         alias: None,
     };
-    let expr = RelExpr::unnest_lateral(
-        Expr::Const(Const::Int(1)),
-        cte_scan,
-        None,
-    );
+    let expr = RelExpr::unnest_lateral(Expr::Const(Const::Int(1)), cte_scan, None);
 
     // The CTE reference detection depends on Scan
     // matching the CTE name -- but Scan doesn't track

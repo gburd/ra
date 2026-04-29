@@ -49,6 +49,7 @@ impl ConvergenceDetector {
     /// # Arguments
     /// * `window_size` - Number of consecutive iterations to check (typically 2-3)
     /// * `min_growth_rate` - Minimum growth rate to consider progress (e.g., 0.05 = 5%)
+    #[must_use]
     pub fn new(window_size: usize, min_growth_rate: f64) -> Self {
         Self {
             window_size,
@@ -64,6 +65,7 @@ impl ConvergenceDetector {
     /// Defaults:
     /// - Window size: 3 iterations
     /// - Min growth rate: 5%
+    #[must_use]
     pub fn default_settings() -> Self {
         Self::new(3, 0.05)
     }
@@ -92,6 +94,7 @@ impl ConvergenceDetector {
     /// Returns `Converged` if:
     /// 1. No new equivalences for `window_size` consecutive iterations, OR
     /// 2. Node growth rate < `min_growth_rate` for `window_size` consecutive iterations
+    #[must_use]
     pub fn should_terminate(&self) -> TerminationDecision {
         // Need enough data for decision
         if self.recent_unions.len() < self.window_size {
@@ -147,6 +150,7 @@ impl ConvergenceDetector {
     }
 
     /// Get current window statistics for debugging.
+    #[must_use]
     pub fn stats(&self) -> ConvergenceStats {
         let avg_unions = if self.recent_unions.is_empty() {
             0.0
@@ -168,7 +172,7 @@ impl ConvergenceDetector {
                 }
             }
             if count > 0 {
-                total_growth / count as f64
+                total_growth / f64::from(count)
             } else {
                 0.0
             }

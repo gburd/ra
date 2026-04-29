@@ -224,7 +224,6 @@ impl ProfileSelector {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -296,10 +295,7 @@ mod tests {
 
     #[test]
     fn lazy_low_priority() {
-        assert_eq!(
-            StatisticsProfile::lazy().priority,
-            GatheringPriority::Low
-        );
+        assert_eq!(StatisticsProfile::lazy().priority, GatheringPriority::Low);
     }
 
     #[test]
@@ -400,8 +396,7 @@ mod tests {
             .into_iter()
             .map(|p| p.name)
             .collect();
-        let unique: std::collections::HashSet<&String> =
-            names.iter().collect();
+        let unique: std::collections::HashSet<&String> = names.iter().collect();
         assert_eq!(names.len(), unique.len());
     }
 
@@ -529,10 +524,8 @@ mod tests {
     #[test]
     fn profile_serialize_roundtrip() {
         let p = StatisticsProfile::standard();
-        let json = serde_json::to_string(&p)
-            .expect("serialize");
-        let d: StatisticsProfile = serde_json::from_str(&json)
-            .expect("deserialize");
+        let json = serde_json::to_string(&p).expect("serialize");
+        let d: StatisticsProfile = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(p, d);
     }
 }

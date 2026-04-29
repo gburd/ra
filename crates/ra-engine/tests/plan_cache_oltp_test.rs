@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Synthetic OLTP workload tests for the plan cache (RFC 0060).
 //!
 //! Validates cache behavior under realistic OLTP conditions:
@@ -168,7 +169,7 @@ fn percentile(sorted: &[Duration], pct: f64) -> Duration {
     if sorted.is_empty() {
         return Duration::ZERO;
     }
-    #[allow(
+    #[expect(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss
@@ -326,9 +327,7 @@ fn prepared_stmt_string_bind_values() {
             let qfp = QueryFingerprint::from_rel_expr(&q);
             assert!(
                 cache.lookup(&qfp).is_some(),
-                "String bind '{}' with threshold {} should hit",
-                status,
-                threshold,
+                "String bind '{status}' with threshold {threshold} should hit",
             );
         }
     }
@@ -576,17 +575,15 @@ fn latency_cached_vs_uncached_percentiles() {
     );
 
     // Report (visible in test output with --nocapture)
-    #[allow(clippy::print_stdout)]
+    #[expect(clippy::print_stdout)]
     {
         println!("\n=== Latency Comparison (200 queries) ===");
         println!("         {:>12} {:>12} {:>12}", "p50", "p95", "p99");
         println!(
-            "Uncached {:>12?} {:>12?} {:>12?}",
-            uncached_p50, uncached_p95, uncached_p99,
+            "Uncached {uncached_p50:>12?} {uncached_p95:>12?} {uncached_p99:>12?}",
         );
         println!(
-            "Cached   {:>12?} {:>12?} {:>12?}",
-            cached_p50, cached_p95, cached_p99,
+            "Cached   {cached_p50:>12?} {cached_p95:>12?} {cached_p99:>12?}",
         );
         if !uncached_p50.is_zero() {
             let speedup = uncached_p50.as_nanos() as f64 / cached_p50.as_nanos().max(1) as f64;
@@ -639,7 +636,7 @@ fn throughput_cached_exceeds_uncached() {
          uncached ({uncached_qps:.0} q/s)",
     );
 
-    #[allow(clippy::print_stdout)]
+    #[expect(clippy::print_stdout)]
     {
         println!("\n=== Throughput (500 queries) ===");
         println!(
@@ -772,7 +769,7 @@ fn per_template_hit_rate_report() {
     }
 
     // Report
-    #[allow(clippy::print_stdout)]
+    #[expect(clippy::print_stdout)]
     {
         println!("\n=== Per-Template Hit Rate (200 queries each) ===",);
         println!(
@@ -792,7 +789,7 @@ fn per_template_hit_rate_report() {
             rate * 100.0,
         );
 
-        #[allow(clippy::print_stdout)]
+        #[expect(clippy::print_stdout)]
         {
             println!(
                 "{:<20} {:>6} {:>6} {:>7.2}%",
@@ -805,7 +802,7 @@ fn per_template_hit_rate_report() {
     }
 
     let total_stats = cache.stats();
-    #[allow(clippy::print_stdout)]
+    #[expect(clippy::print_stdout)]
     {
         println!("{:-<44}", "");
         println!(
@@ -885,7 +882,7 @@ fn comprehensive_oltp_report() {
         v.sort();
     }
 
-    #[allow(clippy::print_stdout)]
+    #[expect(clippy::print_stdout)]
     {
         println!("\n=== Comprehensive OLTP Report (1000 queries) ===",);
         println!();
@@ -907,7 +904,7 @@ fn comprehensive_oltp_report() {
 
         let speedup = uc_p50.as_nanos() as f64 / c_p50.as_nanos().max(1) as f64;
 
-        #[allow(clippy::print_stdout)]
+        #[expect(clippy::print_stdout)]
         {
             println!(
                 "{:<14} | {:>10?} {:>10?} {:>10?} | {:>10?} {:>10?} {:>10?} | {:>7.1}x",
@@ -919,7 +916,7 @@ fn comprehensive_oltp_report() {
     // Cache stats
     let stats = opt_cached2.cache_stats().expect("cache enabled");
 
-    #[allow(clippy::print_stdout)]
+    #[expect(clippy::print_stdout)]
     {
         println!();
         println!("=== Cache Statistics ===");

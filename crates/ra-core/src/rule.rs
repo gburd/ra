@@ -59,9 +59,7 @@ pub struct RuleMetadata {
 }
 
 /// Categories of optimization rules.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RuleCategory {
     /// Logical-to-logical transformations (e.g., predicate pushdown).
     Logical,
@@ -92,6 +90,7 @@ impl std::fmt::Display for RuleCategory {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,17 +118,13 @@ mod tests {
     fn rule_category_display() {
         assert_eq!(RuleCategory::Logical.to_string(), "Logical");
         assert_eq!(RuleCategory::Physical.to_string(), "Physical");
-        assert_eq!(
-            RuleCategory::Implementation.to_string(),
-            "Implementation"
-        );
+        assert_eq!(RuleCategory::Implementation.to_string(), "Implementation");
     }
 
     #[test]
     fn rule_application_roundtrip() {
         let before = RelExpr::scan("t");
-        let after =
-            RelExpr::scan("t").filter(Expr::Const(Const::Bool(true)));
+        let after = RelExpr::scan("t").filter(Expr::Const(Const::Bool(true)));
 
         let app = RuleApplication {
             rule_id: "test-rule".into(),
@@ -137,12 +132,80 @@ mod tests {
             after: after.clone(),
         };
 
-        let json = serde_json::to_string(&app)
-            .expect("serialization should succeed");
-        let deserialized: RuleApplication = serde_json::from_str(&json)
-            .expect("deserialization should succeed");
+        let json = serde_json::to_string(&app).expect("serialization should succeed");
+        let deserialized: RuleApplication =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.rule_id, "test-rule");
         assert_eq!(deserialized.before, before);
         assert_eq!(deserialized.after, after);
+    }
+
+    #[test]
+    fn rule_metadata_serialization_roundtrip() {
+        let meta = RuleMetadata {
+            id: "filter-pushdown".into(),
+            name: "Filter Pushdown".into(),
+            description: "Push filters below joins".into(),
+            category: RuleCategory::Logical,
+            databases: vec!["postgresql".into(), "mysql".into()],
+            priority: 5,
+            preconditions: vec![],
+        };
+
+        let json = serde_json::to_string(&meta).expect("serialization should succeed");
+        let deserialized: RuleMetadata =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(meta, deserialized);
+    }
+
+    #[test]
+    fn rule_category_equality() {
+        assert_eq!(RuleCategory::Logical, RuleCategory::Logical);
+        assert_ne!(RuleCategory::Logical, RuleCategory::Physical);
+        assert_ne!(RuleCategory::Physical, RuleCategory::Implementation);
+    }
+
+    #[test]
+    fn rule_metadata_with_databases() {
+        let meta = RuleMetadata {
+            id: "test".into(),
+            name: "Test".into(),
+            description: "desc".into(),
+            category: RuleCategory::Physical,
+            databases: vec!["duckdb".into()],
+            priority: 0,
+            preconditions: vec![],
+        };
+
+        assert_eq!(meta.databases.len(), 1);
+        assert_eq!(meta.databases[0], "duckdb");
+        assert_eq!(meta.priority, 0);
+    }
+
+    #[test]
+    fn rule_metadata_default_preconditions() {
+        // Deserialize with missing preconditions field to test #[serde(default)]
+        let json = r#"{
+            "id": "r1",
+            "name": "Rule 1",
+            "description": "A rule",
+            "category": "Logical",
+            "databases": [],
+            "priority": 1
+        }"#;
+        let meta: RuleMetadata =
+            serde_json::from_str(json).expect("deserialization should succeed");
+        assert!(meta.preconditions.is_empty());
+    }
+
+    #[test]
+    fn rule_application_clone() {
+        let app = RuleApplication {
+            rule_id: "r".into(),
+            before: RelExpr::scan("a"),
+            after: RelExpr::scan("b"),
+        };
+        let cloned = app.clone();
+        assert_eq!(app, cloned);
     }
 }

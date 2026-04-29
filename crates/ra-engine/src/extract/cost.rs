@@ -109,10 +109,6 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
                 120.0 * storage_factor
             }
-            RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => {
-                // Combining bitmaps is cheap (bitwise operations)
-                0.1
-            }
             RelLang::BitmapHeapScan(_) => {
                 // Heap access after bitmap: sequential IO at a fraction of full scan
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;

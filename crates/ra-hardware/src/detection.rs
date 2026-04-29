@@ -47,8 +47,8 @@ fn detect_hardware_inner() -> HardwareProfile {
         cpu_memory_bandwidth_gbps: detect_memory_bandwidth(),
         l2_cache_bytes: detect_l2_cache(),
         l3_cache_bytes: detect_l3_cache(),
-        l3_latency_ns: 12.0,        // Reasonable default
-        dram_latency_ns: 80.0,      // Reasonable default
+        l3_latency_ns: 12.0,   // Reasonable default
+        dram_latency_ns: 80.0, // Reasonable default
         simd_width_bits: detect_simd_width(),
         numa_nodes: detect_numa_nodes(),
         memory_level_parallelism: 10, // Reasonable default for modern CPUs
@@ -116,11 +116,7 @@ fn detect_cpu_cores() -> u32 {
         let cores_per_socket: u32 = content
             .lines()
             .filter(|line| line.starts_with("cpu cores"))
-            .filter_map(|line| {
-                line.split(':')
-                    .nth(1)
-                    .and_then(|s| s.trim().parse().ok())
-            })
+            .filter_map(|line| line.split(':').nth(1).and_then(|s| s.trim().parse().ok()))
             .next()
             .unwrap_or(1);
 
@@ -245,9 +241,7 @@ fn detect_simd_width() -> u32 {
     use std::process::Command;
 
     // Check for AVX512, AVX2, SSE support
-    let output = Command::new("sysctl")
-        .args(["-a"])
-        .output();
+    let output = Command::new("sysctl").args(["-a"]).output();
 
     if let Ok(output) = output {
         if let Ok(content) = String::from_utf8(output.stdout) {

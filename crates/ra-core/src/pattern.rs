@@ -173,20 +173,12 @@ impl Bindings {
     }
 
     /// Bind a relational expression to a variable name.
-    pub fn bind_rel(
-        &mut self,
-        name: impl Into<String>,
-        expr: RelExpr,
-    ) {
+    pub fn bind_rel(&mut self, name: impl Into<String>, expr: RelExpr) {
         self.rel_bindings.insert(name.into(), expr);
     }
 
     /// Bind a scalar expression to a variable name.
-    pub fn bind_expr(
-        &mut self,
-        name: impl Into<String>,
-        expr: Expr,
-    ) {
+    pub fn bind_expr(&mut self, name: impl Into<String>, expr: Expr) {
         self.expr_bindings.insert(name.into(), expr);
     }
 }
@@ -211,21 +203,13 @@ impl Pattern {
         }
     }
 
-    #[expect(clippy::too_many_lines, reason = "comprehensive pattern matching logic; refactoring would obscure the match structure")]
-    fn do_match(
-        &self,
-        expr: &RelExpr,
-        bindings: &mut Bindings,
-    ) -> bool {
+    fn do_match(&self, expr: &RelExpr, bindings: &mut Bindings) -> bool {
         match (self, expr) {
             (Self::Wildcard(var), _) => {
                 bindings.bind_rel(&var.name, expr.clone());
                 true
             }
-            (
-                Self::Scan { table: pat_table },
-                RelExpr::Scan { table, .. },
-            ) => {
+            (Self::Scan { table: pat_table }, RelExpr::Scan { table, .. }) => {
                 pat_table.as_ref().is_none_or(|pt| pt == table)
             }
             (
@@ -235,42 +219,14 @@ impl Pattern {
                 },
                 RelExpr::Filter { input, .. },
             )
-            | (
-                Self::Project {
-                    input: pat_input,
-                },
-                RelExpr::Project { input, .. },
-            )
-            | (
-                Self::Aggregate {
-                    input: pat_input,
-                },
-                RelExpr::Aggregate { input, .. },
-            )
-            | (
-                Self::Sort {
-                    input: pat_input,
-                },
-                RelExpr::Sort { input, .. },
-            )
-            | (
-                Self::Limit {
-                    input: pat_input,
-                },
-                RelExpr::Limit { input, .. },
-            )
-            | (
-                Self::Window {
-                    input: pat_input,
-                },
-                RelExpr::Window { input, .. },
-            )
-            | (
-                Self::Distinct {
-                    input: pat_input,
-                },
-                RelExpr::Distinct { input, .. },
-            ) => pat_input.do_match(input, bindings),
+            | (Self::Project { input: pat_input }, RelExpr::Project { input, .. })
+            | (Self::Aggregate { input: pat_input }, RelExpr::Aggregate { input, .. })
+            | (Self::Sort { input: pat_input }, RelExpr::Sort { input, .. })
+            | (Self::Limit { input: pat_input }, RelExpr::Limit { input, .. })
+            | (Self::Window { input: pat_input }, RelExpr::Window { input, .. })
+            | (Self::Distinct { input: pat_input }, RelExpr::Distinct { input, .. }) => {
+                pat_input.do_match(input, bindings)
+            }
             (
                 Self::Join {
                     join_type: pat_jt,
@@ -289,8 +245,7 @@ impl Pattern {
                         return false;
                     }
                 }
-                pat_left.do_match(left, bindings)
-                    && pat_right.do_match(right, bindings)
+                pat_left.do_match(left, bindings) && pat_right.do_match(right, bindings)
             }
             (
                 Self::Union {
@@ -312,10 +267,7 @@ impl Pattern {
                     right: pat_right,
                 },
                 RelExpr::Except { left, right, .. },
-            ) => {
-                pat_left.do_match(left, bindings)
-                    && pat_right.do_match(right, bindings)
-            }
+            ) => pat_left.do_match(left, bindings) && pat_right.do_match(right, bindings),
             (
                 Self::CTE {
                     definition: pat_def,
@@ -324,10 +276,7 @@ impl Pattern {
                 RelExpr::CTE {
                     definition, body, ..
                 },
-            ) => {
-                pat_def.do_match(definition, bindings)
-                    && pat_body.do_match(body, bindings)
-            }
+            ) => pat_def.do_match(definition, bindings) && pat_body.do_match(body, bindings),
             (
                 Self::RecursiveCTE {
                     base_case: pat_base,
@@ -350,6 +299,7 @@ impl Pattern {
     }
 }
 
+#[expect(clippy::expect_used, reason = "test code")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,8 +340,7 @@ mod tests {
             predicate: None,
             input: Box::new(Pattern::wildcard("child")),
         };
-        let expr =
-            RelExpr::scan("t").filter(Expr::Const(Const::Bool(true)));
+        let expr = RelExpr::scan("t").filter(Expr::Const(Const::Bool(true)));
         let bindings = pattern.match_expr(&expr);
         assert!(bindings.is_some());
         let b = bindings.expect("already checked");

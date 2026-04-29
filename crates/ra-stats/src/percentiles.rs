@@ -84,12 +84,13 @@ impl TDigest {
             return;
         }
 
-        let mut all: Vec<Centroid> =
-            self.centroids.drain(..).chain(self.unmerged.drain(..)).collect();
+        let mut all: Vec<Centroid> = self
+            .centroids
+            .drain(..)
+            .chain(self.unmerged.drain(..))
+            .collect();
 
-        all.sort_by(|a, b| {
-            a.mean.partial_cmp(&b.mean).unwrap_or(CmpOrd::Equal)
-        });
+        all.sort_by(|a, b| a.mean.partial_cmp(&b.mean).unwrap_or(CmpOrd::Equal));
 
         if all.is_empty() {
             return;
@@ -106,9 +107,8 @@ impl TDigest {
 
             if current.weight + incoming.weight <= max_weight {
                 let new_weight = current.weight + incoming.weight;
-                current.mean = current.mean
-                    + (incoming.mean - current.mean) * incoming.weight
-                        / new_weight;
+                current.mean =
+                    current.mean + (incoming.mean - current.mean) * incoming.weight / new_weight;
                 current.weight = new_weight;
             } else {
                 weight_so_far += current.weight;
@@ -171,9 +171,7 @@ impl TDigest {
                 if i == len - 1 {
                     let overshoot = cumulative - target;
                     let t = overshoot / half_w;
-                    return Some(
-                        self.max_val - t * (self.max_val - c.mean),
-                    );
+                    return Some(self.max_val - t * (self.max_val - c.mean));
                 }
                 let next = &self.centroids[i + 1];
                 let gap = next.mean - c.mean;
@@ -273,10 +271,7 @@ impl PercentileTracker {
     }
 
     /// Create a tracker with custom compression factor.
-    pub fn with_compression(
-        name: impl Into<String>,
-        compression: f64,
-    ) -> Self {
+    pub fn with_compression(name: impl Into<String>, compression: f64) -> Self {
         Self {
             digest: TDigest::new(compression),
             name: name.into(),
@@ -346,10 +341,11 @@ pub struct PercentileSummary {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::float_cmp,
     clippy::expect_used,
-    clippy::cast_lossless
+    clippy::cast_lossless,
+    reason = "test code"
 )]
 mod tests {
     use super::*;
@@ -392,18 +388,9 @@ mod tests {
         let p99 = td.p99().expect("p99");
 
         // Loose bounds: t-digest is approximate
-        assert!(
-            (p50 - 500.0).abs() < 50.0,
-            "p50 = {p50}, expected ~500"
-        );
-        assert!(
-            (p90 - 900.0).abs() < 50.0,
-            "p90 = {p90}, expected ~900"
-        );
-        assert!(
-            (p99 - 990.0).abs() < 50.0,
-            "p99 = {p99}, expected ~990"
-        );
+        assert!((p50 - 500.0).abs() < 50.0, "p50 = {p50}, expected ~500");
+        assert!((p90 - 900.0).abs() < 50.0, "p90 = {p90}, expected ~900");
+        assert!((p99 - 990.0).abs() < 50.0, "p99 = {p99}, expected ~990");
     }
 
     #[test]

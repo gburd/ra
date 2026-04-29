@@ -1,3 +1,4 @@
+#![expect(clippy::panic, reason = "test assertions")]
 //! Comprehensive end-to-end tests for incremental optimization.
 //!
 //! Validates the full loop:
@@ -13,7 +14,8 @@
 //! - Integration with streaming stats pipeline
 
 #![cfg(feature = "timeline")]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![expect(clippy::expect_used)]
+#![expect(clippy::float_cmp, reason = "exact float literals in tests")]
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -949,7 +951,7 @@ fn multi_dimension_dependency_any_triggers() {
 // 6. Performance and Latency Tests
 // ================================================================
 
-/// Measure end-to-end latency: detect + compute_affected +
+/// Measure end-to-end latency: detect + `compute_affected` +
 /// invalidate for a realistic setup with 100 plans.
 #[test]
 fn end_to_end_latency_under_100ms() {
@@ -986,8 +988,7 @@ fn end_to_end_latency_under_100ms() {
 
     assert!(
         elapsed.as_millis() < 100,
-        "end-to-end latency should be <100ms, got {:?}",
-        elapsed,
+        "end-to-end latency should be <100ms, got {elapsed:?}",
     );
     assert_eq!(affected.len(), 1);
 }
@@ -1027,8 +1028,7 @@ fn throughput_100_stat_changes() {
     assert!(
         elapsed.as_secs() < 10,
         "100 invalidation cycles should complete in <10s, \
-         got {:?}",
-        elapsed,
+         got {elapsed:?}",
     );
 }
 
@@ -1088,7 +1088,7 @@ fn high_frequency_changes_stable() {
 // 7. Resource ID and Dependency Tests
 // ================================================================
 
-/// Verify PlanDependencies::all_resources enumerates every dimension.
+/// Verify `PlanDependencies::all_resources` enumerates every dimension.
 #[test]
 fn plan_dependencies_all_resources_complete() {
     let deps = PlanDependencies {
@@ -1118,7 +1118,7 @@ fn plan_dependencies_all_resources_complete() {
          histogram, fact)"
     );
 
-    let keys: Vec<String> = resources.iter().map(|r| r.key()).collect();
+    let keys: Vec<String> = resources.iter().map(ra_engine::ResourceId::key).collect();
     assert!(keys.contains(&"users.row_count".to_string()));
     assert!(keys.contains(&"users.idx_email".to_string()));
     assert!(keys.contains(&"users.email.ndistinct".to_string()));
@@ -1126,7 +1126,7 @@ fn plan_dependencies_all_resources_complete() {
     assert!(keys.contains(&"pk_users".to_string()));
 }
 
-/// Verify change_ratio edge cases.
+/// Verify `change_ratio` edge cases.
 #[test]
 fn change_ratio_edge_cases() {
     assert!((change_ratio(100.0, 100.0) - 1.0).abs() < 1e-10);
@@ -1169,7 +1169,7 @@ fn unregister_plan_deps_cleanup() {
 // 8. Integration with Optimizer Re-optimization
 // ================================================================
 
-/// Verify that optimize_incremental works with DeltaSet for
+/// Verify that `optimize_incremental` works with `DeltaSet` for
 /// incremental updates.
 #[test]
 fn optimizer_incremental_reopt_small_delta() {
@@ -1217,7 +1217,7 @@ fn optimizer_incremental_reopt_small_delta() {
     }
 }
 
-/// Verify that optimize_incremental triggers full reoptimization
+/// Verify that `optimize_incremental` triggers full reoptimization
 /// for large deltas.
 #[test]
 fn optimizer_incremental_reopt_large_delta() {
@@ -1278,7 +1278,7 @@ fn reinsertion_after_hard_invalidation() {
     cache.insert(fp.clone(), plan.clone());
 
     // Hard invalidate (cold entry)
-    cache.invalidate(&[fp.clone()]);
+    cache.invalidate(std::slice::from_ref(&fp));
     assert!(cache.lookup(&fp).is_none());
 
     // Re-insert
@@ -1337,7 +1337,7 @@ fn kl_divergence_symmetric() {
     );
 }
 
-/// Verify that from_histogram correctly normalizes bucket
+/// Verify that `from_histogram` correctly normalizes bucket
 /// frequencies.
 #[test]
 fn histogram_digest_normalization() {

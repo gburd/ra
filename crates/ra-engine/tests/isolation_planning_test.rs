@@ -1,8 +1,9 @@
 //! Integration tests for isolation-aware query planning (RFC 0058).
 //!
 //! Validates that transaction isolation context influences cost
-//! adjustments correctly across PostgreSQL, MySQL, Oracle, SQLite,
-//! and DuckDB backends.
+#![expect(clippy::float_cmp, reason = "test code comparing cost adjustments to zero")]
+//! adjustments correctly across `PostgreSQL`, `MySQL`, Oracle, `SQLite`,
+//! and `DuckDB` backends.
 
 use ra_core::isolation::{BackendKind, IsolationLevel, MultiXactPressure, TransactionContext};
 use ra_engine::isolation_cost::{isolation_cost_adjustment, IsolationCostConfig, PlanEstimates};
@@ -309,8 +310,10 @@ fn optimizer_config_default_has_no_transaction_context() {
 
 #[test]
 fn optimizer_config_accepts_transaction_context() {
-    let mut config = ra_engine::OptimizerConfig::default();
-    config.transaction_context = Some(TransactionContext::pg_serializable());
+    let config = ra_engine::OptimizerConfig {
+        transaction_context: Some(TransactionContext::pg_serializable()),
+        ..ra_engine::OptimizerConfig::default()
+    };
     assert!(config.transaction_context.is_some());
 }
 

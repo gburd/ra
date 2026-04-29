@@ -1,11 +1,11 @@
-//! DocumentDB (MongoDB-compatible) query optimization.
+//! `DocumentDB` (MongoDB-compatible) query optimization.
 //!
 //! Provides BSON-aware selectivity estimation, GIN index cost
 //! modeling, and rewrite rules for queries originating from
-//! Microsoft's documentdb PostgreSQL extension.
+//! Microsoft's documentdb `PostgreSQL` extension.
 //!
-//! DocumentDB translates MongoDB wire protocol operations into
-//! PostgreSQL queries over BSON-typed columns using custom
+//! `DocumentDB` translates `MongoDB` wire protocol operations into
+//! `PostgreSQL` queries over BSON-typed columns using custom
 //! operators (`@=`, `@>`, `@<`, `@*=`, `@~`, etc.). The default
 //! selectivity for all these operators is a fixed 0.01 (1%),
 //! leading to poor join ordering and scan strategy selection.
@@ -18,7 +18,7 @@
 //! - Rewriting filter patterns to exploit GIN index structure
 //!
 //! All optimizations are non-fatal: when BSON parsing or metadata
-//! queries fail, the optimizer falls back to standard PostgreSQL
+//! queries fail, the optimizer falls back to standard `PostgreSQL`
 //! behavior.
 //!
 //! See: `rfcs/text/0062-documentdb-query-optimization.md`
@@ -36,7 +36,7 @@ use crate::parse_var;
 // ------------------------------------------------------------------
 
 /// MongoDB/BSON operators that documentdb translates to custom
-/// PostgreSQL operators.
+/// `PostgreSQL` operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BsonOperator {
     /// `$eq` maps to `@=` -- exact equality on a BSON path.
@@ -66,7 +66,7 @@ pub enum BsonOperator {
 }
 
 impl BsonOperator {
-    /// Parse a PostgreSQL custom operator name into a BSON operator.
+    /// Parse a `PostgreSQL` custom operator name into a BSON operator.
     #[must_use]
     pub fn from_pg_operator(op: &str) -> Option<Self> {
         match op {
@@ -301,7 +301,7 @@ impl Default for GinBsonCostParams {
 
 /// Estimate the cost of a GIN index scan for a single-path query.
 ///
-/// Cost = n_terms * term_lookup + n_matching * (recheck + heap_fetch)
+/// Cost = `n_terms` * `term_lookup` + `n_matching` * (recheck + `heap_fetch`)
 #[must_use]
 pub fn gin_scan_cost(
     total_rows: f64,
@@ -368,7 +368,7 @@ pub fn gin_vs_sequential_ratio(
 /// A recommendation to create a GIN index for BSON queries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GinIndexRecommendation {
-    /// Collection name (from documentdb_api.collection).
+    /// Collection name (from `documentdb_api.collection`).
     pub collection: String,
     /// BSON paths that should be indexed.
     pub paths: Vec<String>,
@@ -518,6 +518,7 @@ pub struct QueryPattern {
 impl QueryPattern {
     /// Estimate combined selectivity for all predicates.
     #[must_use]
+    #[expect(clippy::similar_names, reason = "sels and self are distinct concepts")]
     pub fn estimated_selectivity(&self) -> f64 {
         let sels: Vec<f64> = self
             .predicates
@@ -598,7 +599,7 @@ pub fn documentdb_rewrite_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 /// Condition: check if a predicate is a BSON operator filter.
 ///
 /// In the e-graph, BSON operators appear as function calls (func
-/// nodes) with operator names like "bson_eq", "bson_gt", etc., or
+/// nodes) with operator names like "`bson_eq`", "`bson_gt`", etc., or
 /// as standard comparison operators applied to BSON function
 /// results. We check for the presence of func nodes or json-access
 /// nodes which indicate BSON column access.
@@ -633,14 +634,9 @@ fn contains_bson_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, dep
             | RelLang::Lt([l, r])
             | RelLang::Le([l, r])
             | RelLang::Gt([l, r])
-            | RelLang::Ge([l, r]) => {
-                if contains_bson_pattern(egraph, *l, depth - 1)
-                    || contains_bson_pattern(egraph, *r, depth - 1)
-                {
-                    return true;
-                }
-            }
-            RelLang::And([l, r]) | RelLang::Or([l, r]) => {
+            | RelLang::Ge([l, r])
+            | RelLang::And([l, r])
+            | RelLang::Or([l, r]) => {
                 if contains_bson_pattern(egraph, *l, depth - 1)
                     || contains_bson_pattern(egraph, *r, depth - 1)
                 {
@@ -665,7 +661,7 @@ fn contains_bson_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, dep
 /// Errors specific to documentdb optimization.
 ///
 /// All errors are non-fatal: the optimizer falls back to treating
-/// the query as standard PostgreSQL.
+/// the query as standard `PostgreSQL`.
 #[derive(Debug, thiserror::Error)]
 pub enum DocumentDbError {
     /// BSON path extraction failed.
@@ -726,7 +722,7 @@ pub fn gin_bson_scan_cost_factor() -> f64 {
 // ------------------------------------------------------------------
 // See: `rfcs/text/0080-documentdb-rum-bson-optimization.md`
 
-/// DocumentDB's four RUM operator families for BSON indexing.
+/// `DocumentDB`'s four RUM operator families for BSON indexing.
 ///
 /// These correspond to the operator families registered by
 /// `pg_documentdb_extended_rum` and determine which scan
@@ -806,12 +802,14 @@ impl std::fmt::Display for BsonRumOpfamily {
 pub fn bson_op_to_rum_opfamily(op: BsonOperator) -> Option<BsonRumOpfamily> {
     match op {
         BsonOperator::Eq => Some(BsonRumOpfamily::Hashed),
-        BsonOperator::Gt | BsonOperator::Gte | BsonOperator::Lt | BsonOperator::Lte => {
-            Some(BsonRumOpfamily::SinglePath)
-        }
-        BsonOperator::In => Some(BsonRumOpfamily::SinglePath),
-        BsonOperator::All | BsonOperator::ElemMatch => Some(BsonRumOpfamily::SinglePath),
-        BsonOperator::Regex => Some(BsonRumOpfamily::SinglePath),
+        BsonOperator::Gt
+        | BsonOperator::Gte
+        | BsonOperator::Lt
+        | BsonOperator::Lte
+        | BsonOperator::In
+        | BsonOperator::All
+        | BsonOperator::ElemMatch
+        | BsonOperator::Regex => Some(BsonRumOpfamily::SinglePath),
         BsonOperator::Ne | BsonOperator::Nin | BsonOperator::Exists => None,
     }
 }
@@ -824,17 +822,21 @@ pub fn bson_op_to_rum_opfamily(op: BsonOperator) -> Option<BsonRumOpfamily> {
 #[must_use]
 pub fn bson_op_benefits_from_rum(op: BsonOperator) -> bool {
     match op {
-        // $text-related: RUM provides in-index phrase verification
-        // and distance ordering, avoiding heap recheck.
-        BsonOperator::Regex => true,
-        // Array ops: RUM can provide ordered array scans.
-        BsonOperator::All | BsonOperator::ElemMatch => true,
-        // Range ops: RUM provides boundary-qualified scans.
-        BsonOperator::Gt | BsonOperator::Gte | BsonOperator::Lt | BsonOperator::Lte => true,
-        // Equality: hashed RUM is comparable to GIN.
-        BsonOperator::Eq | BsonOperator::In => false,
-        // Not indexable by either.
-        BsonOperator::Ne | BsonOperator::Nin | BsonOperator::Exists => false,
+        // RUM benefits: regex phrase verification, ordered array scans,
+        // boundary-qualified range scans.
+        BsonOperator::Regex
+        | BsonOperator::All
+        | BsonOperator::ElemMatch
+        | BsonOperator::Gt
+        | BsonOperator::Gte
+        | BsonOperator::Lt
+        | BsonOperator::Lte => true,
+        // Equality (hashed RUM comparable to GIN) and non-indexable ops.
+        BsonOperator::Eq
+        | BsonOperator::In
+        | BsonOperator::Ne
+        | BsonOperator::Nin
+        | BsonOperator::Exists => false,
     }
 }
 
@@ -879,7 +881,7 @@ impl Default for RumBsonCostParams {
 
 /// Estimate the cost of a RUM index scan for a BSON `$text` query.
 ///
-/// `$text` queries translated by DocumentDB use RUM's distance-ordered
+/// `$text` queries translated by `DocumentDB` use RUM's distance-ordered
 /// scan. With a LIMIT, only ~k entries are visited (plus 20%
 /// overfetch buffer). Without a LIMIT, all matches are scanned.
 #[must_use]
@@ -1130,13 +1132,13 @@ pub fn rum_bson_scan_cost_factor() -> f64 {
 // Errors specific to DocumentDB RUM optimization
 // ------------------------------------------------------------------
 
-/// Errors specific to DocumentDB RUM optimization.
+/// Errors specific to `DocumentDB` RUM optimization.
 ///
 /// All errors are non-fatal: the optimizer falls back to GIN-based
 /// cost modeling.
 #[derive(Debug, thiserror::Error)]
 pub enum DocumentDbRumError {
-    /// DocumentDB extended RUM is not installed.
+    /// `DocumentDB` extended RUM is not installed.
     #[error(
         "DocumentDB extended RUM not installed; \
          using GIN cost model instead"
@@ -1171,7 +1173,8 @@ pub enum DocumentDbRumError {
 // ------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
     use crate::egraph::{to_rec_expr, RelLang};

@@ -6,7 +6,7 @@
 //! - Detect cascading trigger chains that could cause performance
 //!   problems or infinite loops
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use ra_metadata::schema::{SchemaInfo, TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming};
 
@@ -96,6 +96,7 @@ impl std::fmt::Display for CascadeSeverity {
 ///
 /// `base_cost` is the base DML cost without triggers.
 /// `estimated_rows` is the expected number of rows affected.
+#[must_use]
 pub fn analyze_dml_cost(
     table_name: &str,
     event: TriggerEvent,
@@ -103,17 +104,14 @@ pub fn analyze_dml_cost(
     estimated_rows: f64,
     schema: &SchemaInfo,
 ) -> DmlCostEstimate {
-    let table = match schema.get_table(table_name) {
-        Some(t) => t,
-        None => {
-            return DmlCostEstimate {
-                base_cost,
-                trigger_cost: 0.0,
-                total_cost: base_cost,
-                trigger_count: 0,
-                trigger_breakdown: vec![],
-            };
-        }
+    let Some(table) = schema.get_table(table_name) else {
+        return DmlCostEstimate {
+            base_cost,
+            trigger_cost: 0.0,
+            total_cost: base_cost,
+            trigger_count: 0,
+            trigger_breakdown: vec![],
+        };
     };
 
     let triggers: Vec<&TriggerInfo> = table
@@ -148,18 +146,16 @@ pub fn analyze_dml_cost(
 
 fn estimate_trigger_cost(trigger: &TriggerInfo, base_cost: f64, estimated_rows: f64) -> f64 {
     match (trigger.timing, trigger.scope) {
-        (TriggerTiming::Before, TriggerScope::Row) => {
+        (TriggerTiming::Before | TriggerTiming::InsteadOf, TriggerScope::Row) => {
             base_cost * BEFORE_ROW_COST * estimated_rows / estimated_rows.max(1.0)
         }
         (TriggerTiming::After, TriggerScope::Row) => {
             base_cost * AFTER_ROW_COST * estimated_rows / estimated_rows.max(1.0)
         }
-        (TriggerTiming::Before, TriggerScope::Statement) => base_cost * BEFORE_STMT_COST,
-        (TriggerTiming::After, TriggerScope::Statement) => base_cost * AFTER_STMT_COST,
-        (TriggerTiming::InsteadOf, TriggerScope::Row) => {
-            base_cost * BEFORE_ROW_COST * estimated_rows / estimated_rows.max(1.0)
+        (TriggerTiming::Before | TriggerTiming::InsteadOf, TriggerScope::Statement) => {
+            base_cost * BEFORE_STMT_COST
         }
-        (TriggerTiming::InsteadOf, TriggerScope::Statement) => base_cost * BEFORE_STMT_COST,
+        (TriggerTiming::After, TriggerScope::Statement) => base_cost * AFTER_STMT_COST,
     }
 }
 
@@ -167,6 +163,7 @@ fn estimate_trigger_cost(trigger: &TriggerInfo, base_cost: f64, estimated_rows: 
 ///
 /// Analyzes trigger action SQL to find triggers that reference
 /// other tables that also have triggers, forming chains.
+#[must_use]
 pub fn detect_cascade(table_name: &str, schema: &SchemaInfo) -> Vec<CascadeWarning> {
     let mut warnings = Vec::new();
     let mut visited = HashSet::new();
@@ -198,9 +195,8 @@ fn detect_cascade_recursive(
         return;
     }
 
-    let table = match schema.get_table(table_name) {
-        Some(t) => t,
-        None => return,
+    let Some(table) = schema.get_table(table_name) else {
+        return;
     };
 
     if table.triggers.is_empty() {
@@ -237,12 +233,12 @@ fn find_tables_referenced_by_triggers(
     triggers: &[TriggerInfo],
     schema: &SchemaInfo,
 ) -> Vec<String> {
-    let table_names: HashMap<&str, ()> = schema.tables.keys().map(|k| (k.as_str(), ())).collect();
+    let table_names: HashSet<&str> = schema.tables.keys().map(String::as_str).collect();
 
     let mut referenced = Vec::new();
     for trigger in triggers {
         let upper = trigger.action_sql.to_uppercase();
-        for name in table_names.keys() {
+        for name in &table_names {
             if upper.contains(&name.to_uppercase())
                 && *name != trigger.table_name
                 && !referenced.contains(&name.to_string())
@@ -256,6 +252,7 @@ fn find_tables_referenced_by_triggers(
 
 /// Run a full trigger analysis on a table, returning cost
 /// estimates for all DML events and cascade warnings.
+#[must_use]
 pub fn analyze_table_triggers(
     table_name: &str,
     schema: &SchemaInfo,
@@ -297,6 +294,7 @@ pub fn analyze_table_triggers(
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use ra_metadata::schema::{
@@ -305,6 +303,7 @@ mod tests {
     };
     use std::collections::HashMap;
 
+    #[expect(clippy::too_many_lines, reason = "test fixture building schema")]
     fn schema_with_triggers() -> SchemaInfo {
         let mut tables = HashMap::new();
 

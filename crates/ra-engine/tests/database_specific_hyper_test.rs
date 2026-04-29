@@ -1,4 +1,4 @@
-//! Tests for HyPer compiled query optimization rules.
+//! Tests for `HyPer` compiled query optimization rules.
 
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};

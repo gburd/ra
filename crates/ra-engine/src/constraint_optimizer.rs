@@ -323,7 +323,7 @@ fn eliminate_join_with_fk(
 
                     match fk_side {
                         FkSide::LeftReferenceRight => {
-                            if !used_tables.contains(&rt.to_string()) {
+                            if !used_tables.contains(&rt.clone()) {
                                 applied.push(format!(
                                     "Eliminated join to {rt}: \
                                      FK {}.({}) -> {rt}.({}) \
@@ -336,7 +336,7 @@ fn eliminate_join_with_fk(
                             }
                         }
                         FkSide::RightReferenceLeft => {
-                            if !used_tables.contains(&lt.to_string()) {
+                            if !used_tables.contains(&lt.clone()) {
                                 applied.push(format!(
                                     "Eliminated join to {lt}: \
                                      FK {}.({}) -> {lt}.({}) \
@@ -464,7 +464,6 @@ fn collect_output_columns(expr: &RelExpr) -> Vec<String> {
                 }
             })
             .collect(),
-        RelExpr::Scan { .. } => Vec::new(),
         RelExpr::Filter { input, .. }
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
@@ -551,6 +550,7 @@ fn collect_table_refs_from_expr(expr: &Expr, tables: &mut Vec<String>) {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use ra_core::algebra::ProjectionColumn;
@@ -559,6 +559,7 @@ mod tests {
     };
     use std::collections::HashMap;
 
+    #[expect(clippy::too_many_lines, reason = "test fixture building schema")]
     fn test_schema() -> SchemaInfo {
         let mut tables = HashMap::new();
 

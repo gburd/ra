@@ -1,12 +1,11 @@
+#![expect(clippy::print_stdout, reason = "benchmark diagnostic output")]
 //! Benchmarks for vector similarity search cost models.
 //!
 //! Validates Phase 4 targets:
 //! - HNSW: 10-100x faster than sequential scan
-//! - IVFFlat: 5-50x faster than sequential scan
+//! - `IVFFlat`: 5-50x faster than sequential scan
 //! - Dimension scaling is linear for distance calculations
 //! - Logarithmic scaling for HNSW with dataset size
-
-#![allow(clippy::expect_used)]
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ra_engine::vector_cost::{
@@ -141,11 +140,10 @@ fn bench_sequential_vs_hnsw(c: &mut Criterion) {
     let hnsw_cost = hnsw_search_cost(dimensions, m, ef_search, total_vectors, k, VectorMetric::L2);
     let speedup = seq_cost.total() / hnsw_cost.total();
 
-    println!("HNSW speedup: {:.1}x (target: 10-100x)", speedup);
+    println!("HNSW speedup: {speedup:.1}x (target: 10-100x)");
     assert!(
         speedup >= 10.0,
-        "HNSW speedup {:.1}x below target 10x",
-        speedup
+        "HNSW speedup {speedup:.1}x below target 10x",
     );
 }
 
@@ -195,11 +193,10 @@ fn bench_sequential_vs_ivfflat(c: &mut Criterion) {
     );
     let speedup = seq_cost.total() / ivfflat_cost.total();
 
-    println!("IVFFlat speedup: {:.1}x (target: 5-50x)", speedup);
+    println!("IVFFlat speedup: {speedup:.1}x (target: 5-50x)");
     assert!(
         speedup >= 5.0,
-        "IVFFlat speedup {:.1}x below target 5x",
-        speedup
+        "IVFFlat speedup {speedup:.1}x below target 5x",
     );
 }
 
@@ -329,7 +326,6 @@ fn bench_metric_comparison(c: &mut Criterion) {
 
     let dimensions = 128;
     let total_vectors = 100_000;
-    let _m = 16;
     let ef_search = 40;
     let k = 10;
 

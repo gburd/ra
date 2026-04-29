@@ -1,4 +1,9 @@
-//! SQLite adapter integration tests.
+#![expect(
+    clippy::unwrap_used,
+    clippy::print_stderr,
+    reason = "test code"
+)]
+//! `SQLite` adapter integration tests.
 //!
 //! Tests FTS5 detection, sqlite-vec detection, schema introspection,
 //! and query execution.
@@ -26,10 +31,7 @@ fn test_db_path(name: &str) -> PathBuf {
 fn test_sqlite_adapter_creation() {
     let adapter = SQLiteAdapter::new();
     assert_eq!(adapter.database_name(), "SQLite");
-    assert_eq!(
-        adapter.sql_dialect(),
-        ra_core::SqlDialect::Sqlite
-    );
+    assert_eq!(adapter.sql_dialect(), ra_core::SqlDialect::Sqlite);
 }
 
 #[test]
@@ -43,7 +45,10 @@ fn test_connect_memory_database() {
 fn test_connect_nonexistent_file() {
     let mut adapter = SQLiteAdapter::new();
     let result = adapter.connect("/tmp/nonexistent-database-12345.db");
-    assert!(result.is_err(), "Should fail connecting to nonexistent file");
+    assert!(
+        result.is_err(),
+        "Should fail connecting to nonexistent file"
+    );
 }
 
 #[test]
@@ -87,13 +92,9 @@ fn test_check_sqlite_vec_memory() {
     let mut adapter = SQLiteAdapter::new();
     adapter.connect(":memory:").unwrap();
 
-    let has_vec = adapter.check_sqlite_vec().unwrap();
-    // sqlite-vec is an extension that may not be loaded
-    // Test should not panic even if unavailable
-    assert!(
-        has_vec || !has_vec,
-        "check_sqlite_vec should return a boolean"
-    );
+    // sqlite-vec is an extension that may not be loaded.
+    // Test verifies the method returns Ok without panicking.
+    let _has_vec = adapter.check_sqlite_vec().unwrap();
 }
 
 #[test]
@@ -152,11 +153,8 @@ fn test_execute_simple_query() {
 
     // Create a test table
     let conn = adapter.get_connection().unwrap();
-    conn.execute(
-        "CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)",
-        [],
-    )
-    .unwrap();
+    conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)", [])
+        .unwrap();
     conn.execute("INSERT INTO test (name) VALUES ('Alice')", [])
         .unwrap();
     conn.execute("INSERT INTO test (name) VALUES ('Bob')", [])
@@ -170,7 +168,10 @@ fn test_execute_simple_query() {
         results.rows[0].get("name").unwrap().as_str().unwrap(),
         "Alice"
     );
-    assert_eq!(results.rows[1].get("name").unwrap().as_str().unwrap(), "Bob");
+    assert_eq!(
+        results.rows[1].get("name").unwrap().as_str().unwrap(),
+        "Bob"
+    );
 }
 
 #[test]
@@ -189,7 +190,10 @@ fn test_execute_fts5_query() {
         .execute("SELECT title FROM articles WHERE articles MATCH 'database' LIMIT 5")
         .unwrap();
 
-    assert!(!results.rows.is_empty(), "Should find articles matching 'database'");
+    assert!(
+        !results.rows.is_empty(),
+        "Should find articles matching 'database'"
+    );
     assert!(results.rows.len() <= 5, "Should return at most 5 results");
 
     // Verify results contain the search term (in title or would be in content)
@@ -210,10 +214,15 @@ fn test_execute_fts5_phrase_query() {
 
     // Test phrase query with quotes
     let results = adapter
-        .execute(r#"SELECT title FROM articles WHERE articles MATCH '"query optimization"' LIMIT 3"#)
+        .execute(
+            r#"SELECT title FROM articles WHERE articles MATCH '"query optimization"' LIMIT 3"#,
+        )
         .unwrap();
 
-    assert!(!results.rows.is_empty(), "Should find articles with 'query optimization'");
+    assert!(
+        !results.rows.is_empty(),
+        "Should find articles with 'query optimization'"
+    );
 }
 
 #[test]
@@ -274,7 +283,10 @@ fn test_gather_column_stats() {
     assert!(!stats.is_empty(), "Should gather column statistics");
 
     // Check for known columns
-    assert!(stats.contains_key("name"), "Should have stats for 'name' column");
+    assert!(
+        stats.contains_key("name"),
+        "Should have stats for 'name' column"
+    );
     assert!(
         stats.contains_key("category"),
         "Should have stats for 'category' column"
@@ -327,7 +339,10 @@ fn test_get_schema_info() {
         column_names.contains(&"category"),
         "Should have 'category' column"
     );
-    assert!(column_names.contains(&"price"), "Should have 'price' column");
+    assert!(
+        column_names.contains(&"price"),
+        "Should have 'price' column"
+    );
     assert!(
         column_names.contains(&"embedding"),
         "Should have 'embedding' column"
@@ -426,7 +441,7 @@ fn test_execute_join_query() {
              JOIN product_stats ps ON p.id = ps.id
              WHERE ps.rating >= 4.5
              ORDER BY ps.review_count DESC
-             LIMIT 5"
+             LIMIT 5",
         )
         .unwrap();
 
@@ -459,11 +474,14 @@ fn test_hybrid_fts_filter_query() {
             "SELECT a.title, a.category
              FROM articles a
              WHERE a.articles MATCH 'machine learning'
-             LIMIT 10"
+             LIMIT 10",
         )
         .unwrap();
 
-    assert!(!results.rows.is_empty(), "Should find machine learning articles");
+    assert!(
+        !results.rows.is_empty(),
+        "Should find machine learning articles"
+    );
 }
 
 #[test]
@@ -527,6 +545,9 @@ fn test_base64_encoding_blob() {
     if !results.rows.is_empty() {
         let first = &results.rows[0];
         // embedding column should be present (might be NULL or base64-encoded)
-        assert!(first.get("embedding").is_some(), "Should have 'embedding' column");
+        assert!(
+            first.get("embedding").is_some(),
+            "Should have 'embedding' column"
+        );
     }
 }

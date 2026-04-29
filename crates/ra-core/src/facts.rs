@@ -64,13 +64,13 @@ impl TableStats {
             let mod_rate = self.estimated_modifications as f64 / self.row_count;
             // Map modification rate to penalty factor
             if mod_rate < 0.01 {
-                1.0  // < 1% change: fresh
+                1.0 // < 1% change: fresh
             } else if mod_rate < 0.05 {
-                1.5  // 1-5% change: slightly stale
+                1.5 // 1-5% change: slightly stale
             } else if mod_rate < 0.20 {
-                3.0  // 5-20% change: moderately stale
+                3.0 // 5-20% change: moderately stale
             } else if mod_rate < 0.50 {
-                5.0  // 20-50% change: very stale
+                5.0 // 20-50% change: very stale
             } else {
                 10.0 // > 50% change: extremely stale
             }
@@ -415,11 +415,7 @@ pub trait FactsProvider: Send + Sync {
         if let Some(schema) = self.get_schema(table) {
             schema.indexes.iter().any(|idx| {
                 let cols_match = idx.columns.len() == columns.len()
-                    && idx
-                        .columns
-                        .iter()
-                        .zip(columns.iter())
-                        .all(|(a, b)| a == b);
+                    && idx.columns.iter().zip(columns.iter()).all(|(a, b)| a == b);
 
                 let type_match = index_type.is_none_or(|t| idx.index_type == t);
 
@@ -447,11 +443,7 @@ pub trait FactsProvider: Send + Sync {
     /// A covering index includes all `needed_columns` in either its
     /// key columns or its included columns, allowing an index-only
     /// scan without heap access.
-    fn get_covering_indexes(
-        &self,
-        table: &str,
-        needed_columns: &[&str],
-    ) -> Vec<&IndexInfo> {
+    fn get_covering_indexes(&self, table: &str, needed_columns: &[&str]) -> Vec<&IndexInfo> {
         let Some(schema) = self.get_schema(table) else {
             return Vec::new();
         };
@@ -468,11 +460,7 @@ pub trait FactsProvider: Send + Sync {
     }
 
     /// Check whether a covering index exists for the given columns.
-    fn has_covering_index(
-        &self,
-        table: &str,
-        needed_columns: &[&str],
-    ) -> bool {
+    fn has_covering_index(&self, table: &str, needed_columns: &[&str]) -> bool {
         !self.get_covering_indexes(table, needed_columns).is_empty()
     }
 
@@ -483,7 +471,8 @@ pub trait FactsProvider: Send + Sync {
     fn cardinality_error(&self, operator_id: &str) -> Option<f64> {
         self.runtime_stats(operator_id).map(|stats| {
             if stats.estimated_rows > 0.0 {
-                (stats.actual_rows / stats.estimated_rows).max(stats.estimated_rows / stats.actual_rows)
+                (stats.actual_rows / stats.estimated_rows)
+                    .max(stats.estimated_rows / stats.actual_rows)
             } else {
                 f64::INFINITY
             }
@@ -626,20 +615,43 @@ mod tests {
     }
     impl SchemaFacts {
         fn with_table(info: TableInfo) -> Self {
-            Self { inner: EmptyFactsProvider::new(), schemas: vec![info] }
+            Self {
+                inner: EmptyFactsProvider::new(),
+                schemas: vec![info],
+            }
         }
     }
     impl FactsProvider for SchemaFacts {
-        fn get_table_stats(&self, t: &str) -> Option<&TableStats> { self.inner.get_table_stats(t) }
-        fn get_column_stats(&self, t: &str, c: &str) -> Option<&ColumnStats> { self.inner.get_column_stats(t, c) }
-        fn hardware_profile(&self) -> &HardwareProfile { self.inner.hardware_profile() }
-        fn get_schema(&self, table: &str) -> Option<&TableInfo> { self.schemas.iter().find(|s| s.name == table) }
-        fn runtime_stats(&self, id: &str) -> Option<&OperatorStats> { self.inner.runtime_stats(id) }
-        fn database_name(&self) -> &'static str { self.inner.database_name() }
-        fn supports_feature(&self, f: &str) -> bool { self.inner.supports_feature(f) }
-        fn sql_dialect(&self) -> SqlDialect { self.inner.sql_dialect() }
-        fn memory_limit(&self) -> Option<u64> { self.inner.memory_limit() }
-        fn optimizer_timeout(&self) -> Duration { self.inner.optimizer_timeout() }
+        fn get_table_stats(&self, t: &str) -> Option<&TableStats> {
+            self.inner.get_table_stats(t)
+        }
+        fn get_column_stats(&self, t: &str, c: &str) -> Option<&ColumnStats> {
+            self.inner.get_column_stats(t, c)
+        }
+        fn hardware_profile(&self) -> &HardwareProfile {
+            self.inner.hardware_profile()
+        }
+        fn get_schema(&self, table: &str) -> Option<&TableInfo> {
+            self.schemas.iter().find(|s| s.name == table)
+        }
+        fn runtime_stats(&self, id: &str) -> Option<&OperatorStats> {
+            self.inner.runtime_stats(id)
+        }
+        fn database_name(&self) -> &'static str {
+            self.inner.database_name()
+        }
+        fn supports_feature(&self, f: &str) -> bool {
+            self.inner.supports_feature(f)
+        }
+        fn sql_dialect(&self) -> SqlDialect {
+            self.inner.sql_dialect()
+        }
+        fn memory_limit(&self) -> Option<u64> {
+            self.inner.memory_limit()
+        }
+        fn optimizer_timeout(&self) -> Duration {
+            self.inner.optimizer_timeout()
+        }
     }
 
     #[test]
@@ -653,7 +665,11 @@ mod tests {
     fn covering_index_with_key_columns() {
         let facts = SchemaFacts::with_table(TableInfo {
             name: "orders".to_string(),
-            columns: vec![("id".into(), DataType::Integer), ("customer_id".into(), DataType::Integer), ("amount".into(), DataType::Float)],
+            columns: vec![
+                ("id".into(), DataType::Integer),
+                ("customer_id".into(), DataType::Integer),
+                ("amount".into(), DataType::Float),
+            ],
             primary_key: vec!["id".into()],
             foreign_keys: vec![],
             indexes: vec![IndexInfo {
@@ -673,7 +689,11 @@ mod tests {
     fn covering_index_with_included_columns() {
         let facts = SchemaFacts::with_table(TableInfo {
             name: "orders".to_string(),
-            columns: vec![("id".into(), DataType::Integer), ("customer_id".into(), DataType::Integer), ("order_date".into(), DataType::Timestamp)],
+            columns: vec![
+                ("id".into(), DataType::Integer),
+                ("customer_id".into(), DataType::Integer),
+                ("order_date".into(), DataType::Timestamp),
+            ],
             primary_key: vec!["id".into()],
             foreign_keys: vec![],
             indexes: vec![IndexInfo {

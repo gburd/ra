@@ -7,12 +7,7 @@ use crate::helpers::collect_rra_files;
 use crate::output::print_header;
 use crate::test_executor::{run_tests, FileResult, TestOutcome, TestResult};
 
-pub fn cmd_test(
-    path: &str,
-    filter: Option<&str>,
-    verbose: bool,
-    quiet: bool,
-) -> Result<()> {
+pub fn cmd_test(path: &str, filter: Option<&str>, verbose: bool, quiet: bool) -> Result<()> {
     let files = collect_rra_files(path)?;
 
     if files.is_empty() {
@@ -39,11 +34,7 @@ pub fn cmd_test(
             eprintln!();
             eprintln!("{}", "Slowest tests:".bold());
             for (name, dur) in &summary.slowest {
-                eprintln!(
-                    "  {:>6.0}ms  {}",
-                    dur.as_secs_f64() * 1000.0,
-                    name.dimmed(),
-                );
+                eprintln!("  {:>6.0}ms  {}", dur.as_secs_f64() * 1000.0, name.dimmed(),);
             }
         }
     }

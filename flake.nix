@@ -18,7 +18,13 @@
           inherit system overlays;
         };
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
+          extensions = [
+            "rust-src"
+            "rust-analyzer"
+            "clippy"
+            "rustfmt"
+            "llvm-tools-preview"
+          ];
           targets = [ "wasm32-unknown-unknown" ];
         };
       in
@@ -39,6 +45,8 @@
             cargo-audit
             cargo-outdated
             cargo-mutants
+            cargo-llvm-cov
+            cargo-tarpaulin
             wasm-pack
 
             # Build tools

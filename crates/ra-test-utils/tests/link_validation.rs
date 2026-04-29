@@ -1,3 +1,9 @@
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::expect_used,
+    reason = "test uses stdout for diagnostic output"
+)]
 //! Link validation test for documentation files
 //!
 //! Validates that all markdown links point to existing files. Scans:
@@ -91,11 +97,7 @@ fn resolve_link_path(source_file: &Path, link_target: &str, repo_root: &Path) ->
 }
 
 /// Validate links in a single file
-fn validate_file_links(
-    file_path: &Path,
-    repo_root: &Path,
-    parser: &LinkParser,
-) -> Vec<BrokenLink> {
+fn validate_file_links(file_path: &Path, repo_root: &Path, parser: &LinkParser) -> Vec<BrokenLink> {
     let mut broken_links = Vec::new();
 
     let content = match fs::read_to_string(file_path) {
@@ -126,7 +128,10 @@ fn validate_file_links(
         // Find line number for this link
         let link_pattern = format!("[{text}]({target})");
         let line_num = if let Some(pos) = content.find(&link_pattern) {
-            line_starts.iter().position(|&start| start > pos).unwrap_or(1)
+            line_starts
+                .iter()
+                .position(|&start| start > pos)
+                .unwrap_or(1)
         } else {
             1
         };
@@ -202,10 +207,7 @@ fn visit_dirs(dir: &Path, files: &mut Vec<PathBuf>, extensions: &[&str]) {
             // Skip hidden directories, node_modules, target, .worktrees
             if path.is_dir() {
                 let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if dir_name.starts_with('.')
-                    || dir_name == "node_modules"
-                    || dir_name == "target"
-                {
+                if dir_name.starts_with('.') || dir_name == "node_modules" || dir_name == "target" {
                     continue;
                 }
                 visit_dirs(&path, files, extensions);
@@ -263,7 +265,11 @@ fn test_documentation_links() {
             .push(link.clone());
     }
 
-    println!("\n⚠ Found {} broken links in {} files:", all_broken_links.len(), files_with_broken_links.len());
+    println!(
+        "\n⚠ Found {} broken links in {} files:",
+        all_broken_links.len(),
+        files_with_broken_links.len()
+    );
     println!("{}", "=".repeat(80));
 
     for (file, links) in &links_by_file {
@@ -278,7 +284,11 @@ fn test_documentation_links() {
     }
 
     println!("\n{}", "=".repeat(80));
-    println!("Summary: {}/{} files have broken links", files_with_broken_links.len(), files.len());
+    println!(
+        "Summary: {}/{} files have broken links",
+        files_with_broken_links.len(),
+        files.len()
+    );
 
     // Generate warning but don't fail the test (as per requirements)
     eprintln!("\n⚠ WARNING: Documentation has broken links. Please fix them.");
@@ -292,12 +302,12 @@ mod tests {
     #[test]
     fn test_link_parser_markdown() {
         let parser = LinkParser::new();
-        let content = r#"
+        let content = r"
 [Getting Started](GETTING_STARTED.md)
 [API Reference](api-reference.md)
 [External](https://example.com)
 [Anchor](#section)
-        "#;
+        ";
 
         let links = parser.extract_links(content);
         assert_eq!(links.len(), 2);

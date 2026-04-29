@@ -1,6 +1,7 @@
-//! MySQL adapter and comparison tests.
+#![expect(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
+//! `MySQL` adapter and comparison tests.
 //!
-//! Run with: cargo test -p ra-adapters --features mysql mysql_comparison
+//! Run with: `cargo test -p ra-adapters --features mysql mysql_comparison`
 
 #![cfg(feature = "mysql")]
 
@@ -10,8 +11,7 @@ use ra_adapters::{
 use std::env;
 
 fn get_test_url() -> String {
-    env::var("TEST_MYSQL_URL")
-        .unwrap_or_else(|_| "mysql://root@localhost:3306/test".to_string())
+    env::var("TEST_MYSQL_URL").unwrap_or_else(|_| "mysql://root@localhost:3306/test".to_string())
 }
 
 fn setup_test_db() -> MySQLAdapter {
@@ -23,14 +23,14 @@ fn setup_test_db() -> MySQLAdapter {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_adapter_creation() {
     let adapter = MySQLAdapter::new();
     assert_eq!(adapter.database_name(), "MySQL");
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_connection() {
     let mut adapter = MySQLAdapter::new();
     let result = adapter.connect(&get_test_url());
@@ -38,7 +38,7 @@ fn test_connection() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_gather_statistics() {
     let adapter = setup_test_db();
     let stats = adapter.gather_statistics();
@@ -49,7 +49,7 @@ fn test_gather_statistics() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_get_schema_info() {
     let adapter = setup_test_db();
     let schema = adapter.get_schema_info();
@@ -60,7 +60,7 @@ fn test_get_schema_info() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_get_capabilities() {
     let adapter = setup_test_db();
     let caps = adapter.get_capabilities();
@@ -72,16 +72,16 @@ fn test_get_capabilities() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_supports_feature() {
     let adapter = setup_test_db();
     let result = adapter.supports_feature("fulltext");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), true);
+    assert!(result.unwrap());
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_execute_native() {
     let adapter = setup_test_db();
     let result = adapter.execute_native("SELECT 1 as num, 'test' as str");
@@ -93,7 +93,7 @@ fn test_execute_native() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_execute_with_ra() {
     let adapter = setup_test_db();
     let result = adapter.execute_with_ra("SELECT 1 as num");
@@ -104,7 +104,7 @@ fn test_execute_with_ra() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_get_explain_plan() {
     let adapter = setup_test_db();
     let plan = adapter.get_explain_plan("SELECT 1");
@@ -115,7 +115,7 @@ fn test_get_explain_plan() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_check_fulltext_indexes() {
     let adapter = setup_test_db();
 
@@ -136,7 +136,7 @@ fn test_check_fulltext_indexes() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_get_query_stats() {
     let adapter = setup_test_db();
 
@@ -151,7 +151,7 @@ fn test_get_query_stats() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_comparison_single_query() {
     let adapter = setup_test_db();
 
@@ -164,9 +164,8 @@ fn test_comparison_single_query() {
         )",
     );
 
-    let _ = adapter.execute_native(
-        "INSERT INTO test_comparison VALUES (1, 'test1', 100), (2, 'test2', 200)",
-    );
+    let _ = adapter
+        .execute_native("INSERT INTO test_comparison VALUES (1, 'test1', 100), (2, 'test2', 200)");
 
     let result = compare_single_mysql_query(&adapter, "SELECT * FROM test_comparison WHERE id = 1");
     assert!(result.is_ok(), "Comparison failed: {result:?}");
@@ -180,7 +179,7 @@ fn test_comparison_single_query() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_comparison_multiple_queries() {
     let adapter = setup_test_db();
 
@@ -192,9 +191,7 @@ fn test_comparison_multiple_queries() {
         )",
     );
 
-    let _ = adapter.execute_native(
-        "INSERT INTO test_multi VALUES (1, 'a'), (2, 'b'), (3, 'c')",
-    );
+    let _ = adapter.execute_native("INSERT INTO test_multi VALUES (1, 'a'), (2, 'b'), (3, 'c')");
 
     let queries = vec![
         "SELECT * FROM test_multi WHERE id = 1".to_string(),
@@ -214,7 +211,7 @@ fn test_comparison_multiple_queries() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_gather_column_stats() {
     let adapter = setup_test_db();
 
@@ -250,7 +247,7 @@ fn test_gather_column_stats() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires live MySQL"]
 fn test_fulltext_search_comparison() {
     let adapter = setup_test_db();
 

@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "test code")]
 //! Integration tests for index metadata abstraction.
 //!
 //! Tests the abstraction layer with multiple index types to ensure rules
@@ -250,7 +251,7 @@ fn documentdb_rum_cost_accounts_for_bson_overhead() {
 #[test]
 fn rules_automatically_use_available_index_type() {
     // Simulate rule checking for indexes supporting array containment
-    let available_indexes = vec![mock_gin_index()];
+    let available_indexes = [mock_gin_index()];
 
     let supporting = available_indexes
         .iter()
@@ -267,7 +268,7 @@ fn rules_prefer_rum_when_both_available() {
     let gin = mock_gin_index();
     let rum = mock_rum_index();
 
-    let available = vec![gin.clone(), rum.clone()];
+    let available = [gin.clone(), rum.clone()];
 
     // For pure containment without ordering, GIN should win
     let best_for_containment = available
@@ -300,10 +301,7 @@ fn rules_work_with_any_inverted_index_type() {
         let supports = idx.supports_operation(&IndexOperation::ArrayContainment)
             || idx.supports_operation(&IndexOperation::JsonContainment);
 
-        assert!(
-            supports,
-            "{name} should support containment operations"
-        );
+        assert!(supports, "{name} should support containment operations");
 
         // Simulate cost estimation
         let cost = idx.estimate_scan_cost(0.01, 1_000_000, None);
@@ -391,10 +389,10 @@ fn capability_differences_affect_rule_applicability() {
 
 #[test]
 fn legacy_index_type_conversion() {
+    use ra_stats::IndexType;
+
     let idx = mock_gin_index();
     let legacy = idx.to_legacy_index_type();
-
-    use ra_stats::IndexType;
     assert!(matches!(legacy, IndexType::GIN { .. }));
 }
 

@@ -1,4 +1,4 @@
-//! SQL to RelExpr converter using the Lime LALR(1) parser.
+//! SQL to `RelExpr` converter using the Lime LALR(1) parser.
 //!
 //! Supports SQL constructs:
 //! - SELECT with projection list, DISTINCT
@@ -9,7 +9,7 @@
 //! - ORDER BY with ASC/DESC and NULLS FIRST/LAST
 //! - LIMIT/OFFSET
 //! - WITH/CTE (Common Table Expressions)
-//! - Window functions (ROW_NUMBER, RANK, LAG, LEAD, etc.)
+//! - Window functions (`ROW_NUMBER`, RANK, LAG, LEAD, etc.)
 //! - UNION/INTERSECT/EXCEPT set operations
 
 mod api;
@@ -19,5 +19,6 @@ pub use api::{sql_to_relexpr, sql_to_relexprs};
 pub use error::SqlConversionError;
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#[expect(clippy::expect_used, clippy::panic)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests;

@@ -120,18 +120,14 @@ impl AdaptiveCostDriver {
     ///
     /// Returns `Some(UpdateRecord)` if the change is large enough
     /// and the minimum interval has elapsed; `None` otherwise.
-    pub fn evaluate(
-        &mut self,
-        snapshot: ResourceSnapshot,
-    ) -> Option<UpdateRecord> {
+    pub fn evaluate(&mut self, snapshot: ResourceSnapshot) -> Option<UpdateRecord> {
         self.eval_count += 1;
         let now = Instant::now();
 
         // Skip the interval check on the very first evaluation
         // (no prior snapshot). Otherwise enforce the minimum interval.
         if self.last_snapshot.is_some()
-            && now.duration_since(self.last_update_time)
-                < self.config.min_interval
+            && now.duration_since(self.last_update_time) < self.config.min_interval
         {
             self.suppressed_count += 1;
             return None;
@@ -140,21 +136,12 @@ impl AdaptiveCostDriver {
         let trigger = match &self.last_snapshot {
             None => UpdateTrigger::Forced,
             Some(prev) => {
-                let cpu_changed = exceeds_threshold(
-                    prev.cpu,
-                    snapshot.cpu,
-                    self.config.change_threshold,
-                );
-                let mem_changed = exceeds_threshold(
-                    prev.memory,
-                    snapshot.memory,
-                    self.config.change_threshold,
-                );
-                let io_changed = exceeds_threshold(
-                    prev.io,
-                    snapshot.io,
-                    self.config.change_threshold,
-                );
+                let cpu_changed =
+                    exceeds_threshold(prev.cpu, snapshot.cpu, self.config.change_threshold);
+                let mem_changed =
+                    exceeds_threshold(prev.memory, snapshot.memory, self.config.change_threshold);
+                let io_changed =
+                    exceeds_threshold(prev.io, snapshot.io, self.config.change_threshold);
 
                 match (cpu_changed, mem_changed, io_changed) {
                     (false, false, false) => {
@@ -188,10 +175,7 @@ impl AdaptiveCostDriver {
     }
 
     /// Force an update regardless of thresholds or interval.
-    pub fn force_update(
-        &mut self,
-        snapshot: ResourceSnapshot,
-    ) -> UpdateRecord {
+    pub fn force_update(&mut self, snapshot: ResourceSnapshot) -> UpdateRecord {
         let now = Instant::now();
         self.last_snapshot = Some(snapshot);
         self.last_update_time = now;
@@ -253,9 +237,7 @@ impl AdaptiveCostDriver {
     pub fn reset(&mut self) {
         self.last_snapshot = None;
         self.last_update_time = Instant::now()
-            .checked_sub(
-                self.config.min_interval + Duration::from_secs(1),
-            )
+            .checked_sub(self.config.min_interval + Duration::from_secs(1))
             .unwrap_or_else(Instant::now);
         self.history.clear();
         self.update_count = 0;
@@ -291,12 +273,7 @@ fn exceeds_threshold(old: f64, new: f64, threshold: f64) -> bool {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::float_cmp,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::cast_lossless
-)]
+#[expect(clippy::unwrap_used, clippy::cast_lossless)]
 mod tests {
     use super::*;
 

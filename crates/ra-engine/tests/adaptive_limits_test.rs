@@ -1,3 +1,4 @@
+#![expect(clippy::print_stdout, reason = "test diagnostic output")]
 //! Tests for adaptive iteration limits (Task #246).
 
 use ra_core::algebra::{JoinType, RelExpr};
@@ -61,7 +62,7 @@ fn test_adaptive_limits_simple_query() {
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
-    println!("Simple query (2 tables) optimized in {:?}", elapsed);
+    println!("Simple query (2 tables) optimized in {elapsed:?}");
 
     // Should be much faster than 1000ms baseline
     assert!(
@@ -91,7 +92,7 @@ fn test_adaptive_limits_medium_query() {
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
-    println!("Medium query (6 tables) optimized in {:?}", elapsed);
+    println!("Medium query (6 tables) optimized in {elapsed:?}");
 
     // Should be faster than 770ms baseline for 7-table query
     assert!(
@@ -102,7 +103,7 @@ fn test_adaptive_limits_medium_query() {
 }
 
 #[test]
-#[ignore] // Performance test - timing assertions fail under coverage instrumentation
+#[ignore = "Performance test - timing assertions fail under coverage instrumentation"]
 fn test_adaptive_limits_vs_fixed() {
     // Compare adaptive vs fixed 30 iterations
     let query = join(
@@ -125,9 +126,11 @@ fn test_adaptive_limits_vs_fixed() {
     assert!(result_adaptive.is_ok());
 
     // Fixed 30 iterations (old behavior)
-    let mut config_fixed = OptimizerConfig::default();
-    config_fixed.use_adaptive_limits = false;
-    config_fixed.iter_limit = 30;
+    let config_fixed = OptimizerConfig {
+        use_adaptive_limits: false,
+        iter_limit: 30,
+        ..OptimizerConfig::default()
+    };
 
     let mut optimizer_fixed = Optimizer::with_config(config_fixed);
     for name in &tables {
@@ -152,14 +155,12 @@ fn test_adaptive_limits_vs_fixed() {
     // Adaptive should be significantly faster
     assert!(
         elapsed_adaptive < elapsed_fixed,
-        "Adaptive ({:?}) should be faster than fixed ({:?})",
-        elapsed_adaptive,
-        elapsed_fixed
+        "Adaptive ({elapsed_adaptive:?}) should be faster than fixed ({elapsed_fixed:?})",
     );
 
     // Should see at least 1.5x speedup
     let speedup = elapsed_fixed.as_secs_f64() / elapsed_adaptive.as_secs_f64();
-    assert!(speedup > 1.5, "Expected >1.5x speedup, got {:.2}x", speedup);
+    assert!(speedup > 1.5, "Expected >1.5x speedup, got {speedup:.2}x");
 }
 
 #[test]
@@ -177,14 +178,14 @@ fn test_query_complexity_classification() {
     // Medium (5 tables)
     let mut query = join(scan("t1"), scan("t2"), eq(col("a"), col("b")));
     for i in 3..=5 {
-        query = join(query, scan(&format!("t{}", i)), eq(col("a"), col("b")));
+        query = join(query, scan(&format!("t{i}")), eq(col("a"), col("b")));
     }
     assert_eq!(QueryComplexity::from_expr(&query), QueryComplexity::Medium);
 
     // Complex (8 tables)
     let mut query = join(scan("t1"), scan("t2"), eq(col("a"), col("b")));
     for i in 3..=8 {
-        query = join(query, scan(&format!("t{}", i)), eq(col("a"), col("b")));
+        query = join(query, scan(&format!("t{i}")), eq(col("a"), col("b")));
     }
     assert_eq!(QueryComplexity::from_expr(&query), QueryComplexity::Complex);
 }

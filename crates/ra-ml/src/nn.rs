@@ -75,8 +75,7 @@ impl FeedForwardNet {
         }
         for pair in layers.windows(2) {
             let out_size = pair[0].biases.len();
-            let next_in =
-                pair[1].weights.first().map_or(0, Vec::len);
+            let next_in = pair[1].weights.first().map_or(0, Vec::len);
             if out_size != next_in {
                 return Err(NnError::DimensionMismatch {
                     expected: out_size,
@@ -93,13 +92,9 @@ impl FeedForwardNet {
     ///
     /// Returns `NnError::DimensionMismatch` if `input` length does
     /// not match the first layer's expected input size.
-    pub fn forward(
-        &self,
-        input: &[f64],
-    ) -> Result<Vec<f64>, NnError> {
+    pub fn forward(&self, input: &[f64]) -> Result<Vec<f64>, NnError> {
         let first = &self.layers[0];
-        let expected_in =
-            first.weights.first().map_or(0, Vec::len);
+        let expected_in = first.weights.first().map_or(0, Vec::len);
         if input.len() != expected_in {
             return Err(NnError::DimensionMismatch {
                 expected: expected_in,
@@ -150,12 +145,7 @@ impl FeedForwardNet {
 fn forward_layer(layer: &DenseLayer, input: &[f64]) -> Vec<f64> {
     let mut output = Vec::with_capacity(layer.biases.len());
     for (row, bias) in layer.weights.iter().zip(&layer.biases) {
-        let sum: f64 = row
-            .iter()
-            .zip(input)
-            .map(|(w, x)| w * x)
-            .sum::<f64>()
-            + bias;
+        let sum: f64 = row.iter().zip(input).map(|(w, x)| w * x).sum::<f64>() + bias;
         output.push(activate(sum, layer.activation));
     }
     output
@@ -195,9 +185,7 @@ pub fn build_default_mlp(layer_sizes: &[usize]) -> FeedForwardNet {
             .map(|row| {
                 (0..in_size)
                     .map(|col| {
-                        let seed = (row * 7 + col * 13 + i * 31)
-                            as f64
-                            / 100.0;
+                        let seed = (row * 7 + col * 13 + i * 31) as f64 / 100.0;
                         (seed.sin() * scale).clamp(-scale, scale)
                     })
                     .collect()
@@ -222,7 +210,10 @@ pub fn build_default_mlp(layer_sizes: &[usize]) -> FeedForwardNet {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(
+    clippy::expect_used,
+    reason = "Test code appropriately uses expect for deterministic neural network operations"
+)]
 mod tests {
     use super::*;
 
@@ -237,15 +228,13 @@ mod tests {
             biases: vec![0.0],
             activation: Activation::Linear,
         };
-        FeedForwardNet::new(vec![layer1, layer2])
-            .expect("valid network")
+        FeedForwardNet::new(vec![layer1, layer2]).expect("valid network")
     }
 
     #[test]
     fn forward_identity_sum() {
         let net = simple_net();
-        let out =
-            net.forward(&[3.0, 4.0]).expect("forward pass");
+        let out = net.forward(&[3.0, 4.0]).expect("forward pass");
         assert_eq!(out.len(), 1);
         assert!((out[0] - 7.0).abs() < f64::EPSILON);
     }
@@ -253,8 +242,7 @@ mod tests {
     #[test]
     fn relu_clips_negatives() {
         let net = simple_net();
-        let out =
-            net.forward(&[-5.0, 3.0]).expect("forward pass");
+        let out = net.forward(&[-5.0, 3.0]).expect("forward pass");
         assert!((out[0] - 3.0).abs() < f64::EPSILON);
     }
 
@@ -308,10 +296,8 @@ mod tests {
     #[test]
     fn json_roundtrip() {
         let net = simple_net();
-        let json = serde_json::to_vec(&net.layers)
-            .expect("serialize layers");
-        let restored = FeedForwardNet::from_json(&json)
-            .expect("deserialize");
+        let json = serde_json::to_vec(&net.layers).expect("serialize layers");
+        let restored = FeedForwardNet::from_json(&json).expect("deserialize");
         assert_eq!(restored.input_size(), 2);
         assert_eq!(restored.output_size(), 1);
         assert_eq!(restored.num_layers(), 2);
@@ -323,8 +309,7 @@ mod tests {
         assert_eq!(net.input_size(), 10);
         assert_eq!(net.output_size(), 1);
         assert_eq!(net.num_layers(), 3);
-        let out =
-            net.forward(&[1.0; 10]).expect("forward pass");
+        let out = net.forward(&[1.0; 10]).expect("forward pass");
         assert_eq!(out.len(), 1);
         assert!(out[0].is_finite());
     }

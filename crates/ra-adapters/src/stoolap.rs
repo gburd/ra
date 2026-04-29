@@ -25,8 +25,7 @@ use stoolap::Database;
 #[derive(Debug)]
 struct StoolapFacts {
     table_stats: HashMap<String, ra_core::CoreTableStats>,
-    column_stats:
-        HashMap<(String, String), ra_core::ColumnStats>,
+    column_stats: HashMap<(String, String), ra_core::ColumnStats>,
     schemas: HashMap<String, ra_core::facts::TableInfo>,
     hardware: ra_core::CoreHardwareProfile,
     features: HashMap<String, bool>,
@@ -70,39 +69,24 @@ impl StoolapFacts {
 }
 
 impl FactsProvider for StoolapFacts {
-    fn get_table_stats(
-        &self,
-        table: &str,
-    ) -> Option<&ra_core::CoreTableStats> {
+    fn get_table_stats(&self, table: &str) -> Option<&ra_core::CoreTableStats> {
         self.table_stats.get(table)
     }
 
-    fn get_column_stats(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> Option<&ra_core::ColumnStats> {
+    fn get_column_stats(&self, table: &str, column: &str) -> Option<&ra_core::ColumnStats> {
         self.column_stats
             .get(&(table.to_string(), column.to_string()))
     }
 
-    fn hardware_profile(
-        &self,
-    ) -> &ra_core::CoreHardwareProfile {
+    fn hardware_profile(&self) -> &ra_core::CoreHardwareProfile {
         &self.hardware
     }
 
-    fn get_schema(
-        &self,
-        table: &str,
-    ) -> Option<&ra_core::facts::TableInfo> {
+    fn get_schema(&self, table: &str) -> Option<&ra_core::facts::TableInfo> {
         self.schemas.get(table)
     }
 
-    fn runtime_stats(
-        &self,
-        _operator_id: &str,
-    ) -> Option<&ra_core::facts::OperatorStats> {
+    fn runtime_stats(&self, _operator_id: &str) -> Option<&ra_core::facts::OperatorStats> {
         None
     }
 
@@ -111,10 +95,7 @@ impl FactsProvider for StoolapFacts {
     }
 
     fn supports_feature(&self, feature: &str) -> bool {
-        self.features
-            .get(feature)
-            .copied()
-            .unwrap_or(false)
+        self.features.get(feature).copied().unwrap_or(false)
     }
 
     fn sql_dialect(&self) -> SqlDialect {
@@ -198,24 +179,17 @@ impl StoolapAdapter {
 
 // Type-conversion utilities used by the stoolap feature and
 // exercised directly by unit tests.
-#[allow(dead_code)]
 impl StoolapAdapter {
     /// Convert `ra_stats::types::TableStats` to
     /// `ra_core::CoreTableStats`.
-    fn to_core_table_stats(
-        stats: &TableStats,
-    ) -> ra_core::CoreTableStats {
+    fn to_core_table_stats(stats: &TableStats) -> ra_core::CoreTableStats {
         ra_core::CoreTableStats {
             row_count: stats.row_count as f64,
             page_count: stats.page_count,
             average_row_size: stats.average_row_size,
             table_size_bytes: stats.table_size_bytes,
-            live_tuples: stats
-                .live_tuples
-                .map(|v| v as f64),
-            dead_tuples: stats
-                .dead_tuples
-                .map(|v| v as f64),
+            live_tuples: stats.live_tuples.map(|v| v as f64),
+            dead_tuples: stats.dead_tuples.map(|v| v as f64),
             last_analyzed: stats.last_analyzed,
             estimated_modifications: 0,
             confidence: 0.8,
@@ -224,9 +198,7 @@ impl StoolapAdapter {
 
     /// Convert `ra_stats::types::ColumnStats` to
     /// `ra_core::ColumnStats`.
-    fn to_core_column_stats(
-        stats: &ColumnStats,
-    ) -> ra_core::ColumnStats {
+    fn to_core_column_stats(stats: &ColumnStats) -> ra_core::ColumnStats {
         ra_core::ColumnStats {
             distinct_count: stats.ndv as f64,
             null_fraction: stats.null_fraction,
@@ -241,51 +213,35 @@ impl StoolapAdapter {
     }
 
     /// Map Stoolap type names to core `DataType`.
-    fn stoolap_to_core_type(
-        st_type: &str,
-    ) -> ra_core::DataType {
+    fn stoolap_to_core_type(st_type: &str) -> ra_core::DataType {
         match st_type.to_lowercase().as_str() {
-            "integer" | "int" | "bigint" | "smallint"
-            | "tinyint" => ra_core::DataType::Integer,
+            "integer" | "int" | "bigint" | "smallint" | "tinyint" => ra_core::DataType::Integer,
 
-            "float" | "double" | "real" | "numeric"
-            | "decimal" => ra_core::DataType::Float,
+            "float" | "double" | "real" | "numeric" | "decimal" => ra_core::DataType::Float,
 
-            "text" | "varchar" | "char"
-            | "character varying" | "string" => {
+            "text" | "varchar" | "char" | "character varying" | "string" => {
                 ra_core::DataType::String
             }
 
-            "boolean" | "bool" => {
-                ra_core::DataType::Boolean
-            }
+            "boolean" | "bool" => ra_core::DataType::Boolean,
 
-            "timestamp" | "datetime" | "date" | "time" => {
-                ra_core::DataType::Timestamp
-            }
+            "timestamp" | "datetime" | "date" | "time" => ra_core::DataType::Timestamp,
 
-            "blob" | "binary" | "bytea" => {
-                ra_core::DataType::Binary
-            }
+            "blob" | "binary" | "bytea" => ra_core::DataType::Binary,
 
             "json" | "jsonb" => ra_core::DataType::Json,
 
-            other => {
-                ra_core::DataType::Other(other.to_string())
-            }
+            other => ra_core::DataType::Other(other.to_string()),
         }
     }
 
     /// Map index type string to the core `IndexType` enum.
-    fn index_type_to_core(
-        idx_type: &str,
-    ) -> ra_core::facts::IndexType {
+    fn index_type_to_core(idx_type: &str) -> ra_core::facts::IndexType {
         match idx_type.to_lowercase().as_str() {
-            "hash" => ra_core::facts::IndexType::Hash,
             "bitmap" => ra_core::facts::IndexType::Bitmap,
             // HNSW is a vector similarity index; map to
             // Hash as the closest available core type
-            "hnsw" => ra_core::facts::IndexType::Hash,
+            "hash" | "hnsw" => ra_core::facts::IndexType::Hash,
             _ => ra_core::facts::IndexType::BTree,
         }
     }
@@ -295,31 +251,19 @@ impl StoolapAdapter {
 
 #[cfg(feature = "stoolap")]
 impl StoolapAdapter {
-    fn connect_real(
-        &mut self,
-        connection_string: &str,
-    ) -> Result<(), AdapterError> {
-        let db = if connection_string == "memory://"
-            || connection_string.is_empty()
-        {
+    fn connect_real(&mut self, connection_string: &str) -> Result<(), AdapterError> {
+        let db = if connection_string == "memory://" || connection_string.is_empty() {
             Database::open_in_memory().map_err(|e| {
-                AdapterError::ConnectionError(format!(
-                    "Stoolap in-memory open failed: {e}"
-                ))
+                AdapterError::ConnectionError(format!("Stoolap in-memory open failed: {e}"))
             })?
         } else {
-            Database::open(connection_string).map_err(
-                |e| {
-                    AdapterError::ConnectionError(format!(
-                        "Stoolap connection failed: {e}"
-                    ))
-                },
-            )?
+            Database::open(connection_string).map_err(|e| {
+                AdapterError::ConnectionError(format!("Stoolap connection failed: {e}"))
+            })?
         };
 
         self.db = Some(db);
-        self.connection_string =
-            Some(connection_string.to_string());
+        self.connection_string = Some(connection_string.to_string());
         self.facts.features = Self::build_features();
 
         tracing::info!(
@@ -329,34 +273,22 @@ impl StoolapAdapter {
         Ok(())
     }
 
-    fn gather_statistics_real(
-        &mut self,
-    ) -> Result<HashMap<String, TableStats>, AdapterError>
-    {
-        let db = self.db.as_ref().ok_or_else(|| {
-            AdapterError::ConnectionError(
-                "Not connected".into(),
-            )
-        })?;
+    fn gather_statistics_real(&mut self) -> Result<HashMap<String, TableStats>, AdapterError> {
+        let db = self
+            .db
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
 
         let table_names = self.list_tables(db)?;
         let mut stats = HashMap::new();
 
         for name in &table_names {
             // Run ANALYZE to refresh statistics
-            let _ = db.execute(
-                &format!("ANALYZE {name}"),
-                (),
-            );
+            let _ = db.execute(&format!("ANALYZE {name}"), ());
 
             // Count rows via SELECT COUNT(*)
             let row_count: i64 = db
-                .query_one(
-                    &format!(
-                        "SELECT COUNT(*) FROM {name}"
-                    ),
-                    (),
-                )
+                .query_one(&format!("SELECT COUNT(*) FROM {name}"), ())
                 .unwrap_or(0);
 
             let row_count_u = row_count.max(0) as u64;
@@ -371,10 +303,9 @@ impl StoolapAdapter {
                 last_analyzed: None,
             };
 
-            self.facts.table_stats.insert(
-                name.clone(),
-                Self::to_core_table_stats(&table_stats),
-            );
+            self.facts
+                .table_stats
+                .insert(name.clone(), Self::to_core_table_stats(&table_stats));
 
             stats.insert(name.clone(), table_stats);
         }
@@ -385,13 +316,11 @@ impl StoolapAdapter {
     fn gather_column_stats_real(
         &mut self,
         table: &str,
-    ) -> Result<HashMap<String, ColumnStats>, AdapterError>
-    {
-        let db = self.db.as_ref().ok_or_else(|| {
-            AdapterError::ConnectionError(
-                "Not connected".into(),
-            )
-        })?;
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError> {
+        let db = self
+            .db
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
 
         // Get column names from DESCRIBE
         let columns = self.describe_columns(db, table)?;
@@ -445,10 +374,7 @@ impl StoolapAdapter {
             };
 
             self.facts.column_stats.insert(
-                (
-                    table.to_string(),
-                    col_name.clone(),
-                ),
+                (table.to_string(), col_name.clone()),
                 Self::to_core_column_stats(&col_stats),
             );
 
@@ -458,24 +384,18 @@ impl StoolapAdapter {
         Ok(stats)
     }
 
-    fn get_schema_info_real(
-        &mut self,
-    ) -> Result<SchemaInfo, AdapterError> {
-        let db = self.db.as_ref().ok_or_else(|| {
-            AdapterError::ConnectionError(
-                "Not connected".into(),
-            )
-        })?;
+    fn get_schema_info_real(&mut self) -> Result<SchemaInfo, AdapterError> {
+        let db = self
+            .db
+            .as_ref()
+            .ok_or_else(|| AdapterError::ConnectionError("Not connected".into()))?;
 
         let table_names = self.list_tables(db)?;
-        let mut tables: HashMap<String, TableInfo> =
-            HashMap::new();
+        let mut tables: HashMap<String, TableInfo> = HashMap::new();
 
         for name in &table_names {
-            let columns =
-                self.describe_columns(db, name)?;
-            let indexes =
-                self.describe_indexes(db, name)?;
+            let columns = self.describe_columns(db, name)?;
+            let indexes = self.describe_indexes(db, name)?;
 
             let table_info = TableInfo {
                 name: name.clone(),
@@ -486,32 +406,18 @@ impl StoolapAdapter {
             };
 
             // Populate core schema facts
-            let core_columns: Vec<(
-                String,
-                ra_core::DataType,
-            )> = table_info
+            let core_columns: Vec<(String, ra_core::DataType)> = table_info
                 .columns
                 .iter()
-                .map(|c| {
-                    (
-                        c.name.clone(),
-                        Self::stoolap_to_core_type(
-                            &c.data_type,
-                        ),
-                    )
-                })
+                .map(|c| (c.name.clone(), Self::stoolap_to_core_type(&c.data_type)))
                 .collect();
 
-            let core_indexes: Vec<
-                ra_core::facts::IndexInfo,
-            > = table_info
+            let core_indexes: Vec<ra_core::facts::IndexInfo> = table_info
                 .indexes
                 .iter()
                 .map(|idx| ra_core::facts::IndexInfo {
                     name: idx.name.clone(),
-                    index_type: Self::index_type_to_core(
-                        &idx.index_type,
-                    ),
+                    index_type: Self::index_type_to_core(&idx.index_type),
                     columns: idx.columns.clone(),
                     included_columns: vec![],
                     is_unique: idx.unique,
@@ -537,31 +443,18 @@ impl StoolapAdapter {
     }
 
     /// List all table names via `SHOW TABLES`.
-    fn list_tables(
-        &self,
-        db: &Database,
-    ) -> Result<Vec<String>, AdapterError> {
+    fn list_tables(&self, db: &Database) -> Result<Vec<String>, AdapterError> {
         let rows = db
             .query("SHOW TABLES", ())
-            .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to list tables: {e}"
-                ))
-            })?;
+            .map_err(|e| AdapterError::QueryError(format!("Failed to list tables: {e}")))?;
 
         let mut names = Vec::new();
         for row in rows {
-            let row = row.map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to read table row: {e}"
-                ))
-            })?;
-            let name: String =
-                row.get(0).map_err(|e| {
-                    AdapterError::QueryError(format!(
-                        "Failed to get table name: {e}"
-                    ))
-                })?;
+            let row = row
+                .map_err(|e| AdapterError::QueryError(format!("Failed to read table row: {e}")))?;
+            let name: String = row
+                .get(0)
+                .map_err(|e| AdapterError::QueryError(format!("Failed to get table name: {e}")))?;
             names.push(name);
         }
         Ok(names)
@@ -574,48 +467,28 @@ impl StoolapAdapter {
         table: &str,
     ) -> Result<Vec<ColumnInfo>, AdapterError> {
         let rows = db
-            .query(
-                &format!("DESCRIBE {table}"),
-                (),
-            )
-            .map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to describe '{table}': {e}"
-                ))
-            })?;
+            .query(&format!("DESCRIBE {table}"), ())
+            .map_err(|e| AdapterError::QueryError(format!("Failed to describe '{table}': {e}")))?;
 
         let mut columns = Vec::new();
         for row in rows {
-            let row = row.map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to read column row: {e}"
-                ))
-            })?;
+            let row = row
+                .map_err(|e| AdapterError::QueryError(format!("Failed to read column row: {e}")))?;
 
             // DESCRIBE typically returns:
             // column_name, data_type, nullable, ...
-            let name: String =
-                row.get(0).map_err(|e| {
-                    AdapterError::QueryError(format!(
-                        "Failed to get column name: {e}"
-                    ))
-                })?;
-            let data_type: String =
-                row.get(1).map_err(|e| {
-                    AdapterError::QueryError(format!(
-                        "Failed to get data type: {e}"
-                    ))
-                })?;
-            let nullable_str: String =
-                row.get(2).unwrap_or_else(|_| {
-                    "YES".to_string()
-                });
+            let name: String = row
+                .get(0)
+                .map_err(|e| AdapterError::QueryError(format!("Failed to get column name: {e}")))?;
+            let data_type: String = row
+                .get(1)
+                .map_err(|e| AdapterError::QueryError(format!("Failed to get data type: {e}")))?;
+            let nullable_str: String = row.get(2).unwrap_or_else(|_| "YES".to_string());
 
             columns.push(ColumnInfo {
                 name,
                 data_type: data_type.to_lowercase(),
-                nullable: nullable_str
-                    .eq_ignore_ascii_case("yes"),
+                nullable: nullable_str.eq_ignore_ascii_case("yes"),
                 default_value: None,
             });
         }
@@ -623,18 +496,9 @@ impl StoolapAdapter {
     }
 
     /// Get index definitions via `SHOW INDEXES FROM table`.
-    fn describe_indexes(
-        &self,
-        db: &Database,
-        table: &str,
-    ) -> Result<Vec<IndexInfo>, AdapterError> {
+    fn describe_indexes(&self, db: &Database, table: &str) -> Result<Vec<IndexInfo>, AdapterError> {
         let rows = db
-            .query(
-                &format!(
-                    "SHOW INDEXES FROM {table}"
-                ),
-                (),
-            )
+            .query(&format!("SHOW INDEXES FROM {table}"), ())
             .map_err(|e| {
                 AdapterError::QueryError(format!(
                     "Failed to show indexes for \
@@ -644,28 +508,17 @@ impl StoolapAdapter {
 
         let mut indexes = Vec::new();
         for row in rows {
-            let row = row.map_err(|e| {
-                AdapterError::QueryError(format!(
-                    "Failed to read index row: {e}"
-                ))
-            })?;
+            let row = row
+                .map_err(|e| AdapterError::QueryError(format!("Failed to read index row: {e}")))?;
 
             // SHOW INDEXES typically returns:
             // index_name, column(s), index_type, unique
-            let name: String =
-                row.get(0).map_err(|e| {
-                    AdapterError::QueryError(format!(
-                        "Failed to get index name: {e}"
-                    ))
-                })?;
-            let col_str: String =
-                row.get(1).unwrap_or_default();
-            let index_type: String =
-                row.get(2).unwrap_or_else(|_| {
-                    "btree".to_string()
-                });
-            let is_unique: bool =
-                row.get(3).unwrap_or(false);
+            let name: String = row
+                .get(0)
+                .map_err(|e| AdapterError::QueryError(format!("Failed to get index name: {e}")))?;
+            let col_str: String = row.get(1).unwrap_or_default();
+            let index_type: String = row.get(2).unwrap_or_else(|_| "btree".to_string());
+            let is_unique: bool = row.get(3).unwrap_or(false);
 
             let columns: Vec<String> = col_str
                 .split(',')
@@ -688,27 +541,22 @@ impl StoolapAdapter {
 
 #[cfg(not(feature = "stoolap"))]
 impl StoolapAdapter {
-    #[allow(clippy::unnecessary_wraps)]
-    fn connect_stub(
-        &mut self,
-        connection_string: &str,
-    ) -> Result<(), AdapterError> {
+    fn connect_stub(&mut self, connection_string: &str) -> Result<(), AdapterError> {
         // Basic validation even in stub mode
         if connection_string.is_empty() {
             return Err(AdapterError::InvalidConfiguration(
-                "Connection string cannot be empty".into()
+                "Connection string cannot be empty".into(),
             ));
         }
 
         // Check for obviously invalid URLs
         if connection_string.starts_with("invalid://") {
-            return Err(AdapterError::ConnectionError(
-                format!("Invalid connection string: {}", connection_string)
-            ));
+            return Err(AdapterError::ConnectionError(format!(
+                "Invalid connection string: {connection_string}"
+            )));
         }
 
-        self.connection_string =
-            Some(connection_string.to_string());
+        self.connection_string = Some(connection_string.to_string());
         tracing::warn!(
             "Stoolap feature not enabled; \
              connection stored but not established. \
@@ -721,10 +569,7 @@ impl StoolapAdapter {
 // -- DatabaseAdapter trait implementation --
 
 impl DatabaseAdapter for StoolapAdapter {
-    fn connect(
-        &mut self,
-        connection_string: &str,
-    ) -> Result<(), AdapterError> {
+    fn connect(&mut self, connection_string: &str) -> Result<(), AdapterError> {
         #[cfg(feature = "stoolap")]
         {
             self.connect_real(connection_string)
@@ -735,23 +580,16 @@ impl DatabaseAdapter for StoolapAdapter {
         }
     }
 
-    #[allow(invalid_reference_casting)]
-    fn gather_statistics(
-        &self,
-    ) -> Result<HashMap<String, TableStats>, AdapterError>
-    {
+    fn gather_statistics(&self) -> Result<HashMap<String, TableStats>, AdapterError> {
         #[cfg(feature = "stoolap")]
         {
             // The trait requires &self but we need &mut self
             // for updating the facts cache. This is safe: we
             // only write to our own facts cache which has no
             // invariants beyond HashMap correctness.
-            #[allow(clippy::cast_ref_to_mut)]
-            #[allow(invalid_reference_casting)]
-            let this = unsafe {
-                &mut *(std::ptr::from_ref(self)
-                    as *mut Self)
-            };
+
+            #[expect(invalid_reference_casting, reason = "unsafe FFI boundary")]
+            let this = unsafe { &mut *std::ptr::from_ref(self).cast_mut() };
             this.gather_statistics_real()
         }
         #[cfg(not(feature = "stoolap"))]
@@ -764,20 +602,14 @@ impl DatabaseAdapter for StoolapAdapter {
         }
     }
 
-    #[allow(invalid_reference_casting)]
     fn gather_column_stats(
         &self,
         table: &str,
-    ) -> Result<HashMap<String, ColumnStats>, AdapterError>
-    {
+    ) -> Result<HashMap<String, ColumnStats>, AdapterError> {
         #[cfg(feature = "stoolap")]
         {
-            #[allow(clippy::cast_ref_to_mut)]
-            #[allow(invalid_reference_casting)]
-            let this = unsafe {
-                &mut *(std::ptr::from_ref(self)
-                    as *mut Self)
-            };
+            #[expect(invalid_reference_casting, reason = "unsafe FFI boundary")]
+            let this = unsafe { &mut *std::ptr::from_ref(self).cast_mut() };
             this.gather_column_stats_real(table)
         }
         #[cfg(not(feature = "stoolap"))]
@@ -791,18 +623,11 @@ impl DatabaseAdapter for StoolapAdapter {
         }
     }
 
-    #[allow(invalid_reference_casting)]
-    fn get_schema_info(
-        &self,
-    ) -> Result<SchemaInfo, AdapterError> {
+    fn get_schema_info(&self) -> Result<SchemaInfo, AdapterError> {
         #[cfg(feature = "stoolap")]
         {
-            #[allow(clippy::cast_ref_to_mut)]
-            #[allow(invalid_reference_casting)]
-            let this = unsafe {
-                &mut *(std::ptr::from_ref(self)
-                    as *mut Self)
-            };
+            #[expect(invalid_reference_casting, reason = "unsafe FFI boundary")]
+            let this = unsafe { &mut *std::ptr::from_ref(self).cast_mut() };
             this.get_schema_info_real()
         }
         #[cfg(not(feature = "stoolap"))]
@@ -815,9 +640,7 @@ impl DatabaseAdapter for StoolapAdapter {
         }
     }
 
-    fn get_capabilities(
-        &self,
-    ) -> Result<DatabaseCapabilities, AdapterError> {
+    fn get_capabilities(&self) -> Result<DatabaseCapabilities, AdapterError> {
         Ok(DatabaseCapabilities {
             database_name: "Stoolap".to_string(),
             dialect: SqlDialect::Generic,
@@ -832,10 +655,7 @@ impl DatabaseAdapter for StoolapAdapter {
         })
     }
 
-    fn supports_feature(
-        &self,
-        feature: &str,
-    ) -> Result<bool, AdapterError> {
+    fn supports_feature(&self, feature: &str) -> Result<bool, AdapterError> {
         let caps = self.get_capabilities()?;
         Ok(caps.supports(feature))
     }
@@ -856,6 +676,7 @@ impl DatabaseAdapter for StoolapAdapter {
 // -- Unit tests --
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float literals in tests")]
 mod tests {
     use super::*;
 
@@ -863,10 +684,7 @@ mod tests {
     fn create_adapter() {
         let adapter = StoolapAdapter::new();
         assert_eq!(adapter.database_name(), "Stoolap");
-        assert_eq!(
-            adapter.sql_dialect(),
-            SqlDialect::Generic
-        );
+        assert_eq!(adapter.sql_dialect(), SqlDialect::Generic);
     }
 
     #[test]
@@ -882,70 +700,43 @@ mod tests {
         assert!(caps.is_ok());
         let caps = caps.as_ref().ok();
         assert!(caps.is_some());
-        assert_eq!(
-            caps.map(|c| c.database_name.as_str()),
-            Some("Stoolap")
-        );
-        assert_eq!(
-            caps.map(|c| c.max_identifier_length),
-            Some(128)
-        );
+        assert_eq!(caps.map(|c| c.database_name.as_str()), Some("Stoolap"));
+        assert_eq!(caps.map(|c| c.max_identifier_length), Some(128));
     }
 
     #[test]
     fn supports_bitmap_index() {
         let adapter = StoolapAdapter::new();
-        assert_eq!(
-            adapter.supports_feature("bitmap_index"),
-            Ok(true)
-        );
+        assert_eq!(adapter.supports_feature("bitmap_index"), Ok(true));
     }
 
     #[test]
     fn supports_mvcc() {
         let adapter = StoolapAdapter::new();
-        assert_eq!(
-            adapter.supports_feature("mvcc"),
-            Ok(true)
-        );
+        assert_eq!(adapter.supports_feature("mvcc"), Ok(true));
     }
 
     #[test]
     fn supports_time_travel() {
         let adapter = StoolapAdapter::new();
-        assert_eq!(
-            adapter.supports_feature("time_travel"),
-            Ok(true)
-        );
+        assert_eq!(adapter.supports_feature("time_travel"), Ok(true));
     }
 
     #[test]
     fn does_not_support_unknown_feature() {
         let adapter = StoolapAdapter::new();
-        assert_eq!(
-            adapter.supports_feature("nonexistent"),
-            Ok(false)
-        );
+        assert_eq!(adapter.supports_feature("nonexistent"), Ok(false));
     }
 
     #[test]
     fn facts_provider_empty() {
         let adapter = StoolapAdapter::new();
         let facts = adapter.as_facts_provider();
-        assert!(
-            facts.get_table_stats("users").is_none()
-        );
-        assert!(
-            facts
-                .get_column_stats("users", "id")
-                .is_none()
-        );
+        assert!(facts.get_table_stats("users").is_none());
+        assert!(facts.get_column_stats("users", "id").is_none());
         assert!(facts.get_schema("users").is_none());
         assert_eq!(facts.database_name(), "Stoolap");
-        assert_eq!(
-            facts.sql_dialect(),
-            SqlDialect::Generic
-        );
+        assert_eq!(facts.sql_dialect(), SqlDialect::Generic);
     }
 
     #[test]
@@ -985,9 +776,7 @@ mod tests {
             ra_core::DataType::Boolean
         );
         assert_eq!(
-            StoolapAdapter::stoolap_to_core_type(
-                "timestamp"
-            ),
+            StoolapAdapter::stoolap_to_core_type("timestamp"),
             ra_core::DataType::Timestamp
         );
         assert_eq!(
@@ -1039,8 +828,7 @@ mod tests {
             dead_tuples: Some(50),
             last_analyzed: Some(1_700_000_000),
         };
-        let core =
-            StoolapAdapter::to_core_table_stats(&stats);
+        let core = StoolapAdapter::to_core_table_stats(&stats);
         assert_eq!(core.row_count, 1000.0);
         assert_eq!(core.page_count, 100);
         assert_eq!(core.average_row_size, 50.0);
@@ -1061,8 +849,7 @@ mod tests {
             histogram: None,
             correlation: Some(0.95),
         };
-        let core =
-            StoolapAdapter::to_core_column_stats(&stats);
+        let core = StoolapAdapter::to_core_column_stats(&stats);
         assert_eq!(core.distinct_count, 500.0);
         assert_eq!(core.null_fraction, 0.02);
         assert_eq!(core.avg_length, Some(32.0));
@@ -1071,64 +858,27 @@ mod tests {
     #[test]
     fn build_features_complete() {
         let features = StoolapAdapter::build_features();
-        assert_eq!(
-            features.get("bitmap_index"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("columnar_storage"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("window_functions"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("cte_recursive"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("parallel_scan"),
-            Some(&true)
-        );
+        assert_eq!(features.get("bitmap_index"), Some(&true));
+        assert_eq!(features.get("columnar_storage"), Some(&true));
+        assert_eq!(features.get("window_functions"), Some(&true));
+        assert_eq!(features.get("cte_recursive"), Some(&true));
+        assert_eq!(features.get("parallel_scan"), Some(&true));
         assert_eq!(features.get("mvcc"), Some(&true));
-        assert_eq!(
-            features.get("time_travel"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("hash_index"),
-            Some(&true)
-        );
-        assert_eq!(
-            features.get("hnsw_index"),
-            Some(&true)
-        );
+        assert_eq!(features.get("time_travel"), Some(&true));
+        assert_eq!(features.get("hash_index"), Some(&true));
+        assert_eq!(features.get("hnsw_index"), Some(&true));
     }
 
     #[test]
     fn capabilities_index_types() {
         let adapter = StoolapAdapter::new();
-        let caps =
-            adapter.get_capabilities().unwrap_or_else(
-                |_| {
-                    core::unreachable!(
-                        "capabilities never fail"
-                    )
-                },
-            );
-        assert!(caps.index_types.contains(
-            &"btree".to_string()
-        ));
-        assert!(caps.index_types.contains(
-            &"bitmap".to_string()
-        ));
-        assert!(caps.index_types.contains(
-            &"hash".to_string()
-        ));
-        assert!(caps.index_types.contains(
-            &"hnsw".to_string()
-        ));
+        let caps = adapter
+            .get_capabilities()
+            .unwrap_or_else(|_| core::unreachable!("capabilities never fail"));
+        assert!(caps.index_types.contains(&"btree".to_string()));
+        assert!(caps.index_types.contains(&"bitmap".to_string()));
+        assert!(caps.index_types.contains(&"hash".to_string()));
+        assert!(caps.index_types.contains(&"hnsw".to_string()));
     }
 }
 
@@ -1141,55 +891,38 @@ mod integration_tests {
     use super::*;
 
     #[test]
-    #[ignore]
+    #[ignore = "requires Stoolap runtime"]
     fn connect_in_memory() {
         let mut adapter = StoolapAdapter::new();
         let result = adapter.connect("memory://");
-        assert!(
-            result.is_ok(),
-            "Failed to connect: {result:?}"
-        );
+        assert!(result.is_ok(), "Failed to connect: {result:?}");
         assert!(adapter.db.is_some());
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires Stoolap runtime"]
     fn gather_statistics_empty_db() {
         let mut adapter = StoolapAdapter::new();
-        adapter.connect("memory://").unwrap_or_else(
-            |e| {
-                core::unreachable!(
-                    "connect failed: {e}"
-                )
-            },
-        );
+        adapter
+            .connect("memory://")
+            .unwrap_or_else(|e| core::unreachable!("connect failed: {e}"));
         let stats = adapter.gather_statistics();
-        assert!(
-            stats.is_ok(),
-            "Failed to gather stats: {stats:?}"
-        );
-        assert!(
-            stats
-                .unwrap_or_else(|_| HashMap::new())
-                .is_empty()
-        );
+        assert!(stats.is_ok(), "Failed to gather stats: {stats:?}");
+        assert!(stats.unwrap_or_else(|_| HashMap::new()).is_empty());
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires Stoolap runtime"]
     fn gather_statistics_with_data() {
         let mut adapter = StoolapAdapter::new();
-        adapter.connect("memory://").unwrap_or_else(
-            |e| {
-                core::unreachable!(
-                    "connect failed: {e}"
-                )
-            },
-        );
+        adapter
+            .connect("memory://")
+            .unwrap_or_else(|e| core::unreachable!("connect failed: {e}"));
 
-        let db = adapter.db.as_ref().unwrap_or_else(|| {
-            core::unreachable!("db should be set")
-        });
+        let db = adapter
+            .db
+            .as_ref()
+            .unwrap_or_else(|| core::unreachable!("db should be set"));
 
         db.execute(
             "CREATE TABLE users (\
@@ -1198,48 +931,34 @@ mod integration_tests {
             )",
             (),
         )
-        .unwrap_or_else(|e| {
-            core::unreachable!(
-                "create table failed: {e}"
-            )
-        });
+        .unwrap_or_else(|e| core::unreachable!("create table failed: {e}"));
 
         db.execute(
             "INSERT INTO users (id, name) \
              VALUES (1, 'Alice')",
             (),
         )
-        .unwrap_or_else(|e| {
-            core::unreachable!("insert failed: {e}")
-        });
+        .unwrap_or_else(|e| core::unreachable!("insert failed: {e}"));
 
         let stats = adapter.gather_statistics();
         assert!(stats.is_ok());
         let stats = stats.unwrap_or_default();
         assert!(stats.contains_key("users"));
-        assert_eq!(
-            stats
-                .get("users")
-                .map(|s| s.row_count),
-            Some(1)
-        );
+        assert_eq!(stats.get("users").map(|s| s.row_count), Some(1));
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires Stoolap runtime"]
     fn gather_schema_info() {
         let mut adapter = StoolapAdapter::new();
-        adapter.connect("memory://").unwrap_or_else(
-            |e| {
-                core::unreachable!(
-                    "connect failed: {e}"
-                )
-            },
-        );
+        adapter
+            .connect("memory://")
+            .unwrap_or_else(|e| core::unreachable!("connect failed: {e}"));
 
-        let db = adapter.db.as_ref().unwrap_or_else(|| {
-            core::unreachable!("db should be set")
-        });
+        let db = adapter
+            .db
+            .as_ref()
+            .unwrap_or_else(|| core::unreachable!("db should be set"));
 
         db.execute(
             "CREATE TABLE orders (\
@@ -1249,40 +968,28 @@ mod integration_tests {
             )",
             (),
         )
-        .unwrap_or_else(|e| {
-            core::unreachable!(
-                "create table failed: {e}"
-            )
-        });
+        .unwrap_or_else(|e| core::unreachable!("create table failed: {e}"));
 
         let schema = adapter.get_schema_info();
-        assert!(
-            schema.is_ok(),
-            "Failed to get schema: {schema:?}"
-        );
-        let schema = schema.unwrap_or_else(|_| {
-            SchemaInfo {
-                tables: HashMap::new(),
-            }
+        assert!(schema.is_ok(), "Failed to get schema: {schema:?}");
+        let schema = schema.unwrap_or_else(|_| SchemaInfo {
+            tables: HashMap::new(),
         });
         assert!(schema.tables.contains_key("orders"));
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires Stoolap runtime"]
     fn facts_provider_after_gather() {
         let mut adapter = StoolapAdapter::new();
-        adapter.connect("memory://").unwrap_or_else(
-            |e| {
-                core::unreachable!(
-                    "connect failed: {e}"
-                )
-            },
-        );
+        adapter
+            .connect("memory://")
+            .unwrap_or_else(|e| core::unreachable!("connect failed: {e}"));
 
-        let db = adapter.db.as_ref().unwrap_or_else(|| {
-            core::unreachable!("db should be set")
-        });
+        let db = adapter
+            .db
+            .as_ref()
+            .unwrap_or_else(|| core::unreachable!("db should be set"));
 
         db.execute(
             "CREATE TABLE items (\
@@ -1291,27 +998,16 @@ mod integration_tests {
             )",
             (),
         )
-        .unwrap_or_else(|e| {
-            core::unreachable!(
-                "create table failed: {e}"
-            )
-        });
+        .unwrap_or_else(|e| core::unreachable!("create table failed: {e}"));
 
-        db.execute(
-            "INSERT INTO items VALUES (1, 9.99)",
-            (),
-        )
-        .unwrap_or_else(|e| {
-            core::unreachable!("insert failed: {e}")
-        });
+        db.execute("INSERT INTO items VALUES (1, 9.99)", ())
+            .unwrap_or_else(|e| core::unreachable!("insert failed: {e}"));
 
         let _ = adapter.gather_statistics();
         let _ = adapter.get_schema_info();
 
         let facts = adapter.as_facts_provider();
         assert_eq!(facts.database_name(), "Stoolap");
-        assert!(
-            facts.get_table_stats("items").is_some()
-        );
+        assert!(facts.get_table_stats("items").is_some());
     }
 }

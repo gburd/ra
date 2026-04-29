@@ -1,6 +1,11 @@
+#![expect(
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    reason = "example binary"
+)]
 //! Profile where time is spent in JOB query optimization.
 //!
-//! Run with: cargo run --example job_profile --package ra-engine --release
+//! Run with: `cargo run --example job_profile --package ra-engine --release`
 
 use ra_core::statistics::Statistics;
 use ra_engine::Optimizer;
@@ -112,8 +117,7 @@ fn main() {
         let avg = times.iter().sum::<f64>() / times.len() as f64;
 
         println!(
-            "{:<8} {:>6} {:>10.0} {:>10.0} {:>10.0} {:>10}",
-            name, tables, min, avg, max, path_name
+            "{name:<8} {tables:>6} {min:>10.0} {avg:>10.0} {max:>10.0} {path_name:>10}",
         );
     }
 
@@ -133,7 +137,7 @@ fn main() {
         "all_rules() x {}: {:.1}ms total, {:.1}us/call",
         iters,
         elapsed.as_millis(),
-        elapsed.as_micros() as f64 / iters as f64
+        elapsed.as_micros() as f64 / f64::from(iters)
     );
 
     // hardware_profile()
@@ -146,7 +150,7 @@ fn main() {
         "detect_hardware() x {}: {:.1}ms total, {:.1}us/call",
         iters,
         elapsed.as_millis(),
-        elapsed.as_micros() as f64 / iters as f64
+        elapsed.as_micros() as f64 / f64::from(iters)
     );
 
     // sql_to_relexpr for a simple query
@@ -160,7 +164,7 @@ fn main() {
         "sql_to_relexpr(2a) x {}: {:.1}ms total, {:.1}us/call",
         iters,
         elapsed.as_millis(),
-        elapsed.as_micros() as f64 / iters as f64
+        elapsed.as_micros() as f64 / f64::from(iters)
     );
 
     // to_rec_expr (conversion to e-graph format)
@@ -174,7 +178,7 @@ fn main() {
         "to_rec_expr(2a) x {}: {:.1}ms total, {:.1}us/call",
         iters,
         elapsed.as_millis(),
-        elapsed.as_micros() as f64 / iters as f64
+        elapsed.as_micros() as f64 / f64::from(iters)
     );
 }
 

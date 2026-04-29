@@ -12,20 +12,23 @@ use std::path::Path;
 ///
 /// * `name` - Timeline name (without path or extension). Looks in tests/data/timelines/
 ///
+/// # Errors
+///
+/// Returns an error if the timeline file cannot be found or parsed.
+///
 /// # Example
 ///
 /// ```ignore
 /// let config = load_timeline("index-addition")?;
 /// ```
 pub fn load_timeline(name: &str) -> Result<TimelineConfig> {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .context("CARGO_MANIFEST_DIR not set")?;
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").context("CARGO_MANIFEST_DIR not set")?;
 
     let timeline_path = Path::new(&manifest_dir)
         .join("tests")
         .join("data")
         .join("timelines")
-        .join(format!("{}.toml", name));
+        .join(format!("{name}.toml"));
 
     load_timeline_from_path(&timeline_path)
 }
@@ -35,6 +38,10 @@ pub fn load_timeline(name: &str) -> Result<TimelineConfig> {
 /// # Arguments
 ///
 /// * `path` - Absolute path to the timeline TOML file
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or the TOML cannot be parsed.
 pub fn load_timeline_from_path(path: &Path) -> Result<TimelineConfig> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read timeline file: {}", path.display()))?;
@@ -42,7 +49,8 @@ pub fn load_timeline_from_path(path: &Path) -> Result<TimelineConfig> {
     let config: TimelineConfig = toml::from_str(&content)
         .with_context(|| format!("Failed to parse timeline TOML: {}", path.display()))?;
 
-    config.validate()
+    config
+        .validate()
         .with_context(|| format!("Timeline validation failed: {}", path.display()))?;
 
     Ok(config)
@@ -100,20 +108,11 @@ impl std::error::Error for ValidationError {}
 /// assert_cost_reduction(1000.0, 100.0, 0.80); // 80% reduction required
 /// ```
 pub fn assert_cost_reduction(before: f64, after: f64, min_reduction_pct: f64) {
-    assert!(
-        before > 0.0,
-        "before cost must be positive: {}",
-        before
-    );
-    assert!(
-        after > 0.0,
-        "after cost must be positive: {}",
-        after
-    );
+    assert!(before > 0.0, "before cost must be positive: {before}");
+    assert!(after > 0.0, "after cost must be positive: {after}");
     assert!(
         (0.0..=1.0).contains(&min_reduction_pct),
-        "min_reduction_pct must be between 0.0 and 1.0: {}",
-        min_reduction_pct
+        "min_reduction_pct must be between 0.0 and 1.0: {min_reduction_pct}",
     );
 
     let actual_reduction = (before - after) / before;
@@ -142,18 +141,15 @@ pub fn assert_cost_reduction(before: f64, after: f64, min_reduction_pct: f64) {
 pub fn assert_cardinality_within_tolerance(expected: f64, actual: f64, tolerance: f64) {
     assert!(
         expected >= 0.0,
-        "expected cardinality must be non-negative: {}",
-        expected
+        "expected cardinality must be non-negative: {expected}",
     );
     assert!(
         actual >= 0.0,
-        "actual cardinality must be non-negative: {}",
-        actual
+        "actual cardinality must be non-negative: {actual}",
     );
     assert!(
         (0.0..=1.0).contains(&tolerance),
-        "tolerance must be between 0.0 and 1.0: {}",
-        tolerance
+        "tolerance must be between 0.0 and 1.0: {tolerance}",
     );
 
     let lower_bound = expected * (1.0 - tolerance);
@@ -180,15 +176,17 @@ pub fn assert_cardinality_within_tolerance(expected: f64, actual: f64, tolerance
 /// # Panics
 ///
 /// Panics if pattern is not found in plan.
+#[expect(
+    clippy::panic,
+    reason = "assertion helper intentionally panics on mismatch"
+)]
 pub fn assert_plan_contains(plan: &str, pattern: &str) {
     let regex = regex::Regex::new(pattern)
-        .unwrap_or_else(|e| panic!("Invalid regex pattern '{}': {}", pattern, e));
+        .unwrap_or_else(|e| panic!("Invalid regex pattern '{pattern}': {e}"));
 
     assert!(
         regex.is_match(plan),
-        "Expected plan to match pattern '{}', but it did not.\nPlan:\n{}",
-        pattern,
-        plan
+        "Expected plan to match pattern '{pattern}', but it did not.\nPlan:\n{plan}",
     );
 }
 
@@ -206,9 +204,7 @@ pub fn assert_rules_applied(rules_applied: &[String], required_rules: &[String])
     for required in required_rules {
         assert!(
             rules_applied.contains(required),
-            "Expected rule '{}' to be applied, but it was not.\nRules applied: {:?}",
-            required,
-            rules_applied
+            "Expected rule '{required}' to be applied, but it was not.\nRules applied: {rules_applied:?}",
         );
     }
 }
@@ -227,16 +223,13 @@ pub fn assert_rules_not_applied(rules_applied: &[String], forbidden_rules: &[Str
     for forbidden in forbidden_rules {
         assert!(
             !rules_applied.contains(forbidden),
-            "Expected rule '{}' to NOT be applied, but it was.\nRules applied: {:?}",
-            forbidden,
-            rules_applied
+            "Expected rule '{forbidden}' to NOT be applied, but it was.\nRules applied: {rules_applied:?}",
         );
     }
 }
 
 /// Placeholder types - these will need to be imported from actual crates.
 /// For now, defining minimal versions to make the module compile.
-
 /// Timeline configuration.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TimelineConfig {
@@ -256,6 +249,10 @@ pub struct TimelineConfig {
 
 impl TimelineConfig {
     /// Validate the timeline configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration is invalid.
     pub fn validate(&self) -> Result<()> {
         if self.snapshots.is_empty() {
             return Err(anyhow!("Timeline must have at least one snapshot"));
@@ -270,7 +267,11 @@ impl TimelineConfig {
                 ));
             }
 
-            if !self.hardware_profiles.iter().any(|p| p.name == snapshot.hardware_profile) {
+            if !self
+                .hardware_profiles
+                .iter()
+                .any(|p| p.name == snapshot.hardware_profile)
+            {
                 return Err(anyhow!(
                     "Snapshot {} references unknown hardware profile '{}'",
                     i,
@@ -293,6 +294,7 @@ impl TimelineConfig {
     }
 
     /// Get a hardware profile by name.
+    #[must_use]
     pub fn get_hardware_profile(&self, name: &str) -> Option<&HardwareProfile> {
         self.hardware_profiles.iter().find(|p| p.name == name)
     }

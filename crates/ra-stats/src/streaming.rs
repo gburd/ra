@@ -83,12 +83,7 @@ struct MetricChannel {
 }
 
 impl MetricChannel {
-    fn new(
-        kind: MetricKind,
-        name: impl Into<String>,
-        capacity: usize,
-        alpha: f64,
-    ) -> Self {
+    fn new(kind: MetricKind, name: impl Into<String>, capacity: usize, alpha: f64) -> Self {
         let name = name.into();
         Self {
             kind,
@@ -160,19 +155,9 @@ impl StreamingPipeline {
         Self {
             channels: vec![
                 MetricChannel::new(MetricKind::Cpu, "cpu", cap, alpha),
-                MetricChannel::new(
-                    MetricKind::Memory,
-                    "memory",
-                    cap,
-                    alpha,
-                ),
+                MetricChannel::new(MetricKind::Memory, "memory", cap, alpha),
                 MetricChannel::new(MetricKind::Io, "io", cap, alpha),
-                MetricChannel::new(
-                    MetricKind::Latency,
-                    "latency",
-                    cap,
-                    alpha,
-                ),
+                MetricChannel::new(MetricKind::Latency, "latency", cap, alpha),
             ],
             thresholds: ChangeThresholds::default(),
             last_update: Instant::now(),
@@ -194,10 +179,7 @@ impl StreamingPipeline {
 
     /// Attach a monitoring adapter for metric export.
     #[must_use]
-    pub fn with_adapter(
-        mut self,
-        adapter: Box<dyn MonitoringAdapter>,
-    ) -> Self {
+    pub fn with_adapter(mut self, adapter: Box<dyn MonitoringAdapter>) -> Self {
         self.adapter = Some(adapter);
         self
     }
@@ -219,29 +201,14 @@ impl StreamingPipeline {
     ///
     /// Returns the smoothed value, or `None` if the channel does not
     /// exist.
-    pub fn ingest(
-        &mut self,
-        kind: MetricKind,
-        value: f64,
-    ) -> Option<f64> {
+    pub fn ingest(&mut self, kind: MetricKind, value: f64) -> Option<f64> {
         self.sample_count += 1;
-        let channel = self
-            .channels
-            .iter_mut()
-            .find(|c| c.kind == kind)?;
+        let channel = self.channels.iter_mut().find(|c| c.kind == kind)?;
         let smoothed = channel.ingest(value);
 
         if let Some(adapter) = &mut self.adapter {
-            adapter.record_histogram(
-                &channel.name,
-                value,
-                &[],
-            );
-            adapter.record_gauge(
-                &format!("{}.smoothed", channel.name),
-                smoothed,
-                &[],
-            );
+            adapter.record_histogram(&channel.name, value, &[]);
+            adapter.record_gauge(&format!("{}.smoothed", channel.name), smoothed, &[]);
         }
 
         Some(smoothed)
@@ -263,15 +230,9 @@ impl StreamingPipeline {
         let io = self.smoothed(MetricKind::Io);
         let latency = self.smoothed(MetricKind::Latency);
 
-        let cpu_changed =
-            exceeds_threshold(self.last_cpu, cpu, self.thresholds.cpu);
-        let mem_changed = exceeds_threshold(
-            self.last_memory,
-            memory,
-            self.thresholds.memory,
-        );
-        let io_changed =
-            exceeds_threshold(self.last_io, io, self.thresholds.io);
+        let cpu_changed = exceeds_threshold(self.last_cpu, cpu, self.thresholds.cpu);
+        let mem_changed = exceeds_threshold(self.last_memory, memory, self.thresholds.memory);
+        let io_changed = exceeds_threshold(self.last_io, io, self.thresholds.io);
 
         if !cpu_changed && !mem_changed && !io_changed {
             return None;
@@ -383,7 +344,6 @@ fn exceeds_threshold(old: f64, new: f64, threshold: f64) -> bool {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
     use crate::adapters::otel::OtelAdapter;
@@ -470,8 +430,7 @@ mod tests {
     #[test]
     fn with_adapter_records_metrics() {
         let adapter = OtelAdapter::new();
-        let mut p = StreamingPipeline::new()
-            .with_adapter(Box::new(adapter));
+        let mut p = StreamingPipeline::new().with_adapter(Box::new(adapter));
         p.ingest(MetricKind::Cpu, 50.0);
         p.ingest(MetricKind::Cpu, 60.0);
         // Adapter is consumed into the pipeline, so we verify via
@@ -483,7 +442,7 @@ mod tests {
     fn percentiles_available_after_ingest() {
         let mut p = StreamingPipeline::new();
         for i in 1..=100 {
-            p.ingest(MetricKind::Latency, i as f64);
+            p.ingest(MetricKind::Latency, f64::from(i));
         }
         let summary = p.percentiles(MetricKind::Latency);
         assert!(summary.is_some());
@@ -502,13 +461,11 @@ mod tests {
 
     #[test]
     fn custom_thresholds() {
-        let p = StreamingPipeline::new().with_thresholds(
-            ChangeThresholds {
-                cpu: 0.05,
-                memory: 0.05,
-                io: 0.05,
-            },
-        );
+        let p = StreamingPipeline::new().with_thresholds(ChangeThresholds {
+            cpu: 0.05,
+            memory: 0.05,
+            io: 0.05,
+        });
         assert!((p.thresholds.cpu - 0.05).abs() < f64::EPSILON);
     }
 

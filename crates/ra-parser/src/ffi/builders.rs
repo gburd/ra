@@ -12,9 +12,8 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering,
-    ProjectionColumn, RelExpr, SortDirection, SortKey, WindowExpr,
-    WindowFunction,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
+    SortDirection, SortKey, WindowExpr, WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
@@ -29,9 +28,7 @@ use super::node::{decode, NodeTag, RaNode, RaParseState};
 ///
 /// # Safety
 /// The pointer must be either null or point to a valid `RaParseState`.
-unsafe fn state_ref<'a>(
-    state: *mut RaParseState,
-) -> Option<&'a mut RaParseState> {
+unsafe fn state_ref<'a>(state: *mut RaParseState) -> Option<&'a mut RaParseState> {
     if state.is_null() {
         return None;
     }
@@ -60,25 +57,17 @@ unsafe fn c_str_to_string(ptr: *const c_char) -> String {
 ///
 /// # Safety
 /// `ptr` must point to at least `len` valid UTF-8 bytes (no NUL required).
-unsafe fn c_str_len_to_string(
-    ptr: *const c_char,
-    len: usize,
-) -> String {
+unsafe fn c_str_len_to_string(ptr: *const c_char, len: usize) -> String {
     if ptr.is_null() || len == 0 {
         return String::new();
     }
     // SAFETY: caller guarantees ptr points to at least len bytes
-    let slice = unsafe {
-        std::slice::from_raw_parts(ptr.cast::<u8>(), len)
-    };
+    let slice = unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), len) };
     String::from_utf8_lossy(slice).into_owned()
 }
 
 /// Decode a tagged pointer as a `RelExpr`, cloning it out of the arena.
-fn decode_rel(
-    state: &RaParseState,
-    ptr: *mut RaNode,
-) -> Option<RelExpr> {
+fn decode_rel(state: &RaParseState, ptr: *mut RaNode) -> Option<RelExpr> {
     let (tag, idx) = decode(ptr)?;
     if tag != NodeTag::Rel {
         return None;
@@ -87,10 +76,7 @@ fn decode_rel(
 }
 
 /// Decode a tagged pointer as an `Expr`, cloning it out of the arena.
-fn decode_expr(
-    state: &RaParseState,
-    ptr: *mut RaNode,
-) -> Option<Expr> {
+fn decode_expr(state: &RaParseState, ptr: *mut RaNode) -> Option<Expr> {
     let (tag, idx) = decode(ptr)?;
     if tag != NodeTag::Expr {
         return None;
@@ -99,10 +85,7 @@ fn decode_expr(
 }
 
 /// Decode a tagged pointer as a list of arena indices.
-fn decode_list(
-    state: &RaParseState,
-    ptr: *mut RaNode,
-) -> Option<Vec<usize>> {
+fn decode_list(state: &RaParseState, ptr: *mut RaNode) -> Option<Vec<usize>> {
     let (tag, idx) = decode(ptr)?;
     if tag != NodeTag::List {
         return None;
@@ -120,10 +103,7 @@ fn decode_list(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `table` must be null or a valid NUL-terminated C string.
 #[no_mangle]
-pub unsafe extern "C" fn ra_scan(
-    state: *mut RaParseState,
-    table: *const c_char,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_scan(state: *mut RaParseState, table: *const c_char) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -190,9 +170,7 @@ pub unsafe extern "C" fn ra_project(
     let mut columns = Vec::with_capacity(indices.len());
     for idx in indices {
         let Some(expr) = st.take_expr(idx) else {
-            st.push_error(format!(
-                "ra_project: invalid expr index {idx}"
-            ));
+            st.push_error(format!("ra_project: invalid expr index {idx}"));
             return std::ptr::null_mut();
         };
         columns.push(ProjectionColumn { expr, alias: None });
@@ -231,9 +209,7 @@ pub unsafe extern "C" fn ra_join(
         5 => JoinType::Semi,
         6 => JoinType::Anti,
         other => {
-            st.push_error(format!(
-                "ra_join: unknown join type {other}"
-            ));
+            st.push_error(format!("ra_join: unknown join type {other}"));
             return std::ptr::null_mut();
         }
     };
@@ -326,9 +302,7 @@ pub unsafe extern "C" fn ra_sort(
     let mut keys = Vec::with_capacity(indices.len());
     for idx in indices {
         let Some(key) = st.take_sort_key(idx) else {
-            st.push_error(format!(
-                "ra_sort: invalid sort key index {idx}"
-            ));
+            st.push_error(format!("ra_sort: invalid sort key index {idx}"));
             return std::ptr::null_mut();
         };
         keys.push(key);
@@ -419,9 +393,7 @@ pub unsafe extern "C" fn ra_intersect(
         return std::ptr::null_mut();
     };
     let Some(right_rel) = decode_rel(st, right) else {
-        st.push_error(
-            "ra_intersect: invalid right node".to_owned(),
-        );
+        st.push_error("ra_intersect: invalid right node".to_owned());
         return std::ptr::null_mut();
     };
     st.push_rel(RelExpr::Intersect {
@@ -485,20 +457,14 @@ pub unsafe extern "C" fn ra_values(
     };
     let mut rows = Vec::with_capacity(row_indices.len());
     for row_idx in row_indices {
-        let Some(col_indices) =
-            st.get_list(row_idx).map(<[usize]>::to_vec)
-        else {
-            st.push_error(format!(
-                "ra_values: invalid row list index {row_idx}"
-            ));
+        let Some(col_indices) = st.get_list(row_idx).map(<[usize]>::to_vec) else {
+            st.push_error(format!("ra_values: invalid row list index {row_idx}"));
             return std::ptr::null_mut();
         };
         let mut row = Vec::with_capacity(col_indices.len());
         for col_idx in col_indices {
             let Some(expr) = st.take_expr(col_idx) else {
-                st.push_error(format!(
-                    "ra_values: invalid expr index {col_idx}"
-                ));
+                st.push_error(format!("ra_values: invalid expr index {col_idx}"));
                 return std::ptr::null_mut();
             };
             row.push(expr);
@@ -528,21 +494,15 @@ pub unsafe extern "C" fn ra_recursive_cte(
     };
     let cte_name = unsafe { c_str_len_to_string(name, name_len) };
     let Some(base_rel) = decode_rel(st, base) else {
-        st.push_error(
-            "ra_recursive_cte: invalid base node".to_owned(),
-        );
+        st.push_error("ra_recursive_cte: invalid base node".to_owned());
         return std::ptr::null_mut();
     };
     let Some(recursive_rel) = decode_rel(st, recursive) else {
-        st.push_error(
-            "ra_recursive_cte: invalid recursive node".to_owned(),
-        );
+        st.push_error("ra_recursive_cte: invalid recursive node".to_owned());
         return std::ptr::null_mut();
     };
     let Some(body_rel) = decode_rel(st, body) else {
-        st.push_error(
-            "ra_recursive_cte: invalid body node".to_owned(),
-        );
+        st.push_error("ra_recursive_cte: invalid body node".to_owned());
         return std::ptr::null_mut();
     };
     st.push_rel(RelExpr::RecursiveCTE {
@@ -632,10 +592,7 @@ pub unsafe extern "C" fn ra_window(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `input` must be a valid tagged pointer or null.
 #[no_mangle]
-pub unsafe extern "C" fn ra_distinct(
-    state: *mut RaParseState,
-    input: *mut RaNode,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_distinct(state: *mut RaParseState, input: *mut RaNode) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -658,10 +615,7 @@ pub unsafe extern "C" fn ra_distinct(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `name` must be null or a valid NUL-terminated C string.
 #[no_mangle]
-pub unsafe extern "C" fn ra_column(
-    state: *mut RaParseState,
-    name: *const c_char,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_column(state: *mut RaParseState, name: *const c_char) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -693,10 +647,7 @@ pub unsafe extern "C" fn ra_qualified_column(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 #[no_mangle]
-pub unsafe extern "C" fn ra_const_int(
-    state: *mut RaParseState,
-    value: i64,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_const_int(state: *mut RaParseState, value: i64) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -708,10 +659,7 @@ pub unsafe extern "C" fn ra_const_int(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 #[no_mangle]
-pub unsafe extern "C" fn ra_const_float(
-    state: *mut RaParseState,
-    value: f64,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_const_float(state: *mut RaParseState, value: f64) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -740,9 +688,7 @@ pub unsafe extern "C" fn ra_const_str(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 #[no_mangle]
-pub unsafe extern "C" fn ra_const_null(
-    state: *mut RaParseState,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_const_null(state: *mut RaParseState) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -756,10 +702,7 @@ pub unsafe extern "C" fn ra_const_null(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 #[no_mangle]
-pub unsafe extern "C" fn ra_const_bool(
-    state: *mut RaParseState,
-    value: u32,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_const_bool(state: *mut RaParseState, value: u32) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -801,9 +744,7 @@ pub unsafe extern "C" fn ra_binop(
         13 => BinOp::Concat,
         14 => BinOp::JsonAccess,
         other => {
-            st.push_error(format!(
-                "ra_binop: unknown operator {other}"
-            ));
+            st.push_error(format!("ra_binop: unknown operator {other}"));
             return std::ptr::null_mut();
         }
     };
@@ -844,16 +785,12 @@ pub unsafe extern "C" fn ra_unary_op(
         2 => UnaryOp::IsNotNull,
         3 => UnaryOp::Neg,
         other => {
-            st.push_error(format!(
-                "ra_unary_op: unknown operator {other}"
-            ));
+            st.push_error(format!("ra_unary_op: unknown operator {other}"));
             return std::ptr::null_mut();
         }
     };
     let Some(operand_expr) = decode_expr(st, operand) else {
-        st.push_error(
-            "ra_unary_op: invalid operand node".to_owned(),
-        );
+        st.push_error("ra_unary_op: invalid operand node".to_owned());
         return std::ptr::null_mut();
     };
     st.push_expr(Expr::UnaryOp {
@@ -886,9 +823,7 @@ pub unsafe extern "C" fn ra_case(
         None
     } else {
         let Some(expr) = decode_expr(st, operand) else {
-            st.push_error(
-                "ra_case: invalid operand node".to_owned(),
-            );
+            st.push_error("ra_case: invalid operand node".to_owned());
             return std::ptr::null_mut();
         };
         Some(Box::new(expr))
@@ -898,31 +833,22 @@ pub unsafe extern "C" fn ra_case(
         return std::ptr::null_mut();
     };
     if indices.len() % 2 != 0 {
-        st.push_error(
-            "ra_case: when list must have even length".to_owned(),
-        );
+        st.push_error("ra_case: when list must have even length".to_owned());
         return std::ptr::null_mut();
     }
-    let mut when_clauses =
-        Vec::with_capacity(indices.len() / 2);
+    let mut when_clauses = Vec::with_capacity(indices.len() / 2);
     let mut iter = indices.into_iter();
     while let Some(cond_idx) = iter.next() {
         let Some(result_idx) = iter.next() else {
-            st.push_error(
-                "ra_case: when list truncated".to_owned(),
-            );
+            st.push_error("ra_case: when list truncated".to_owned());
             return std::ptr::null_mut();
         };
         let Some(cond) = st.take_expr(cond_idx) else {
-            st.push_error(format!(
-                "ra_case: invalid condition index {cond_idx}"
-            ));
+            st.push_error(format!("ra_case: invalid condition index {cond_idx}"));
             return std::ptr::null_mut();
         };
         let Some(result) = st.take_expr(result_idx) else {
-            st.push_error(format!(
-                "ra_case: invalid result index {result_idx}"
-            ));
+            st.push_error(format!("ra_case: invalid result index {result_idx}"));
             return std::ptr::null_mut();
         };
         when_clauses.push((cond, result));
@@ -931,9 +857,7 @@ pub unsafe extern "C" fn ra_case(
         None
     } else {
         let Some(expr) = decode_expr(st, else_expr) else {
-            st.push_error(
-                "ra_case: invalid else expression".to_owned(),
-            );
+            st.push_error("ra_case: invalid else expression".to_owned());
             return std::ptr::null_mut();
         };
         Some(Box::new(expr))
@@ -962,13 +886,10 @@ pub unsafe extern "C" fn ra_cast(
         return std::ptr::null_mut();
     };
     let Some(inner_expr) = decode_expr(st, expr) else {
-        st.push_error(
-            "ra_cast: invalid expression node".to_owned(),
-        );
+        st.push_error("ra_cast: invalid expression node".to_owned());
         return std::ptr::null_mut();
     };
-    let target_type =
-        unsafe { c_str_len_to_string(type_str, type_len) };
+    let target_type = unsafe { c_str_len_to_string(type_str, type_len) };
     st.push_expr(Expr::Cast {
         expr: Box::new(inner_expr),
         target_type,
@@ -1002,25 +923,19 @@ pub unsafe extern "C" fn ra_subquery(
         3 => SubQueryType::Any,
         4 => SubQueryType::All,
         other => {
-            st.push_error(format!(
-                "ra_subquery: unknown type code {other}"
-            ));
+            st.push_error(format!("ra_subquery: unknown type code {other}"));
             return std::ptr::null_mut();
         }
     };
     let Some(query_rel) = decode_rel(st, rel_node) else {
-        st.push_error(
-            "ra_subquery: invalid rel node".to_owned(),
-        );
+        st.push_error("ra_subquery: invalid rel node".to_owned());
         return std::ptr::null_mut();
     };
     let test = if test_expr.is_null() {
         None
     } else {
         let Some(expr) = decode_expr(st, test_expr) else {
-            st.push_error(
-                "ra_subquery: invalid test expression".to_owned(),
-            );
+            st.push_error("ra_subquery: invalid test expression".to_owned());
             return std::ptr::null_mut();
         };
         Some(Box::new(expr))
@@ -1065,10 +980,7 @@ pub unsafe extern "C" fn ra_func(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `elem_list` must be a valid tagged pointer or null.
 #[no_mangle]
-pub unsafe extern "C" fn ra_array(
-    state: *mut RaParseState,
-    elem_list: *mut RaNode,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_array(state: *mut RaParseState, elem_list: *mut RaNode) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1091,15 +1003,11 @@ pub unsafe extern "C" fn ra_array_index(
         return std::ptr::null_mut();
     };
     let Some(array) = decode_expr(st, array_expr) else {
-        st.push_error(
-            "ra_array_index: invalid array expression".to_owned(),
-        );
+        st.push_error("ra_array_index: invalid array expression".to_owned());
         return std::ptr::null_mut();
     };
     let Some(index) = decode_expr(st, index_expr) else {
-        st.push_error(
-            "ra_array_index: invalid index expression".to_owned(),
-        );
+        st.push_error("ra_array_index: invalid index expression".to_owned());
         return std::ptr::null_mut();
     };
     st.push_expr(Expr::ArrayIndex(Box::new(array), Box::new(index)))
@@ -1122,13 +1030,10 @@ pub unsafe extern "C" fn ra_field_access(
         return std::ptr::null_mut();
     };
     let Some(base_expr) = decode_expr(st, expr) else {
-        st.push_error(
-            "ra_field_access: invalid expression node".to_owned(),
-        );
+        st.push_error("ra_field_access: invalid expression node".to_owned());
         return std::ptr::null_mut();
     };
-    let name =
-        unsafe { c_str_len_to_string(field_name, field_len) };
+    let name = unsafe { c_str_len_to_string(field_name, field_len) };
     st.push_expr(Expr::FieldAccess {
         expr: Box::new(base_expr),
         field_name: name,
@@ -1174,9 +1079,7 @@ pub unsafe extern "C" fn ra_agg_expr(
         7 => AggregateFunction::StringAgg,
         8 => AggregateFunction::ArrayAgg,
         other => {
-            st.push_error(format!(
-                "ra_agg_expr: unknown function code {other}"
-            ));
+            st.push_error(format!("ra_agg_expr: unknown function code {other}"));
             return std::ptr::null_mut();
         }
     };
@@ -1184,9 +1087,7 @@ pub unsafe extern "C" fn ra_agg_expr(
         None
     } else {
         let Some(expr) = decode_expr(st, arg) else {
-            st.push_error(
-                "ra_agg_expr: invalid arg expression".to_owned(),
-            );
+            st.push_error("ra_agg_expr: invalid arg expression".to_owned());
             return std::ptr::null_mut();
         };
         Some(expr)
@@ -1249,9 +1150,7 @@ pub unsafe extern "C" fn ra_window_expr(
         13 => WindowFunction::LastValue,
         14 => WindowFunction::NthValue,
         other => {
-            st.push_error(format!(
-                "ra_window_expr: unknown function code {other}"
-            ));
+            st.push_error(format!("ra_window_expr: unknown function code {other}"));
             return std::ptr::null_mut();
         }
     };
@@ -1259,9 +1158,7 @@ pub unsafe extern "C" fn ra_window_expr(
         None
     } else {
         let Some(expr) = decode_expr(st, arg) else {
-            st.push_error(
-                "ra_window_expr: invalid arg expression".to_owned(),
-            );
+            st.push_error("ra_window_expr: invalid arg expression".to_owned());
             return std::ptr::null_mut();
         };
         Some(expr)
@@ -1293,9 +1190,7 @@ pub unsafe extern "C" fn ra_window_expr(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 #[no_mangle]
-pub unsafe extern "C" fn ra_list_new(
-    state: *mut RaParseState,
-) -> *mut RaNode {
+pub unsafe extern "C" fn ra_list_new(state: *mut RaParseState) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1330,9 +1225,7 @@ pub unsafe extern "C" fn ra_list_push(
     if st.list_push(list_idx, item_idx) {
         list
     } else {
-        st.push_error(format!(
-            "ra_list_push: list index {list_idx} out of bounds"
-        ));
+        st.push_error(format!("ra_list_push: list index {list_idx} out of bounds"));
         std::ptr::null_mut()
     }
 }
@@ -1356,9 +1249,7 @@ pub unsafe extern "C" fn ra_sort_key(
         return std::ptr::null_mut();
     };
     let Some(key_expr) = decode_expr(st, expr) else {
-        st.push_error(
-            "ra_sort_key: invalid expression node".to_owned(),
-        );
+        st.push_error("ra_sort_key: invalid expression node".to_owned());
         return std::ptr::null_mut();
     };
     let direction = if ascending != 0 {
@@ -1385,10 +1276,7 @@ pub unsafe extern "C" fn ra_sort_key(
 /// Collect `Expr` values from a tagged list pointer.
 ///
 /// Returns an empty vec if the pointer is null or not a valid list.
-fn collect_exprs(
-    state: &RaParseState,
-    list_ptr: *mut RaNode,
-) -> Vec<Expr> {
+fn collect_exprs(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<Expr> {
     let Some(indices) = decode_list(state, list_ptr) else {
         return vec![];
     };
@@ -1404,10 +1292,7 @@ fn collect_exprs(
 /// Collect `SortKey` values from a tagged list pointer.
 ///
 /// Returns an empty vec if the pointer is null or not a valid list.
-fn collect_sort_keys(
-    state: &RaParseState,
-    list_ptr: *mut RaNode,
-) -> Vec<SortKey> {
+fn collect_sort_keys(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<SortKey> {
     let Some(indices) = decode_list(state, list_ptr) else {
         return vec![];
     };
@@ -1449,8 +1334,7 @@ mod tests {
 
     #[test]
     fn null_state_returns_null() {
-        let result =
-            unsafe { ra_scan(std::ptr::null_mut(), std::ptr::null()) };
+        let result = unsafe { ra_scan(std::ptr::null_mut(), std::ptr::null()) };
         assert!(result.is_null());
     }
 
@@ -1463,9 +1347,7 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(
-            matches!(rel, RelExpr::Scan { table, .. } if table == "users")
-        );
+        assert!(matches!(rel, RelExpr::Scan { table, .. } if table == "users"));
     }
 
     #[test]
@@ -1494,7 +1376,13 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(matches!(rel, RelExpr::Join { join_type: JoinType::Inner, .. }));
+        assert!(matches!(
+            rel,
+            RelExpr::Join {
+                join_type: JoinType::Inner,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1506,9 +1394,14 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(
-            matches!(rel, RelExpr::Limit { count: 10, offset: 5, .. })
-        );
+        assert!(matches!(
+            rel,
+            RelExpr::Limit {
+                count: 10,
+                offset: 5,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1521,9 +1414,7 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(
-            matches!(rel, RelExpr::Union { all: true, .. })
-        );
+        assert!(matches!(rel, RelExpr::Union { all: true, .. }));
     }
 
     #[test]
@@ -1561,9 +1452,7 @@ mod tests {
         assert_eq!(tag, NodeTag::Expr);
         let state = unsafe { free_state(st) };
         let expr = state.take_expr(idx).expect("should exist");
-        assert!(
-            matches!(expr, Expr::Const(Const::Float(v)) if (v - 3.14).abs() < f64::EPSILON)
-        );
+        assert!(matches!(expr, Expr::Const(Const::Float(v)) if (v - 3.14).abs() < f64::EPSILON));
     }
 
     #[test]
@@ -1582,19 +1471,14 @@ mod tests {
     #[test]
     fn qualified_column_builds_correctly() {
         let st = new_state();
-        let node = unsafe {
-            ra_qualified_column(st, c"users".as_ptr(), c"id".as_ptr())
-        };
+        let node = unsafe { ra_qualified_column(st, c"users".as_ptr(), c"id".as_ptr()) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
         assert_eq!(tag, NodeTag::Expr);
         let state = unsafe { free_state(st) };
         let expr = state.take_expr(idx).expect("should exist");
-        assert_eq!(
-            expr,
-            Expr::Column(ColumnRef::qualified("users", "id"))
-        );
+        assert_eq!(expr, Expr::Column(ColumnRef::qualified("users", "id")));
     }
 
     #[test]
@@ -1664,9 +1548,7 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(
-            matches!(rel, RelExpr::CTE { name, .. } if name == "temp")
-        );
+        assert!(matches!(rel, RelExpr::CTE { name, .. } if name == "temp"));
     }
 
     #[test]
@@ -1728,8 +1610,7 @@ mod tests {
 
     #[test]
     fn const_bool_null_state() {
-        let result =
-            unsafe { ra_const_bool(std::ptr::null_mut(), 1) };
+        let result = unsafe { ra_const_bool(std::ptr::null_mut(), 1) };
         assert!(result.is_null());
     }
 
@@ -1746,7 +1627,10 @@ mod tests {
         let expr = state.take_expr(idx).expect("should exist");
         assert!(matches!(
             expr,
-            Expr::UnaryOp { op: UnaryOp::Not, .. }
+            Expr::UnaryOp {
+                op: UnaryOp::Not,
+                ..
+            }
         ));
     }
 
@@ -1763,7 +1647,10 @@ mod tests {
         let expr = state.take_expr(idx).expect("should exist");
         assert!(matches!(
             expr,
-            Expr::UnaryOp { op: UnaryOp::IsNull, .. }
+            Expr::UnaryOp {
+                op: UnaryOp::IsNull,
+                ..
+            }
         ));
     }
 
@@ -1780,7 +1667,10 @@ mod tests {
         let expr = state.take_expr(idx).expect("should exist");
         assert!(matches!(
             expr,
-            Expr::UnaryOp { op: UnaryOp::IsNotNull, .. }
+            Expr::UnaryOp {
+                op: UnaryOp::IsNotNull,
+                ..
+            }
         ));
     }
 
@@ -1797,7 +1687,10 @@ mod tests {
         let expr = state.take_expr(idx).expect("should exist");
         assert!(matches!(
             expr,
-            Expr::UnaryOp { op: UnaryOp::Neg, .. }
+            Expr::UnaryOp {
+                op: UnaryOp::Neg,
+                ..
+            }
         ));
     }
 
@@ -1815,9 +1708,7 @@ mod tests {
 
     #[test]
     fn unary_op_null_state() {
-        let result = unsafe {
-            ra_unary_op(std::ptr::null_mut(), 0, std::ptr::null_mut())
-        };
+        let result = unsafe { ra_unary_op(std::ptr::null_mut(), 0, std::ptr::null_mut()) };
         assert!(result.is_null());
     }
 
@@ -1829,18 +1720,13 @@ mod tests {
         let zero = unsafe { ra_const_int(st, 0) };
         let cond = unsafe { ra_binop(st, 8, col, zero) }; // Gt
         let result = unsafe { ra_const_str(st, c"positive".as_ptr()) };
-        let else_val =
-            unsafe { ra_const_str(st, c"non-positive".as_ptr()) };
+        let else_val = unsafe { ra_const_str(st, c"non-positive".as_ptr()) };
 
         let when_list = unsafe { ra_list_new(st) };
-        let when_list =
-            unsafe { ra_list_push(st, when_list, cond) };
-        let when_list =
-            unsafe { ra_list_push(st, when_list, result) };
+        let when_list = unsafe { ra_list_push(st, when_list, cond) };
+        let when_list = unsafe { ra_list_push(st, when_list, result) };
 
-        let node = unsafe {
-            ra_case(st, std::ptr::null_mut(), when_list, else_val)
-        };
+        let node = unsafe { ra_case(st, std::ptr::null_mut(), when_list, else_val) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
@@ -1870,14 +1756,10 @@ mod tests {
         let result = unsafe { ra_const_str(st, c"one".as_ptr()) };
 
         let when_list = unsafe { ra_list_new(st) };
-        let when_list =
-            unsafe { ra_list_push(st, when_list, when_val) };
-        let when_list =
-            unsafe { ra_list_push(st, when_list, result) };
+        let when_list = unsafe { ra_list_push(st, when_list, when_val) };
+        let when_list = unsafe { ra_list_push(st, when_list, result) };
 
-        let node = unsafe {
-            ra_case(st, operand, when_list, std::ptr::null_mut())
-        };
+        let node = unsafe { ra_case(st, operand, when_list, std::ptr::null_mut()) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
@@ -1903,16 +1785,8 @@ mod tests {
         let st = new_state();
         let val = unsafe { ra_const_int(st, 1) };
         let when_list = unsafe { ra_list_new(st) };
-        let when_list =
-            unsafe { ra_list_push(st, when_list, val) };
-        let node = unsafe {
-            ra_case(
-                st,
-                std::ptr::null_mut(),
-                when_list,
-                std::ptr::null_mut(),
-            )
-        };
+        let when_list = unsafe { ra_list_push(st, when_list, val) };
+        let node = unsafe { ra_case(st, std::ptr::null_mut(), when_list, std::ptr::null_mut()) };
         assert!(node.is_null());
 
         let state = unsafe { free_state(st) };
@@ -1953,7 +1827,9 @@ mod tests {
         let state = unsafe { free_state(st) };
         let expr = state.take_expr(idx).expect("should exist");
         if let Expr::Cast {
-            target_type, expr: inner, ..
+            target_type,
+            expr: inner,
+            ..
         } = &expr
         {
             assert_eq!(target_type, "VARCHAR");
@@ -1980,9 +1856,7 @@ mod tests {
     fn subquery_scalar() {
         let st = new_state();
         let scan = unsafe { ra_scan(st, c"t".as_ptr()) };
-        let node = unsafe {
-            ra_subquery(st, 0, scan, std::ptr::null_mut())
-        };
+        let node = unsafe { ra_subquery(st, 0, scan, std::ptr::null_mut()) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
@@ -2006,9 +1880,7 @@ mod tests {
     fn subquery_exists() {
         let st = new_state();
         let scan = unsafe { ra_scan(st, c"t".as_ptr()) };
-        let node = unsafe {
-            ra_subquery(st, 1, scan, std::ptr::null_mut())
-        };
+        let node = unsafe { ra_subquery(st, 1, scan, std::ptr::null_mut()) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
@@ -2017,7 +1889,10 @@ mod tests {
         let expr = state.take_expr(idx).expect("should exist");
         assert!(matches!(
             expr,
-            Expr::SubQuery { subquery_type: SubQueryType::Exists, .. }
+            Expr::SubQuery {
+                subquery_type: SubQueryType::Exists,
+                ..
+            }
         ));
     }
 
@@ -2050,9 +1925,7 @@ mod tests {
     fn subquery_invalid_type_records_error() {
         let st = new_state();
         let scan = unsafe { ra_scan(st, c"t".as_ptr()) };
-        let node = unsafe {
-            ra_subquery(st, 99, scan, std::ptr::null_mut())
-        };
+        let node = unsafe { ra_subquery(st, 99, scan, std::ptr::null_mut()) };
         assert!(node.is_null());
 
         let state = unsafe { free_state(st) };
@@ -2087,10 +1960,7 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(matches!(
-            rel,
-            RelExpr::Intersect { all: false, .. }
-        ));
+        assert!(matches!(rel, RelExpr::Intersect { all: false, .. }));
     }
 
     #[test]
@@ -2103,10 +1973,7 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(matches!(
-            rel,
-            RelExpr::Intersect { all: true, .. }
-        ));
+        assert!(matches!(rel, RelExpr::Intersect { all: true, .. }));
     }
 
     #[test]
@@ -2132,10 +1999,7 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(matches!(
-            rel,
-            RelExpr::Except { all: false, .. }
-        ));
+        assert!(matches!(rel, RelExpr::Except { all: false, .. }));
     }
 
     #[test]
@@ -2148,10 +2012,7 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let rel = state.take_result().expect("should succeed");
-        assert!(matches!(
-            rel,
-            RelExpr::Except { all: true, .. }
-        ));
+        assert!(matches!(rel, RelExpr::Except { all: true, .. }));
     }
 
     #[test]
@@ -2203,9 +2064,7 @@ mod tests {
 
     #[test]
     fn values_null_state() {
-        let result = unsafe {
-            ra_values(std::ptr::null_mut(), std::ptr::null_mut())
-        };
+        let result = unsafe { ra_values(std::ptr::null_mut(), std::ptr::null_mut()) };
         assert!(result.is_null());
     }
 
@@ -2213,10 +2072,8 @@ mod tests {
     fn recursive_cte_builds_correctly() {
         let st = new_state();
         let base = unsafe { ra_scan(st, c"edges".as_ptr()) };
-        let recursive =
-            unsafe { ra_scan(st, c"edges".as_ptr()) };
-        let body =
-            unsafe { ra_scan(st, c"reachable".as_ptr()) };
+        let recursive = unsafe { ra_scan(st, c"edges".as_ptr()) };
+        let body = unsafe { ra_scan(st, c"reachable".as_ptr()) };
         let name = b"reachable";
         let node = unsafe {
             ra_recursive_cte(
@@ -2267,16 +2124,7 @@ mod tests {
     #[test]
     fn agg_expr_count_star() {
         let st = new_state();
-        let node = unsafe {
-            ra_agg_expr(
-                st,
-                0,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null(),
-                0,
-            )
-        };
+        let node = unsafe { ra_agg_expr(st, 0, std::ptr::null_mut(), 0, std::ptr::null(), 0) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
@@ -2294,16 +2142,8 @@ mod tests {
         let st = new_state();
         let col = unsafe { ra_column(st, c"amount".as_ptr()) };
         let alias = b"total";
-        let node = unsafe {
-            ra_agg_expr(
-                st,
-                1,
-                col,
-                1,
-                alias.as_ptr().cast::<c_char>(),
-                alias.len(),
-            )
-        };
+        let node =
+            unsafe { ra_agg_expr(st, 1, col, 1, alias.as_ptr().cast::<c_char>(), alias.len()) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
@@ -2331,22 +2171,12 @@ mod tests {
             (8, AggregateFunction::ArrayAgg),
         ];
         for (code, func) in expected {
-            let node = unsafe {
-                ra_agg_expr(
-                    st,
-                    code,
-                    std::ptr::null_mut(),
-                    0,
-                    std::ptr::null(),
-                    0,
-                )
-            };
+            let node =
+                unsafe { ra_agg_expr(st, code, std::ptr::null_mut(), 0, std::ptr::null(), 0) };
             assert!(!node.is_null());
             let (tag, idx) = decode(node).expect("should decode");
             assert_eq!(tag, NodeTag::Agg);
-            let agg = unsafe { &*st }
-                .take_agg_expr(idx)
-                .expect("should exist");
+            let agg = unsafe { &*st }.take_agg_expr(idx).expect("should exist");
             assert_eq!(agg.function, func);
         }
         unsafe { free_state(st) };
@@ -2355,16 +2185,7 @@ mod tests {
     #[test]
     fn agg_expr_invalid_function_records_error() {
         let st = new_state();
-        let node = unsafe {
-            ra_agg_expr(
-                st,
-                99,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null(),
-                0,
-            )
-        };
+        let node = unsafe { ra_agg_expr(st, 99, std::ptr::null_mut(), 0, std::ptr::null(), 0) };
         assert!(node.is_null());
 
         let state = unsafe { free_state(st) };
@@ -2420,30 +2241,16 @@ mod tests {
         let st = new_state();
         let arg = unsafe { ra_column(st, c"amount".as_ptr()) };
 
-        let part_col =
-            unsafe { ra_column(st, c"dept".as_ptr()) };
+        let part_col = unsafe { ra_column(st, c"dept".as_ptr()) };
         let part_list = unsafe { ra_list_new(st) };
-        let part_list =
-            unsafe { ra_list_push(st, part_list, part_col) };
+        let part_list = unsafe { ra_list_push(st, part_list, part_col) };
 
-        let ord_col =
-            unsafe { ra_column(st, c"date".as_ptr()) };
+        let ord_col = unsafe { ra_column(st, c"date".as_ptr()) };
         let sk = unsafe { ra_sort_key(st, ord_col, 1, 0) };
         let ord_list = unsafe { ra_list_new(st) };
-        let ord_list =
-            unsafe { ra_list_push(st, ord_list, sk) };
+        let ord_list = unsafe { ra_list_push(st, ord_list, sk) };
 
-        let node = unsafe {
-            ra_window_expr(
-                st,
-                1,
-                arg,
-                part_list,
-                ord_list,
-                std::ptr::null(),
-                0,
-            )
-        };
+        let node = unsafe { ra_window_expr(st, 1, arg, part_list, ord_list, std::ptr::null(), 0) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
@@ -2492,9 +2299,7 @@ mod tests {
             assert!(!node.is_null());
             let (tag, idx) = decode(node).expect("should decode");
             assert_eq!(tag, NodeTag::Window);
-            let win = unsafe { &*st }
-                .take_window_expr(idx)
-                .expect("should exist");
+            let win = unsafe { &*st }.take_window_expr(idx).expect("should exist");
             assert_eq!(win.function, func);
         }
         unsafe { free_state(st) };
@@ -2585,9 +2390,7 @@ mod tests {
 
     #[test]
     fn array_null_state() {
-        let result = unsafe {
-            ra_array(std::ptr::null_mut(), std::ptr::null_mut())
-        };
+        let result = unsafe { ra_array(std::ptr::null_mut(), std::ptr::null_mut()) };
         assert!(result.is_null());
     }
 
@@ -2623,25 +2426,15 @@ mod tests {
         let st = new_state();
         let base = unsafe { ra_column(st, c"row_val".as_ptr()) };
         let field = b"name";
-        let node = unsafe {
-            ra_field_access(
-                st,
-                base,
-                field.as_ptr().cast::<c_char>(),
-                field.len(),
-            )
-        };
+        let node =
+            unsafe { ra_field_access(st, base, field.as_ptr().cast::<c_char>(), field.len()) };
         assert!(!node.is_null());
 
         let (tag, idx) = decode(node).expect("should decode");
         assert_eq!(tag, NodeTag::Expr);
         let state = unsafe { free_state(st) };
         let expr = state.take_expr(idx).expect("should exist");
-        if let Expr::FieldAccess {
-            field_name,
-            ..
-        } = &expr
-        {
+        if let Expr::FieldAccess { field_name, .. } = &expr {
             assert_eq!(field_name, "name");
         } else {
             panic!("expected FieldAccess variant");

@@ -1,4 +1,5 @@
-//! DuckDB adapter integration tests with comparison benchmarking.
+#![expect(clippy::unwrap_used, reason = "test code")]
+//! `DuckDB` adapter integration tests with comparison benchmarking.
 //!
 //! Tests adapter creation, native vs Ra execution, Parquet file access,
 //! and comparison metrics.
@@ -12,10 +13,7 @@ use tempfile::NamedTempFile;
 fn test_duckdb_adapter_creation() {
     let adapter = DuckDBAdapter::new();
     assert_eq!(adapter.database_name(), "DuckDB");
-    assert_eq!(
-        adapter.sql_dialect(),
-        ra_core::SqlDialect::Postgres
-    );
+    assert_eq!(adapter.sql_dialect(), ra_core::SqlDialect::Postgres);
 }
 
 #[test]
@@ -57,8 +55,12 @@ fn test_create_and_query_table() {
     let mut adapter = DuckDBAdapter::new();
     adapter.open(":memory:").unwrap();
 
-    adapter.execute("CREATE TABLE test (id INTEGER, name VARCHAR)").unwrap();
-    adapter.execute("INSERT INTO test VALUES (1, 'Alice'), (2, 'Bob')").unwrap();
+    adapter
+        .execute("CREATE TABLE test (id INTEGER, name VARCHAR)")
+        .unwrap();
+    adapter
+        .execute("INSERT INTO test VALUES (1, 'Alice'), (2, 'Bob')")
+        .unwrap();
 
     let result = adapter.execute("SELECT * FROM test ORDER BY id").unwrap();
     assert_eq!(result.row_count, 2);
@@ -71,7 +73,9 @@ fn test_execute_native() {
     adapter.open(":memory:").unwrap();
 
     adapter.execute("CREATE TABLE numbers (n INTEGER)").unwrap();
-    adapter.execute("INSERT INTO numbers SELECT * FROM range(100)").unwrap();
+    adapter
+        .execute("INSERT INTO numbers SELECT * FROM range(100)")
+        .unwrap();
 
     let result = adapter.execute_native("SELECT COUNT(*) as count FROM numbers");
     assert!(result.is_ok());
@@ -87,7 +91,9 @@ fn test_execute_with_ra() {
     adapter.open(":memory:").unwrap();
 
     adapter.execute("CREATE TABLE numbers (n INTEGER)").unwrap();
-    adapter.execute("INSERT INTO numbers SELECT * FROM range(100)").unwrap();
+    adapter
+        .execute("INSERT INTO numbers SELECT * FROM range(100)")
+        .unwrap();
 
     let result = adapter.execute_with_ra("SELECT COUNT(*) as count FROM numbers");
     assert!(result.is_ok());
@@ -118,7 +124,9 @@ fn test_gather_statistics() {
     adapter.open(":memory:").unwrap();
 
     adapter.execute("CREATE TABLE test (id INTEGER)").unwrap();
-    adapter.execute("INSERT INTO test SELECT * FROM range(100)").unwrap();
+    adapter
+        .execute("INSERT INTO test SELECT * FROM range(100)")
+        .unwrap();
 
     let stats = adapter.gather_statistics();
     assert!(stats.is_ok(), "Failed to gather statistics");
@@ -134,8 +142,12 @@ fn test_gather_column_stats() {
     let mut adapter = DuckDBAdapter::new();
     adapter.open(":memory:").unwrap();
 
-    adapter.execute("CREATE TABLE test (id INTEGER, name VARCHAR)").unwrap();
-    adapter.execute("INSERT INTO test VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Alice')").unwrap();
+    adapter
+        .execute("CREATE TABLE test (id INTEGER, name VARCHAR)")
+        .unwrap();
+    adapter
+        .execute("INSERT INTO test VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Alice')")
+        .unwrap();
 
     let stats = adapter.gather_column_stats("test");
     assert!(stats.is_ok(), "Failed to gather column stats");
@@ -153,7 +165,9 @@ fn test_get_schema_info() {
     let mut adapter = DuckDBAdapter::new();
     adapter.open(":memory:").unwrap();
 
-    adapter.execute("CREATE TABLE test (id INTEGER, name VARCHAR, age INTEGER)").unwrap();
+    adapter
+        .execute("CREATE TABLE test (id INTEGER, name VARCHAR, age INTEGER)")
+        .unwrap();
 
     let schema = adapter.get_schema_info();
     assert!(schema.is_ok(), "Failed to get schema info");
@@ -203,11 +217,15 @@ fn test_window_functions() {
     let mut adapter = DuckDBAdapter::new();
     adapter.open(":memory:").unwrap();
 
-    adapter.execute("CREATE TABLE sales (product VARCHAR, amount INTEGER)").unwrap();
-    adapter.execute("INSERT INTO sales VALUES ('A', 100), ('B', 200), ('A', 150), ('C', 300)").unwrap();
+    adapter
+        .execute("CREATE TABLE sales (product VARCHAR, amount INTEGER)")
+        .unwrap();
+    adapter
+        .execute("INSERT INTO sales VALUES ('A', 100), ('B', 200), ('A', 150), ('C', 300)")
+        .unwrap();
 
     let result = adapter.execute(
-        "SELECT product, amount, SUM(amount) OVER (PARTITION BY product) as total FROM sales"
+        "SELECT product, amount, SUM(amount) OVER (PARTITION BY product) as total FROM sales",
     );
     assert!(result.is_ok(), "Window function query failed");
 
@@ -221,12 +239,16 @@ fn test_aggregate_query() {
     let mut adapter = DuckDBAdapter::new();
     adapter.open(":memory:").unwrap();
 
-    adapter.execute("CREATE TABLE orders (customer_id INTEGER, amount DECIMAL)").unwrap();
-    adapter.execute("INSERT INTO orders SELECT i % 10, i * 1.5 FROM range(1000) t(i)").unwrap();
+    adapter
+        .execute("CREATE TABLE orders (customer_id INTEGER, amount DECIMAL)")
+        .unwrap();
+    adapter
+        .execute("INSERT INTO orders SELECT i % 10, i * 1.5 FROM range(1000) t(i)")
+        .unwrap();
 
     let result = adapter.execute(
         "SELECT customer_id, COUNT(*) as order_count, SUM(amount) as total
-         FROM orders GROUP BY customer_id ORDER BY customer_id"
+         FROM orders GROUP BY customer_id ORDER BY customer_id",
     );
     assert!(result.is_ok(), "Aggregate query failed");
 
@@ -240,15 +262,23 @@ fn test_join_query() {
     let mut adapter = DuckDBAdapter::new();
     adapter.open(":memory:").unwrap();
 
-    adapter.execute("CREATE TABLE customers (id INTEGER, name VARCHAR)").unwrap();
-    adapter.execute("CREATE TABLE orders (id INTEGER, customer_id INTEGER, amount DECIMAL)").unwrap();
-    adapter.execute("INSERT INTO customers VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie')").unwrap();
-    adapter.execute("INSERT INTO orders VALUES (1, 1, 100), (2, 1, 200), (3, 2, 150)").unwrap();
+    adapter
+        .execute("CREATE TABLE customers (id INTEGER, name VARCHAR)")
+        .unwrap();
+    adapter
+        .execute("CREATE TABLE orders (id INTEGER, customer_id INTEGER, amount DECIMAL)")
+        .unwrap();
+    adapter
+        .execute("INSERT INTO customers VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie')")
+        .unwrap();
+    adapter
+        .execute("INSERT INTO orders VALUES (1, 1, 100), (2, 1, 200), (3, 2, 150)")
+        .unwrap();
 
     let result = adapter.execute(
         "SELECT c.name, COUNT(*) as order_count, SUM(o.amount) as total
          FROM customers c JOIN orders o ON c.id = o.customer_id
-         GROUP BY c.name ORDER BY c.name"
+         GROUP BY c.name ORDER BY c.name",
     );
     assert!(result.is_ok(), "Join query failed");
 
@@ -263,7 +293,9 @@ fn test_compare_execution() {
     adapter.open(":memory:").unwrap();
 
     adapter.execute("CREATE TABLE numbers (n INTEGER)").unwrap();
-    adapter.execute("INSERT INTO numbers SELECT * FROM range(10000)").unwrap();
+    adapter
+        .execute("INSERT INTO numbers SELECT * FROM range(10000)")
+        .unwrap();
 
     let result = adapter.compare_execution("SELECT COUNT(*) as count FROM numbers WHERE n % 2 = 0");
     assert!(result.is_ok(), "Comparison execution failed");
@@ -293,7 +325,9 @@ fn test_load_csv() {
     let result = adapter.load_csv("csv_test", csv_path);
     assert!(result.is_ok(), "Failed to load CSV");
 
-    let query_result = adapter.execute("SELECT COUNT(*) as count FROM csv_test").unwrap();
+    let query_result = adapter
+        .execute("SELECT COUNT(*) as count FROM csv_test")
+        .unwrap();
     assert_eq!(query_result.row_count, 1);
 }
 

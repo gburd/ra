@@ -32,7 +32,7 @@
 //! 1. All projected columns are in the index (key or INCLUDE columns)
 //! 2. All filter columns are in the index
 //! 3. Index is not partial, or query satisfies partial index predicate
-//! 4. No NULL visibility issues (PostgreSQL visibility map)
+//! 4. No NULL visibility issues (`PostgreSQL` visibility map)
 //!
 //! ## Example
 //!
@@ -116,7 +116,7 @@ pub fn index_only_scan_cost_factor() -> f64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::analysis::RelAnalysis;

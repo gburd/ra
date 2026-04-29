@@ -306,7 +306,7 @@ fn compute_compensation(query_preds: &[Expr], mv_preds: &[Expr]) -> Option<Expr>
         1 => Some(extra[0].clone()),
         _ => {
             let mut iter = extra.into_iter();
-            let first = iter.next().map(Clone::clone);
+            let first = iter.next().cloned();
             first.map(|init| {
                 iter.fold(init, |acc, p| Expr::BinOp {
                     op: ra_core::expr::BinOp::And,
@@ -390,7 +390,7 @@ fn collect_column_names(expr: &Expr, out: &mut HashSet<String>) {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType};
@@ -519,7 +519,7 @@ mod tests {
     #[test]
     fn no_match_incompatible_predicates() {
         let q_pred = gt(col("o_totalprice"), int(100));
-        let mv_pred = gt(col("o_orderdate"), int(20240101));
+        let mv_pred = gt(col("o_orderdate"), int(20_240_101));
         let query = make_order_summary_query(Some(q_pred));
         let mv = make_mv_info(Some(mv_pred), 500);
         let result = match_query_with_mv(&query, &mv);

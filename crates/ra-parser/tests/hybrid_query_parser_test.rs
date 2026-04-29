@@ -1,13 +1,13 @@
 //! Hybrid query parser integration tests.
 //!
 //! Tests parsing and translation of hybrid search queries across different
-//! database systems: PostgreSQL, MySQL, SQL Server, and SQLite.
+//! database systems: `PostgreSQL`, `MySQL`, SQL Server, and `SQLite`.
 
-/// PostgreSQL hybrid query patterns (ts_rank + pgvector).
+/// `PostgreSQL` hybrid query patterns (`ts_rank` + pgvector).
 mod postgres {
     #[test]
     fn test_parse_postgres_hybrid_basic() {
-        let query = r#"
+        let query = r"
             SELECT id, title, content,
                    ts_rank(content_tsvector, to_tsquery('machine & learning')) as text_score,
                    content_embedding <-> '[0.1, 0.2, 0.3]'::vector as vector_distance
@@ -16,7 +16,7 @@ mod postgres {
             ORDER BY (0.7 * ts_rank(content_tsvector, to_tsquery('machine & learning')) +
                       0.3 * (1 / (1 + (content_embedding <-> '[0.1, 0.2, 0.3]'::vector)))) DESC
             LIMIT 10;
-        "#;
+        ";
 
         // Verify query structure
         assert!(query.contains("ts_rank"));
@@ -27,14 +27,14 @@ mod postgres {
 
     #[test]
     fn test_parse_postgres_hybrid_with_rum_index() {
-        let query = r#"
+        let query = r"
             SELECT *
             FROM documents
             WHERE content_tsvector @@ to_tsquery('search & query')
             ORDER BY content_tsvector <=> to_tsquery('search & query'),
                      content_embedding <-> '[0.5, 0.5, 0.5]'::vector
             LIMIT 20;
-        "#;
+        ";
 
         assert!(query.contains("@@")); // FTS match operator
         assert!(query.contains("<=>")); // RUM distance operator
@@ -69,21 +69,21 @@ mod postgres {
 
     #[test]
     fn test_parse_postgres_weighted_hybrid() {
-        let query = r#"
+        let query = r"
             SELECT *, (0.3 * ts_rank + 0.7 * (1/(1 + vector_dist))) as score
             FROM docs
             ORDER BY score DESC
-        "#;
+        ";
         assert!(query.contains("0.3"));
         assert!(query.contains("0.7"));
     }
 }
 
-/// MySQL hybrid query patterns (MATCH + vector UDF).
+/// `MySQL` hybrid query patterns (MATCH + vector UDF).
 mod mysql {
     #[test]
     fn test_parse_mysql_hybrid_basic() {
-        let query = r#"
+        let query = r"
             SELECT id, title, content,
                    MATCH(content) AGAINST('machine learning' IN NATURAL LANGUAGE MODE) as text_score,
                    vector_distance(content_embedding, '[0.1, 0.2, 0.3]') as vector_distance
@@ -92,7 +92,7 @@ mod mysql {
             ORDER BY (0.7 * MATCH(content) AGAINST('machine learning' IN NATURAL LANGUAGE MODE) +
                       0.3 * (1 / (1 + vector_distance(content_embedding, '[0.1, 0.2, 0.3]')))) DESC
             LIMIT 10;
-        "#;
+        ";
 
         assert!(query.contains("MATCH"));
         assert!(query.contains("AGAINST"));
@@ -101,20 +101,20 @@ mod mysql {
 
     #[test]
     fn test_parse_mysql_boolean_mode() {
-        let query = r#"
+        let query = r"
             SELECT * FROM documents
             WHERE MATCH(content) AGAINST('+machine +learning -neural' IN BOOLEAN MODE)
-        "#;
+        ";
         assert!(query.contains("BOOLEAN MODE"));
         assert!(query.contains("+machine"));
     }
 
     #[test]
     fn test_parse_mysql_with_query_expansion() {
-        let query = r#"
+        let query = r"
             SELECT * FROM documents
             WHERE MATCH(content) AGAINST('database' WITH QUERY EXPANSION)
-        "#;
+        ";
         assert!(query.contains("WITH QUERY EXPANSION"));
     }
 
@@ -129,7 +129,7 @@ mod mysql {
 mod sqlserver {
     #[test]
     fn test_parse_sqlserver_hybrid_basic() {
-        let query = r#"
+        let query = r"
             SELECT id, title, content,
                    ft.[RANK] as text_score,
                    dbo.VectorDistance(content_embedding, '[0.1, 0.2, 0.3]') as vector_distance
@@ -138,7 +138,7 @@ mod sqlserver {
                 ON d.id = ft.[KEY]
             ORDER BY (0.7 * ft.[RANK] + 0.3 * (1 / (1 + dbo.VectorDistance(content_embedding, '[0.1, 0.2, 0.3]')))) DESC
             TOP 10;
-        "#;
+        ";
 
         assert!(query.contains("CONTAINSTABLE"));
         assert!(query.contains("RANK"));
@@ -156,10 +156,10 @@ mod sqlserver {
 
     #[test]
     fn test_parse_sqlserver_freetext() {
-        let query = r#"
+        let query = r"
             SELECT * FROM documents
             WHERE FREETEXT(content, 'machine learning algorithms')
-        "#;
+        ";
         assert!(query.contains("FREETEXT"));
     }
 
@@ -170,11 +170,11 @@ mod sqlserver {
     }
 }
 
-/// SQLite hybrid query patterns (fts5 + sqlite-vec).
+/// `SQLite` hybrid query patterns (fts5 + sqlite-vec).
 mod sqlite {
     #[test]
     fn test_parse_sqlite_hybrid_basic() {
-        let query = r#"
+        let query = r"
             SELECT id, title, content,
                    bm25(documents_fts) as text_score,
                    vec_distance_l2(content_embedding, vec_f32('[0.1, 0.2, 0.3]')) as vector_distance
@@ -183,7 +183,7 @@ mod sqlite {
             WHERE documents_fts MATCH 'machine learning'
             ORDER BY (0.7 * bm25(documents_fts) + 0.3 * (1 / (1 + vec_distance_l2(content_embedding, vec_f32('[0.1, 0.2, 0.3]'))))) DESC
             LIMIT 10;
-        "#;
+        ";
 
         assert!(query.contains("bm25"));
         assert!(query.contains("MATCH"));
@@ -192,10 +192,10 @@ mod sqlite {
 
     #[test]
     fn test_parse_sqlite_fts5_match() {
-        let query = r#"
+        let query = r"
             SELECT * FROM documents_fts
             WHERE documents_fts MATCH 'machine AND learning'
-        "#;
+        ";
         assert!(query.contains("MATCH"));
     }
 
@@ -222,18 +222,18 @@ mod sqlite {
 mod translation {
     #[test]
     fn test_postgres_to_mysql_translation() {
-        let postgres_query = r#"
+        let postgres_query = r"
             SELECT * FROM docs
             WHERE content_tsvector @@ to_tsquery('search')
             ORDER BY embedding <-> '[1,2,3]' LIMIT 10
-        "#;
+        ";
 
         // Expected MySQL translation
-        let mysql_expected = r#"
+        let mysql_expected = r"
             SELECT * FROM docs
             WHERE MATCH(content) AGAINST('search' IN NATURAL LANGUAGE MODE)
             ORDER BY vector_distance(embedding, '[1,2,3]') LIMIT 10
-        "#;
+        ";
 
         assert!(postgres_query.contains("@@"));
         assert!(mysql_expected.contains("MATCH"));
@@ -259,7 +259,7 @@ mod translation {
     }
 }
 
-/// TopK detection tests.
+/// `TopK` detection tests.
 mod topk_detection {
     #[test]
     fn test_detect_topk_postgres() {
@@ -294,7 +294,7 @@ mod topk_detection {
     }
 }
 
-/// VectorFilter detection tests.
+/// `VectorFilter` detection tests.
 mod vector_filter_detection {
     #[test]
     fn test_detect_vector_filter_postgres() {
@@ -329,14 +329,14 @@ mod vector_filter_detection {
 mod complex_queries {
     #[test]
     fn test_parse_hybrid_with_multiple_filters() {
-        let query = r#"
+        let query = r"
             SELECT * FROM docs
             WHERE category = 'tech'
               AND content_tsvector @@ to_tsquery('machine & learning')
               AND embedding <-> '[1,2,3]' < 0.5
             ORDER BY (0.5 * ts_rank + 0.5 * vector_score) DESC
             LIMIT 10
-        "#;
+        ";
 
         assert!(query.contains("category"));
         assert!(query.contains("@@"));
@@ -346,13 +346,13 @@ mod complex_queries {
 
     #[test]
     fn test_parse_hybrid_with_joins() {
-        let query = r#"
+        let query = r"
             SELECT d.*, a.name
             FROM docs d
             JOIN authors a ON d.author_id = a.id
             WHERE d.content_fts MATCH 'search'
             ORDER BY vec_distance(d.emb, '[1,2,3]')
-        "#;
+        ";
 
         assert!(query.contains("JOIN"));
         assert!(query.contains("MATCH"));
@@ -360,12 +360,12 @@ mod complex_queries {
 
     #[test]
     fn test_parse_hybrid_with_aggregation() {
-        let query = r#"
+        let query = r"
             SELECT category, COUNT(*), AVG(score)
             FROM docs
             WHERE fts_match AND vector_match
             GROUP BY category
-        "#;
+        ";
 
         assert!(query.contains("GROUP BY"));
         assert!(query.contains("AVG"));
@@ -373,12 +373,12 @@ mod complex_queries {
 
     #[test]
     fn test_parse_hybrid_with_subquery() {
-        let query = r#"
+        let query = r"
             SELECT * FROM (
                 SELECT *, (fts_score + vec_score) as total_score
                 FROM docs
             ) WHERE total_score > 0.5
-        "#;
+        ";
 
         assert!(query.contains("SELECT * FROM ("));
     }

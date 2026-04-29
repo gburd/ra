@@ -25,9 +25,7 @@ use ra_stats::timeline::{ExecutionFeedback, Snapshot, TimelinePlayer};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use crate::executor::{
-    AdaptiveConfig, AdaptiveExecutor, ExecutionReport,
-};
+use crate::executor::{AdaptiveConfig, AdaptiveExecutor, ExecutionReport};
 use crate::plan_switch::JoinStrategy;
 use crate::runtime_stats::NodeId;
 
@@ -54,9 +52,7 @@ pub enum BatchError {
 }
 
 /// How feedback is applied to the statistics state between batches.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FeedbackMode {
     /// Only adjust confidence scores based on estimate accuracy.
     /// Row counts and histograms are unchanged.
@@ -70,10 +66,7 @@ pub enum FeedbackMode {
 }
 
 impl std::fmt::Display for FeedbackMode {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let label = match self {
             Self::ConfidenceOnly => "confidence-only",
             Self::IncrementalStats => "incremental-stats",
@@ -178,8 +171,7 @@ impl BatchRunResult {
         if self.batches.is_empty() {
             return 1.0;
         }
-        let sum: f64 =
-            self.batches.iter().map(|b| b.avg_q_error).sum();
+        let sum: f64 = self.batches.iter().map(|b| b.avg_q_error).sum();
         sum / self.batches.len() as f64
     }
 
@@ -197,12 +189,8 @@ impl BatchRunResult {
     /// Confidence trend: final minus initial confidence.
     #[must_use]
     pub fn confidence_delta(&self) -> f64 {
-        let first = self
-            .batches
-            .first()
-            .map_or(1.0, |b| b.confidence_before);
-        let last =
-            self.batches.last().map_or(1.0, |b| b.confidence_after);
+        let first = self.batches.first().map_or(1.0, |b| b.confidence_before);
+        let last = self.batches.last().map_or(1.0, |b| b.confidence_after);
         last - first
     }
 }
@@ -223,17 +211,11 @@ pub struct BatchExecutor {
 }
 
 impl std::fmt::Debug for BatchExecutor {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BatchExecutor")
             .field("config", &self.config)
             .field("batches_completed", &self.batch_history.len())
-            .field(
-                "reoptimization_count",
-                &self.reoptimization_count,
-            )
+            .field("reoptimization_count", &self.reoptimization_count)
             .field("table_names", &self.table_names)
             .finish_non_exhaustive()
     }
@@ -251,9 +233,7 @@ impl BatchExecutor {
         profile: StatisticsProfile,
     ) -> Result<Self, BatchError> {
         if config.batch_size == 0 {
-            return Err(BatchError::InvalidConfig(
-                "batch_size must be > 0".into(),
-            ));
+            return Err(BatchError::InvalidConfig("batch_size must be > 0".into()));
         }
         Ok(Self {
             config,
@@ -270,9 +250,7 @@ impl BatchExecutor {
     pub fn with_defaults(plan: RelExpr) -> Self {
         Self {
             config: BatchConfig::default(),
-            adapter: StatisticsAdapter::new(
-                StatisticsProfile::standard(),
-            ),
+            adapter: StatisticsAdapter::new(StatisticsProfile::standard()),
             current_plan: plan,
             batch_history: Vec::new(),
             reoptimization_count: 0,
@@ -289,25 +267,16 @@ impl BatchExecutor {
     /// # Errors
     ///
     /// Returns `BatchError` if execution fails.
-    pub fn run(
-        &mut self,
-        player: &mut TimelinePlayer,
-    ) -> Result<BatchRunResult, BatchError> {
+    pub fn run(&mut self, player: &mut TimelinePlayer) -> Result<BatchRunResult, BatchError> {
         player.seek_start();
         let total_snapshots = player.snapshot_count();
         let mut snapshot_idx = 0;
         let mut batch_index = 0;
 
         while snapshot_idx < total_snapshots {
-            let batch_end = (snapshot_idx + self.config.batch_size)
-                .min(total_snapshots);
+            let batch_end = (snapshot_idx + self.config.batch_size).min(total_snapshots);
 
-            let record = self.execute_batch(
-                player,
-                batch_index,
-                snapshot_idx,
-                batch_end,
-            )?;
+            let record = self.execute_batch(player, batch_index, snapshot_idx, batch_end)?;
 
             self.batch_history.push(record);
             snapshot_idx = batch_end;
@@ -336,25 +305,24 @@ impl BatchExecutor {
     ) -> Result<BatchRecord, BatchError> {
         // Load statistics from the last snapshot in this batch
         let target_snap = snap_end.saturating_sub(1);
-        player.seek(target_snap).map_err(|e| {
-            BatchError::ExecutionFailed {
+        player
+            .seek(target_snap)
+            .map_err(|e| BatchError::ExecutionFailed {
                 batch_index,
                 reason: format!("seek failed: {e}"),
-            }
-        })?;
+            })?;
 
         let managed_stats =
-            player.current_managed_stats().ok_or_else(|| {
-                BatchError::ExecutionFailed {
+            player
+                .current_managed_stats()
+                .ok_or_else(|| BatchError::ExecutionFailed {
                     batch_index,
                     reason: "no stats at snapshot".into(),
-                }
-            })?;
+                })?;
 
         // Update adapter with snapshot statistics
         for (table, stats) in &managed_stats {
-            self.adapter
-                .add_table(table.clone(), stats.clone());
+            self.adapter.add_table(table.clone(), stats.clone());
             if !self.table_names.contains(table) {
                 self.table_names.push(table.clone());
             }
@@ -369,15 +337,11 @@ impl BatchExecutor {
             self.config.adaptive_config.clone(),
         );
 
-        let estimates = self.register_operators(
-            &managed_stats,
-            &mut executor,
-        );
+        let estimates = self.register_operators(&managed_stats, &mut executor);
 
         // Collect execution feedback from timeline and
         // synthetic sources
-        let mut operator_feedback: HashMap<NodeId, OperatorFeedback> =
-            HashMap::new();
+        let mut operator_feedback: HashMap<NodeId, OperatorFeedback> = HashMap::new();
         Self::collect_timeline_feedback(
             player,
             &managed_stats,
@@ -385,32 +349,20 @@ impl BatchExecutor {
             &mut executor,
             &mut operator_feedback,
         );
-        Self::collect_synthetic_feedback(
-            player,
-            &estimates,
-            &mut executor,
-            &mut operator_feedback,
-        );
+        Self::collect_synthetic_feedback(player, &estimates, &mut executor, &mut operator_feedback);
 
         let report = executor.report();
 
         // Compute Q-error summary
-        let (avg_q, max_q) =
-            compute_q_error_summary(&operator_feedback);
+        let (avg_q, max_q) = compute_q_error_summary(&operator_feedback);
 
         // Apply feedback to statistics state
-        self.apply_feedback(
-            &managed_stats,
-            &operator_feedback,
-        );
+        self.apply_feedback(&managed_stats, &operator_feedback);
 
         let confidence_after = self.average_confidence();
 
         // Decide whether to reoptimize
-        let should_reoptimize = self.should_reoptimize(
-            max_q,
-            confidence_after,
-        );
+        let should_reoptimize = self.should_reoptimize(max_q, confidence_after);
 
         let reoptimized = if should_reoptimize {
             self.reoptimize(&report);
@@ -464,20 +416,12 @@ impl BatchExecutor {
             estimates.insert(node_id, estimated_rows);
 
             if is_join {
-                executor.register_join(
-                    node_id,
-                    estimated_rows,
-                    JoinStrategy::HashJoin,
-                );
+                executor.register_join(node_id, estimated_rows, JoinStrategy::HashJoin);
             } else {
-                executor.register_operator(
-                    node_id,
-                    estimated_rows,
-                );
+                executor.register_operator(node_id, estimated_rows);
             }
 
-            let core_stats =
-                self.adapter.to_core_statistics(stats);
+            let core_stats = self.adapter.to_core_statistics(stats);
             executor.add_table_stats(table_name, core_stats);
             node_id += 1;
         }
@@ -494,8 +438,7 @@ impl BatchExecutor {
     ) {
         let feedback_entries = player.feedback_at_current();
         for fb in &feedback_entries {
-            let fb_node_id =
-                Self::match_feedback_to_node(fb, managed_stats);
+            let fb_node_id = Self::match_feedback_to_node(fb, managed_stats);
             let estimated = estimates
                 .get(&fb_node_id)
                 .copied()
@@ -531,8 +474,7 @@ impl BatchExecutor {
             let Some(snap) = player.current_snapshot() else {
                 continue;
             };
-            let actual =
-                Self::find_actual_for_node(nid, snap, estimates);
+            let actual = Self::find_actual_for_node(nid, snap, estimates);
             let q_err = compute_q_error(est, actual);
             operator_feedback.insert(
                 nid,
@@ -559,10 +501,7 @@ impl BatchExecutor {
                 self.apply_confidence_feedback(operator_feedback);
             }
             FeedbackMode::IncrementalStats => {
-                self.apply_incremental_feedback(
-                    managed_stats,
-                    operator_feedback,
-                );
+                self.apply_incremental_feedback(managed_stats, operator_feedback);
             }
             FeedbackMode::FullReanalyze => {
                 self.apply_full_reanalyze(managed_stats);
@@ -571,17 +510,11 @@ impl BatchExecutor {
     }
 
     /// Adjust confidence based on estimate accuracy.
-    fn apply_confidence_feedback(
-        &mut self,
-        operator_feedback: &HashMap<NodeId, OperatorFeedback>,
-    ) {
+    fn apply_confidence_feedback(&mut self, operator_feedback: &HashMap<NodeId, OperatorFeedback>) {
         let avg_q = if operator_feedback.is_empty() {
             1.0
         } else {
-            let sum: f64 = operator_feedback
-                .values()
-                .map(|f| f.q_error)
-                .sum();
+            let sum: f64 = operator_feedback.values().map(|f| f.q_error).sum();
             sum / operator_feedback.len() as f64
         };
 
@@ -589,25 +522,19 @@ impl BatchExecutor {
         let decay = confidence_decay_from_q_error(avg_q);
 
         // Apply to all tables
-        let table_names: Vec<String> = self
-            .adapter_table_names()
-            .to_vec();
+        let table_names: Vec<String> = self.adapter_table_names().to_vec();
         for name in &table_names {
-            if let Some(stats) =
-                self.adapter.get_table_stats(name)
-            {
+            if let Some(stats) = self.adapter.get_table_stats(name) {
                 let mut updated = stats.clone();
-                updated.state.confidence =
-                    (updated.state.confidence * decay).max(0.05);
-                self.adapter
-                    .add_table(name.clone(), updated);
+                updated.state.confidence = (updated.state.confidence * decay).max(0.05);
+                self.adapter.add_table(name.clone(), updated);
 
                 debug!(
                     table = name.as_str(),
-                    new_confidence =
-                        self.adapter
-                            .get_table_stats(name)
-                            .map_or(0.0, |s| s.state.confidence),
+                    new_confidence = self
+                        .adapter
+                        .get_table_stats(name)
+                        .map_or(0.0, |s| s.state.confidence),
                     "confidence updated"
                 );
             }
@@ -633,29 +560,18 @@ impl BatchExecutor {
             // Apply correction to matching tables
             for (name, stats) in managed_stats {
                 let table_rows = stats.table.row_count as f64;
-                if (table_rows - fb.estimated_rows).abs()
-                    / table_rows.max(1.0)
-                    < 0.5
-                {
-                    if let Some(current) =
-                        self.adapter.get_table_stats(name)
-                    {
+                if (table_rows - fb.estimated_rows).abs() / table_rows.max(1.0) < 0.5 {
+                    if let Some(current) = self.adapter.get_table_stats(name) {
                         let mut updated = current.clone();
                         // Blend: 70% old + 30% corrected
-                        let corrected =
-                            table_rows * correction;
-                        let blended =
-                            table_rows * 0.7 + corrected * 0.3;
-                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let corrected = table_rows * correction;
+                        let blended = table_rows * 0.7 + corrected * 0.3;
+                        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "legacy allow")]
                         let new_rows = blended.max(1.0) as u64;
                         updated.table.row_count = new_rows;
                         // Record the modification for staleness
-                        let delta = (new_rows as i64
-                            - stats.table.row_count as i64)
-                            .unsigned_abs();
-                        updated
-                            .state
-                            .record_modifications(delta);
+                        let delta = (new_rows as i64 - stats.table.row_count as i64).unsigned_abs();
+                        updated.state.record_modifications(delta);
 
                         debug!(
                             table = name.as_str(),
@@ -664,8 +580,7 @@ impl BatchExecutor {
                             correction,
                             "incremental stats update"
                         );
-                        self.adapter
-                            .add_table(name.clone(), updated);
+                        self.adapter.add_table(name.clone(), updated);
                     }
                 }
             }
@@ -673,18 +588,12 @@ impl BatchExecutor {
     }
 
     /// Replace statistics entirely with fresh snapshot data.
-    fn apply_full_reanalyze(
-        &mut self,
-        managed_stats: &HashMap<String, ManagedTableStats>,
-    ) {
+    fn apply_full_reanalyze(&mut self, managed_stats: &HashMap<String, ManagedTableStats>) {
         for (name, stats) in managed_stats {
             let fresh = ManagedTableStats {
                 table: stats.table.clone(),
                 columns: stats.columns.clone(),
-                state: StatisticsState::new(
-                    StatisticsSource::ExactCount,
-                    stats.table.row_count,
-                ),
+                state: StatisticsState::new(StatisticsSource::ExactCount, stats.table.row_count),
             };
             self.adapter.add_table(name.clone(), fresh);
             debug!(
@@ -696,18 +605,11 @@ impl BatchExecutor {
     }
 
     /// Whether reoptimization should occur.
-    fn should_reoptimize(
-        &self,
-        max_q_error: f64,
-        confidence: f64,
-    ) -> bool {
-        if self.reoptimization_count
-            >= self.config.max_reoptimizations
-        {
+    fn should_reoptimize(&self, max_q_error: f64, confidence: f64) -> bool {
+        if self.reoptimization_count >= self.config.max_reoptimizations {
             return false;
         }
-        max_q_error > self.config.reoptimize_threshold
-            || confidence < self.config.min_confidence
+        max_q_error > self.config.reoptimize_threshold || confidence < self.config.min_confidence
     }
 
     /// Perform reoptimization by recording the decision.
@@ -730,11 +632,7 @@ impl BatchExecutor {
         }
         let sum: f64 = names
             .iter()
-            .filter_map(|n| {
-                self.adapter
-                    .get_table_stats(n)
-                    .map(|s| s.state.confidence)
-            })
+            .filter_map(|n| self.adapter.get_table_stats(n).map(|s| s.state.confidence))
             .sum();
         sum / names.len() as f64
     }
@@ -829,9 +727,7 @@ fn compute_q_error(estimated: f64, actual: f64) -> f64 {
 }
 
 /// Compute average and max Q-error from operator feedback.
-fn compute_q_error_summary(
-    feedback: &HashMap<NodeId, OperatorFeedback>,
-) -> (f64, f64) {
+fn compute_q_error_summary(feedback: &HashMap<NodeId, OperatorFeedback>) -> (f64, f64) {
     if feedback.is_empty() {
         return (1.0, 1.0);
     }
@@ -857,14 +753,12 @@ fn confidence_decay_from_q_error(avg_q_error: f64) -> f64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
     use ra_core::algebra::{JoinType, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Expr};
     use ra_stats::timeline::{
-        ColumnSnapshot, Snapshot, TableSnapshot, Timeline,
-        TimelineMetadata, TimelinePlayer,
+        ColumnSnapshot, Snapshot, TableSnapshot, Timeline, TimelineMetadata, TimelinePlayer,
     };
 
     // -- Test helpers --
@@ -878,21 +772,15 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("o_id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::new("l_orderkey"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("o_id"))),
+                right: Box::new(Expr::Column(ColumnRef::new("l_orderkey"))),
             },
             left: Box::new(RelExpr::scan("orders")),
             right: Box::new(RelExpr::scan("lineitem")),
         }
     }
 
-    fn make_timeline(
-        snapshots: Vec<Snapshot>,
-    ) -> Timeline {
+    fn make_timeline(snapshots: Vec<Snapshot>) -> Timeline {
         Timeline {
             metadata: TimelineMetadata {
                 name: "test".to_string(),
@@ -927,11 +815,7 @@ mod tests {
         }
     }
 
-    fn make_snapshot(
-        time: u64,
-        table_name: &str,
-        rows: u64,
-    ) -> Snapshot {
+    fn make_snapshot(time: u64, table_name: &str, rows: u64) -> Snapshot {
         Snapshot {
             time_offset: time,
             label: None,
@@ -997,9 +881,7 @@ mod tests {
         }
     }
 
-    fn default_player(
-        snapshots: Vec<Snapshot>,
-    ) -> TimelinePlayer {
+    fn default_player(snapshots: Vec<Snapshot>) -> TimelinePlayer {
         let tl = make_timeline(snapshots);
         TimelinePlayer::new(tl).expect("player")
     }
@@ -1008,39 +890,25 @@ mod tests {
 
     #[test]
     fn feedback_mode_display() {
-        assert_eq!(
-            FeedbackMode::ConfidenceOnly.to_string(),
-            "confidence-only"
-        );
+        assert_eq!(FeedbackMode::ConfidenceOnly.to_string(), "confidence-only");
         assert_eq!(
             FeedbackMode::IncrementalStats.to_string(),
             "incremental-stats"
         );
-        assert_eq!(
-            FeedbackMode::FullReanalyze.to_string(),
-            "full-reanalyze"
-        );
+        assert_eq!(FeedbackMode::FullReanalyze.to_string(), "full-reanalyze");
     }
 
     #[test]
     fn feedback_mode_equality() {
-        assert_eq!(
-            FeedbackMode::ConfidenceOnly,
-            FeedbackMode::ConfidenceOnly,
-        );
-        assert_ne!(
-            FeedbackMode::ConfidenceOnly,
-            FeedbackMode::IncrementalStats,
-        );
+        assert_eq!(FeedbackMode::ConfidenceOnly, FeedbackMode::ConfidenceOnly,);
+        assert_ne!(FeedbackMode::ConfidenceOnly, FeedbackMode::IncrementalStats,);
     }
 
     #[test]
     fn feedback_mode_serialize_roundtrip() {
         let mode = FeedbackMode::IncrementalStats;
-        let json = serde_json::to_string(&mode)
-            .expect("serialize");
-        let deserialized: FeedbackMode =
-            serde_json::from_str(&json).expect("deserialize");
+        let json = serde_json::to_string(&mode).expect("serialize");
+        let deserialized: FeedbackMode = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(mode, deserialized);
     }
 
@@ -1050,32 +918,19 @@ mod tests {
     fn batch_config_default() {
         let config = BatchConfig::default();
         assert_eq!(config.batch_size, 1);
-        assert_eq!(
-            config.feedback_mode,
-            FeedbackMode::IncrementalStats,
-        );
-        assert!((config.reoptimize_threshold - 3.0).abs()
-            < f64::EPSILON);
-        assert!((config.min_confidence - 0.4).abs()
-            < f64::EPSILON);
+        assert_eq!(config.feedback_mode, FeedbackMode::IncrementalStats,);
+        assert!((config.reoptimize_threshold - 3.0).abs() < f64::EPSILON);
+        assert!((config.min_confidence - 0.4).abs() < f64::EPSILON);
         assert_eq!(config.max_reoptimizations, 10);
     }
 
     #[test]
     fn batch_config_serialize_roundtrip() {
         let config = BatchConfig::default();
-        let json = serde_json::to_string(&config)
-            .expect("serialize");
-        let deserialized: BatchConfig =
-            serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(
-            config.batch_size,
-            deserialized.batch_size,
-        );
-        assert_eq!(
-            config.feedback_mode,
-            deserialized.feedback_mode,
-        );
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deserialized: BatchConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(config.batch_size, deserialized.batch_size,);
+        assert_eq!(config.feedback_mode, deserialized.feedback_mode,);
     }
 
     // ---- BatchExecutor creation ----
@@ -1098,11 +953,7 @@ mod tests {
             batch_size: 0,
             ..BatchConfig::default()
         };
-        let result = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        );
+        let result = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard());
         assert!(result.is_err());
     }
 
@@ -1110,10 +961,7 @@ mod tests {
     fn executor_with_defaults() {
         let exec = BatchExecutor::with_defaults(simple_plan());
         assert_eq!(exec.reoptimization_count(), 0);
-        assert_eq!(
-            exec.config().feedback_mode,
-            FeedbackMode::IncrementalStats,
-        );
+        assert_eq!(exec.config().feedback_mode, FeedbackMode::IncrementalStats,);
     }
 
     #[test]
@@ -1127,26 +975,17 @@ mod tests {
 
     #[test]
     fn q_error_perfect() {
-        assert!(
-            (compute_q_error(1000.0, 1000.0) - 1.0).abs()
-                < f64::EPSILON
-        );
+        assert!((compute_q_error(1000.0, 1000.0) - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn q_error_overestimate() {
-        assert!(
-            (compute_q_error(2000.0, 1000.0) - 2.0).abs()
-                < f64::EPSILON
-        );
+        assert!((compute_q_error(2000.0, 1000.0) - 2.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn q_error_underestimate() {
-        assert!(
-            (compute_q_error(500.0, 1000.0) - 2.0).abs()
-                < f64::EPSILON
-        );
+        assert!((compute_q_error(500.0, 1000.0) - 2.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1182,14 +1021,8 @@ mod tests {
     fn confidence_decay_always_positive() {
         for q in [1.0, 2.0, 5.0, 10.0, 100.0, 1000.0] {
             let decay = confidence_decay_from_q_error(q);
-            assert!(
-                decay > 0.0,
-                "decay should be positive for q={q}"
-            );
-            assert!(
-                decay <= 1.0,
-                "decay should be <= 1.0 for q={q}"
-            );
+            assert!(decay > 0.0, "decay should be positive for q={q}");
+            assert!(decay <= 1.0, "decay should be <= 1.0 for q={q}");
         }
     }
 
@@ -1197,8 +1030,7 @@ mod tests {
 
     #[test]
     fn q_error_summary_empty() {
-        let (avg, max) =
-            compute_q_error_summary(&HashMap::new());
+        let (avg, max) = compute_q_error_summary(&HashMap::new());
         assert!((avg - 1.0).abs() < f64::EPSILON);
         assert!((max - 1.0).abs() < f64::EPSILON);
     }
@@ -1256,10 +1088,8 @@ mod tests {
             q_error: 1.5,
             triggered_reoptimization: false,
         };
-        let json = serde_json::to_string(&fb)
-            .expect("serialize");
-        let deserialized: OperatorFeedback =
-            serde_json::from_str(&json).expect("deserialize");
+        let json = serde_json::to_string(&fb).expect("serialize");
+        let deserialized: OperatorFeedback = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(fb, deserialized);
     }
 
@@ -1285,14 +1115,9 @@ mod tests {
                 final_stats: HashMap::new(),
             },
         };
-        let json = serde_json::to_string(&record)
-            .expect("serialize");
-        let deserialized: BatchRecord =
-            serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(
-            record.batch_index,
-            deserialized.batch_index,
-        );
+        let json = serde_json::to_string(&record).expect("serialize");
+        let deserialized: BatchRecord = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(record.batch_index, deserialized.batch_index,);
     }
 
     // ---- Batch execution: basic run ----
@@ -1301,11 +1126,9 @@ mod tests {
     fn run_single_snapshot() {
         let snapshots = vec![make_snapshot(0, "orders", 1000)];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 1);
         assert_eq!(result.batches[0].batch_index, 0);
@@ -1320,11 +1143,9 @@ mod tests {
             make_snapshot(120, "orders", 2000),
         ];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 3);
     }
@@ -1342,15 +1163,10 @@ mod tests {
             batch_size: 2,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 2);
         assert_eq!(result.batches[0].snapshot_range, (0, 2));
@@ -1369,15 +1185,10 @@ mod tests {
             batch_size: 2,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 2);
     }
@@ -1395,20 +1206,12 @@ mod tests {
             feedback_mode: FeedbackMode::ConfidenceOnly,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
-        assert_eq!(
-            result.feedback_mode,
-            FeedbackMode::ConfidenceOnly,
-        );
+        assert_eq!(result.feedback_mode, FeedbackMode::ConfidenceOnly,);
     }
 
     #[test]
@@ -1422,15 +1225,10 @@ mod tests {
             feedback_mode: FeedbackMode::IncrementalStats,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
     }
 
@@ -1445,20 +1243,12 @@ mod tests {
             feedback_mode: FeedbackMode::FullReanalyze,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
-        assert_eq!(
-            result.feedback_mode,
-            FeedbackMode::FullReanalyze,
-        );
+        assert_eq!(result.feedback_mode, FeedbackMode::FullReanalyze,);
     }
 
     // ---- Reoptimization triggering ----
@@ -1481,22 +1271,16 @@ mod tests {
             actual_time_ms: None,
         }];
         let tl = make_timeline_with_feedback(snapshots, fb);
-        let mut player =
-            TimelinePlayer::new(tl).expect("player");
+        let mut player = TimelinePlayer::new(tl).expect("player");
 
         let config = BatchConfig {
             reoptimize_threshold: 2.0,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.total_reoptimizations > 0);
     }
 
@@ -1512,15 +1296,10 @@ mod tests {
             reoptimize_threshold: 5.0,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert_eq!(result.total_reoptimizations, 0);
     }
 
@@ -1540,15 +1319,10 @@ mod tests {
             reoptimize_threshold: 2.0,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.total_reoptimizations <= 1);
     }
 
@@ -1564,8 +1338,7 @@ mod tests {
             completed: true,
             feedback_mode: FeedbackMode::ConfidenceOnly,
         };
-        assert!((result.overall_avg_q_error() - 1.0).abs()
-            < f64::EPSILON);
+        assert!((result.overall_avg_q_error() - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1706,19 +1479,13 @@ mod tests {
     #[test]
     fn two_table_batch_run() {
         let snapshots = vec![
-            make_two_table_snapshot(
-                0, "orders", 1000, "lineitem", 6000,
-            ),
-            make_two_table_snapshot(
-                60, "orders", 1100, "lineitem", 6600,
-            ),
+            make_two_table_snapshot(0, "orders", 1000, "lineitem", 6000),
+            make_two_table_snapshot(60, "orders", 1100, "lineitem", 6600),
         ];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(join_plan());
+        let mut exec = BatchExecutor::with_defaults(join_plan());
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 2);
     }
@@ -1729,8 +1496,7 @@ mod tests {
     fn reset_clears_state() {
         let snapshots = vec![make_snapshot(0, "orders", 1000)];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
         exec.run(&mut player).expect("should run");
         assert!(!exec.batch_history().is_empty());
@@ -1753,18 +1519,11 @@ mod tests {
             min_value: Some("1".to_string()),
             max_value: Some("1000".to_string()),
         };
-        let snapshots = vec![make_snapshot_with_columns(
-            0,
-            "orders",
-            1000,
-            vec![col],
-        )];
+        let snapshots = vec![make_snapshot_with_columns(0, "orders", 1000, vec![col])];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
     }
 
@@ -1780,9 +1539,7 @@ mod tests {
             ExecutionFeedback {
                 time_offset: 0,
                 query: "SELECT * FROM orders".to_string(),
-                operator: Some(
-                    "SeqScan on orders".to_string(),
-                ),
+                operator: Some("SeqScan on orders".to_string()),
                 estimated_rows: 1000.0,
                 actual_rows: 1000.0,
                 estimated_cost: None,
@@ -1791,9 +1548,7 @@ mod tests {
             ExecutionFeedback {
                 time_offset: 60,
                 query: "SELECT * FROM orders".to_string(),
-                operator: Some(
-                    "SeqScan on orders".to_string(),
-                ),
+                operator: Some("SeqScan on orders".to_string()),
                 estimated_rows: 1000.0,
                 actual_rows: 1500.0,
                 estimated_cost: None,
@@ -1801,13 +1556,10 @@ mod tests {
             },
         ];
         let tl = make_timeline_with_feedback(snapshots, fb);
-        let mut player =
-            TimelinePlayer::new(tl).expect("player");
+        let mut player = TimelinePlayer::new(tl).expect("player");
 
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
-        let result =
-            exec.run(&mut player).expect("should run");
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 2);
     }
@@ -1820,7 +1572,7 @@ mod tests {
             batches_completed: 5,
         };
         let msg = format!("{err}");
-        assert!(msg.contains("5"));
+        assert!(msg.contains('5'));
         assert!(msg.contains("exhausted"));
     }
 
@@ -1831,15 +1583,13 @@ mod tests {
             reason: "test failure".to_string(),
         };
         let msg = format!("{err}");
-        assert!(msg.contains("3"));
+        assert!(msg.contains('3'));
         assert!(msg.contains("test failure"));
     }
 
     #[test]
     fn batch_error_invalid_config_display() {
-        let err = BatchError::InvalidConfig(
-            "bad setting".to_string(),
-        );
+        let err = BatchError::InvalidConfig("bad setting".to_string());
         let msg = format!("{err}");
         assert!(msg.contains("bad setting"));
     }
@@ -1860,8 +1610,7 @@ mod tests {
         )
         .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
     }
 
@@ -1879,8 +1628,7 @@ mod tests {
         )
         .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
     }
 
@@ -1898,8 +1646,7 @@ mod tests {
         )
         .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
     }
 
@@ -1908,20 +1655,12 @@ mod tests {
     #[test]
     fn many_snapshots_run() {
         let snapshots: Vec<Snapshot> = (0..20)
-            .map(|i| {
-                make_snapshot(
-                    i * 60,
-                    "orders",
-                    1000 + i * 100,
-                )
-            })
+            .map(|i| make_snapshot(i * 60, "orders", 1000 + i * 100))
             .collect();
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 20);
     }
@@ -1938,15 +1677,10 @@ mod tests {
             batch_size: 100,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 1);
     }
@@ -1957,13 +1691,7 @@ mod tests {
     fn streaming_inserts_scenario() {
         // Simulate TPC-H Q1 with growing lineitem table
         let snapshots: Vec<Snapshot> = (0..10)
-            .map(|i| {
-                make_snapshot(
-                    i * 300,
-                    "lineitem",
-                    6_000_000 + i * 500_000,
-                )
-            })
+            .map(|i| make_snapshot(i * 300, "lineitem", 6_000_000 + i * 500_000))
             .collect();
         let mut player = default_player(snapshots);
         let config = BatchConfig {
@@ -1979,8 +1707,7 @@ mod tests {
         )
         .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 5);
     }
@@ -2021,11 +1748,9 @@ mod tests {
             ),
         ];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
     }
 
@@ -2045,9 +1770,7 @@ mod tests {
                         ndv: 10 + i,
                         null_fraction: 0.0,
                         avg_width: 8.0,
-                        correlation: Some(
-                            0.95 - (i as f64 * 0.1),
-                        ),
+                        correlation: Some(0.95 - (i as f64 * 0.1)),
                         min_value: None,
                         max_value: None,
                     }],
@@ -2066,8 +1789,7 @@ mod tests {
         )
         .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 5);
     }
@@ -2092,21 +1814,15 @@ mod tests {
 
         let mut results = Vec::new();
         for mode in &modes {
-            let mut player =
-                default_player(make_snapshots());
+            let mut player = default_player(make_snapshots());
             let config = BatchConfig {
                 feedback_mode: *mode,
                 ..BatchConfig::default()
             };
-            let mut exec = BatchExecutor::new(
-                simple_plan(),
-                config,
-                StatisticsProfile::standard(),
-            )
-            .expect("create");
+            let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+                .expect("create");
 
-            let result =
-                exec.run(&mut player).expect("should run");
+            let result = exec.run(&mut player).expect("should run");
             results.push(result);
         }
 
@@ -2130,12 +1846,8 @@ mod tests {
             batch_size: 5,
             ..BatchConfig::default()
         };
-        let exec = BatchExecutor::new(
-            simple_plan(),
-            config.clone(),
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let exec = BatchExecutor::new(simple_plan(), config.clone(), StatisticsProfile::standard())
+            .expect("create");
         assert_eq!(exec.config().batch_size, 5);
     }
 
@@ -2147,10 +1859,7 @@ mod tests {
             StatisticsProfile::analytical(),
         )
         .expect("create");
-        assert_eq!(
-            exec.adapter().profile().name,
-            "Analytical",
-        );
+        assert_eq!(exec.adapter().profile().name, "Analytical",);
     }
 
     // ---- BatchRunResult overall_avg_q_error ----
@@ -2203,10 +1912,7 @@ mod tests {
             completed: true,
             feedback_mode: FeedbackMode::IncrementalStats,
         };
-        assert!(
-            (result.overall_avg_q_error() - 2.0).abs()
-                < f64::EPSILON
-        );
+        assert!((result.overall_avg_q_error() - 2.0).abs() < f64::EPSILON);
     }
 
     // ---- Edge: batch size larger than snapshots ----
@@ -2219,15 +1925,10 @@ mod tests {
             batch_size: 10,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 1);
     }
@@ -2247,9 +1948,7 @@ mod tests {
             ExecutionFeedback {
                 time_offset: 60,
                 query: "SELECT * FROM orders".to_string(),
-                operator: Some(
-                    "SeqScan on orders".to_string(),
-                ),
+                operator: Some("SeqScan on orders".to_string()),
                 estimated_rows: 1000.0,
                 actual_rows: 10_000.0,
                 estimated_cost: None,
@@ -2258,9 +1957,7 @@ mod tests {
             ExecutionFeedback {
                 time_offset: 120,
                 query: "SELECT * FROM orders".to_string(),
-                operator: Some(
-                    "SeqScan on orders".to_string(),
-                ),
+                operator: Some("SeqScan on orders".to_string()),
                 estimated_rows: 10_000.0,
                 actual_rows: 100_000.0,
                 estimated_cost: None,
@@ -2268,22 +1965,16 @@ mod tests {
             },
         ];
         let tl = make_timeline_with_feedback(snapshots, fb);
-        let mut player =
-            TimelinePlayer::new(tl).expect("player");
+        let mut player = TimelinePlayer::new(tl).expect("player");
 
         let config = BatchConfig {
             reoptimize_threshold: 2.0,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         // 10x growth with feedback should trigger reoptimization
         assert!(result.total_reoptimizations > 0);
@@ -2299,11 +1990,9 @@ mod tests {
             make_snapshot(120, "orders", 10_000),
         ];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 3);
     }
@@ -2322,15 +2011,10 @@ mod tests {
             reoptimize_threshold: 5.0,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert_eq!(result.total_reoptimizations, 0);
     }
 
@@ -2339,22 +2023,14 @@ mod tests {
     #[test]
     fn join_plan_batch_execution() {
         let snapshots = vec![
-            make_two_table_snapshot(
-                0, "orders", 1000, "lineitem", 6000,
-            ),
-            make_two_table_snapshot(
-                60, "orders", 1500, "lineitem", 9000,
-            ),
-            make_two_table_snapshot(
-                120, "orders", 2000, "lineitem", 12000,
-            ),
+            make_two_table_snapshot(0, "orders", 1000, "lineitem", 6000),
+            make_two_table_snapshot(60, "orders", 1500, "lineitem", 9000),
+            make_two_table_snapshot(120, "orders", 2000, "lineitem", 12000),
         ];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(join_plan());
+        let mut exec = BatchExecutor::with_defaults(join_plan());
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 3);
     }
@@ -2372,10 +2048,7 @@ mod tests {
             adaptive_config: AdaptiveConfig::default(),
         };
         assert_eq!(config.batch_size, 5);
-        assert_eq!(
-            config.feedback_mode,
-            FeedbackMode::FullReanalyze,
-        );
+        assert_eq!(config.feedback_mode, FeedbackMode::FullReanalyze,);
     }
 
     #[test]
@@ -2419,15 +2092,10 @@ mod tests {
             batch_size: 3,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert_eq!(result.batches.len(), 2);
         assert_eq!(result.batches[0].snapshot_range, (0, 3));
         assert_eq!(result.batches[1].snapshot_range, (3, 6));
@@ -2461,10 +2129,7 @@ mod tests {
             completed: true,
             feedback_mode: FeedbackMode::ConfidenceOnly,
         };
-        assert!(
-            (result.overall_avg_q_error() - 3.5).abs()
-                < f64::EPSILON
-        );
+        assert!((result.overall_avg_q_error() - 3.5).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -2528,10 +2193,7 @@ mod tests {
             completed: true,
             feedback_mode: FeedbackMode::ConfidenceOnly,
         };
-        assert!(
-            (result.confidence_delta() - 0.0).abs()
-                < f64::EPSILON
-        );
+        assert!((result.confidence_delta() - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -2597,15 +2259,10 @@ mod tests {
             reoptimize_threshold: 100.0,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.total_reoptimizations > 0);
     }
 
@@ -2623,8 +2280,7 @@ mod tests {
         )
         .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("should run");
+        let result = exec.run(&mut player).expect("should run");
         assert!(result.completed);
     }
 
@@ -2640,15 +2296,10 @@ mod tests {
             batch_size: 3,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 1);
     }
@@ -2659,11 +2310,9 @@ mod tests {
             .map(|i| make_snapshot(i * 60, "t", 1000 + i * 100))
             .collect();
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert_eq!(result.batches.len(), 7);
         for (i, batch) in result.batches.iter().enumerate() {
             assert_eq!(batch.batch_index, i);
@@ -2690,9 +2339,7 @@ mod tests {
             triggered_reoptimization: true,
         };
         assert!(fb.triggered_reoptimization);
-        assert!(
-            (fb.estimated_rows - 500.0).abs() < f64::EPSILON
-        );
+        assert!((fb.estimated_rows - 500.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -2707,10 +2354,7 @@ mod tests {
         };
         assert_eq!(result.total_reoptimizations, 5);
         assert!(!result.completed);
-        assert_eq!(
-            result.feedback_mode,
-            FeedbackMode::FullReanalyze,
-        );
+        assert_eq!(result.feedback_mode, FeedbackMode::FullReanalyze,);
     }
 
     #[test]
@@ -2742,23 +2386,17 @@ mod tests {
             },
         ];
         let tl = make_timeline_with_feedback(snapshots, fb);
-        let mut player =
-            TimelinePlayer::new(tl).expect("player");
+        let mut player = TimelinePlayer::new(tl).expect("player");
 
         let config = BatchConfig {
             reoptimize_threshold: 2.0,
             max_reoptimizations: 5,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert!(result.total_reoptimizations >= 2);
     }
 
@@ -2778,13 +2416,10 @@ mod tests {
             actual_time_ms: Some(120.5),
         }];
         let tl = make_timeline_with_feedback(snapshots, fb);
-        let mut player =
-            TimelinePlayer::new(tl).expect("player");
+        let mut player = TimelinePlayer::new(tl).expect("player");
 
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
-        let result =
-            exec.run(&mut player).expect("run");
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
+        let result = exec.run(&mut player).expect("run");
         assert!(result.completed);
     }
 
@@ -2795,31 +2430,24 @@ mod tests {
             make_snapshot(60, "orders", 1500),
         ];
         let mut player1 = default_player(snapshots.clone());
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result1 =
-            exec.run(&mut player1).expect("run 1");
+        let result1 = exec.run(&mut player1).expect("run 1");
         assert_eq!(result1.batches.len(), 2);
 
         exec.reset(simple_plan());
         let mut player2 = default_player(snapshots);
-        let result2 =
-            exec.run(&mut player2).expect("run 2");
+        let result2 = exec.run(&mut player2).expect("run 2");
         assert_eq!(result2.batches.len(), 2);
     }
 
     #[test]
     fn batch_index_sequential() {
-        let snapshots: Vec<Snapshot> = (0..5)
-            .map(|i| make_snapshot(i * 60, "t", 1000))
-            .collect();
+        let snapshots: Vec<Snapshot> = (0..5).map(|i| make_snapshot(i * 60, "t", 1000)).collect();
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         for (i, batch) in result.batches.iter().enumerate() {
             assert_eq!(batch.batch_index, i);
         }
@@ -2827,15 +2455,11 @@ mod tests {
 
     #[test]
     fn all_batches_have_plan() {
-        let snapshots: Vec<Snapshot> = (0..4)
-            .map(|i| make_snapshot(i * 60, "t", 1000))
-            .collect();
+        let snapshots: Vec<Snapshot> = (0..4).map(|i| make_snapshot(i * 60, "t", 1000)).collect();
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         for batch in &result.batches {
             assert_eq!(batch.plan, simple_plan());
         }
@@ -2843,16 +2467,11 @@ mod tests {
 
     #[test]
     fn confidence_before_after_present() {
-        let snapshots = vec![
-            make_snapshot(0, "t", 1000),
-            make_snapshot(60, "t", 1500),
-        ];
+        let snapshots = vec![make_snapshot(0, "t", 1000), make_snapshot(60, "t", 1500)];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         for batch in &result.batches {
             assert!(batch.confidence_before >= 0.0);
             assert!(batch.confidence_before <= 1.0);
@@ -2863,16 +2482,11 @@ mod tests {
 
     #[test]
     fn avg_q_error_at_least_one() {
-        let snapshots = vec![
-            make_snapshot(0, "t", 1000),
-            make_snapshot(60, "t", 1500),
-        ];
+        let snapshots = vec![make_snapshot(0, "t", 1000), make_snapshot(60, "t", 1500)];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         for batch in &result.batches {
             assert!(batch.avg_q_error >= 1.0);
             assert!(batch.max_q_error >= 1.0);
@@ -2881,16 +2495,11 @@ mod tests {
 
     #[test]
     fn max_q_error_gte_avg_q_error() {
-        let snapshots = vec![
-            make_snapshot(0, "t", 100),
-            make_snapshot(60, "t", 10000),
-        ];
+        let snapshots = vec![make_snapshot(0, "t", 100), make_snapshot(60, "t", 10000)];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         for batch in &result.batches {
             assert!(batch.max_q_error >= batch.avg_q_error);
         }
@@ -2908,15 +2517,10 @@ mod tests {
             feedback_mode: FeedbackMode::FullReanalyze,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         // After full reanalyze, confidence should be high
         let last = result.batches.last().expect("last");
         assert!(last.confidence_after >= 0.5);
@@ -2924,14 +2528,11 @@ mod tests {
 
     #[test]
     fn empty_operator_feedback_in_batch() {
-        let snapshots =
-            vec![make_snapshot(0, "nonexistent", 0)];
+        let snapshots = vec![make_snapshot(0, "nonexistent", 0)];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert!(result.completed);
     }
 
@@ -2945,8 +2546,7 @@ mod tests {
             max_reoptimizations: 7,
             adaptive_config: AdaptiveConfig::default(),
         };
-        let json = serde_json::to_string(&config)
-            .expect("serialize");
+        let json = serde_json::to_string(&config).expect("serialize");
         assert!(json.contains("batch_size"));
         assert!(json.contains("feedback_mode"));
         assert!(json.contains("reoptimize_threshold"));
@@ -2959,11 +2559,8 @@ mod tests {
             FeedbackMode::IncrementalStats,
             FeedbackMode::FullReanalyze,
         ] {
-            let json = serde_json::to_string(&mode)
-                .expect("serialize");
-            let back: FeedbackMode =
-                serde_json::from_str(&json)
-                    .expect("deserialize");
+            let json = serde_json::to_string(&mode).expect("serialize");
+            let back: FeedbackMode = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(mode, back);
         }
     }
@@ -2980,13 +2577,7 @@ mod tests {
     #[test]
     fn many_small_batches_performance() {
         let snapshots: Vec<Snapshot> = (0..50)
-            .map(|i| {
-                make_snapshot(
-                    i * 10,
-                    "events",
-                    10_000 + i * 500,
-                )
-            })
+            .map(|i| make_snapshot(i * 10, "events", 10_000 + i * 500))
             .collect();
         let mut player = default_player(snapshots);
         let mut exec = BatchExecutor::new(
@@ -2996,53 +2587,36 @@ mod tests {
         )
         .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert!(result.completed);
         assert_eq!(result.batches.len(), 50);
     }
 
     #[test]
     fn batch_size_larger_than_total_single_batch() {
-        let snapshots = vec![
-            make_snapshot(0, "t", 100),
-            make_snapshot(60, "t", 200),
-        ];
+        let snapshots = vec![make_snapshot(0, "t", 100), make_snapshot(60, "t", 200)];
         let mut player = default_player(snapshots);
         let config = BatchConfig {
             batch_size: 1000,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert_eq!(result.batches.len(), 1);
-        assert_eq!(
-            result.batches[0].snapshot_range,
-            (0, 2),
-        );
+        assert_eq!(result.batches[0].snapshot_range, (0, 2),);
     }
 
     #[test]
     fn two_table_with_feedback() {
         let snapshots = vec![
-            make_two_table_snapshot(
-                0, "orders", 1000, "lineitem", 6000,
-            ),
-            make_two_table_snapshot(
-                60, "orders", 2000, "lineitem", 12000,
-            ),
+            make_two_table_snapshot(0, "orders", 1000, "lineitem", 6000),
+            make_two_table_snapshot(60, "orders", 2000, "lineitem", 12000),
         ];
         let fb = vec![ExecutionFeedback {
             time_offset: 60,
-            query: "SELECT * FROM orders JOIN lineitem"
-                .to_string(),
+            query: "SELECT * FROM orders JOIN lineitem".to_string(),
             operator: Some("HashJoin".to_string()),
             estimated_rows: 6000.0,
             actual_rows: 12000.0,
@@ -3050,13 +2624,10 @@ mod tests {
             actual_time_ms: Some(500.0),
         }];
         let tl = make_timeline_with_feedback(snapshots, fb);
-        let mut player =
-            TimelinePlayer::new(tl).expect("player");
+        let mut player = TimelinePlayer::new(tl).expect("player");
 
-        let mut exec =
-            BatchExecutor::with_defaults(join_plan());
-        let result =
-            exec.run(&mut player).expect("run");
+        let mut exec = BatchExecutor::with_defaults(join_plan());
+        let result = exec.run(&mut player).expect("run");
         assert!(result.completed);
     }
 
@@ -3070,9 +2641,7 @@ mod tests {
             ExecutionFeedback {
                 time_offset: 60,
                 query: "q1".to_string(),
-                operator: Some(
-                    "SeqScan on orders".to_string(),
-                ),
+                operator: Some("SeqScan on orders".to_string()),
                 estimated_rows: 1000.0,
                 actual_rows: 1500.0,
                 estimated_cost: None,
@@ -3081,9 +2650,7 @@ mod tests {
             ExecutionFeedback {
                 time_offset: 60,
                 query: "q2".to_string(),
-                operator: Some(
-                    "IndexScan on orders".to_string(),
-                ),
+                operator: Some("IndexScan on orders".to_string()),
                 estimated_rows: 500.0,
                 actual_rows: 750.0,
                 estimated_cost: None,
@@ -3091,13 +2658,10 @@ mod tests {
             },
         ];
         let tl = make_timeline_with_feedback(snapshots, fb);
-        let mut player =
-            TimelinePlayer::new(tl).expect("player");
+        let mut player = TimelinePlayer::new(tl).expect("player");
 
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
-        let result =
-            exec.run(&mut player).expect("run");
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
+        let result = exec.run(&mut player).expect("run");
         assert!(result.completed);
     }
 
@@ -3105,8 +2669,7 @@ mod tests {
     fn reoptimization_count_accessor() {
         let snapshots = vec![make_snapshot(0, "t", 1000)];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
         assert_eq!(exec.reoptimization_count(), 0);
         exec.run(&mut player).expect("run");
         // Stable data should not trigger reoptimization
@@ -3115,12 +2678,9 @@ mod tests {
 
     #[test]
     fn batch_history_grows() {
-        let snapshots: Vec<Snapshot> = (0..3)
-            .map(|i| make_snapshot(i * 60, "t", 1000))
-            .collect();
+        let snapshots: Vec<Snapshot> = (0..3).map(|i| make_snapshot(i * 60, "t", 1000)).collect();
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
         assert!(exec.batch_history().is_empty());
         exec.run(&mut player).expect("run");
@@ -3129,33 +2689,22 @@ mod tests {
 
     #[test]
     fn confidence_only_no_row_count_change() {
-        let snapshots = vec![
-            make_snapshot(0, "t", 1000),
-            make_snapshot(60, "t", 1000),
-        ];
+        let snapshots = vec![make_snapshot(0, "t", 1000), make_snapshot(60, "t", 1000)];
         let mut player = default_player(snapshots);
         let config = BatchConfig {
             feedback_mode: FeedbackMode::ConfidenceOnly,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert!(result.completed);
     }
 
     #[test]
     fn incremental_with_large_correction() {
-        let snapshots = vec![
-            make_snapshot(0, "t", 100),
-            make_snapshot(60, "t", 10_000),
-        ];
+        let snapshots = vec![make_snapshot(0, "t", 100), make_snapshot(60, "t", 10_000)];
         let fb = vec![ExecutionFeedback {
             time_offset: 60,
             query: "q".to_string(),
@@ -3166,22 +2715,16 @@ mod tests {
             actual_time_ms: None,
         }];
         let tl = make_timeline_with_feedback(snapshots, fb);
-        let mut player =
-            TimelinePlayer::new(tl).expect("player");
+        let mut player = TimelinePlayer::new(tl).expect("player");
 
         let config = BatchConfig {
             feedback_mode: FeedbackMode::IncrementalStats,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert!(result.completed);
     }
 
@@ -3189,35 +2732,25 @@ mod tests {
     fn execution_report_in_batch_record() {
         let snapshots = vec![make_snapshot(0, "t", 1000)];
         let mut player = default_player(snapshots);
-        let mut exec =
-            BatchExecutor::with_defaults(simple_plan());
+        let mut exec = BatchExecutor::with_defaults(simple_plan());
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         let report = &result.batches[0].execution_report;
         assert_eq!(report.final_plan, simple_plan());
     }
 
     #[test]
     fn final_plan_matches_initial_without_reopt() {
-        let snapshots = vec![
-            make_snapshot(0, "t", 1000),
-            make_snapshot(60, "t", 1000),
-        ];
+        let snapshots = vec![make_snapshot(0, "t", 1000), make_snapshot(60, "t", 1000)];
         let mut player = default_player(snapshots);
         let config = BatchConfig {
             reoptimize_threshold: 100.0,
             ..BatchConfig::default()
         };
-        let mut exec = BatchExecutor::new(
-            simple_plan(),
-            config,
-            StatisticsProfile::standard(),
-        )
-        .expect("create");
+        let mut exec = BatchExecutor::new(simple_plan(), config, StatisticsProfile::standard())
+            .expect("create");
 
-        let result =
-            exec.run(&mut player).expect("run");
+        let result = exec.run(&mut player).expect("run");
         assert_eq!(result.final_plan, simple_plan());
     }
 
@@ -3231,12 +2764,9 @@ mod tests {
             completed: true,
             feedback_mode: FeedbackMode::ConfidenceOnly,
         };
-        let json = serde_json::to_string(&result)
-            .expect("serialize");
-        let back: BatchRunResult =
-            serde_json::from_str(&json)
-                .expect("deserialize");
-        assert_eq!(back.completed, true);
+        let json = serde_json::to_string(&result).expect("serialize");
+        let back: BatchRunResult = serde_json::from_str(&json).expect("deserialize");
+        assert!(back.completed);
         assert_eq!(back.total_reoptimizations, 0);
     }
 }
