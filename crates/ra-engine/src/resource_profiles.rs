@@ -6,7 +6,10 @@
 
 use std::time::Duration;
 
-use crate::resource_budget::{OverflowStrategy, ResourceBudget};
+use crate::resource_budget::{
+    ConvergenceBehavior, FastPathPreferences, OverflowStrategy,
+    ResourceBudget, RuleSelectionBehavior,
+};
 
 impl ResourceBudget {
     /// Interactive query profile: fast response time.
@@ -22,6 +25,9 @@ impl ResourceBudget {
             max_egraph_nodes: Some(10_000),
             max_iterations: Some(10),
             overflow_strategy: OverflowStrategy::ReturnBestSoFar,
+            rule_selection: RuleSelectionBehavior::default(),
+            convergence: ConvergenceBehavior::Adaptive,
+            fast_path: FastPathPreferences::default(),
         }
     }
 
@@ -39,6 +45,9 @@ impl ResourceBudget {
             max_egraph_nodes: Some(100_000),
             max_iterations: Some(30),
             overflow_strategy: OverflowStrategy::ReturnBestSoFar,
+            rule_selection: RuleSelectionBehavior::default(),
+            convergence: ConvergenceBehavior::Adaptive,
+            fast_path: FastPathPreferences::default(),
         }
     }
 
@@ -56,6 +65,9 @@ impl ResourceBudget {
             max_egraph_nodes: Some(1_000_000),
             max_iterations: Some(100),
             overflow_strategy: OverflowStrategy::ReturnBestSoFar,
+            rule_selection: RuleSelectionBehavior::default(),
+            convergence: ConvergenceBehavior::Adaptive,
+            fast_path: FastPathPreferences::default(),
         }
     }
 
@@ -72,7 +84,52 @@ impl ResourceBudget {
             max_egraph_nodes: Some(5_000),
             max_iterations: Some(15),
             overflow_strategy: OverflowStrategy::ReturnBestSoFar,
+            rule_selection: RuleSelectionBehavior::default(),
+            convergence: ConvergenceBehavior::Adaptive,
+            fast_path: FastPathPreferences::default(),
         }
+    }
+
+
+    /// Select an appropriate profile based on a named workload.
+    ///
+    /// Returns `None` if the name is unrecognized. This is useful
+    /// for CLI tools and configuration files that specify profiles
+    /// by name.
+    #[must_use]
+    pub fn from_profile_name(name: &str) -> Option<Self> {
+        match name {
+            "interactive" => Some(Self::interactive()),
+            "interactive_plus" | "interactive-plus" => {
+                Some(Self::interactive_plus())
+            }
+            "standard" => Some(Self::standard()),
+            "batch" => Some(Self::batch()),
+            "memory_constrained" | "memory-constrained" => {
+                Some(Self::memory_constrained())
+            }
+            "oltp" => Some(Self::oltp()),
+            "olap" => Some(Self::olap()),
+            "research" => Some(Self::research()),
+            "unlimited" => Some(Self::unlimited()),
+            _ => None,
+        }
+    }
+
+    /// All available profile names, sorted alphabetically.
+    #[must_use]
+    pub fn profile_names() -> &'static [&'static str] {
+        &[
+            "batch",
+            "interactive",
+            "interactive_plus",
+            "memory_constrained",
+            "olap",
+            "oltp",
+            "research",
+            "standard",
+            "unlimited",
+        ]
     }
 }
 
@@ -381,6 +438,43 @@ mod tests {
     fn memory_constrained_can_override_egraph_limit() {
         let budget = ResourceBudget::memory_constrained().with_egraph_node_limit(2_000);
         assert_eq!(budget.max_egraph_nodes, Some(2_000));
+    }
+
+    // ---- Profile selection ----
+
+    #[test]
+    fn from_profile_name_returns_known_profiles() {
+        for name in ResourceBudget::profile_names() {
+            assert!(
+                ResourceBudget::from_profile_name(name).is_some(),
+                "profile '{name}' should be recognized"
+            );
+        }
+    }
+
+    #[test]
+    fn from_profile_name_returns_none_for_unknown() {
+        assert!(ResourceBudget::from_profile_name("nonexistent").is_none());
+        assert!(ResourceBudget::from_profile_name("").is_none());
+    }
+
+    #[test]
+    fn from_profile_name_accepts_hyphenated_variants() {
+        assert!(ResourceBudget::from_profile_name("interactive-plus").is_some());
+        assert!(ResourceBudget::from_profile_name("memory-constrained").is_some());
+    }
+
+    #[test]
+    fn profile_names_are_sorted() {
+        let names = ResourceBudget::profile_names();
+        for window in names.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "profile names should be sorted: '{}' >= '{}'",
+                window[0],
+                window[1]
+            );
+        }
     }
 
     // ---- All profiles have all fields set ----

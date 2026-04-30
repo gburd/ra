@@ -68,7 +68,7 @@ pub struct MaterializedViewInfo {
 }
 
 /// A successful match between a query and a materialized view.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MvMatch {
     /// Name of the matched MV.
     pub mv_name: String,

@@ -95,6 +95,10 @@ harness = false
 name = "hybrid_bench"
 harness = false
 
+[[bench]]
+name = "perf_framework"
+harness = false
+
 [[bin]]
 name = "planner_comparison_runner"
 path = "../../benchmarks/planner_comparison/runner.rs"

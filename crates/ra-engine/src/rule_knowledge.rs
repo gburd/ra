@@ -172,6 +172,14 @@ impl RuleKnowledge {
         self.entries.len()
     }
 
+    /// Iterate over all per-shape-bucket effectiveness entries.
+    #[must_use]
+    pub fn entries(
+        &self,
+    ) -> &HashMap<ShapeKeyBucket, HashMap<String, RuleEffectivenessEntry>> {
+        &self.entries
+    }
+
     /// Record that a rule was applied (matched) for a given shape.
     pub fn record_application(&mut self, shape: &ShapeKeyBucket, rule_name: &str) {
         // Update per-shape entry

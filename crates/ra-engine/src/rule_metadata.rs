@@ -192,7 +192,7 @@ pub fn parse_rra_file(path: &Path) -> Result<ParsedRule> {
     let content = parts[2].trim();
 
     // Parse YAML frontmatter
-    let metadata: RuleMetadata = serde_yaml::from_str(frontmatter)
+    let metadata: RuleMetadata = serde_yml::from_str(frontmatter)
         .with_context(|| format!("Failed to parse YAML frontmatter in {}", path.display()))?;
 
     Ok(ParsedRule {

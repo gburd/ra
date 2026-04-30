@@ -11,7 +11,9 @@ use crate::analysis::RelAnalysis;
 use crate::extract::extract_best;
 use crate::genetic_fingerprint::QueryFingerprint;
 use crate::plan_cache::{PlanCache, PlanCacheConfig, PlanCacheStats};
-use crate::resource_budget::{OverflowStrategy, ResourceBudget, ResourceTracker};
+use crate::resource_budget::{
+    ConvergenceBehavior, OverflowStrategy, ResourceBudget, ResourceTracker,
+};
 use crate::rewrite::all_rules;
 
 use super::config::OptimizerConfig;
@@ -127,13 +129,19 @@ impl Optimizer {
     ///
     /// Centralises the rule-loading logic so every optimisation path
     /// (normal, bounded, tracking, incremental) honours the rule
-    /// advisor when it is configured.
+    /// advisor when it is configured. When a [`ResourceBudget`] is
+    /// set, passes it to the advisor so rule selection respects the
+    /// budget's [`RuleSelectionBehavior`].
     fn load_rules(&self, expr: &RelExpr) -> Vec<Rewrite<RelLang, RelAnalysis>> {
         if let Some(ref advisor_mutex) = self.rule_advisor {
             let mut advisor = advisor_mutex
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            advisor.select_rules(expr)
+            if let Some(ref budget) = self.resource_budget {
+                advisor.select_rules_with_budget(expr, budget)
+            } else {
+                advisor.select_rules(expr)
+            }
         } else if self.config.use_lazy_rules {
             let pattern = crate::lazy_rules::LazyQueryPattern::analyze(expr);
             let compiler = crate::lazy_rules::LazyRuleCompiler::new();
@@ -288,10 +296,18 @@ impl Optimizer {
             }
         };
 
-        let iter_limit = if self.config.use_adaptive_limits {
+        let base_iter_limit = if self.config.use_adaptive_limits {
             complexity.default_iter_limit()
         } else {
             self.config.iter_limit
+        };
+
+        // Cap iteration limit by the resource budget when set.
+        // This ensures the budget's max_iterations is respected
+        // even in the non-bounded optimize() path.
+        let iter_limit = match self.resource_budget.as_ref().and_then(|b| b.max_iterations) {
+            Some(budget_cap) => base_iter_limit.min(budget_cap),
+            None => base_iter_limit,
         };
 
         let timeout_ms = if self.config.use_adaptive_limits {
@@ -320,8 +336,18 @@ impl Optimizer {
 
         let rules = self.load_rules(expr);
 
-        // Create convergence detector (window size: 3, min growth rate: 5%)
-        let mut convergence_detector = crate::convergence::ConvergenceDetector::default_settings();
+        // Create convergence detector tuned to the budget's behavior.
+        // When a resource budget is set, its ConvergenceBehavior controls
+        // how aggressively we detect convergence. Without a budget we
+        // fall back to the Adaptive defaults (window=3, growth=5%).
+        let convergence_behavior = self
+            .resource_budget
+            .as_ref()
+            .map_or(ConvergenceBehavior::Adaptive, |b| b.convergence);
+        let mut convergence_detector = crate::convergence::ConvergenceDetector::new(
+            convergence_behavior.window_size(),
+            convergence_behavior.min_growth_rate(),
+        );
 
         // Create cost pruner (if enabled)
         let mut cost_pruner = if self.config.use_cost_pruning {
@@ -465,7 +491,7 @@ impl Optimizer {
                 }
             }
 
-            // Check for convergence
+            // Check for convergence (detector-based)
             if convergence_detector.should_terminate()
                 == crate::convergence::TerminationDecision::Converged
             {
@@ -476,6 +502,45 @@ impl Optimizer {
                     convergence_detector.stats()
                 );
                 break;
+            }
+
+            // Convergence-behavior-aware early termination.
+            //
+            // The detector needs `window_size` data points before
+            // it can declare convergence. For Immediate and Adaptive
+            // modes we apply policy-level checks that don't depend
+            // on filling the full window:
+            //
+            //   Immediate  -- stop after 1 iteration (OLTP fast path)
+            //   Adaptive   -- stop after 2 iterations for simple
+            //                  queries (Trivial/Simple complexity)
+            //   Thorough / Complete -- rely on the detector above
+            match convergence_behavior {
+                ConvergenceBehavior::Immediate => {
+                    termination_reason = "convergence_immediate";
+                    debug!(
+                        "Immediate convergence: stopping after {} iteration(s)",
+                        actual_iterations,
+                    );
+                    break;
+                }
+                ConvergenceBehavior::Adaptive if actual_iterations >= 2 => {
+                    let is_simple = matches!(
+                        complexity,
+                        crate::query_complexity::QueryComplexity::Trivial
+                            | crate::query_complexity::QueryComplexity::Simple
+                    );
+                    if is_simple {
+                        termination_reason = "convergence_adaptive_simple";
+                        debug!(
+                            "Adaptive convergence: simple query, \
+                             stopping after {} iterations",
+                            actual_iterations,
+                        );
+                        break;
+                    }
+                }
+                _ => {}
             }
 
             // Check for egg saturation
@@ -700,8 +765,12 @@ impl Optimizer {
     /// Returns an error if expression conversion fails, or if the
     /// overflow strategy is [`OverflowStrategy::Fail`] and the budget
     /// is exceeded before any plan is extracted.
+    #[expect(clippy::too_many_lines, reason = "bounded optimization with convergence control")]
     pub fn optimize_bounded(&self, expr: &RelExpr) -> Result<OptimizationResult, EGraphError> {
+        use tracing::debug;
+
         let budget = self.resource_budget.clone().unwrap_or_default();
+        let convergence_behavior = budget.convergence;
         let mut tracker = ResourceTracker::start(budget);
 
         let rec_expr = to_rec_expr(expr)?;
@@ -712,11 +781,31 @@ impl Optimizer {
         let node_limit = self.config.node_limit;
         let time_limit_secs = self.config.time_limit_secs;
 
+        // Compute query complexity for Adaptive convergence decisions
+        let complexity = if self.config.use_adaptive_limits {
+            crate::query_complexity::QueryComplexity::from_expr(expr)
+        } else {
+            let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
+            match table_count {
+                0..=1 => crate::query_complexity::QueryComplexity::Trivial,
+                2..=4 => crate::query_complexity::QueryComplexity::Simple,
+                5..=7 => crate::query_complexity::QueryComplexity::Medium,
+                8..=9 => crate::query_complexity::QueryComplexity::Complex,
+                _ => crate::query_complexity::QueryComplexity::VeryComplex,
+            }
+        };
+
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
 
         let mut best_plan: Option<RelExpr> = None;
         let mut best_cost = f64::INFINITY;
+
+        // Configure convergence detector from the budget
+        let mut convergence_detector = crate::convergence::ConvergenceDetector::new(
+            convergence_behavior.window_size(),
+            convergence_behavior.min_growth_rate(),
+        );
 
         // Extract initial plan (the original, unoptimized)
         if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
@@ -724,12 +813,14 @@ impl Optimizer {
             best_cost = estimate_plan_cost(&egraph, root, &hardware);
         }
 
-        for _iteration in 0..iter_limit {
+        for iteration in 0..iter_limit {
             // Check budget before running an iteration
             let check = tracker.check();
             if !check.is_within_budget() {
                 return handle_overflow(&tracker, expr, best_plan, best_cost);
             }
+
+            let prev_classes = egraph.number_of_classes();
 
             // Run one iteration of equality saturation
             let runner: Runner<RelLang, RelAnalysis> = Runner::default()
@@ -747,6 +838,20 @@ impl Optimizer {
             let mem_estimate = (egraph.total_number_of_nodes() as u64).saturating_mul(64);
             tracker.record_memory_estimate(mem_estimate);
 
+            // Record convergence metrics
+            let curr_classes = egraph.number_of_classes();
+            let unions = if iteration > 0 {
+                prev_classes.saturating_sub(curr_classes)
+            } else {
+                curr_classes
+            };
+            convergence_detector.record(crate::convergence::IterationMetrics {
+                iteration,
+                unions,
+                total_nodes: egraph.total_size(),
+                total_classes: curr_classes,
+            });
+
             // Try to extract the best plan from the current e-graph
             if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
                 let cost = estimate_plan_cost(&egraph, root, &hardware);
@@ -754,6 +859,44 @@ impl Optimizer {
                     best_cost = cost;
                     best_plan = Some(plan);
                 }
+            }
+
+            // Check convergence detector
+            if convergence_detector.should_terminate()
+                == crate::convergence::TerminationDecision::Converged
+            {
+                break;
+            }
+
+            // Convergence-behavior-aware early termination.
+            // Same logic as optimize(): stop early for Immediate
+            // and Adaptive-simple without waiting for the detector
+            // to fill its full window.
+            let iterations_done = iteration + 1;
+            match convergence_behavior {
+                ConvergenceBehavior::Immediate => {
+                    debug!(
+                        "Immediate convergence: stopping after {} iteration(s)",
+                        iterations_done,
+                    );
+                    break;
+                }
+                ConvergenceBehavior::Adaptive if iterations_done >= 2 => {
+                    let is_simple = matches!(
+                        complexity,
+                        crate::query_complexity::QueryComplexity::Trivial
+                            | crate::query_complexity::QueryComplexity::Simple
+                    );
+                    if is_simple {
+                        debug!(
+                            "Adaptive convergence: simple query, \
+                             stopping after {} iterations",
+                            iterations_done,
+                        );
+                        break;
+                    }
+                }
+                _ => {}
             }
 
             // Check for egg saturation (no new nodes)

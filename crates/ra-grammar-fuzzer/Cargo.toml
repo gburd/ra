@@ -1,0 +1,38 @@
+[package]
+name = "ra-grammar-fuzzer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Grammar-based property testing for SQL optimizer correctness"
+
+[features]
+default = []
+# Enable long-duration tests (hours/days of fuzzing)
+long-duration-testing = []
+# Enable reference optimizer comparison (requires running databases)
+reference-comparison = ["dep:postgres", "dep:duckdb"]
+
+[dependencies]
+ra-core = { workspace = true }
+ra-engine = { workspace = true }
+ra-parser = { path = "../ra-parser" }
+egg = { workspace = true }
+proptest = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Optional reference optimizer dependencies
+postgres = { workspace = true, optional = true }
+duckdb = { version = "1.10501", optional = true, features = ["bundled"] }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

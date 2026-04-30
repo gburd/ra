@@ -95,6 +95,7 @@ pub mod resource_budget;
 pub mod resource_profiles;
 pub mod rewrite;
 pub mod rule_advisor;
+pub mod rule_consolidation;
 pub mod rule_knowledge;
 pub mod rule_metadata;
 pub mod rule_priority;
@@ -213,6 +214,9 @@ pub use memo::{structural_hash, MemoTable};
 pub use mv_matching::{
     match_query_with_mv, view_benefit, MatchType, MaterializedViewInfo, MvCatalog, MvMatch,
 };
+pub use shortcuts::fast_path::{
+    can_use_fast_path, FastPathDecision, FastPathKind, FastPathSelector, SimpleAggFunction,
+};
 pub use mv_rewrite::{mv_rewrite_rules, mv_scan_cost_factor};
 pub use network_cost::{DistributionStrategy, JoinSides, NetworkCostEstimate, NetworkCostModel};
 pub use oracle_json_duality::{
@@ -250,13 +254,21 @@ pub use recursive::{
     RecursiveCTEExecutor, Row, TerminationReason,
 };
 pub use resource_budget::{
-    ExceededResource, OverflowStrategy, ResourceBudget, ResourceCheckResult, ResourceTracker,
-    ResourceUsageReport,
+    ConvergenceBehavior, ExceededResource, FastPathPreferences, OverflowStrategy, ResourceBudget,
+    ResourceCheckResult, ResourceTracker, ResourceUsageReport, RuleSelectionBehavior,
 };
 pub use rewrite::{
     all_rules, all_rules_annotated, all_rules_unsorted, AnnotatedRuleGroup, RuleAnnotation,
 };
-pub use rule_advisor::{AdvisorStats, RuleAdvisor, RuleAdvisorConfig};
+pub use rule_advisor::{
+    AdaptiveState, AdvisorStats, RuleAdvisor, RuleAdvisorConfig, RuleApplicability, RuleOutcome,
+    RuleTier, RuleUsageStats, TierSummary, TierThresholds,
+};
+pub use rule_consolidation::{
+    default_consolidator, known_rule_dependencies, ConflictResolution, ConsolidationConfig,
+    ConsolidationMetrics, ConsolidationResult, DependencyKind, MergeRecord, RuleConflict,
+    RuleConsolidator, RuleDependency, RuleEffectivenessRecord, RuleEffectivenessReport,
+};
 pub use rule_knowledge::{RuleKnowledge, ShapeKeyBucket};
 pub use rule_metadata::{
     filter_rules_by_preconditions, load_rules_from_directory, parse_rra_file, BenefitRange,
