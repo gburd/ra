@@ -34,27 +34,18 @@ cargo build
 
 This will compile all workspace crates and download dependencies.
 
-**Install frontend dependencies:**
-
-```bash
-cd crates/ra-web/frontend
-npm install
-cd ../../..
-```
-
 **Start test databases (Docker):**
 
 ```bash
 docker compose -f docker/docker-compose.test.yml up -d
 ```
 
-This starts PostgreSQL, MySQL, and Redis containers with test data.
+This starts PostgreSQL and MySQL containers with test data.
 
 **Verify setup:**
 
 ```bash
 cargo test --workspace
-cd crates/ra-web/frontend && npm test
 ```
 
 All tests should pass on a clean checkout.
@@ -68,8 +59,6 @@ ra/
 │   ├── ra-parser/          # SQL parser
 │   ├── ra-engine/          # Optimization engine
 │   ├── ra-adapters/        # Database adapters
-│   ├── ra-web/             # Web API server
-│   │   └── frontend/       # React frontend
 │   ├── ra-cli/             # CLI tool
 │   └── ...                 # Other crates
 ├── docs/                   # Documentation
@@ -213,14 +202,6 @@ export function parsePlan(text: string, engine: string): PlanNode {
 }
 ```
 
-**Linting:**
-
-```bash
-cd crates/ra-web/frontend
-npx oxlint .
-npx oxfmt --check .
-```
-
 ### General
 
 - 100-character line length
@@ -282,14 +263,6 @@ describe('parsePlan', () => {
     expect(() => parsePlan('', 'invalid')).toThrow('Unsupported engine');
   });
 });
-```
-
-Run tests:
-
-```bash
-cd crates/ra-web/frontend
-npm test
-npm test -- --watch  # Watch mode
 ```
 
 ### Integration Tests
@@ -393,18 +366,12 @@ Commit message format:
 ```bash
 # Format code
 cargo fmt
-cd crates/ra-web/frontend && npx oxfmt . && cd ../../..
 
 # Lint
 cargo clippy --all-targets --all-features -- -D warnings
-cd crates/ra-web/frontend && npx oxlint . && cd ../../..
 
 # Test
 cargo test --workspace
-cd crates/ra-web/frontend && npm test && cd ../../..
-
-# Check types
-cd crates/ra-web/frontend && npx tsc --noEmit && cd ../../..
 ```
 
 All checks must pass before pushing.
@@ -570,25 +537,11 @@ Handle edge cases. Clean up what you touched. Don't stop at the minimum.
 
 ### Daily Development
 
-**Start the dev server:**
+**Start test databases (Docker):**
 
 ```bash
-# Terminal 1: Backend
-cd crates/ra-web
-cargo watch -x run
-
-# Terminal 2: Frontend
-cd crates/ra-web/frontend
-npm run dev
-
-# Terminal 3: Redis
-redis-server
-
-# Terminal 4: Test databases
 docker compose -f docker/docker-compose.test.yml up
 ```
-
-Visit http://localhost:5173 for the frontend (proxies to backend on 8000).
 
 ### Running Tests
 
@@ -596,7 +549,6 @@ Visit http://localhost:5173 for the frontend (proxies to backend on 8000).
 
 ```bash
 cargo test --workspace
-cd crates/ra-web/frontend && npm test
 ```
 
 **Specific crate:**
@@ -616,7 +568,6 @@ cargo test test_optimizer_pushdown
 
 ```bash
 cargo watch -x test
-cd crates/ra-web/frontend && npm test -- --watch
 ```
 
 ### Benchmarks

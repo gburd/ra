@@ -117,5 +117,5 @@ SELECT * FROM sales WHERE order_id = 12345;
 
 - mssql: Columnstore indexes
 - Oracle: In-memory column store
-- IndexType::Columnstore in ra-stats/src/index_types.rs
+- IndexType::Columnstore in ra-stats-advanced/src/index_types.rs
 - IndexCostFactors::columnstore_default()

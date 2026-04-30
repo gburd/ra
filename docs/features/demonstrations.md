@@ -3,7 +3,7 @@
 The RA web UI includes 10 interactive demonstrations showing how
 statistics quality and hardware characteristics influence query
 optimizer decisions. Each demonstration runs entirely in the browser
-using a TypeScript simulation of the cost models from the `ra-stats`
+using a TypeScript simulation of the cost models from the `ra-stats-advanced`
 and `ra-hardware` crates.
 
 ## Accessing the Demos

@@ -14,10 +14,6 @@ All bugs and issues are tracked on Codeberg:
 
 ### Critical (P0)
 
-- **ra-web blank page** - Web UI not loading ([#TBD](https://codeberg.org/gregburd/ra/issues))
-  - Status: Investigating
-  - Likely: Frontend build or static file serving issue
-
 - **ra-cli test failures** - 3 tests failing in migrate_commands ([#TBD](https://codeberg.org/gregburd/ra/issues))
   - `float_threshold_narrowing`
   - `narrowed_threshold_detected`

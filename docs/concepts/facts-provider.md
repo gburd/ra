@@ -412,4 +412,4 @@ SELECT COUNT(*) FROM table_name;
 - [Pre-Condition System](PRECONDITIONS.md)
 - [Database Integration Guide](DATABASE_INTEGRATION.md)
 - [Hardware Detection](../crates/ra-hardware/README.md)
-- [Statistics System](../crates/ra-stats/README.md)
+- [Statistics System](../crates/ra-stats-advanced/README.md)

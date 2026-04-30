@@ -97,12 +97,12 @@ against data transfer overhead.
 RA consists of 16 Rust crates organized in layers:
 
 ```
-Applications: ra-cli, ra-web
+Applications: ra-cli
 Optimization: ra-engine (egg), ra-codegen (Cranelift)
 Rules: ra-parser (.rra), ra-compiler (indexing)
 Cost models: ra-hardware, ra-ml, ra-adaptive
 Translation: ra-dialect (6 dialects)
-Testing: ra-isolation, ra-wasm
+Testing: ra-isolation
 Discovery: ra-synthesis, ra-discovery, ra-multimodel
 Foundation: ra-core (RelExpr, Expr, Cost, Rule)
 ```

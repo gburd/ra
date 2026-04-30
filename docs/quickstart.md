@@ -150,16 +150,9 @@ Evaluated But Not Applied:
 
 Ra includes interactive HTML demos that run entirely in your browser using WebAssembly.
 
-### Run Demo Server
+### Demonstrations
 
-```bash
-# Start the demo server
-cargo run --bin ra-web
-
-# Open browser to http://localhost:8000
-```
-
-Available demos:
+Available demos (see [Interactive Demonstrations](/features/demonstrations)):
 1. **Query Optimizer** - Real-time query optimization with plan visualization
 2. **Rule Explorer** - Interactive rule browser with examples
 3. **Cost Model Playground** - Experiment with different cost parameters

@@ -32,10 +32,6 @@ View it directly for the most up-to-date task list.
 - Verify MVCC/HOT statistics gathering
 - Test crash recovery
 
-**ra-web**:
-- Fix blank page issue (web UI not loading)
-- Test with 100+ queries
-
 **ra-core**:
 - Verify all `RelExpr` pattern matches (no `_` wildcards)
 - Document public API
@@ -62,12 +58,6 @@ View it directly for the most up-to-date task list.
 
 ### SQL Parser (`ra-parser`)
 - 3 P0 items, 4 P1, 3 P2, 3 P3
-
-### Web UI (`ra-web`)
-- 3 P0 items, 4 P1, 4 P2, 3 P3
-
-### Terminal UI (`ra-tui`)
-- 3 P0 items, 4 P1, 3 P2, 2 P3
 
 ### Documentation
 - 3 P0 items, 4 P1, 3 P2, 3 P3

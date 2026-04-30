@@ -298,9 +298,6 @@ Benefits: Reproducible builds, no version drift.
 # Generate Rust API docs
 cargo doc --all-features --open
 
-# Run web UI (separate from documentation)
-cargo run --bin ra-web-ui
-
 # Build all project artifacts
 cargo build --all-features --release
 ```

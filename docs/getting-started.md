@@ -264,31 +264,7 @@ ra-cli optimize \
 # RA leverages Parquet statistics when available
 ```
 
-### 12. WASM Integration
-
-RA supports running queries in WebAssembly environments. See the [WASM integration guide](features/wasm-databases.md) for details on deploying RA in browser or edge environments.
-
-### 13. Web UI Usage
-
-Launch the interactive web interface for visual optimization:
-
-```bash
-# Start the web UI
-./scripts/docker-compose-up.sh
-
-# Or without Docker
-ra-web-ui -- --port 8000
-```
-
-Open http://localhost:8000 to:
-- Visualize query plans as graphs
-- Step through optimization rules
-- Compare before/after plans
-- Explore the e-graph structure
-- Test different cost models
-- Profile query performance
-
-### 14. Advanced Rule Control
+### 12. Advanced Rule Control
 
 Fine-grained control over transformation rules:
 
@@ -309,7 +285,7 @@ ra-cli optimize \
   "SELECT * FROM complex_query"
 ```
 
-### 15. Rule Advisor
+### 13. Rule Advisor
 
 Eliminate irrelevant rules before optimization using the three-stage Rule Advisor:
 
@@ -330,7 +306,7 @@ ra-cli optimize \
   "SELECT * FROM orders JOIN items ON orders.id = items.order_id"
 ```
 
-### 16. Distributed Query Optimization
+### 14. Distributed Query Optimization
 
 Optimize queries for distributed execution. See the [federated queries](features/federated-queries.md) and [distributed optimization](features/distributed-optimization.md) guides for details on distributed query planning.
 

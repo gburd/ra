@@ -46,7 +46,7 @@ A query flows through five major stages:
     |
     v
 +-------------------+
-|  4. Cost-Based    |  ra-engine + ra-hardware + ra-stats:
+|  4. Cost-Based    |  ra-engine + ra-hardware + ra-stats-advanced:
 |     Extraction    |  hardware-aware, staleness-adjusted
 |                   |  cost function selects cheapest plan
 +-------------------+
@@ -530,7 +530,7 @@ Ra uses a layered cost model with three levels of sophistication:
 +-----------------------------------------------+
 |  IntegratedCostFn                              |
 |  Statistics + staleness + hardware             |
-|  (ra-stats + ra-hardware)                      |
+|  (ra-stats-advanced + ra-hardware)                      |
 +-----------------------------------------------+
           |
           v
@@ -804,7 +804,7 @@ trigger cascades and provides warnings about expensive trigger chains.
                         |                 | uses
                         |                 v
                    +----------+    +--------------+
-                   | ra-stats |<---| Cost Models  |
+                   | ra-stats-advanced |<---| Cost Models  |
                    | staleness|    | RelCostFn    |
                    | accuracy |    | Integrated   |
                    +----------+    | Cardinality  |
@@ -826,7 +826,7 @@ trigger cascades and provides warnings about expensive trigger chains.
 | `ra-core` | `RelExpr`, `Expr`, `Statistics`, `CostModel` trait | Everything |
 | `ra-engine` | Optimizer, e-graph, rewrite rules, cost functions | CLI, Web, WASM |
 | `ra-hardware` | `HardwareProfile`, `detect_hardware()`, `HardwareCostModel` | ra-engine |
-| `ra-stats` | Staleness tracking, confidence scoring, delta computation | ra-engine |
+| `ra-stats-advanced` | Staleness tracking, confidence scoring, delta computation | ra-engine |
 | `ra-ml` | `CardinalityEstimator`, `HeuristicEstimator` | ra-engine |
 | `ra-parser` | SQL parsing, RRA parsing, validation | CLI, Web |
 | `ra-compiler` | Rule indexing, dependency analysis | CLI |

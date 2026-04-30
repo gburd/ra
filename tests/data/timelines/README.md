@@ -312,4 +312,3 @@ When adding new timeline files:
 
 - [RFC 0105: Timeline-Based Fingerprint Configuration](../../../docs/rfcs/0105-timeline-fingerprints.md)
 - [Timeline Optimizer Design](../../../crates/ra-engine/src/timeline_optimizer.rs)
-- [TUI Visualization Guide](../../../crates/ra-tui/README.md)

@@ -14,7 +14,7 @@ estimation. The system is built around three core abstractions:
 3. **Timeline playback** -- A TOML-based format for describing statistics
    evolution over time, with a playback engine for stepping through snapshots
 
-The statistics subsystem lives in the `ra-stats` crate and integrates with the
+The statistics subsystem lives in the `ra-stats-advanced` crate and integrates with the
 optimizer through the `StatisticsAdapter` bridge.
 
 ---
@@ -63,16 +63,16 @@ graph TD
 
 | Module | File | Purpose |
 |--------|------|---------|
-| `types` | `crates/ra-stats/src/types.rs` | Statistics type definitions |
-| `accuracy` | `crates/ra-stats/src/accuracy.rs` | Staleness and confidence tracking |
-| `delta` | `crates/ra-stats/src/delta.rs` | Change detection between snapshots |
-| `timeline` | `crates/ra-stats/src/timeline.rs` | TOML timeline format and playback |
-| `integration` | `crates/ra-stats/src/integration.rs` | Bridge to ra-core cost model |
-| `profiles` | `crates/ra-stats/src/profiles.rs` | Pre-configured accuracy profiles |
-| `feedback` | `crates/ra-stats/src/feedback.rs` | Execution feedback and error tracking |
-| `gathering_cost` | `crates/ra-stats/src/gathering_cost.rs` | Cost estimation for ANALYZE |
-| `skew` | `crates/ra-stats/src/skew.rs` | Data skew detection |
-| `index_types` | `crates/ra-stats/src/index_types.rs` | Index metadata and cost factors |
+| `types` | `crates/ra-stats-advanced/src/types.rs` | Statistics type definitions |
+| `accuracy` | `crates/ra-stats-advanced/src/accuracy.rs` | Staleness and confidence tracking |
+| `delta` | `crates/ra-stats-advanced/src/delta.rs` | Change detection between snapshots |
+| `timeline` | `crates/ra-stats-advanced/src/timeline.rs` | TOML timeline format and playback |
+| `integration` | `crates/ra-stats-advanced/src/integration.rs` | Bridge to ra-core cost model |
+| `profiles` | `crates/ra-stats-advanced/src/profiles.rs` | Pre-configured accuracy profiles |
+| `feedback` | `crates/ra-stats-advanced/src/feedback.rs` | Execution feedback and error tracking |
+| `gathering_cost` | `crates/ra-stats-advanced/src/gathering_cost.rs` | Cost estimation for ANALYZE |
+| `skew` | `crates/ra-stats-advanced/src/skew.rs` | Data skew detection |
+| `index_types` | `crates/ra-stats-advanced/src/index_types.rs` | Index metadata and cost factors |
 
 ---
 
@@ -80,7 +80,7 @@ graph TD
 
 ### Table-level statistics
 
-**Source:** `crates/ra-stats/src/types.rs:16-32`
+**Source:** `crates/ra-stats-advanced/src/types.rs:16-32`
 
 ```rust
 pub struct TableStats {
@@ -111,7 +111,7 @@ Derived methods:
 
 ### Column-level statistics
 
-**Source:** `crates/ra-stats/src/types.rs:35-51`
+**Source:** `crates/ra-stats-advanced/src/types.rs:35-51`
 
 ```rust
 pub struct ColumnStats {
@@ -148,7 +148,7 @@ pub fn range_selectivity(&self, fraction: f64) -> f64 {
 
 ### Histogram types
 
-**Source:** `crates/ra-stats/src/types.rs:64-92`
+**Source:** `crates/ra-stats-advanced/src/types.rs:64-92`
 
 ```rust
 pub enum Histogram {
@@ -202,7 +202,7 @@ pub enum Sketch {
 
 ### Index statistics
 
-**Source:** `crates/ra-stats/src/types.rs:95-110`
+**Source:** `crates/ra-stats-advanced/src/types.rs:95-110`
 
 ```rust
 pub struct IndexStats {
@@ -227,7 +227,7 @@ clustering factor and selectivity.
 
 Tracks the reliability and freshness of statistics.
 
-**Source:** `crates/ra-stats/src/accuracy.rs:10-22`
+**Source:** `crates/ra-stats-advanced/src/accuracy.rs:10-22`
 
 ```rust
 pub struct StatisticsState {
@@ -248,7 +248,7 @@ pub struct StatisticsState {
 
 Staleness is computed from the modification ratio:
 
-**Source:** `crates/ra-stats/src/accuracy.rs:89-106`
+**Source:** `crates/ra-stats-advanced/src/accuracy.rs:89-106`
 
 ```rust
 pub fn staleness(&self) -> Staleness {
@@ -285,7 +285,7 @@ pub fn staleness(&self) -> Staleness {
 
 The confidence score reflects the method used to gather statistics:
 
-**Source:** `crates/ra-stats/src/accuracy.rs:64-77`
+**Source:** `crates/ra-stats-advanced/src/accuracy.rs:64-77`
 
 | Source | Confidence | Description |
 |--------|-----------|-------------|
@@ -314,7 +314,7 @@ With a decay rate of 0.1, confidence halves approximately every 7 days.
 
 The `RefreshThreshold` enum supports flexible refresh policies:
 
-**Source:** `crates/ra-stats/src/accuracy.rs:152-168`
+**Source:** `crates/ra-stats-advanced/src/accuracy.rs:152-168`
 
 ```rust
 pub enum RefreshThreshold {
@@ -341,7 +341,7 @@ RefreshThreshold::Any(vec![
 
 The `QualityMetrics` type provides a composite quality score:
 
-**Source:** `crates/ra-stats/src/accuracy.rs:172-213`
+**Source:** `crates/ra-stats-advanced/src/accuracy.rs:172-213`
 
 ```rust
 pub struct QualityMetrics {
@@ -358,10 +358,10 @@ pub struct QualityMetrics {
 
 ### StatisticsAdapter
 
-The `StatisticsAdapter` bridges `ra-stats` types with `ra-core` cost model
+The `StatisticsAdapter` bridges `ra-stats-advanced` types with `ra-core` cost model
 types, applying staleness adjustments.
 
-**Source:** `crates/ra-stats/src/integration.rs:27-108`
+**Source:** `crates/ra-stats-advanced/src/integration.rs:27-108`
 
 ```rust
 pub struct StatisticsAdapter {
@@ -375,7 +375,7 @@ pub struct StatisticsAdapter {
 When converting to core statistics, the adapter applies a staleness multiplier
 to inflate estimates, accounting for the uncertainty of stale data:
 
-**Source:** `crates/ra-stats/src/integration.rs:84-92`
+**Source:** `crates/ra-stats-advanced/src/integration.rs:84-92`
 
 ```rust
 fn staleness_factor(state: &StatisticsState) -> f64 {
@@ -397,7 +397,7 @@ rather than nested-loop joins.
 
 ### ManagedTableStats
 
-**Source:** `crates/ra-stats/src/integration.rs:12-20`
+**Source:** `crates/ra-stats-advanced/src/integration.rs:12-20`
 
 ```rust
 pub struct ManagedTableStats {
@@ -422,7 +422,7 @@ adapter to make staleness-aware decisions.
 The timeline format describes how database statistics evolve over time,
 enabling reproducible optimization demos and benchmarks.
 
-**Source:** `crates/ra-stats/src/timeline.rs:53-87`
+**Source:** `crates/ra-stats-advanced/src/timeline.rs:53-87`
 
 ```rust
 pub struct Timeline {
@@ -504,7 +504,7 @@ actual_rows = 75000.0
 
 Each snapshot captures the state of all tables at a point in time:
 
-**Source:** `crates/ra-stats/src/timeline.rs:89-143`
+**Source:** `crates/ra-stats-advanced/src/timeline.rs:89-143`
 
 ```rust
 pub struct Snapshot {
@@ -537,7 +537,7 @@ pub struct ColumnSnapshot {
 
 Events represent data modifications and system actions:
 
-**Source:** `crates/ra-stats/src/timeline.rs:150-184`
+**Source:** `crates/ra-stats-advanced/src/timeline.rs:150-184`
 
 | Event kind | Description |
 |-----------|-------------|
@@ -553,7 +553,7 @@ Events represent data modifications and system actions:
 
 Feedback entries compare optimizer estimates against actual execution:
 
-**Source:** `crates/ra-stats/src/timeline.rs:187-226`
+**Source:** `crates/ra-stats-advanced/src/timeline.rs:187-226`
 
 ```rust
 pub struct ExecutionFeedback {
@@ -585,7 +585,7 @@ Q-error is the standard metric for cardinality estimation accuracy:
 
 The playback engine steps through snapshots, providing statistics at each point.
 
-**Source:** `crates/ra-stats/src/timeline.rs:416-499`
+**Source:** `crates/ra-stats-advanced/src/timeline.rs:416-499`
 
 ```rust
 pub struct TimelinePlayer {
@@ -614,7 +614,7 @@ Playback operations:
 The player converts snapshots to `ManagedTableStats` for direct use with the
 `StatisticsAdapter`:
 
-**Source:** `crates/ra-stats/src/timeline.rs:338-400`
+**Source:** `crates/ra-stats-advanced/src/timeline.rs:338-400`
 
 ```rust
 impl Snapshot {
@@ -672,7 +672,7 @@ impl Snapshot {
 
 Computes the minimal set of changes between two statistics snapshots.
 
-**Source:** `crates/ra-stats/src/delta.rs:140-295`
+**Source:** `crates/ra-stats-advanced/src/delta.rs:140-295`
 
 ```rust
 pub struct DeltaSet {
@@ -696,7 +696,7 @@ pub struct DeltaSet {
 
 ### Computing deltas
 
-**Source:** `crates/ra-stats/src/delta.rs:161-193`
+**Source:** `crates/ra-stats-advanced/src/delta.rs:161-193`
 
 ```rust
 pub fn compute(
@@ -738,7 +738,7 @@ pub fn compute(
 
 ### Reoptimization decision
 
-**Source:** `crates/ra-stats/src/delta.rs:280-288`
+**Source:** `crates/ra-stats-advanced/src/delta.rs:280-288`
 
 ```rust
 pub fn needs_full_reoptimization(&self) -> bool {
@@ -772,7 +772,7 @@ pub fn needs_full_reoptimization(&self) -> bool {
 Pre-configured profiles balance accuracy, cost, and refresh frequency for
 different workload patterns.
 
-**Source:** `crates/ra-stats/src/profiles.rs`
+**Source:** `crates/ra-stats-advanced/src/profiles.rs`
 
 | Profile | Refresh threshold | Use sketches | Description |
 |---------|------------------|--------------|-------------|
@@ -962,13 +962,13 @@ This closed loop ensures that:
 
 | File | Lines | Description |
 |------|-------|-------------|
-| [`crates/ra-stats/src/lib.rs`](../../crates/ra-stats/src/lib.rs) | 122 | Crate root with public API |
-| [`crates/ra-stats/src/types.rs`](../../crates/ra-stats/src/types.rs) | 1151 | Statistics type catalog |
-| [`crates/ra-stats/src/accuracy.rs`](../../crates/ra-stats/src/accuracy.rs) | 624 | Staleness and confidence tracking |
-| [`crates/ra-stats/src/delta.rs`](../../crates/ra-stats/src/delta.rs) | 888 | Delta computation between snapshots |
-| [`crates/ra-stats/src/timeline.rs`](../../crates/ra-stats/src/timeline.rs) | 800+ | TOML timeline format and playback |
-| [`crates/ra-stats/src/integration.rs`](../../crates/ra-stats/src/integration.rs) | 259 | Bridge to ra-core cost model |
-| [`crates/ra-stats/src/profiles.rs`](../../crates/ra-stats/src/profiles.rs) | -- | Pre-configured accuracy profiles |
-| [`crates/ra-stats/src/feedback.rs`](../../crates/ra-stats/src/feedback.rs) | -- | Execution feedback tracking |
-| [`crates/ra-stats/src/gathering_cost.rs`](../../crates/ra-stats/src/gathering_cost.rs) | -- | ANALYZE cost estimation |
-| [`crates/ra-stats/src/skew.rs`](../../crates/ra-stats/src/skew.rs) | -- | Data skew detection |
+| [`crates/ra-stats-advanced/src/lib.rs`](../../crates/ra-stats-advanced/src/lib.rs) | 122 | Crate root with public API |
+| [`crates/ra-stats-advanced/src/types.rs`](../../crates/ra-stats-advanced/src/types.rs) | 1151 | Statistics type catalog |
+| [`crates/ra-stats-advanced/src/accuracy.rs`](../../crates/ra-stats-advanced/src/accuracy.rs) | 624 | Staleness and confidence tracking |
+| [`crates/ra-stats-advanced/src/delta.rs`](../../crates/ra-stats-advanced/src/delta.rs) | 888 | Delta computation between snapshots |
+| [`crates/ra-stats-advanced/src/timeline.rs`](../../crates/ra-stats-advanced/src/timeline.rs) | 800+ | TOML timeline format and playback |
+| [`crates/ra-stats-advanced/src/integration.rs`](../../crates/ra-stats-advanced/src/integration.rs) | 259 | Bridge to ra-core cost model |
+| [`crates/ra-stats-advanced/src/profiles.rs`](../../crates/ra-stats-advanced/src/profiles.rs) | -- | Pre-configured accuracy profiles |
+| [`crates/ra-stats-advanced/src/feedback.rs`](../../crates/ra-stats-advanced/src/feedback.rs) | -- | Execution feedback tracking |
+| [`crates/ra-stats-advanced/src/gathering_cost.rs`](../../crates/ra-stats-advanced/src/gathering_cost.rs) | -- | ANALYZE cost estimation |
+| [`crates/ra-stats-advanced/src/skew.rs`](../../crates/ra-stats-advanced/src/skew.rs) | -- | Data skew detection |

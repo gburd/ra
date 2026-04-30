@@ -182,23 +182,7 @@ cargo run --bin ra-cli -- <args>
 ```
 :::
 
-### TUI (`ra-tui`)
-
-```bash
-cargo build --release --bin ra-tui
-./target/release/ra-tui
-```
-
-### Web Server (`ra-web`)
-
-```bash
-cargo build --release --bin ra-web
-
-# Run the server (default: http://localhost:8000)
-./target/release/ra-web
-```
-
-### WASM Module (`ra-wasm`)
+### WASM Documentation Module
 
 ```bash
 # Install WASM target

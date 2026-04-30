@@ -215,57 +215,6 @@ Tasks too small for an RFC but necessary for project completion, organized by su
 
 ---
 
-## ra-web (Web UI)
-
-### P0 - Critical
-- [ ] Fix web UI (currently showing blank page)
-- [ ] Test with 100+ queries
-- [ ] Verify query comparison works correctly
-
-### P1 - High Priority
-- [ ] Add query history (save optimized queries)
-- [ ] Export optimization report (PDF, HTML)
-- [ ] Add dark mode
-- [ ] Responsive design (mobile-friendly)
-
-### P2 - Medium Priority
-- [ ] Add query templates (common patterns)
-- [ ] Real-time optimization progress (WebSocket updates)
-- [ ] Add query sharing (generate shareable links)
-- [ ] Syntax highlighting for SQL
-
-### P3 - Nice to Have
-- [ ] Query builder UI (visual query construction)
-- [ ] Integration with BI tools
-- [ ] Collaborative query editing (multiple users)
-
----
-
-## ra-tui (Terminal UI)
-
-### P0 - Critical
-- [ ] Verify ASCII recording works (`cargo run -- tui --record test.cast`)
-- [ ] Test timeline playback with various speeds
-- [ ] Fix any rendering glitches
-
-### P1 - High Priority
-- [ ] Add keyboard shortcuts help (press '?' to show help)
-- [ ] Better error display (show full error messages, not just first line)
-- [ ] Add query history navigation (up/down arrows)
-- [ ] Export current view to text file
-
-### P2 - Medium Priority
-- [ ] Add zoom controls for large query plans
-- [ ] Configurable color schemes
-- [ ] Add search functionality (find text in plan)
-- [ ] Mouse support (click to expand/collapse nodes)
-
-### P3 - Nice to Have
-- [ ] Split-pane mode (compare two queries side-by-side)
-- [ ] Animation of optimization steps (show rule applications)
-
----
-
 ## Documentation
 
 ### P0 - Critical
@@ -408,9 +357,8 @@ These gaps need RFCs (not small chores):
 
 1. **Address P0 items** in each subsystem (critical blockers)
 2. **Create missing RFCs** for semi-join reduction, distinct aggregation rewrite
-3. **Fix ra-web** (blank page issue)
-4. **Run integration tests** for ra-pg-extension
-5. **Fix failing tests** in ra-cli
+3. **Run integration tests** for ra-pg-extension
+4. **Fix failing tests** in ra-cli
 
 ---
 

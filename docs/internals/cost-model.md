@@ -5,7 +5,7 @@ of query plans, integrates statistics, accounts for hardware characteristics,
 and adapts to runtime feedback. The cost model spans three crates:
 
 - `ra-hardware` -- hardware profiles and device-aware cost estimation
-- `ra-stats` -- statistics types, staleness tracking, and streaming pipeline
+- `ra-stats-advanced` -- statistics types, staleness tracking, and streaming pipeline
 - `ra-engine` -- the integrated cost model that combines both
 
 ## Architecture
@@ -48,7 +48,7 @@ an `egg::CostFunction` implementation for the equality saturation optimizer.
 
 ### Table Statistics
 
-`TableStats` (`crates/ra-stats/src/types.rs:17`) captures physical table
+`TableStats` (`crates/ra-stats-advanced/src/types.rs:17`) captures physical table
 metadata:
 
 ```rust
@@ -66,13 +66,13 @@ pub struct TableStats {
 Key derived metrics:
 
 - **Dead tuple ratio**: `dead / (live + dead)` -- triggers vacuum decisions
-  (`crates/ra-stats/src/types.rs:275`)
+  (`crates/ra-stats-advanced/src/types.rs:275`)
 - **Fill factor**: `table_size_bytes / page_count` -- indicates page
-  utilization (`crates/ra-stats/src/types.rs:290`)
+  utilization (`crates/ra-stats-advanced/src/types.rs:290`)
 
 ### Column Statistics
 
-`ColumnStats` (`crates/ra-stats/src/types.rs:36`) drives selectivity
+`ColumnStats` (`crates/ra-stats-advanced/src/types.rs:36`) drives selectivity
 estimation:
 
 ```
@@ -82,14 +82,14 @@ range_selectivity    = (1.0 - null_fraction) * fraction
 
 Where `ndv` is the number of distinct values and `fraction` is the portion
 of the value domain covered by the range predicate
-(`crates/ra-stats/src/types.rs:300`).
+(`crates/ra-stats-advanced/src/types.rs:300`).
 
 A column is classified as "high cardinality" when `ndv / row_count > 0.9`,
 which influences index selection decisions.
 
 ### Index Statistics
 
-`IndexStats` (`crates/ra-stats/src/types.rs:96`) includes:
+`IndexStats` (`crates/ra-stats-advanced/src/types.rs:96`) includes:
 
 - **Clustering factor**: how well index order matches heap order (1.0 =
   perfect, `row_count` = random)
@@ -101,14 +101,14 @@ where factor = clustering_factor / distinct_keys
       min_pages = total_pages * selectivity
 ```
 
-(`crates/ra-stats/src/types.rs:333`)
+(`crates/ra-stats-advanced/src/types.rs:333`)
 
 A well-clustered index has `clustering_factor / row_count < 0.1`, making
 sequential I/O patterns likely during range scans.
 
 ### Histogram Types
 
-RA supports four histogram representations (`crates/ra-stats/src/types.rs:64`):
+RA supports four histogram representations (`crates/ra-stats-advanced/src/types.rs:64`):
 
 | Type | Use Case |
 |------|----------|
@@ -119,7 +119,7 @@ RA supports four histogram representations (`crates/ra-stats/src/types.rs:64`):
 
 ### Sketch Types
 
-For approximate statistics on large datasets (`crates/ra-stats/src/types.rs:167`):
+For approximate statistics on large datasets (`crates/ra-stats-advanced/src/types.rs:167`):
 
 | Sketch | Purpose |
 |--------|---------|
@@ -132,7 +132,7 @@ For approximate statistics on large datasets (`crates/ra-stats/src/types.rs:167`
 ## Staleness Model
 
 Statistics become stale as data changes. The staleness model
-(`crates/ra-stats/src/accuracy.rs:48`) classifies staleness based on the
+(`crates/ra-stats-advanced/src/accuracy.rs:48`) classifies staleness based on the
 ratio of modifications since the last ANALYZE to the row count at gathering
 time:
 
@@ -169,7 +169,7 @@ over nested loops, and toward plans that tolerate cardinality errors.
 ### Confidence Discount
 
 Statistics from different sources carry different confidence levels
-(`crates/ra-stats/src/accuracy.rs:62`):
+(`crates/ra-stats-advanced/src/accuracy.rs:62`):
 
 ```
 Source          Initial Confidence
@@ -198,7 +198,7 @@ conservative when it has poor information.
 
 ### Confidence Decay
 
-Confidence decays exponentially with time (`crates/ra-stats/src/accuracy.rs:144`):
+Confidence decays exponentially with time (`crates/ra-stats-advanced/src/accuracy.rs:144`):
 
 ```
 confidence *= exp(-decay_rate * age_days)
@@ -209,7 +209,7 @@ intuition that older statistics are less trustworthy.
 
 ### Quality Metrics
 
-The `QualityMetrics` struct (`crates/ra-stats/src/accuracy.rs:172`)
+The `QualityMetrics` struct (`crates/ra-stats-advanced/src/accuracy.rs:172`)
 combines three dimensions into an overall quality score:
 
 ```
@@ -640,7 +640,7 @@ pruning_rate = classes_pruned / classes_evaluated * 100
 ## Q-Error Calibration
 
 The feedback system uses **q-error** as the standard metric for estimation
-accuracy (`crates/ra-stats/src/feedback.rs:103`):
+accuracy (`crates/ra-stats-advanced/src/feedback.rs:103`):
 
 ```
 q_error = max(actual / estimated, estimated / actual)
@@ -658,11 +658,11 @@ q_error < 10.0  =>  Medium    (correlation or skew issues)
 q_error >= 10.0 =>  High      (likely stale statistics)
 ```
 
-(`crates/ra-stats/src/feedback.rs:110`)
+(`crates/ra-stats-advanced/src/feedback.rs:110`)
 
 ### Error Tracking
 
-`CardinalityErrorTracker` (`crates/ra-stats/src/feedback.rs:126`) collects
+`CardinalityErrorTracker` (`crates/ra-stats-advanced/src/feedback.rs:126`) collects
 per-operator observations and computes aggregate statistics:
 
 ```rust
@@ -680,7 +680,7 @@ tracker.worst_operators(3); // operator types ranked by avg q-error
 
 ### Recommendation Engine
 
-`RecommendationEngine` (`crates/ra-stats/src/feedback.rs:361`) maps error
+`RecommendationEngine` (`crates/ra-stats-advanced/src/feedback.rs:361`) maps error
 patterns to actionable fixes:
 
 | Error Pattern | Threshold | Recommendation |
@@ -713,7 +713,7 @@ their statistics are refreshed.
 
 ## Adaptive Cost Model (Streaming Statistics)
 
-The streaming statistics pipeline (`crates/ra-stats/src/streaming.rs:22`)
+The streaming statistics pipeline (`crates/ra-stats-advanced/src/streaming.rs:22`)
 provides continuous cost model adaptation based on runtime resource metrics.
 
 ### Pipeline Architecture
@@ -728,11 +728,11 @@ Monitoring Sources -> Adapter -> Ring Buffer -> Percentile Tracker
 
 ### Components
 
-**Ring Buffer** (`crates/ra-stats/src/ring_buffer.rs:16`): Fixed-capacity
+**Ring Buffer** (`crates/ra-stats-advanced/src/ring_buffer.rs:16`): Fixed-capacity
 (default 4096) lock-free ring buffer storing `f64` samples. O(1) push with
 no allocations in the hot path.
 
-**EWMA Smoother** (`crates/ra-stats/src/smoother.rs:20`): Exponentially
+**EWMA Smoother** (`crates/ra-stats-advanced/src/smoother.rs:20`): Exponentially
 weighted moving average that filters noise from streaming metrics:
 
 ```
@@ -746,14 +746,14 @@ so an old observation decays to 50% weight after n samples:
 alpha = 1 - 0.5^(1/half_life)
 ```
 
-**Percentile Tracker** (`crates/ra-stats/src/percentiles.rs:26`): T-digest
+**Percentile Tracker** (`crates/ra-stats-advanced/src/percentiles.rs:26`): T-digest
 algorithm for streaming approximate quantile estimation. Compression
 parameter = 100 provides ~1% accuracy at distribution tails (p1, p99).
 
 ### Metric Channels
 
 The pipeline manages four standard channels plus custom channels
-(`crates/ra-stats/src/streaming.rs:62`):
+(`crates/ra-stats-advanced/src/streaming.rs:62`):
 
 | Channel | MetricKind | Threshold | Description |
 |---------|-----------|-----------|-------------|
@@ -764,7 +764,7 @@ The pipeline manages four standard channels plus custom channels
 
 ### Change Detection
 
-`ChangeThresholds` (`crates/ra-stats/src/streaming.rs:41`) define fractional
+`ChangeThresholds` (`crates/ra-stats-advanced/src/streaming.rs:41`) define fractional
 change thresholds. The pipeline produces a `CostModelUpdate` only when a
 metric's smoothed value shifts by more than its threshold:
 
@@ -774,15 +774,15 @@ exceeds_threshold(old, new, threshold) =
     else: |(new - old) / old| > threshold
 ```
 
-(`crates/ra-stats/src/streaming.rs:378`)
+(`crates/ra-stats-advanced/src/streaming.rs:378`)
 
 A minimum update interval of 100ms prevents excessive recomputation
-(`crates/ra-stats/src/streaming.rs:37`).
+(`crates/ra-stats-advanced/src/streaming.rs:37`).
 
 ### CostModelUpdate
 
 When thresholds are exceeded, the pipeline emits a snapshot
-(`crates/ra-stats/src/streaming.rs:125`):
+(`crates/ra-stats-advanced/src/streaming.rs:125`):
 
 ```rust
 pub struct CostModelUpdate {
@@ -828,7 +828,7 @@ let snapshot = pipeline.force_update();
 ### Monitoring Adapters
 
 The pipeline supports pluggable monitoring adapters
-(`crates/ra-stats/src/adapters/mod.rs`) that export metrics to external
+(`crates/ra-stats-advanced/src/adapters/mod.rs`) that export metrics to external
 systems:
 
 - `OtelAdapter` -- OpenTelemetry export
@@ -839,7 +839,7 @@ systems:
 
 ## Statistics Configuration Profiles
 
-`StatisticsProfile` (`crates/ra-stats/src/profiles.rs:12`) provides
+`StatisticsProfile` (`crates/ra-stats-advanced/src/profiles.rs:12`) provides
 pre-configured profiles for different workload patterns:
 
 | Profile | Method | Refresh Trigger | Confidence | Sketches |
@@ -853,7 +853,7 @@ pre-configured profiles for different workload patterns:
 
 ### Profile Selection
 
-`ProfileSelector` (`crates/ra-stats/src/profiles.rs:196`) recommends
+`ProfileSelector` (`crates/ra-stats-advanced/src/profiles.rs:196`) recommends
 profiles based on workload characteristics:
 
 ```
@@ -866,7 +866,7 @@ else                                               =>  Standard
 
 ### Refresh Thresholds
 
-`RefreshThreshold` (`crates/ra-stats/src/accuracy.rs:152`) supports
+`RefreshThreshold` (`crates/ra-stats-advanced/src/accuracy.rs:152`) supports
 composable conditions:
 
 ```rust
@@ -888,7 +888,7 @@ RefreshThreshold::All(vec![
 ## Statistics Gathering Cost Model
 
 Before gathering statistics, the system estimates the resource cost
-(`crates/ra-stats/src/gathering_cost.rs:84`):
+(`crates/ra-stats-advanced/src/gathering_cost.rs:84`):
 
 | Method | CPU Cost | I/O | Memory | Interference |
 |--------|----------|-----|--------|--------------|
@@ -899,7 +899,7 @@ Before gathering statistics, the system estimates the resource cost
 | Incremental | rows/100 * cpu_per_row | modified pages | 2 pages | 0.1 (minimal) |
 | Sketch | rows * 0.5us | 0 | 1 MB | 0.05 (negligible) |
 
-Default estimator parameters (`crates/ra-stats/src/gathering_cost.rs:99`):
+Default estimator parameters (`crates/ra-stats-advanced/src/gathering_cost.rs:99`):
 
 ```
 cpu_cost_per_row  = 1.0 us
@@ -1066,15 +1066,15 @@ for rec in engine.recommend(&tracker) {
 | `crates/ra-engine/src/cost_pruning.rs` | CostPruner for branch-and-bound |
 | `crates/ra-hardware/src/profile.rs` | HardwareProfile struct |
 | `crates/ra-hardware/src/cost.rs` | HardwareCostModel (CPU/GPU/FPGA) |
-| `crates/ra-stats/src/types.rs` | TableStats, ColumnStats, IndexStats, Histograms |
-| `crates/ra-stats/src/accuracy.rs` | Staleness, StatisticsState, QualityMetrics |
-| `crates/ra-stats/src/integration.rs` | ManagedTableStats, StatisticsAdapter |
-| `crates/ra-stats/src/feedback.rs` | Q-error, CardinalityErrorTracker, RecommendationEngine |
-| `crates/ra-stats/src/streaming.rs` | StreamingPipeline, CostModelUpdate |
-| `crates/ra-stats/src/smoother.rs` | EWMA smoother |
-| `crates/ra-stats/src/ring_buffer.rs` | Lock-free ring buffer |
-| `crates/ra-stats/src/percentiles.rs` | T-digest percentile tracker |
-| `crates/ra-stats/src/profiles.rs` | StatisticsProfile, ProfileSelector |
-| `crates/ra-stats/src/gathering_cost.rs` | CostEstimator, GatheringCost |
+| `crates/ra-stats-advanced/src/types.rs` | TableStats, ColumnStats, IndexStats, Histograms |
+| `crates/ra-stats-advanced/src/accuracy.rs` | Staleness, StatisticsState, QualityMetrics |
+| `crates/ra-stats-advanced/src/integration.rs` | ManagedTableStats, StatisticsAdapter |
+| `crates/ra-stats-advanced/src/feedback.rs` | Q-error, CardinalityErrorTracker, RecommendationEngine |
+| `crates/ra-stats-advanced/src/streaming.rs` | StreamingPipeline, CostModelUpdate |
+| `crates/ra-stats-advanced/src/smoother.rs` | EWMA smoother |
+| `crates/ra-stats-advanced/src/ring_buffer.rs` | Lock-free ring buffer |
+| `crates/ra-stats-advanced/src/percentiles.rs` | T-digest percentile tracker |
+| `crates/ra-stats-advanced/src/profiles.rs` | StatisticsProfile, ProfileSelector |
+| `crates/ra-stats-advanced/src/gathering_cost.rs` | CostEstimator, GatheringCost |
 | `rfcs/0005-hardware-aware-optimization.md` | Hardware-aware optimization RFC |
 | `rfcs/0026-adaptive-cost-calibration.md` | Adaptive cost calibration RFC |

@@ -131,5 +131,5 @@ WHERE timestamp > '2025-01-01' AND sensor_id > 100;
 ## References
 
 - B-tree index prefix matching rules
-- IndexType::Composite in ra-stats/src/index_types.rs
+- IndexType::Composite in ra-stats-advanced/src/index_types.rs
 - Use The Index, Luke: https://use-the-index-luke.com

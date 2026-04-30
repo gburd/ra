@@ -11,11 +11,9 @@ The system consists of several layers:
 ```mermaid
 flowchart TD
     A1["CLI<br/>ra-cli"]
-    A2["Web UI<br/>ra-web"]
-    A3["WASM<br/>ra-wasm"]
 
     B1["Optimization Engine<br/>ra-engine<br/>E-graph + egg"]
-    B2["Code Generation<br/>ra-codegen<br/>Cranelift + WASM"]
+    B2["Code Generation<br/>ra-codegen<br/>Cranelift"]
     B3["SQL Dialect<br/>ra-dialect<br/>Translation"]
 
     C1["Parser<br/>ra-parser"]
@@ -30,8 +28,6 @@ flowchart TD
     E4["Isolation<br/>Isolation<br/>testing"]
 
     A1 --> B1
-    A2 --> B1
-    A3 --> B1
     A1 --> B2
     A1 --> B3
 
@@ -50,8 +46,6 @@ flowchart TD
     D1 --> E4
 
     click A1 "/ra/maintainers/cli-reference" "CLI Documentation"
-    click A2 "/ra/integrations/web-ui" "Web UI Documentation"
-    click A3 "/ra/architecture#ra-wasm" "WASM Module"
     click B1 "/ra/architecture#ra-engine" "Optimization Engine"
     click B2 "/ra/architecture#ra-codegen" "Code Generation"
     click B3 "/ra/architecture#ra-dialect" "SQL Dialect Translation"
@@ -65,8 +59,6 @@ flowchart TD
     click E4 "/ra/features/formal-verification" "Formal Verification"
 
     style A1 fill:#e1f5ff,color:#000
-    style A2 fill:#e1f5ff,color:#000
-    style A3 fill:#e1f5ff,color:#000
     style B1 fill:#fff4e1,color:#000
     style B2 fill:#fff4e1,color:#000
     style B3 fill:#fff4e1,color:#000
@@ -178,33 +170,6 @@ ra-cli explain <query>     # Explain transformations
 ra-cli benchmark           # Run benchmarks
 ```
 
-### ra-web {#ra-web}
-
-Web explorer backend API:
-
-- REST API for optimization and exploration
-- WebSocket for real-time updates
-- URL shortening for sharing
-- Static file serving
-
-Endpoints:
-- `POST /api/optimize` - Optimize a query
-- `POST /api/explain` - Explain transformations
-- `POST /api/share` - Generate shareable URL
-- `GET /api/rules` - List available rules
-
-### ra-wasm {#ra-wasm}
-
-WebAssembly module for running the optimizer in the browser:
-
-- **lib.rs**: WASM entry point exposing optimizer API via `wasm-bindgen`
-- **bindings.rs**: JavaScript-friendly type conversions
-- **playground.rs**: Interactive query playground support
-
-Enables client-side query optimization without a backend server.
-Used by the [Web UI](/integrations/web-ui) for the interactive
-playground and by the documentation site for live examples.
-
 ### ra-dialect {#ra-dialect}
 
 SQL dialect translation between database systems:
@@ -261,8 +226,6 @@ query optimization cycle, from SQL input through to executable output.
 flowchart LR
     subgraph Entry["Entry Points"]
         CLI["ra-cli"]
-        Web["ra-web"]
-        WASM["ra-wasm"]
     end
 
     subgraph Parse["Parsing"]
@@ -287,8 +250,6 @@ flowchart LR
     end
 
     CLI -->|SQL query| Dialect
-    Web -->|REST API| Dialect
-    WASM -->|JS binding| Dialect
 
     Dialect -->|normalized SQL| Parser
     Parser -->|RuleFile / AST| Core
@@ -303,8 +264,6 @@ flowchart LR
     Adaptive -.->|reopt trigger| Engine
 
     click CLI "/ra/maintainers/cli-reference" "CLI Documentation"
-    click Web "/ra/integrations/web-ui" "Web UI Documentation"
-    click WASM "/ra/architecture#ra-wasm" "WASM Module"
     click Dialect "/ra/architecture#ra-dialect" "SQL Dialect"
     click Parser "/ra/architecture#ra-parser" "SQL Parser"
     click Core "/ra/architecture#ra-core" "Core Types"
@@ -316,8 +275,6 @@ flowchart LR
     click Adaptive "/ra/architecture#ra-adaptive" "Adaptive Execution"
 
     style CLI fill:#e1f5ff,color:#000
-    style Web fill:#e1f5ff,color:#000
-    style WASM fill:#e1f5ff,color:#000
     style Dialect fill:#fff4e1,color:#000
     style Parser fill:#ffe1f5,color:#000
     style Core fill:#e1ffe1,color:#000
@@ -508,7 +465,7 @@ flowchart TD
         HW["Hardware<br/>Detection"]
     end
 
-    subgraph Ingestion["Ingestion Layer (ra-stats)"]
+    subgraph Ingestion["Ingestion Layer (ra-stats-advanced)"]
         ADAPT["StatisticsAdapter<br/>normalize formats"]
         DELTA["DeltaTracker<br/>compute diffs"]
         QUALITY["StatisticsState<br/>confidence + staleness"]

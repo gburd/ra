@@ -11,20 +11,9 @@ graph TD
     CLI[ra-cli] --> Engine[ra-engine]
     CLI --> Parser[ra-parser]
     CLI --> Dialect[ra-dialect]
-    CLI --> Stats[ra-stats]
+    CLI --> Stats[ra-stats-advanced]
     CLI --> Config[ra-config]
     CLI --> Regression[ra-regression]
-
-    TUI[ra-tui] --> Engine
-    TUI --> Parser
-    TUI --> Config
-
-    Web[ra-web] --> Engine
-    Web --> Parser
-    Web --> Dialect
-
-    WASM[ra-wasm] --> Engine
-    WASM --> Parser
 
     PGExt[ra-pg-extension] --> Engine
     PGExt --> Core[ra-core]
@@ -36,7 +25,7 @@ graph TD
     Engine --> Core
     Engine --> Hardware
     Engine --> ML[ra-ml]
-    Engine --> Stats
+    Engine --> Stats[ra-stats-advanced]
     Engine --> Metadata[ra-metadata]
     Parser --> Core
     Dialect --> Core
@@ -50,7 +39,8 @@ graph TD
     Isolation[ra-isolation] --> Core
     Multimodel[ra-multimodel] --> Core
     Catalog[ra-catalog] --> Core
-    Cache[ra-cache] --> Core
+    CacheAPI[ra-cache-api] --> Core
+    CacheImpl[ra-cache-impl] --> CacheAPI
     Adapters[ra-adapters] --> Core
 
     style Core fill:#e1f5fe
@@ -341,11 +331,11 @@ Generates executable code from optimized physical plans.
 
 ---
 
-## Statistics System (`ra-stats`)
+## Statistics System (`ra-stats-advanced`)
 
 Manages table and column statistics with temporal support.
 
-**Source**: `crates/ra-stats/src/`
+**Source**: `crates/ra-stats-advanced/src/`
 
 | Module | Purpose |
 |--------|---------|
@@ -435,7 +425,8 @@ Generates optimization advice (index suggestions, query rewrites) based on workl
 | Crate | Purpose |
 |-------|---------|
 | `ra-config` | Application configuration (TOML-based) |
-| `ra-cache` | Query plan caching |
+| `ra-cache-api` | Plan cache API traits |
+| `ra-cache-impl` | Plan cache implementation |
 | `ra-catalog` | Schema catalog management |
 | `ra-metadata` | Metadata extraction and management |
 | `ra-isolation` | Isolation testing framework |
@@ -446,8 +437,6 @@ Generates optimization advice (index suggestions, query rewrites) based on workl
 | `ra-regression` | Query regression detection |
 | `ra-adapters` | External database adapters |
 | `ra-test-utils` | Shared test utilities |
-| `ra-wasm` | WASM bindings for browser use |
-| `ra-wasm-docs` | WASM module for interactive documentation |
 
 ---
 
@@ -461,7 +450,7 @@ sequenceDiagram
     participant Compiler as ra-compiler
     participant Engine as ra-engine
     participant Core as ra-core
-    participant Stats as ra-stats
+    participant Stats as ra-stats-advanced
     participant HW as ra-hardware
 
     User->>CLI: SQL query + statistics file

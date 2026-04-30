@@ -157,7 +157,7 @@ cargo bench --package ra-hardware --bench hardware_models
 cargo bench --package ra-dialect --bench backend_comparison
 
 # Streaming statistics
-cargo bench --package ra-stats --bench streaming_bench
+cargo bench --package ra-stats-advanced --bench streaming_bench
 ```
 
 ## Running All Benchmarks

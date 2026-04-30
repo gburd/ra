@@ -129,4 +129,4 @@ WHERE period && tsrange('2025-01-01', '2025-02-01');
 
 - PostgreSQL: GiST indexes
 - PostGIS: Spatial indexing with GiST
-- IndexType::GiST in ra-stats/src/index_types.rs
+- IndexType::GiST in ra-stats-advanced/src/index_types.rs

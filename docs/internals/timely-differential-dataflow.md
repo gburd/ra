@@ -509,13 +509,13 @@ duplicate expressions share cached results.
 
 ## Statistics integration
 
-The incremental optimizer works with the statistics delta system in `ra-stats`
+The incremental optimizer works with the statistics delta system in `ra-stats-advanced`
 to decide whether incremental reoptimization is sufficient or a full re-plan
 is needed.
 
 ### DeltaSet: tracking statistics changes
 
-**Source:** `crates/ra-stats/src/delta.rs:140-295`
+**Source:** `crates/ra-stats-advanced/src/delta.rs:140-295`
 
 The `DeltaSet` type computes the minimal set of changes between two statistics
 snapshots:
@@ -542,7 +542,7 @@ Delta types include:
 
 ### Deciding between incremental and full reoptimization
 
-**Source:** `crates/ra-stats/src/delta.rs:280-288`
+**Source:** `crates/ra-stats-advanced/src/delta.rs:280-288`
 
 ```rust
 pub fn needs_full_reoptimization(&self) -> bool {
@@ -674,7 +674,7 @@ run.
 Each delta has a `magnitude()` method that quantifies the size of the change.
 This is used for prioritizing which queries to reoptimize first.
 
-**Source:** `crates/ra-stats/src/delta.rs:100-120`
+**Source:** `crates/ra-stats-advanced/src/delta.rs:100-120`
 
 ```rust
 pub fn magnitude(&self) -> f64 {
@@ -1058,6 +1058,6 @@ fast thanks to the memo cache.
 | [`crates/ra-engine/src/timely.rs`](../../crates/ra-engine/src/timely.rs) | 130 | Timely configuration and ComputationStats |
 | [`crates/ra-engine/src/differential.rs`](../../crates/ra-engine/src/differential.rs) | 772 | IncrementalOptimizer with differential join |
 | [`crates/ra-engine/src/memo.rs`](../../crates/ra-engine/src/memo.rs) | -- | Structural-hash memo table |
-| [`crates/ra-stats/src/delta.rs`](../../crates/ra-stats/src/delta.rs) | 888 | Statistics delta computation |
-| [`crates/ra-stats/src/timeline.rs`](../../crates/ra-stats/src/timeline.rs) | 800+ | Timeline format and playback engine |
+| [`crates/ra-stats-advanced/src/delta.rs`](../../crates/ra-stats-advanced/src/delta.rs) | 888 | Statistics delta computation |
+| [`crates/ra-stats-advanced/src/timeline.rs`](../../crates/ra-stats-advanced/src/timeline.rs) | 800+ | Timeline format and playback engine |
 | [`crates/ra-engine/benches/differential_timeline.rs`](../../crates/ra-engine/benches/differential_timeline.rs) | 188 | Full vs incremental benchmarks |

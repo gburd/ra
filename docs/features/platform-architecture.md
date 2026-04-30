@@ -13,8 +13,6 @@ translate SQL across database engines.
 ```mermaid
 graph TD
     CLI["CLI (ra-cli)"]
-    Web["Web (ra-web)"]
-    WASM["WASM Playground<br/>(ra-wasm)"]
 
     Engine["Query Optimization<br/>(ra-engine)"]
     Dialect["Dialect Translation<br/>(ra-dialect)"]
@@ -33,9 +31,6 @@ graph TD
 
     CLI --> Engine
     CLI --> Dialect
-    Web --> Engine
-    Web --> Isolation
-    WASM --> Engine
     PGExt --> Engine
     PGExt --> HW
     Engine --> PipelineDesc
@@ -46,8 +41,6 @@ graph TD
     CoreDesc --> Codegen
 
     style CLI fill:#e1f5fe
-    style Web fill:#e1f5fe
-    style WASM fill:#e1f5fe
     style PGExt fill:#e1f5fe
     style Engine fill:#fff3e0
     style Dialect fill:#fff3e0
@@ -72,16 +65,12 @@ graph TD
     Core --> ML[ra-ml]
     Core --> Adaptive[ra-adaptive]
     Core --> Dialect[ra-dialect]
-    Core --> Wasm[ra-wasm]
-
     Parser --> Compiler
     Compiler --> Engine
     Engine --> Adaptive
 
     Engine --> CLI[ra-cli]
     Dialect --> CLI
-    Engine --> Web[ra-web]
-    Wasm --> Web
 ```
 
 ```mermaid
@@ -96,8 +85,7 @@ graph BT
     ML["ra-ml"] --> Core
     Adaptive["ra-adaptive"] --> Engine
     Dialect["ra-dialect"] --> Core
-    WasmCrate["ra-wasm"] --> Core
-    Isolation["ra-isolation"] -.-> WasmCrate
+    Isolation["ra-isolation"] --> Core
     Synthesis["ra-synthesis"] --> Core
     Discovery["ra-discovery"] --> Core
     Multimodel["ra-multimodel"] --> Core
@@ -106,12 +94,9 @@ graph BT
     PGExt --> Core
     CLI["ra-cli"] --> Engine
     CLI --> Dialect
-    WebCrate["ra-web"] --> Engine
-    WebCrate --> WasmCrate
 
     style Core fill:#e8f5e9
     style CLI fill:#e1f5fe
-    style WebCrate fill:#e1f5fe
     style PGExt fill:#e1f5fe
 ```
 
@@ -257,7 +242,6 @@ it falls back to the standard planner. See
 |--------------|-------------------------------------------|
 | ra-dialect   | SQL dialect translation (6 dialects)      |
 | ra-isolation | Cross-database isolation testing          |
-| ra-wasm      | WASM database adapters (SQLite, DuckDB)   |
 
 ### Rule Discovery
 
@@ -272,7 +256,6 @@ it falls back to the standard planner. See
 | Crate             | Purpose                                      |
 |-------------------|----------------------------------------------|
 | ra-cli            | Command-line interface                       |
-| ra-web            | Web explorer backend (Rocket.rs)             |
 | ra-pg-extension   | PostgreSQL planner hook (pgrx, PG 13--18)    |
 
 ## Rule Categories

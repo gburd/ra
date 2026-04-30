@@ -125,8 +125,7 @@ export default withMermaid(defineConfig({
             { text: 'Cost Models', link: '/guides/cost-models' },
             { text: 'Testing', link: '/guides/testing' },
             { text: 'Test Format', link: '/guides/test-format' },
-            { text: 'Production Workloads', link: '/guides/modeling-production-workloads' },
-            { text: 'Ra Web UI Quickstart', link: '/guides/ra-web-quickstart' }
+            { text: 'Production Workloads', link: '/guides/modeling-production-workloads' }
           ]
         },
         {
@@ -204,8 +203,7 @@ export default withMermaid(defineConfig({
           collapsed: true,
           items: [
             { text: 'Database Adapters', link: '/integrations/database-adapters' },
-            { text: 'PostgreSQL', link: '/integrations/postgresql' },
-            { text: 'Web UI', link: '/integrations/web-ui' }
+            { text: 'PostgreSQL', link: '/integrations/postgresql' }
           ]
         },
         {

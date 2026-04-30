@@ -28,15 +28,16 @@ const treeData = [
       { name: 'ra-parser', cat: 'parser', desc: 'SQL parser: multi-dialect parsing, query to RelExpr', href: `${CB}/crates/ra-parser`, anchor: '#ra-parser' },
       { name: 'ra-compiler', cat: 'parser', desc: 'SQL-to-RelExpr compiler pipeline', href: `${CB}/crates/ra-compiler` },
       { name: 'ra-dialect', cat: 'parser', desc: 'SQL dialect translation for cross-database compatibility', href: `${CB}/crates/ra-dialect`, anchor: '#ra-dialect' },
-      { name: 'ra-stats', cat: 'stats', desc: 'Statistics system: timeline, interpolation, staleness modeling', href: `${CB}/crates/ra-stats`, anchor: '#ra-stats' },
+      { name: 'ra-stats-advanced', cat: 'stats', desc: 'Statistics system: timeline, interpolation, staleness modeling', href: `${CB}/crates/ra-stats-advanced`, anchor: '#ra-stats' },
       { name: 'ra-hardware', cat: 'hardware', desc: 'Hardware detection: GPU/FPGA/SIMD cost models', href: `${CB}/crates/ra-hardware`, anchor: '#ra-hardware' },
-      { name: 'ra-config', cat: 'config', desc: 'Configuration management (TOML-based)', href: `${CB}/crates/ra-config` },
+      { name: 'ra-config', cat: 'config', desc: 'Configuration management (merged into ra-core::config)', href: `${CB}/crates/ra-config` },
       { name: 'ra-metadata', cat: 'catalog', desc: 'Database metadata and schema information', href: `${CB}/crates/ra-metadata` },
       { name: 'ra-catalog', cat: 'catalog', desc: 'Function catalog for SQL query optimization', href: `${CB}/crates/ra-catalog` },
       { name: 'ra-adapters', cat: 'adapter', desc: 'Database adapter backends (PostgreSQL, Stoolap)', href: `${CB}/crates/ra-adapters` },
       { name: 'ra-adaptive', cat: 'engine', desc: 'Adaptive query execution with runtime reoptimization', href: `${CB}/crates/ra-adaptive` },
       { name: 'ra-advisor', cat: 'engine', desc: 'Automatic index advisor for workload analysis', href: `${CB}/crates/ra-advisor` },
-      { name: 'ra-cache', cat: 'engine', desc: 'Plan cache with LRU/LFU/adaptive eviction', href: `${CB}/crates/ra-cache` },
+      { name: 'ra-cache-api', cat: 'engine', desc: 'Plan cache API traits', href: `${CB}/crates/ra-cache-api` },
+      { name: 'ra-cache-impl', cat: 'engine', desc: 'Plan cache implementation with LRU/LFU/adaptive eviction', href: `${CB}/crates/ra-cache-impl` },
       { name: 'ra-codegen', cat: 'engine', desc: 'Cranelift-based code generation', href: `${CB}/crates/ra-codegen` },
       { name: 'ra-discovery', cat: 'engine', desc: 'Automatic rule discovery from execution logs', href: `${CB}/crates/ra-discovery` },
       { name: 'ra-isolation', cat: 'test', desc: 'Cross-database isolation testing framework', href: `${CB}/crates/ra-isolation` },
@@ -44,13 +45,9 @@ const treeData = [
       { name: 'ra-multimodel', cat: 'engine', desc: 'Multi-model optimization (graph, document, time-series)', href: `${CB}/crates/ra-multimodel` },
       { name: 'ra-synthesis', cat: 'engine', desc: 'Natural language to relational algebra synthesis', href: `${CB}/crates/ra-synthesis` },
       { name: 'ra-cli', cat: 'ui', desc: 'Command-line interface', href: `${CB}/crates/ra-cli` },
-      { name: 'ra-tui', cat: 'ui', desc: 'Terminal UI', href: `${CB}/crates/ra-tui` },
-      { name: 'ra-web', cat: 'ui', desc: 'Web UI server', href: `${CB}/crates/ra-web` },
       { name: 'ra-pg-extension', cat: 'pg', desc: 'PostgreSQL pgrx extension', href: `${CB}/crates/ra-pg-extension` },
       { name: 'ra-pg-advisor', cat: 'pg', desc: 'PostgreSQL plan advisor (pg_plan_advice hints)', href: `${CB}/crates/ra-pg-advisor` },
       { name: 'ra-pg-monitor', cat: 'pg', desc: 'PostgreSQL monitoring and schema analysis', href: `${CB}/crates/ra-pg-monitor` },
-      { name: 'ra-wasm', cat: 'wasm', desc: 'WASM database adapters for browser-based SQL', href: `${CB}/crates/ra-wasm` },
-      { name: 'ra-wasm-docs', cat: 'wasm', desc: 'WASM wrapper for documentation interactive examples', href: `${CB}/crates/ra-wasm-docs` },
       { name: 'ra-regression', cat: 'test', desc: 'Regression testing against DataFusion and SQLite', href: `${CB}/crates/ra-regression` },
       { name: 'ra-test-utils', cat: 'test', desc: 'Shared test utilities and fixtures', href: `${CB}/crates/ra-test-utils` },
       { name: 'sparsemap', cat: 'core', desc: 'Sparse bitmap for efficient set operations', href: `${CB}/crates/sparsemap` },
@@ -96,7 +93,7 @@ const treeData = [
 - **Syntax normalization**: Unifies dialect-specific syntax
 - **Output generation**: Produces target-dialect SQL from RelExpr
 
-### Statistics System (`ra-stats`) {#ra-stats}
+### Statistics System (`ra-stats-advanced`) {#ra-stats}
 - **Timeline support**: Statistics evolution over time
 - **Interpolation**: Estimates statistics between snapshots
 - **Formats**: TOML, JSON, binary
@@ -123,16 +120,6 @@ const treeData = [
 3. **Run CLI**
    ```bash
    ra-cli optimize "SELECT * FROM users WHERE age > 18"
-   ```
-
-4. **Run web UI**
-   ```bash
-   cd web && npm install && npm run dev
-   ```
-
-5. **Run TUI**
-   ```bash
-   cargo run --bin ra-tui
    ```
 
 ## Contributing

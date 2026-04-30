@@ -18,7 +18,7 @@ nix develop                              # full dev environment
 SQL → ra-parser → ra-compiler (loads .rra rules) → ra-engine (e-graph equality saturation) → optimized plan
 ```
 
-**Crate layers:** `ra-core` (foundation) → `ra-parser` → `ra-compiler` → `ra-engine` → `ra-cli`/`ra-web`/`ra-tui`/`ra-wasm`
+**Crate layers:** `ra-core` (foundation) → `ra-parser` → `ra-compiler` → `ra-engine` → `ra-cli`
 
 **Key types (ra-core):** `RelExpr` (relational AST), `Expr` (scalar), `Rule` trait, `Cost` (startup+total), `Statistics`, `Pattern`
 
@@ -30,6 +30,6 @@ SQL → ra-parser → ra-compiler (loads .rra rules) → ra-engine (e-graph equa
 - `tla/` — TLA+ formal specs
 
 ## Notes
-- Custom sqlparser fork at `crates/sqlparser-ra` (path dependency, not upstream)
+- Custom SQL parser at `crates/ra-sql-parser` (path dependency, not upstream sqlparser)
 - Minimum Rust 1.88.0, edition 2021
 - Clippy: `unwrap_used`/`panic`/`todo` denied; `pedantic` warned

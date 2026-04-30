@@ -13,7 +13,7 @@ This document summarizes the current test coverage across the RA project and pro
 
 | Crate | Line Coverage | Function Coverage | Status |
 |-------|--------------|-------------------|--------|
-| ra-stats | 95.67% | 97.79% | Excellent |
+| ra-stats-advanced | 95.67% | 97.79% | Excellent |
 | ra-adaptive | 96.36% | 94.52% | Excellent |
 | ra-core | 92.78% | 94.14% | Good |
 
@@ -23,7 +23,7 @@ This document summarizes the current test coverage across the RA project and pro
 |-------|--------------|-------------------|--------|
 | ra-engine | 88.57% | 93.04% | Good |
 | ra-parser | 84.49% | 91.24% | Good |
-| ra-cache | 83.90% | 82.79% | Needs improvement |
+| ra-cache-impl | 83.90% | 82.79% | Needs improvement |
 
 ### Needs Improvement (<80%)
 
@@ -31,7 +31,7 @@ This document summarizes the current test coverage across the RA project and pro
 |-------|--------------|-------------------|----------|
 | ra-dialect | 66.69% | 78.06% | High |
 | ra-metadata | 74.23% | 78.52% | High |
-| ra-config | 77.65% | 79.01% | Medium |
+| ra-core (config) | 77.65% | 79.01% | Medium |
 
 ## Coverage Gaps by Area
 
@@ -57,12 +57,12 @@ This document summarizes the current test coverage across the RA project and pro
    - **Gap:** Edge cases in optimization logic
    - **Impact:** Medium - covered by property tests
 
-4. **ra-config** (77.65% coverage)
+4. **ra-core config module** (77.65% coverage)
    - `loader.rs` (74.07%): Configuration file loading
    - **Gap:** Error handling for malformed config files
    - **Impact:** Low - configuration is validated at startup
 
-5. **ra-cache** (83.90% coverage)
+5. **ra-cache-impl** (83.90% coverage)
    - `eviction.rs` (68.75%): Cache eviction policies
    - **Gap:** LRU/LFU eviction edge cases
    - **Impact:** Low - cache misses don't affect correctness
@@ -72,8 +72,6 @@ This document summarizes the current test coverage across the RA project and pro
 The following files have low coverage but are not prioritized:
 
 - **ra-test-utils** (calibrate.rs, profile.rs): Test utilities, not production code
-- **ra-tui** (event.rs, app.rs): UI code, tested manually
-- **ra-wasm** (various files): WASM bindings, tested in browser
 - **ra-wasm-docs**: Documentation generator, not production code
 
 ## Running Coverage Locally
@@ -205,9 +203,9 @@ Some code intentionally has lower coverage:
 - **Reason:** Requires live database connections
 - **Mitigation:** Integration tests in separate test suite
 
-### 2. UI Code
-- **Crates:** ra-tui, ra-wasm
-- **Reason:** Requires manual/browser testing
+### 2. WASM Code
+- **Crates:** ra-wasm-docs
+- **Reason:** Requires browser testing
 - **Mitigation:** E2E tests, manual testing
 
 ### 3. Error Paths

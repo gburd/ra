@@ -1,6 +1,6 @@
 # Index Types
 
-This document describes the index type model in `ra-stats::index_types`,
+This document describes the index type model in `ra-stats-advanced::index_types`,
 which the RA optimizer uses to select access paths and estimate I/O cost
 for each candidate plan.
 
@@ -14,7 +14,7 @@ The companion `IndexMetadata` struct bundles an `IndexType` with its
 table, physical `IndexStats` (from the catalog), and per-operation
 `IndexCostFactors`.
 
-Source: `crates/ra-stats/src/index_types.rs`
+Source: `crates/ra-stats-advanced/src/index_types.rs`
 
 ## Index Types
 

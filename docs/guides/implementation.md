@@ -278,11 +278,11 @@ fn optimize(&self, plan: &RelExpr) -> Result<RelExpr> {
 
 **Version:** 1.0
 
-**Used in:** ra-web, ra-pg-monitor
+**Used in:** ra-pg-monitor
 
-**Purpose:** Async HTTP server (web UI), async PostgreSQL monitoring
+**Purpose:** Async PostgreSQL monitoring
 
-**Why Async:** Web UI serves multiple concurrent users, each requesting plan visualizations. Async I/O prevents blocking threads while waiting for database queries or file I/O.
+**Why Async:** Async I/O prevents blocking threads while waiting for database queries or file I/O.
 
 ## Dependency Philosophy
 

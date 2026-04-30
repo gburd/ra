@@ -48,14 +48,12 @@ maintainable, formally verified framework.
   into PostgreSQL's planner for transparent query optimization
 - **Isolation Testing** -- Cross-database transaction isolation
   verification using PostgreSQL's `.spec` format
-- **WASM Database Adapters** -- Run SQLite and DuckDB in the browser
-  via WebAssembly
 - **ML Cardinality Estimation** -- Neural network models trained on
   execution feedback
 - **Adaptive Execution** -- Runtime reoptimization and mid-query plan
   switching
-- **Multiple Backends** -- JIT compilation (Cranelift), WASM, and
-  bytecode interpretation
+- **Multiple Backends** -- JIT compilation (Cranelift) and bytecode
+  interpretation
 - **Formal Verification** -- TLA+ specifications proving termination,
   cost monotonicity, and semantic equivalence
 - **Resource Budgets** -- Constrain optimizer time, memory, and
@@ -148,8 +146,9 @@ ra/
 |   |---- ra-parser/           # .rra literate format + SQL parser
 |   |---- ra-compiler/         # Rule compilation and indexing
 |   |---- ra-engine/           # Optimization engine (egg + differential)
-|   |---- ra-cache/            # Plan cache with template matching
-|   |---- ra-stats/            # Streaming statistics + monitoring adapters
+|   |---- ra-cache-api/         # Plan cache API
+|   |---- ra-cache-impl/       # Plan cache implementation
+|   |---- ra-stats-advanced/   # Streaming statistics + monitoring adapters
 |   |---- ra-codegen/          # Code generation (Cranelift, WASM, bytecode)
 |   |---- ra-hardware/         # GPU/FPGA/SIMD/NUMA + network cost models
 |   |---- ra-ml/               # ML cardinality estimation
@@ -159,12 +158,10 @@ ra/
 |   |---- ra-pg-advisor/       # PostgreSQL query advisor daemon
 |   |---- ra-pg-monitor/       # PostgreSQL monitoring and health checks
 |   |---- ra-isolation/        # Cross-database isolation testing
-|   |---- ra-wasm/             # WASM database adapters
 |   |---- ra-synthesis/        # Natural language to SQL
 |   |---- ra-discovery/        # Automatic rule mining from logs
 |   |---- ra-multimodel/       # Graph, document, time-series rules
-|   |---- ra-cli/              # Command-line interface
-|   `---- ra-web/              # Web explorer backend (Rocket.rs)
+|   `---- ra-cli/              # Command-line interface
 |---- rules/                   # 1,327+ rule definitions (.rra files)
 |   |---- logical/             # Predicate pushdown, join reordering, ...
 |   |---- physical/            # Join algorithms, index selection, ...
@@ -234,7 +231,6 @@ sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
 - [Execution Models](docs/features/execution-models.md) -- Volcano, vectorized, push-based, differential, column-at-a-time
 - [Dialect Translation](docs/guides/dialect-translation.md) -- SQL cross-database translation
 - [Isolation Testing](docs/features/isolation-testing.md) -- Transaction isolation verification
-- [WASM Databases](docs/features/wasm-databases.md) -- Browser-based database execution
 - [Formal Verification](docs/features/formal-verification.md) -- TLA+ specifications and verification approach
 - [TLA+ Specifications](tla/README.md) -- Mathematical proofs of correctness properties
 - [Resource Budgets](docs/features/resource-budgets.md) -- Predefined profiles, custom limits, and overflow strategies

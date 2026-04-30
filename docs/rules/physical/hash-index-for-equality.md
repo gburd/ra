@@ -105,5 +105,5 @@ SELECT * FROM sessions ORDER BY session_token;
 ## References
 
 - PostgreSQL: Hash indexes (WAL-logged since v10)
-- IndexType::Hash in ra-stats/src/index_types.rs
+- IndexType::Hash in ra-stats-advanced/src/index_types.rs
 - IndexCostFactors::hash_default() (infinite range_scan_cost)

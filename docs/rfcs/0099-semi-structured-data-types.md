@@ -417,7 +417,7 @@ pub struct ListColumn {
 **Dictionary Encoding for VARIANT:**
 
 ```rust
-// In crates/ra-stats/src/nested.rs
+// In crates/ra-stats-advanced/src/nested.rs
 
 /// Track frequently-accessed paths and their values
 pub struct VariantPathDictionary {
@@ -446,7 +446,7 @@ impl VariantPathDictionary {
 #### 2. Statistics Collection
 
 ```rust
-// In crates/ra-stats/src/nested.rs
+// In crates/ra-stats-advanced/src/nested.rs
 
 /// Statistics for semi-structured columns
 pub struct NestedColumnStats {

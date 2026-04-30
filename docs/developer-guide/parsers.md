@@ -493,61 +493,9 @@ fn test_newdb_schema() {
 }
 ```
 
-### Step 6: Add to Web API
+### Step 6: Register in CLI
 
-Update `crates/ra-web/src/api/explain.rs` to support the new engine:
-
-```rust
-fn get_adapter_for_engine(engine: &str) -> Result<Box<dyn DatabaseAdapter>> {
-    match engine {
-        "postgresql" | "postgresql-16" | "postgresql-17" => {
-            Ok(Box::new(PostgresAdapter::new()))
-        }
-        "mysql" | "mysql-8.0" | "mysql-8.4" => {
-            Ok(Box::new(MySQLAdapter::new()))
-        }
-        "newdb" | "newdb-1.0" => {
-            Ok(Box::new(NewDbAdapter::new()))  // Add this
-        }
-        _ => Err(anyhow!("Unsupported engine: {}", engine)),
-    }
-}
-```
-
-### Step 7: Add to Frontend
-
-Update `crates/ra-web/frontend/src/constants.ts`:
-
-```typescript
-export const ENGINES = [
-  { id: 'postgresql-17', name: 'PostgreSQL 17', vendor: 'postgresql' },
-  { id: 'mysql-8.4', name: 'MySQL 8.4', vendor: 'mysql' },
-  { id: 'newdb-1.0', name: 'NewDB 1.0', vendor: 'newdb' },  // Add this
-  // ... other engines
-] as const;
-```
-
-Update plan parser in `crates/ra-web/frontend/src/utils/planParser.ts`:
-
-```typescript
-export function parsePlan(text: string, engine: string): PlanNode {
-  if (engine.startsWith('postgresql')) {
-    return parsePostgresqlPlan(text);
-  } else if (engine.startsWith('mysql')) {
-    return parseMysqlPlan(text);
-  } else if (engine.startsWith('newdb')) {
-    return parseNewDbPlan(text);  // Add this
-  } else {
-    return parseGenericPlan(text);
-  }
-}
-
-function parseNewDbPlan(text: string): PlanNode {
-  // Parse NewDB's EXPLAIN output format
-  // Return unified PlanNode structure
-  // ...
-}
-```
+Update the CLI adapter registry to support the new engine in optimization and explain commands.
 
 ## Testing Parsers
 

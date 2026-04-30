@@ -141,4 +141,4 @@ SELECT * FROM users WHERE id = 42;
 
 - PostgreSQL: BitmapAnd and BitmapOr nodes
 - Oracle: Bitmap index combining
-- IndexType::Bitmap in ra-stats/src/index_types.rs
+- IndexType::Bitmap in ra-stats-advanced/src/index_types.rs

@@ -215,9 +215,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 # Generate Rust API documentation
 cargo doc --all-features --open
-
-# Run web UI locally
-cargo run --bin ra-web-ui
 ```
 
 ## Security

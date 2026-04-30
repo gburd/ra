@@ -118,5 +118,5 @@ SELECT * FROM users WHERE id = 42;
 ## References
 
 - PostgreSQL: GIN indexes for arrays, JSONB, full-text
-- IndexType::GIN in ra-stats/src/index_types.rs
+- IndexType::GIN in ra-stats-advanced/src/index_types.rs
 - IndexCostFactors::gin_default()

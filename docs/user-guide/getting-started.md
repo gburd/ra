@@ -30,7 +30,6 @@ docker-compose up -d
 
 This launches the following services:
 
-- **ra-web** (port 8000) - Query optimization web interface
 - **postgres-15** (port 5415) - PostgreSQL 15 test database
 - **postgres-16** (port 5416) - PostgreSQL 16 test database
 - **mysql-8** (port 3306) - MySQL 8.0 test database
@@ -191,7 +190,6 @@ Recipients can click the URL to see your exact setup.
 Check Docker logs:
 
 ```bash
-docker-compose logs ra-web
 docker-compose logs postgres-16
 ```
 
@@ -215,12 +213,6 @@ docker-compose down -v  # Remove volumes
 docker-compose up -d    # Recreate with fresh data
 ```
 
-### Page doesn't load
-
-- Verify ra-web is running: `docker-compose ps ra-web`
-- Check port 8000 is accessible: `curl http://localhost:8000/health`
-- Clear browser cache and reload
-
 ## Next Steps
 
 - [Visualizations Guide](./visualizations.md) - Learn to interpret each visualization mode
@@ -232,7 +224,7 @@ docker-compose up -d    # Recreate with fresh data
 
 ### Environment Variables
 
-Customize ra-web behavior in `docker-compose.yml`:
+Customize behavior in `docker-compose.yml`:
 
 ```yaml
 environment:

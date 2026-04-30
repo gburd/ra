@@ -27,9 +27,8 @@ This directory contains comprehensive documentation for RA developers.
 ### architecture.md
 
 Comprehensive system architecture documentation covering:
-- System components (ra-core, ra-parser, ra-engine, ra-adapters, ra-web)
-- Frontend architecture (React, TypeScript, D3.js visualizations)
-- Backend architecture (Rocket API, Redis caching)
+- System components (ra-core, ra-parser, ra-engine, ra-adapters)
+- Backend architecture
 - Data flow diagrams
 - Technology stack
 - Deployment architecture
@@ -80,15 +79,10 @@ Development workflow and contribution guidelines:
 - [ra-parser](/crates/ra-parser/) - SQL parser
 - [ra-engine](/crates/ra-engine/) - Optimization engine
 - [ra-adapters](/crates/ra-adapters/) - Database adapters
-- [ra-web](/crates/ra-web/) - Web API and frontend
-
 ### External Resources
 
 - [sqlparser-rs](https://docs.rs/sqlparser/) - SQL parser library
 - [egg](https://docs.rs/egg/) - E-graph library for equality saturation
-- [Rocket](https://rocket.rs/) - Web framework
-- [React](https://react.dev/) - Frontend framework
-- [D3.js](https://d3js.org/) - Data visualization
 
 ## Quick Reference
 
@@ -100,9 +94,6 @@ cargo build
 
 # Build specific crate
 cargo build -p ra-engine
-
-# Build frontend
-cd crates/ra-web/frontend && npm run build
 
 # Build for release
 cargo build --release
@@ -120,8 +111,6 @@ cargo test -p ra-parser
 # Run integration tests
 cargo test --workspace -- --ignored
 
-# Run frontend tests
-cd crates/ra-web/frontend && npm test
 ```
 
 ### Lint Commands
@@ -130,27 +119,6 @@ cd crates/ra-web/frontend && npm test
 # Rust
 cargo fmt
 cargo clippy --all-targets --all-features -- -D warnings
-
-# TypeScript
-cd crates/ra-web/frontend
-npx oxfmt .
-npx oxlint .
-```
-
-### Development Server
-
-```bash
-# Backend
-cd crates/ra-web && cargo run
-
-# Frontend (with hot reload)
-cd crates/ra-web/frontend && npm run dev
-
-# Redis
-redis-server
-
-# Test databases
-docker compose -f docker/docker-compose.test.yml up
 ```
 
 ## Common Workflows
@@ -177,8 +145,7 @@ docker compose -f docker/docker-compose.test.yml up
 2. Create vendor profile in `ra-parser/profiles/vendors/`
 3. Implement adapter in `ra-adapters/src/`
 4. Add tests
-5. Register in web API and frontend
-6. Submit pull request
+5. Submit pull request
 
 ### Optimizing Performance
 

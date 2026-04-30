@@ -282,191 +282,6 @@ impl FactsProvider for PostgresAdapter {
 }
 ```
 
-### 5. ra-web
-
-Web API and frontend for visualization.
-
-**Backend (Rocket):**
-
-```
-src/
-├── main.rs              - Server entry point
-├── api/
-│   ├── explain.rs       - EXPLAIN endpoint
-│   ├── optimize.rs      - Optimization endpoint
-│   ├── compare.rs       - Multi-engine comparison
-│   ├── share.rs         - Query sharing (Redis)
-│   └── visualize.rs     - Plan visualization
-├── cache.rs             - Redis integration
-├── cors.rs              - CORS handling
-├── rate_limit.rs        - Rate limiting
-└── websocket.rs         - WebSocket streaming
-```
-
-**API endpoints:**
-
-```
-POST /api/explain      - Get query plan from database
-POST /api/optimize     - Optimize RelExpr with RA engine
-POST /api/compare      - Compare plans across databases
-POST /api/share        - Create shareable query URL
-GET  /api/share/:id    - Retrieve shared query
-POST /api/visualize    - Get plan tree for D3.js rendering
-```
-
-**Frontend architecture:** (See [Frontend Architecture](#frontend-architecture))
-
-## Frontend Architecture
-
-The frontend is a single-page React application built with TypeScript and Material-UI.
-
-### Component Hierarchy
-
-```
-App (Root Component)
-├── ThemeProvider (Material-UI dark theme)
-├── Toolbar
-│   ├── Execute Button
-│   ├── EXPLAIN Mode Toggle
-│   ├── Add Panel Button
-│   ├── Schema Button
-│   └── Share Button
-├── Allotment (Split Panes)
-│   ├── Left Pane: Monaco Editor (SQL)
-│   └── Right Pane: Output Panels
-│       ├── OutputPanel 1
-│       │   ├── EngineSelector
-│       │   └── Visualization Tabs
-│       │       ├── Tree View (D3.js)
-│       │       ├── Flow View (React Flow)
-│       │       ├── Cost Analysis (Recharts)
-│       │       └── Warnings
-│       ├── OutputPanel 2
-│       ├── OutputPanel 3 (optional)
-│       └── OutputPanel 4 (optional)
-├── ShareDialog (Modal)
-└── SchemaViewer (Modal)
-```
-
-### State Management
-
-**App state:**
-
-```typescript
-interface AppState {
-  sql: string;
-  explainMode: 'explain' | 'analyze';
-  panels: OutputPanelState[];
-}
-
-interface OutputPanelState {
-  id: string;
-  engine: Engine;
-  loading: boolean;
-  output: string | null;
-  error: string | null;
-}
-```
-
-**Data flow:**
-
-```
-User types SQL
-  ↓
-handleSqlChange(newSql)
-  ↓
-setState({ sql: newSql })
-  ↓
-User clicks Execute
-  ↓
-executeAllPanels(panels, sql, explainMode)
-  ↓
-For each panel:
-  - POST /api/explain { sql, engine }
-  - updatePanel(panelId, { output, loading: false })
-  ↓
-Panels re-render with results
-```
-
-### Visualization System
-
-**Plan parsing:**
-
-```typescript
-// Parse multiple plan formats into unified structure
-interface PlanNode {
-  operator_type: string;
-  cost: number;
-  rows: number;
-  details: string[];
-  children: PlanNode[];
-}
-
-// Parsers for different formats
-parsePlan(text: string, engine: string): PlanNode
-parsePostgresqlPlan(json: any): PlanNode
-parseMysqlPlan(text: string): PlanNode
-```
-
-**Tree visualization (D3.js):**
-
-```typescript
-// D3 tree layout with collapsible nodes
-const treeLayout = d3.tree<PlanNode>()
-  .nodeSize([NODE_WIDTH, NODE_HEIGHT])
-  .separation((a, b) => a.parent === b.parent ? 1 : 2);
-
-// Render nodes with cost annotations
-svg.selectAll('.node')
-  .data(nodes)
-  .enter()
-  .append('g')
-  .attr('transform', d => `translate(${d.x},${d.y})`)
-  .append('rect')
-  .attr('fill', d => costColorScale(d.data.cost));
-```
-
-**Cost analysis:**
-
-```typescript
-// Extract cost metrics from plan tree
-interface CostMetrics {
-  totalCost: number;
-  operators: Map<string, number>; // operator → cost
-  bottlenecks: PlanNode[];         // nodes with cost > threshold
-}
-
-// Display as bar chart
-<ResponsiveContainer width="100%" height={400}>
-  <BarChart data={costBreakdown}>
-    <CartesianGrid strokeDasharray="3 3" />
-    <XAxis dataKey="operator" />
-    <YAxis />
-    <Tooltip />
-    <Bar dataKey="cost" fill="#667eea" />
-  </BarChart>
-</ResponsiveContainer>
-```
-
-### URL Sharing
-
-Shareable URLs encode the entire application state:
-
-```typescript
-// State encoding
-interface ShareState {
-  s: string;      // SQL query
-  e: Engine[];    // Array of engine IDs
-  m: ExplainMode; // 'explain' or 'analyze'
-}
-
-// Encoding process
-JSON.stringify(state)
-  → btoa() to Base64
-  → Replace '+' → '-', '/' → '_'
-  → URL: /p/:encoded
-```
-
 ## Data Flow
 
 ### Query Optimization Flow
@@ -539,31 +354,15 @@ Frontend                      Backend                    Database
 
 ## Technology Stack
 
-### Backend
+### Core
 
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
-| HTTP server | Rocket 0.5 | REST API |
 | Optimization | egg 0.9 | E-graph equality saturation |
-| Parsing | sqlparser-rs | SQL parsing (forked) |
+| Parsing | ra-sql-parser | SQL parsing (custom fork) |
 | Execution | tokio 1.x | Async runtime |
-| Caching | Redis | Query result caching |
 | Database | postgres 0.19 | PostgreSQL client |
 | Database | stoolap 0.3 | Stoolap client |
-
-### Frontend
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Framework | React 18 | UI library |
-| Language | TypeScript 5 | Type safety |
-| Editor | Monaco Editor | SQL editor with syntax highlighting |
-| Visualization | D3.js v7 | Plan tree rendering |
-| Flow | React Flow | Flow diagram visualization |
-| Charts | Recharts | Cost analysis charts |
-| UI | Material-UI v6 | Component library |
-| Layout | react-split-pane | Resizable panes |
-| Build | Vite 6 | Fast bundler with HMR |
 
 ### Development
 
@@ -572,49 +371,6 @@ Frontend                      Backend                    Database
 | cargo | Rust build system |
 | clippy | Rust linter |
 | rustfmt | Rust formatter |
-| oxlint | TypeScript linter (fast) |
-| oxfmt | TypeScript formatter (fast) |
-| vitest | TypeScript test runner |
-
-## Deployment Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Fly.io (Production)                   │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │ ra-web container                                   │  │
-│  │ - Rocket server (port 8000)                       │  │
-│  │ - Static frontend (React SPA)                     │  │
-│  └───────────────────────────────────────────────────┘  │
-│                          │                               │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │ Redis container (Fly.io)                          │  │
-│  │ - Query caching                                   │  │
-│  │ - Share URL storage                               │  │
-│  └───────────────────────────────────────────────────┘  │
-│                          │                               │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │ PostgreSQL container (docker-compose)             │  │
-│  │ - Test database schemas (HR, TPC-H, etc.)        │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Docker images:**
-
-```dockerfile
-# Backend (multi-stage build)
-FROM rust:1.88 as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release --bin ra-web
-
-FROM debian:bookworm-slim
-COPY --from=builder /app/target/release/ra-web /usr/local/bin/
-COPY crates/ra-web/frontend/dist /app/frontend/dist
-EXPOSE 8000
-CMD ["ra-web"]
-```
 
 ## Performance Characteristics
 

@@ -241,7 +241,7 @@ Publish in dependency order. Workspace crates must be published individually:
 cargo publish -p ra-core
 cargo publish -p ra-parser
 cargo publish -p ra-compiler
-cargo publish -p ra-stats
+cargo publish -p ra-stats-advanced
 cargo publish -p ra-hardware
 cargo publish -p ra-metadata
 cargo publish -p ra-ml
@@ -249,7 +249,8 @@ cargo publish -p ra-engine
 cargo publish -p ra-codegen
 cargo publish -p ra-dialect
 cargo publish -p ra-config
-cargo publish -p ra-cache
+cargo publish -p ra-cache-api
+cargo publish -p ra-cache-impl
 cargo publish -p ra-catalog
 cargo publish -p ra-adaptive
 cargo publish -p ra-isolation
@@ -261,10 +262,7 @@ cargo publish -p ra-regression
 cargo publish -p ra-test-utils
 cargo publish -p ra-pg-monitor
 cargo publish -p ra-pg-advisor
-cargo publish -p ra-wasm
 cargo publish -p ra-cli
-cargo publish -p ra-tui
-cargo publish -p ra-web
 ```
 
 ::: warning

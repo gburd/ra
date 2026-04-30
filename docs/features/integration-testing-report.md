@@ -14,11 +14,10 @@
 | ra-metadata (EXPLAIN + connectors) | 161 | 0 | 161 | 100% |
 | ra-hardware | 219 | 0 | 219 | 100% |
 | ra-dialect | 69 | 0 | 69 | 100% |
-| ra-config | 22 | 0 | 22 | 100% |
+| ra-core (config) | 22 | 0 | 22 | 100% |
 | ra-parser | 128 | 6 | 134 | 95.5% |
 | ra-engine | 500 | 49 | 549 | 91.1% |
-| ra-stats | 467 | 20 | 487 | 95.9% |
-| ra-tui | 212 | 0 | 212 | 100% |
+| ra-stats-advanced | 467 | 20 | 487 | 95.9% |
 
 ## 2. Docker Stack (Phase 7)
 
@@ -28,12 +27,12 @@ The `docker-compose.yml` defines four services:
 
 | Service | Image | Port | Healthcheck |
 |---------|-------|------|-------------|
-| ra-web | Custom (Dockerfile) | 8000 | `curl http://localhost:8000/health` |
+| ra-web-ui | Custom (Dockerfile) | 8000 | `curl http://localhost:8000/health` |
 | postgres | postgres:16-alpine | 5432 | `pg_isready -U ra_test -d ra_testdb` |
 | mysql | mysql:8.0 | 3306 | `mysqladmin ping` |
 | duckdb | datacatering/duckdb | 8080 | `curl http://localhost:8080/` |
 
-- `ra-web` depends on postgres and mysql with `condition: service_healthy`
+- `ra-web-ui` depends on postgres and mysql with `condition: service_healthy`
 - Named volumes for persistence (`postgres-data`, `mysql-data`)
 - Credentials: `ra_test` / `ra_test_pass` / `ra_testdb` (both databases)
 
@@ -170,10 +169,10 @@ The 234 test failures are concentrated in:
 - `recursive_cte_test` (4 failures) -- CTE parsing not yet implemented
 - `rule_validation_test` (2 failures) -- rule validation edge cases
 
-**ra-stats (20 failures):**
+**ra-stats-advanced (20 failures):**
 - Histogram/statistics edge cases
 
-**ra-web (1 failure):**
+**web UI (1 failure):**
 - Single web handler test
 
 Root cause: Most failures are in test suites that exercise SQL features not yet fully supported in the parser (CTEs, INTERVAL, IN lists) or optimizer rules that are defined but not yet wired into the egg rewrite system. These are tracked as Phase 16.2 work.

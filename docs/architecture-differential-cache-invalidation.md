@@ -237,7 +237,7 @@ plan_cache.insert(fingerprint_A, new_plan, new_deps)
 
 ### With Streaming Statistics (Track 2)
 ```rust
-// crates/ra-stats/src/streaming.rs
+// crates/ra-stats-advanced/src/streaming.rs
 impl StreamingPipeline {
     pub fn on_significant_change<F>(&mut self, callback: F)
     where

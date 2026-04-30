@@ -70,7 +70,7 @@ execution. Includes network-locality-aware placement and skew detection.
 Implements two-phase and three-phase aggregation strategies for distributed
 execution. Detects and handles skewed data distributions.
 
-**Crates:** `ra-core` (distributed_agg module), `ra-stats` (skew module)
+**Crates:** `ra-core` (distributed_agg module), `ra-stats-advanced` (skew module)
 
 **Key types:**
 - `TwoPhaseAggregation` -- Local pre-aggregation + global merge

@@ -42,7 +42,7 @@ docker compose build postgres-ra-extension
 ```
 
 ### Files Modified
-- 4 Cargo.toml files (ra-stats, ra-engine, ra-tui, ra-test-utils)
+- 4 Cargo.toml files (ra-stats-advanced, ra-engine, ra-test-utils)
 - 8 source files with #[cfg(feature = "timeline")]
 - 57 total items feature-gated
 

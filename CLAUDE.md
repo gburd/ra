@@ -9,9 +9,18 @@ RA is a relational algebra query optimization system. It codifies 1,327+ databas
 ## Build & Test Commands
 
 ```bash
-# Build (excludes ra-pg-extension which needs PostgreSQL headers)
+# Build core crates only (default-members)
 cargo build
 cargo build --release
+
+# Build core + CLI layer
+cargo build -p ra --features cli
+
+# Build everything (core + CLI + experimental)
+cargo build -p ra --features all
+
+# Build the CLI binary directly
+cargo build -p ra-cli
 
 # Run all tests
 cargo test --all-features
@@ -61,21 +70,40 @@ SQL string
   → Optimized RelExpr
 ```
 
+### Workspace Layers
+
+The workspace is organized into three layers, controlled by Cargo features on the root `ra` package.
+
+**Core (default build — `cargo build`):**
+`lime-sys`, `lime-rs`, `ra-core`, `ra-parser`, `ra-compiler`, `ra-engine`, `ra-dialect`, `ra-hardware`, `ra-stats-advanced` (lib name `ra_stats`), `ra-cache-api`, `ra-sql-parser` (lib name `sqlparser`)
+
+**CLI (`--features cli`):**
+`ra-cli` (binary), `ra-adapters`, `ra-metadata`
+
+**Experimental (`--features experimental`):**
+`ra-ml`, `ra-cache-impl`, `ra-adaptive`, `ra-test-utils`, `ra-quel-parser`
+
+Use `--features all` to build everything.
+
 ### Core Crate Dependency Layers
 
-**Foundation:** `ra-core` — defines `RelExpr`, `Expr`, `Rule` trait, `Cost`, `Statistics`, `Pattern`; no dependencies on other workspace crates.
+**Foundation:** `ra-core` — defines `RelExpr`, `Expr`, `Rule` trait, `Cost`, `Statistics`, `Pattern`, and the `config` module (merged from the former `ra-config` crate). No dependencies on other workspace crates.
 
-**Parsing:** `ra-parser` → `ra-core`. Handles both SQL-to-`RelExpr` conversion (`sql_to_relexpr.rs`, the largest file at ~102KB) and `.rra` literate rule file parsing (`rule_file_parser.rs`).
+**SQL Parsing:** `ra-sql-parser` — custom fork of sqlparser 0.52 at `crates/ra-sql-parser`. The library name is `sqlparser` for compatibility with downstream code.
+
+**Lime Tokenizer:** `lime-sys` (C library) + `lime-rs` (Rust bindings) — LALR(1) parser generator used by `ra-parser` for grammar-based SQL parsing.
+
+**RA Parsing:** `ra-parser` → `ra-core`. Handles both SQL-to-`RelExpr` conversion (`sql_to_relexpr.rs`) and `.rra` literate rule file parsing (`rule_file_parser.rs`).
 
 **Compilation:** `ra-compiler` → `ra-core`, `ra-parser`. Builds rule indices and the registry.
 
-**Engine:** `ra-engine` → `ra-core`, `ra-parser`, plus `egg` for e-graph equality saturation. Key files:
+**Engine:** `ra-engine` → `ra-core`, `ra-parser`, `ra-hardware`, `ra-stats-advanced`, plus `egg` for e-graph equality saturation. Key files:
 - `egraph.rs` — e-graph construction, `RelLang` s-expression language definition, optimizer loop
 - `rewrite.rs` — rule registry, rewrite application
 - `extract.rs` — cost-based plan extraction
 - `analysis.rs` — per-e-class property tracking (tables, cardinality)
 
-**Interfaces:** `ra-cli`, `ra-web` (Rocket), `ra-tui` (ratatui), `ra-wasm` sit on top of everything.
+**CLI:** `ra-cli` — command-line interface. Depends on `ra-adapters` (DuckDB, MySQL, Stoolap connectors) and `ra-metadata` (database metadata factory).
 
 ### Key Types (all in `ra-core`)
 
@@ -107,8 +135,10 @@ Parsed by `ra-parser::rule_file_parser` into `RuleFile { metadata, description, 
 
 ### Feature Flags
 
-- **`ra-engine` defaults:** `metadata`, `streaming` (timely/differential-dataflow), `file-discovery`
-- **`timeline`** — feature-gated across `ra-stats`, `ra-engine`, `ra-tui`, `ra-test-utils`; enables timeline snapshots/replay
+- **Root `ra` package:** `cli`, `experimental`, `all` (combines both)
+- **`ra-engine` defaults:** `metadata`, `streaming` (timely/differential-dataflow), `file-discovery`, `ml`
+- **`ra-engine` `ml`** — enables `ra-ml` integration (on by default)
+- **`timeline`** — feature-gated across `ra-stats-advanced`, `ra-engine`, `ra-test-utils`; enables timeline snapshots/replay
 - **`ra-core` `parquet`** — Parquet file support
 - **`ra-pg-extension`** — excluded from workspace; requires `pg_config` and PostgreSQL headers (built via pgrx)
 
@@ -124,7 +154,7 @@ Use `anyhow`/`thiserror` for error handling; avoid `.unwrap()` and `.expect()` (
 
 ```
 rules/           — 1,327+ .rra rule files (logical/, physical/, hardware/, distributed/, multi-model/)
-crates/          — 32+ Rust crates (see layers above)
+crates/          — Rust crates organized into core/cli/experimental layers (see above)
 tests/           — workspace-level integration tests
 benchmarks/      — JOB and TPC-H benchmark suites
 docs/            — VitePress documentation site (Node.js 20, npm)
@@ -137,7 +167,13 @@ xtask/           — cargo xtask build automation (docs build/serve)
 
 ## SQL Parser
 
-Uses a custom fork at `crates/sqlparser-ra` (based on sqlparser 0.52) referenced as a path dependency. Not the upstream `sqlparser` crate.
+Uses a custom fork at `crates/ra-sql-parser` (based on sqlparser 0.52) referenced as a path dependency. The package is named `ra-sql-parser` but the library name is `sqlparser` for compatibility. Not the upstream `sqlparser` crate.
+
+## Cache Architecture
+
+Cache functionality is split into two crates:
+- **`ra-cache-api`** (core layer) — trait definitions and interfaces
+- **`ra-cache-impl`** (experimental layer) — LRU/LFU/adaptive implementations
 
 ## Rust Version
 

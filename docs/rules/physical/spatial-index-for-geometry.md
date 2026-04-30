@@ -121,4 +121,4 @@ WHERE ST_Intersects(boundary, ST_MakeEnvelope(0, 0, 10, 10));
 
 - PostgreSQL: GiST indexes for PostGIS
 - MySQL: Spatial indexes on GEOMETRY columns
-- IndexType::Spatial and IndexType::GiST in ra-stats/src/index_types.rs
+- IndexType::Spatial and IndexType::GiST in ra-stats-advanced/src/index_types.rs

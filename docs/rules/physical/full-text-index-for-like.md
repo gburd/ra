@@ -121,4 +121,4 @@ SELECT * FROM users WHERE name LIKE 'John%';
 
 - PostgreSQL: Full-text search with GIN indexes
 - MySQL: FULLTEXT indexes on InnoDB/MyISAM
-- IndexType::FullText in ra-stats/src/index_types.rs
+- IndexType::FullText in ra-stats-advanced/src/index_types.rs
