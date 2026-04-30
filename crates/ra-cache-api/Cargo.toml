@@ -1,25 +1,18 @@
 [package]
-name = "ra-cache"
+name = "ra-cache-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Plan cache with LRU/LFU/adaptive eviction and statistics-driven reoptimization"
+description = "Plan cache trait definitions and types for ra"
 
 [dependencies]
 ra-core = { workspace = true }
-ra-engine = { workspace = true }
-ra-hardware = { workspace = true }
-ra-parser = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
-
-[dev-dependencies]
-proptest = { workspace = true }
 
 [lints]
 workspace = true

@@ -20,6 +20,7 @@
 
 // Re-export main types
 pub mod algebra;
+pub mod config;
 pub mod cost;
 pub mod distributed_agg;
 pub mod distribution;

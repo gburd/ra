@@ -1,20 +1,10 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
-//! Plan cache with LRU/LFU/adaptive eviction and
-//! statistics-driven reoptimization.
+//! Reference plan cache implementation with LRU/LFU/adaptive eviction
+//! and statistics-driven reoptimization.
 //!
-//! Caches optimized query plans keyed by SQL text, hardware profile,
-//! and parameter types. Detects statistics drift by comparing cached
-//! snapshots against current values and triggers reoptimization when
-//! row counts or column distributions shift beyond a configurable
-//! threshold.
-//!
-//! # Architecture
-//!
-//! - [`QueryKey`]: composite cache key (SQL + hardware + param types).
-//! - [`CachedPlan`]: plan with cost, statistics snapshot, timestamps.
-//! - [`PlanCache`]: thread-safe cache with configurable eviction.
-//! - [`EvictionPolicy`]: LRU, LFU, or adaptive strategies.
-//! - [`CacheMetrics`]: hit/miss counters and utilization stats.
+//! This crate provides a concrete [`PlanCache`] backed by an in-memory
+//! `HashMap` with configurable eviction and drift detection. For the
+//! trait definition and shared types, see `ra-cache-api`.
 
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
@@ -25,16 +15,14 @@
 #![allow(clippy::missing_errors_doc)]
 
 mod eviction;
-mod key;
-mod metrics;
-mod plan;
 mod validity;
 
-pub use eviction::EvictionPolicy;
-pub use key::QueryKey;
-pub use metrics::CacheMetrics;
-pub use plan::CachedPlan;
-pub use validity::{DriftDimension, DriftReport, DriftStatus, PlanDrift, TableDrift};
+// Re-export all API types for convenience.
+pub use ra_cache_api::{
+    CacheConfig, CacheError, CachedPlan, DriftDimension, DriftReport, DriftStatus, EvictionPolicy,
+    PlanCacheApi, PlanDrift, QueryKey, TableDrift,
+};
+pub use ra_cache_api::CacheMetrics;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -44,41 +32,6 @@ use ra_core::algebra::RelExpr;
 use ra_core::cost::{Cost, StatisticsProvider};
 use ra_core::statistics::Statistics;
 use ra_engine::Optimizer;
-use thiserror::Error;
-
-/// Errors produced by cache operations.
-#[derive(Debug, Error)]
-pub enum CacheError {
-    /// The optimizer failed during reoptimization.
-    #[error("reoptimization failed: {0}")]
-    OptimizationFailed(String),
-    /// The cache lock was poisoned.
-    #[error("cache lock poisoned")]
-    LockPoisoned,
-}
-
-/// Configuration for the plan cache.
-#[derive(Debug, Clone)]
-pub struct CacheConfig {
-    /// Maximum number of entries the cache can hold.
-    pub max_entries: usize,
-    /// Eviction policy to use when the cache is full.
-    pub eviction_policy: EvictionPolicy,
-    /// Statistics drift threshold (fraction, e.g. 0.2 = 20%).
-    /// When the row count of any referenced table changes by more
-    /// than this fraction, the cached plan is considered stale.
-    pub drift_threshold: f64,
-}
-
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self {
-            max_entries: 1024,
-            eviction_policy: EvictionPolicy::Lru,
-            drift_threshold: 0.2,
-        }
-    }
-}
 
 /// Thread-safe plan cache with configurable eviction.
 ///

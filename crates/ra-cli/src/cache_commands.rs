@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 
 use ra_adaptive::cache_adapter::{AdaptiveCacheConfig, AdaptivePlanCache};
-use ra_cache::EvictionPolicy;
+use ra_cache_impl::EvictionPolicy;
 use ra_core::cost::StatisticsProvider;
 use ra_core::statistics::Statistics;
 use ra_engine::Optimizer;
@@ -196,9 +196,9 @@ pub fn cmd_cache_drift(verbose: bool, quiet: bool) -> Result<()> {
             for (key, drift) in &report.stale_plans {
                 let sql_display = truncate(&key.sql, 50);
                 let status = match drift.status {
-                    ra_cache::DriftStatus::Fresh => "fresh".green().to_string(),
-                    ra_cache::DriftStatus::Stale => "STALE".red().bold().to_string(),
-                    ra_cache::DriftStatus::Unknown => "unknown".yellow().to_string(),
+                    ra_cache_impl::DriftStatus::Fresh => "fresh".green().to_string(),
+                    ra_cache_impl::DriftStatus::Stale => "STALE".red().bold().to_string(),
+                    ra_cache_impl::DriftStatus::Unknown => "unknown".yellow().to_string(),
                 };
 
                 eprintln!(

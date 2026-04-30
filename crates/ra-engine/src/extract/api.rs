@@ -96,6 +96,7 @@ pub fn extract_best_with_staleness<S: BuildHasher, S2: BuildHasher>(
 ///
 /// Returns an error if the extracted nodes cannot be converted
 /// back to a [`RelExpr`].
+#[cfg(feature = "ml")]
 pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
     egraph: &egg::EGraph<RelLang, RelAnalysis>,
     root: Id,

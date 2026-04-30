@@ -39,6 +39,7 @@ pub struct DuckDBAdapter {
     connection_string: Option<String>,
     #[cfg(feature = "duckdb")]
     connection: Option<Mutex<Connection>>,
+    #[cfg_attr(not(feature = "duckdb"), expect(dead_code))]
     facts: Mutex<DuckDBFacts>,
 }
 
@@ -68,6 +69,7 @@ struct DuckDBFacts {
     schemas: HashMap<String, ra_core::facts::TableInfo>,
     #[expect(dead_code, reason = "adapter scaffolding")]
     hardware: ra_core::facts::HardwareProfile,
+    #[cfg_attr(not(feature = "duckdb"), expect(dead_code))]
     features: HashMap<String, bool>,
 }
 
@@ -447,6 +449,7 @@ fn row_value_to_json(row: &Row, idx: usize) -> Result<serde_json::Value, duckdb:
 }
 
 /// Simple base64 encoding.
+#[cfg(feature = "duckdb")]
 fn base64_encode(data: &[u8]) -> String {
     const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
@@ -786,6 +789,7 @@ impl FactsProvider for DuckDBAdapter {
     }
 }
 
+#[cfg(feature = "duckdb")]
 static DEFAULT_HARDWARE: ra_core::facts::HardwareProfile = ra_core::facts::HardwareProfile {
     cpu_cores: 8,
     available_memory: 8 * 1024 * 1024 * 1024,

@@ -13,6 +13,8 @@ mod scalar;
 #[cfg(test)]
 mod tests;
 
-pub use api::{extract_best, extract_best_with_cardinality, extract_best_with_staleness};
+pub use api::{extract_best, extract_best_with_staleness};
+#[cfg(feature = "ml")]
+pub use api::extract_best_with_cardinality;
 pub use convert::rec_expr_to_rel_expr;
 pub use cost::RelCostFn;

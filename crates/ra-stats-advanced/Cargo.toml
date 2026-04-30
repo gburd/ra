@@ -1,12 +1,15 @@
 [package]
-name = "ra-stats"
-description = "Statistics abstraction system for query optimization with accuracy and staleness modeling"
+name = "ra-stats-advanced"
+description = "Advanced statistics system for query optimization with accuracy, staleness, and streaming analytics"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[lib]
+name = "ra_stats"
 
 [features]
 default = []

@@ -81,8 +81,11 @@ impl std::fmt::Debug for MySQLAdapter {
 /// Internal storage for gathered facts.
 #[derive(Debug, Clone)]
 struct MySQLFacts {
+    #[cfg_attr(not(feature = "mysql"), expect(dead_code))]
     table_stats: HashMap<String, ra_core::CoreTableStats>,
+    #[cfg_attr(not(feature = "mysql"), expect(dead_code))]
     column_stats: HashMap<(String, String), ra_core::ColumnStats>,
+    #[cfg_attr(not(feature = "mysql"), expect(dead_code))]
     schemas: HashMap<String, ra_core::facts::TableInfo>,
     #[expect(dead_code, reason = "adapter scaffolding")]
     hardware: ra_core::CoreHardwareProfile,
@@ -427,6 +430,7 @@ impl MySQLAdapter {
     }
 
     /// Convert `ra_stats::types::TableStats` to `ra_core::CoreTableStats`.
+    #[cfg(feature = "mysql")]
     fn to_core_table_stats(stats: &TableStats) -> ra_core::CoreTableStats {
         ra_core::CoreTableStats {
             row_count: stats.row_count as f64,
@@ -442,6 +446,7 @@ impl MySQLAdapter {
     }
 
     /// Convert `ra_stats::types::ColumnStats` to `ra_core::ColumnStats`.
+    #[cfg(feature = "mysql")]
     fn to_core_column_stats(stats: &ColumnStats) -> ra_core::ColumnStats {
         ra_core::ColumnStats {
             distinct_count: stats.ndv as f64,
@@ -457,6 +462,7 @@ impl MySQLAdapter {
     }
 
     /// Map `MySQL` type names to core `DataType`.
+    #[cfg(any(feature = "mysql", test))]
     fn mysql_to_core_type(mysql_type: &str) -> ra_core::DataType {
         let lower = mysql_type.to_lowercase();
         match lower.as_str() {
@@ -528,6 +534,7 @@ fn mysql_value_to_string(row: &mysql::Row, idx: usize) -> Option<String> {
 }
 
 /// Simple base64 encoding.
+#[cfg(any(feature = "mysql", test))]
 fn base64_encode(data: &[u8]) -> String {
     const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();

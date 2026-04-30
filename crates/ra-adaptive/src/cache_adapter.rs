@@ -1,6 +1,6 @@
 //! Adaptive plan cache with background statistics polling.
 //!
-//! Wraps [`ra_cache::PlanCache`] with automatic reoptimization when
+//! Wraps [`ra_cache_impl::PlanCache`] with automatic reoptimization when
 //! table statistics drift beyond configurable thresholds. The
 //! [`AdaptivePlanCache`] provides a `get_or_optimize` interface that
 //! transparently returns cached plans or runs the optimizer on cache
@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ra_cache::{
+use ra_cache_impl::{
     CacheConfig, CacheMetrics, CachedPlan, DriftReport, EvictionPolicy, PlanCache, QueryKey,
 };
 use ra_core::algebra::RelExpr;
@@ -33,7 +33,7 @@ use thiserror::Error;
 pub enum AdaptiveCacheError {
     /// A cache operation failed.
     #[error("cache error: {0}")]
-    Cache(#[from] ra_cache::CacheError),
+    Cache(#[from] ra_cache_impl::CacheError),
     /// SQL parsing failed.
     #[error("parse error: {0}")]
     Parse(String),

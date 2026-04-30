@@ -2,6 +2,12 @@
 //!
 //! Tests load each example timeline, validate parsing, run optimization through
 //! all snapshots, and verify expectations.
+#![allow(
+    clippy::useless_vec,
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used
+)]
 
 use ra_test_utils::timeline_helpers::{
     assert_cardinality_within_tolerance, assert_cost_reduction, assert_plan_contains,

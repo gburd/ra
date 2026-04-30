@@ -1,6 +1,17 @@
+[package]
+name = "ra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Relational algebra query optimization engine"
+
 [workspace]
 resolver = "2"
 members = [
+    # Core layer (always available)
     "crates/lime-sys",
     "crates/lime-rs",
     "crates/ra-core",
@@ -8,23 +19,84 @@ members = [
     "crates/ra-compiler",
     "crates/ra-engine",
     "crates/ra-dialect",
-    "crates/ra-cli",
-    "crates/ra-adaptive",
-    "crates/ra-ml",
     "crates/ra-hardware",
-    "crates/ra-stats",
-    "crates/ra-metadata",
-    "crates/ra-config",
-    "crates/ra-cache",
+    "crates/ra-stats-advanced",
+    "crates/ra-cache-api",
+    "crates/ra-sql-parser",
+    # CLI layer (research & education)
+    "crates/ra-cli",
     "crates/ra-adapters",
+    "crates/ra-metadata",
+    # Experimental layer (research innovations)
+    "crates/ra-ml",
+    "crates/ra-cache-impl",
+    "crates/ra-adaptive",
     "crates/ra-test-utils",
-    "crates/sqlparser-ra",
+    "crates/ra-quel-parser",
+]
+default-members = [
+    # Core layer: cargo build builds only these by default
+    "crates/lime-sys",
+    "crates/lime-rs",
+    "crates/ra-core",
+    "crates/ra-parser",
+    "crates/ra-compiler",
+    "crates/ra-engine",
+    "crates/ra-dialect",
+    "crates/ra-hardware",
+    "crates/ra-stats-advanced",
+    "crates/ra-cache-api",
+    "crates/ra-sql-parser",
 ]
 # Excluded from workspace build (require special setup):
 # - ra-pg-extension: requires pg_config and PostgreSQL headers
 exclude = [
     "crates/ra-pg-extension",
 ]
+
+[features]
+default = []
+# CLI layer: research & educational tooling
+cli = [
+    "dep:ra-adapters",
+    "dep:ra-metadata",
+]
+# Experimental layer: research innovations
+experimental = [
+    "dep:ra-ml",
+    "dep:ra-cache-impl",
+    "dep:ra-adaptive",
+    "dep:ra-test-utils",
+    "dep:ra-quel-parser",
+]
+# Build everything
+all = ["cli", "experimental"]
+
+[dependencies]
+# Core (always linked into the facade)
+ra-core = { workspace = true }
+ra-parser = { workspace = true }
+ra-compiler = { workspace = true }
+ra-engine = { workspace = true }
+ra-dialect = { workspace = true }
+ra-hardware = { workspace = true }
+ra-stats = { workspace = true }
+ra-cache-api = { workspace = true }
+# CLI layer (optional — ra-cli is a binary, build with: cargo build -p ra-cli)
+ra-adapters = { workspace = true, optional = true }
+ra-metadata = { workspace = true, optional = true }
+# Experimental layer (optional)
+ra-ml = { workspace = true, optional = true }
+ra-cache-impl = { workspace = true, optional = true }
+ra-adaptive = { workspace = true, optional = true }
+ra-test-utils = { workspace = true, optional = true }
+ra-quel-parser = { workspace = true, optional = true }
+
+[dev-dependencies]
+ra-test-utils = { workspace = true, features = ["timeline"] }
+
+[lints]
+workspace = true
 
 [workspace.package]
 version = "0.2.0"
@@ -45,9 +117,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Parsing
-serde_yaml = "0.9"
+serde_yml = "0.0.12"
 pulldown-cmark = "0.9"
-sqlparser = { path = "crates/sqlparser-ra", version = "0.52" }
+sqlparser = { package = "ra-sql-parser", path = "crates/ra-sql-parser", version = "0.52" }
 
 # Optimization
 egg = "0.11"
@@ -61,7 +133,7 @@ colored = "2.1"
 libc = "0.2"
 
 # Async
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros"] }
 
 # Testing
 proptest = "1.5"
@@ -69,7 +141,6 @@ criterion = "0.5"
 assert_cmd = "2.2"
 predicates = "3.1"
 tempfile = "3.27"
-pretty_assertions = "1.4"
 chrono = "0.4"
 
 # Utilities
@@ -80,7 +151,6 @@ parquet = "53.4"
 
 # Random number generation
 rand = { version = "0.8", features = ["getrandom"] }
-getrandom = "0.2"
 
 # Workspace crates
 ra-core = { path = "crates/ra-core" }
@@ -91,12 +161,14 @@ ra-dialect = { path = "crates/ra-dialect" }
 ra-adaptive = { path = "crates/ra-adaptive" }
 ra-ml = { path = "crates/ra-ml" }
 ra-hardware = { path = "crates/ra-hardware" }
-ra-stats = { path = "crates/ra-stats" }
+ra-stats = { package = "ra-stats-advanced", path = "crates/ra-stats-advanced" }
 ra-metadata = { path = "crates/ra-metadata" }
-ra-config = { path = "crates/ra-config" }
-ra-cache = { path = "crates/ra-cache" }
+ra-cache-api = { path = "crates/ra-cache-api" }
+ra-cache-impl = { path = "crates/ra-cache-impl" }
 ra-adapters = { path = "crates/ra-adapters" }
 ra-test-utils = { path = "crates/ra-test-utils" }
+ra-quel-parser = { path = "crates/ra-quel-parser" }
+ra-cli = { path = "crates/ra-cli" }
 lime-sys = { path = "crates/lime-sys" }
 lime-rs = { path = "crates/lime-rs" }
 postgres = "0.19"

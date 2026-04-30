@@ -182,6 +182,7 @@ impl StoolapAdapter {
 impl StoolapAdapter {
     /// Convert `ra_stats::types::TableStats` to
     /// `ra_core::CoreTableStats`.
+    #[cfg(any(feature = "stoolap", test))]
     fn to_core_table_stats(stats: &TableStats) -> ra_core::CoreTableStats {
         ra_core::CoreTableStats {
             row_count: stats.row_count as f64,
@@ -198,6 +199,7 @@ impl StoolapAdapter {
 
     /// Convert `ra_stats::types::ColumnStats` to
     /// `ra_core::ColumnStats`.
+    #[cfg(any(feature = "stoolap", test))]
     fn to_core_column_stats(stats: &ColumnStats) -> ra_core::ColumnStats {
         ra_core::ColumnStats {
             distinct_count: stats.ndv as f64,
@@ -213,6 +215,7 @@ impl StoolapAdapter {
     }
 
     /// Map Stoolap type names to core `DataType`.
+    #[cfg(any(feature = "stoolap", test))]
     fn stoolap_to_core_type(st_type: &str) -> ra_core::DataType {
         match st_type.to_lowercase().as_str() {
             "integer" | "int" | "bigint" | "smallint" | "tinyint" => ra_core::DataType::Integer,
@@ -236,6 +239,7 @@ impl StoolapAdapter {
     }
 
     /// Map index type string to the core `IndexType` enum.
+    #[cfg(any(feature = "stoolap", test))]
     fn index_type_to_core(idx_type: &str) -> ra_core::facts::IndexType {
         match idx_type.to_lowercase().as_str() {
             "bitmap" => ra_core::facts::IndexType::Bitmap,

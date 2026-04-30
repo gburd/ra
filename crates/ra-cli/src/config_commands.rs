@@ -6,7 +6,7 @@
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
-use ra_config::{config_path, ConfigLoader, RaConfig};
+use ra_core::config::{config_path, ConfigLoader, RaConfig};
 
 /// Execute `config list` -- show all current settings.
 pub fn cmd_config_list(quiet: bool) -> Result<()> {

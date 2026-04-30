@@ -11,7 +11,7 @@
 
 [package]
 edition = "2021"
-name = "sqlparser"
+name = "ra-sql-parser"
 version = "0.52.0"
 authors = ["Apache DataFusion <dev@datafusion.apache.org>"]
 build = false

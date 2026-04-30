@@ -8,18 +8,19 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["metadata", "streaming", "file-discovery"]
+default = ["metadata", "streaming", "file-discovery", "ml"]
 metadata = ["ra-metadata"]
 streaming = ["timely", "differential-dataflow"]
 file-discovery = ["walkdir"]
 timeline = ["ra-stats/timeline"]
+ml = ["ra-ml"]
 
 [dependencies]
 anyhow = { workspace = true }
 ra-core = { workspace = true }
 ra-hardware = { workspace = true }
 ra-metadata = { workspace = true, optional = true }
-ra-ml = { workspace = true }
+ra-ml = { workspace = true, optional = true }
 ra-stats = { workspace = true }
 egg = { workspace = true }
 serde = { workspace = true }
@@ -30,8 +31,7 @@ timely = { workspace = true, optional = true }
 differential-dataflow = { workspace = true, optional = true }
 toml = { workspace = true }
 rand = { workspace = true }
-getrandom = { workspace = true }
-serde_yaml = { workspace = true }
+serde_yml = { workspace = true }
 walkdir = { version = "2", optional = true }
 chrono = { workspace = true }
 ra-parser = { path = "../ra-parser" }

@@ -39,6 +39,7 @@
 pub mod adaptive_calibration;
 pub mod analysis;
 pub mod beam_search;
+#[cfg(feature = "ml")]
 pub mod cardinality_cost;
 pub mod citus_optimizer;
 pub mod column_pruning;
@@ -73,6 +74,7 @@ pub mod large_join;
 pub mod lazy_rules;
 pub mod left_deep;
 pub mod memo;
+#[cfg(feature = "ml")]
 pub mod ml_integration;
 pub mod mv_matching;
 pub mod mv_rewrite;
@@ -126,6 +128,7 @@ pub use adaptive_calibration::{
 };
 pub use analysis::RelAnalysis;
 pub use beam_search::{BeamSearchConfig, BeamSearchStats, BeamSearchTracker};
+#[cfg(feature = "ml")]
 pub use cardinality_cost::CardinalityAwareCostFn;
 pub use citus_optimizer::{
     analyze_shard_pruning, columnar_scan_cost_factor, CitusMetadata, CitusOptimizedPlan,
@@ -170,10 +173,9 @@ pub use egraph::{
 pub use executors::{
     LateralJoinExecutor, MultiUnnestExecutor, TableFunctionExecutor, UnnestExecutor,
 };
-pub use extract::{
-    extract_best, extract_best_with_cardinality, extract_best_with_staleness, rec_expr_to_rel_expr,
-    RelCostFn,
-};
+pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
+#[cfg(feature = "ml")]
+pub use extract::extract_best_with_cardinality;
 pub use facts_context::{FactsContext, FactsContextBuilder};
 pub use federated_cost::FederatedCostModel;
 pub use federated_optimizer::{FederatedAnalysis, FederatedError, FederatedOptimizer};
