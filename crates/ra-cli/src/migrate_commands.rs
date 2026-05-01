@@ -650,7 +650,7 @@ fn build_migrated_content(
     let mut metadata = rule_file.metadata.clone();
     metadata.preconditions = preconditions.to_vec();
 
-    let yaml = serde_yaml::to_string(&metadata).context("Failed to serialize metadata to YAML")?;
+    let yaml = serde_yml::to_string(&metadata).context("Failed to serialize metadata to YAML")?;
 
     // Reconstruct file
     let mut result = String::new();

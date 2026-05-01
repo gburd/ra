@@ -49,6 +49,7 @@ use cli::{Cli, Commands};
 fn main() {
     if let Err(e) = run_main() {
         let debug_level = std::env::var("DEBUG_RA")
+            .or_else(|_| std::env::var("RA_DEBUG"))
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(0);
@@ -82,7 +83,17 @@ fn run_main() -> Result<()> {
     } else if is_test_cmd {
         "ra_cli=info,warn".to_owned()
     } else {
-        "info".to_owned()
+        // Check DEBUG_RA or RA_DEBUG environment variable for debug level
+        let debug_level = std::env::var("DEBUG_RA")
+            .or_else(|_| std::env::var("RA_DEBUG"))
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok());
+
+        match debug_level {
+            Some(0) | None => "info".to_owned(),
+            Some(1) => "debug".to_owned(),
+            Some(_) => "trace".to_owned(), // Level 2+ enables trace
+        }
     };
     tracing_subscriber::fmt()
         .with_env_filter(&filter)

@@ -323,8 +323,8 @@ fn optimize_single_snapshot(
     let mut optimizer = Optimizer::with_config(optimizer_config);
     optimizer.set_hardware_profile(hardware.clone());
 
-    // Estimate initial cost - use simple heuristic for now
-    let initial_cost = 1000.0; // TODO: Improve cost estimation
+    // Estimate initial cost based on query complexity
+    let initial_cost = estimate_query_complexity(&rel_expr);
 
     // Optimize with tracking
     let start = Instant::now();
@@ -549,6 +549,29 @@ fn output_toml(timeline_name: &str, results: &[SnapshotResult]) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Estimate initial query complexity for cost comparison.
+/// Returns a rough cost estimate based on query structure.
+fn estimate_query_complexity(rel_expr: &ra_core::algebra::RelExpr) -> f64 {
+    use ra_core::algebra::RelExpr;
+
+    match rel_expr {
+        RelExpr::Scan { .. } => 10.0,
+        RelExpr::Filter { input, .. } => 20.0 + estimate_query_complexity(input),
+        RelExpr::Project { input, .. } => 15.0 + estimate_query_complexity(input),
+        RelExpr::Join { left, right, .. } => {
+            50.0 + estimate_query_complexity(left) + estimate_query_complexity(right)
+        }
+        RelExpr::Aggregate { input, .. } => 40.0 + estimate_query_complexity(input),
+        RelExpr::Sort { input, .. } => 30.0 + estimate_query_complexity(input),
+        RelExpr::Limit { input, .. } => 5.0 + estimate_query_complexity(input),
+        RelExpr::Distinct { input } => 25.0 + estimate_query_complexity(input),
+        RelExpr::Union { left, right, .. } => {
+            35.0 + estimate_query_complexity(left) + estimate_query_complexity(right)
+        }
+        _ => 100.0, // Default for complex operations
+    }
 }
 
 /// Launch TUI visualization for timeline.
