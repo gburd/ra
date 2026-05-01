@@ -62,6 +62,9 @@ tla/states/
 # External repositories (should not be committed as gitlinks)
 /django/
 
+# Memory/agent state directories
+.memelord/
+
 # Agent working files (status, progress tracking)
 /agent/
 **/TASK*_PROGRESS.md
