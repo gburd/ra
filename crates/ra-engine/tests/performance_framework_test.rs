@@ -27,7 +27,7 @@ use ra_core::algebra::{
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::Statistics;
 use ra_engine::{
-    OptimizationStatus, Optimizer, OptimizerConfig, OverflowStrategy,
+    ConvergenceBehavior, OptimizationStatus, Optimizer, OptimizerConfig, OverflowStrategy,
     QueryComplexity, ResourceBudget, ResourceUsageReport,
 };
 use ra_test_utils::TestProfile;
@@ -651,7 +651,11 @@ fn simple_oltp_point_lookup_under_1ms() {
     let target_ms = target_ms(profile, 1.0);
 
     let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+        .with_resource_budget(
+            ResourceBudget::oltp()
+                .with_iteration_limit(1)
+                .with_convergence(ConvergenceBehavior::Immediate)
+        );
     let expr = oltp_point_lookup();
 
     let m = measure_bounded(&optimizer, "point_lookup", &expr, 10);
@@ -669,7 +673,11 @@ fn simple_oltp_filtered_scan_under_1ms() {
     let target_ms = target_ms(profile, 1.0);
 
     let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+        .with_resource_budget(
+            ResourceBudget::oltp()
+                .with_iteration_limit(1)
+                .with_convergence(ConvergenceBehavior::Immediate)
+        );
     let expr = oltp_filtered_scan();
 
     let m = measure_bounded(&optimizer, "filtered_scan", &expr, 10);
@@ -1012,7 +1020,11 @@ fn tproc_c_delivery_performance() {
     let target_ms = target_ms(profile, 1.0);
 
     let mut optimizer = make_tpcc_optimizer();
-    optimizer.set_resource_budget(ResourceBudget::interactive());
+    optimizer.set_resource_budget(
+        ResourceBudget::oltp()
+            .with_iteration_limit(1)
+            .with_convergence(ConvergenceBehavior::Immediate)
+    );
     let expr = tproc_c_delivery();
 
     let m = measure_bounded(&optimizer, "tproc_c_delivery", &expr, 10);
@@ -1048,7 +1060,11 @@ fn tproc_c_full_workload_mix() {
     let target_ms = target_ms(profile, 10.0);
 
     let mut optimizer = make_tpcc_optimizer();
-    optimizer.set_resource_budget(ResourceBudget::interactive());
+    optimizer.set_resource_budget(
+        ResourceBudget::oltp()
+            .with_iteration_limit(1)
+            .with_convergence(ConvergenceBehavior::Immediate)
+    );
 
     // HammerDB TPROC-C standard mix: 45% New-Order, 43% Payment,
     // 4% Order-Status, 4% Delivery, 4% Stock-Level

@@ -16,8 +16,26 @@ pub fn format_sql_error(
 
     if let (Some(line), Some(col)) = (line_num, col_num) {
         format_error_with_location(sql, line, col, &error_msg)
+    } else if let Some(position) = extract_position(&error_msg) {
+        // Handle "at position X" format by converting to line/column
+        let (line, col) = position_to_line_col(sql, position);
+        format_error_with_location(sql, line, col, &error_msg)
     } else {
         format_error_with_context(sql, &error_msg)
+    }
+}
+
+/// Extract position from "at position X" error messages.
+fn extract_position(error_msg: &str) -> Option<usize> {
+    if let Some(pos_start) = error_msg.find("at position ") {
+        let rest = &error_msg[pos_start + 12..]; // "at position ".len() = 12
+        if let Some(end) = rest.find(|c: char| !c.is_ascii_digit()) {
+            rest[..end].parse().ok()
+        } else {
+            rest.parse().ok()
+        }
+    } else {
+        None
     }
 }
 
@@ -28,6 +46,7 @@ fn extract_error_position(
     let mut line = None;
     let mut col = None;
 
+    // Handle "Line: X, Column: Y" format
     if let Some(line_start) = error_msg.find("Line:") {
         if let Some(line_end) = error_msg[line_start..].find(',') {
             if let Ok(num) = error_msg
@@ -48,6 +67,26 @@ fn extract_error_position(
             }
         } else if let Ok(num) = rest.trim().parse::<usize>() {
             col = Some(num);
+        }
+    }
+
+    (line, col)
+}
+
+/// Convert position to line and column given the SQL text.
+fn position_to_line_col(sql: &str, position: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut col = 1;
+
+    for (i, ch) in sql.chars().enumerate() {
+        if i >= position {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
         }
     }
 
@@ -162,6 +201,7 @@ fn format_error_with_location(
     let line_idx = line_num.saturating_sub(1);
 
     let debug_level = std::env::var("DEBUG_RA")
+        .or_else(|_| std::env::var("RA_DEBUG"))
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);
@@ -292,6 +332,7 @@ fn format_error_with_context(
     }
 
     let debug_level = std::env::var("DEBUG_RA")
+        .or_else(|_| std::env::var("RA_DEBUG"))
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);

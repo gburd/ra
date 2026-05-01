@@ -22,6 +22,7 @@
 // Test-oriented crate: property tests legitimately use expect/unwrap.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
+pub mod dynamic_facts;
 pub mod generator;
 pub mod minimizer;
 pub mod properties;
@@ -29,6 +30,7 @@ pub mod properties;
 pub mod reference;
 pub mod storyline;
 
+pub use dynamic_facts::{DatabaseScenario, DynamicFactsProvider, EnhancedPropertyValidator};
 pub use generator::SqlGenerator;
 pub use minimizer::TestMinimizer;
 pub use properties::{OptimizerProperty, PropertyValidator};
