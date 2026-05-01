@@ -9,15 +9,17 @@ use std::path::Path;
 use crate::connector::MetadataResult;
 use crate::error::MetadataError;
 use crate::explain::ExplainPlan;
-use crate::mysql::MySqlConnector;
-use crate::postgres::PostgresConnector;
 use crate::schema::{DatabaseKind, SchemaInfo, TableStats};
+
+#[cfg(feature = "mysql-support")]
+use crate::mysql::MySqlConnector;
+#[cfg(feature = "postgres-support")]
+use crate::postgres::PostgresConnector;
+#[cfg(feature = "sqlite-support")]
 use crate::sqlite::SqliteConnector;
 
 #[cfg(feature = "duckdb-support")]
 use crate::duckdb::DuckDBConnector;
-#[cfg(feature = "monetdb-support")]
-use crate::monetdb::MonetDBConnector;
 #[cfg(feature = "oracle-support")]
 use crate::oracle::OracleConnector;
 #[cfg(feature = "sqlserver-support")]
@@ -29,11 +31,14 @@ use crate::sqlserver::SqlServerConnector;
 /// this owns the connection mutably and can perform all operations
 /// without the `_mut` suffix workaround.
 pub enum AnyConnector {
-    /// `PostgreSQL` backend.
+    /// `PostgreSQL` backend (requires `postgres-support` feature).
+    #[cfg(feature = "postgres-support")]
     Postgres(PostgresConnector),
-    /// `MySQL` backend.
+    /// `MySQL` backend (requires `mysql-support` feature).
+    #[cfg(feature = "mysql-support")]
     MySql(MySqlConnector),
-    /// `SQLite` backend.
+    /// `SQLite` backend (requires `sqlite-support` feature).
+    #[cfg(feature = "sqlite-support")]
     SQLite(SqliteConnector),
     /// `DuckDB` backend (requires `duckdb-support` feature).
     #[cfg(feature = "duckdb-support")]
@@ -44,17 +49,17 @@ pub enum AnyConnector {
     /// Oracle backend (requires `oracle-support` feature).
     #[cfg(feature = "oracle-support")]
     Oracle(OracleConnector),
-    /// `MonetDB` backend (requires `monetdb-support` feature).
-    #[cfg(feature = "monetdb-support")]
-    MonetDB(MonetDBConnector),
 }
 
 impl AnyConnector {
     /// Return the database kind.
     pub fn kind(&self) -> DatabaseKind {
         match self {
+            #[cfg(feature = "postgres-support")]
             Self::Postgres(_) => DatabaseKind::PostgreSQL,
+            #[cfg(feature = "mysql-support")]
             Self::MySql(_) => DatabaseKind::MySQL,
+            #[cfg(feature = "sqlite-support")]
             Self::SQLite(_) => DatabaseKind::SQLite,
             #[cfg(feature = "duckdb-support")]
             Self::DuckDB(_) => DatabaseKind::DuckDB,
@@ -62,8 +67,6 @@ impl AnyConnector {
             Self::SqlServer(_) => DatabaseKind::SqlServer,
             #[cfg(feature = "oracle-support")]
             Self::Oracle(_) => DatabaseKind::Oracle,
-            #[cfg(feature = "monetdb-support")]
-            Self::MonetDB(_) => DatabaseKind::MonetDB,
         }
     }
 
@@ -74,8 +77,11 @@ impl AnyConnector {
     /// Returns `MetadataError` if catalog queries fail.
     pub fn gather_schema(&mut self) -> MetadataResult<SchemaInfo> {
         match self {
+            #[cfg(feature = "postgres-support")]
             Self::Postgres(c) => c.gather_schema_mut(),
+            #[cfg(feature = "mysql-support")]
             Self::MySql(c) => c.gather_schema_mut(),
+            #[cfg(feature = "sqlite-support")]
             Self::SQLite(c) => crate::connector::DatabaseConnector::gather_schema(c),
             #[cfg(feature = "duckdb-support")]
             Self::DuckDB(c) => c.gather_schema_mut(),
@@ -83,8 +89,6 @@ impl AnyConnector {
             Self::SqlServer(c) => c.gather_schema_mut(),
             #[cfg(feature = "oracle-support")]
             Self::Oracle(c) => c.gather_schema_mut(),
-            #[cfg(feature = "monetdb-support")]
-            Self::MonetDB(c) => c.gather_schema_mut(),
         }
     }
 
@@ -95,8 +99,11 @@ impl AnyConnector {
     /// Returns `MetadataError` if statistics queries fail.
     pub fn gather_statistics(&mut self, table: &str) -> MetadataResult<TableStats> {
         match self {
+            #[cfg(feature = "postgres-support")]
             Self::Postgres(c) => c.gather_statistics_mut(table),
+            #[cfg(feature = "mysql-support")]
             Self::MySql(c) => c.gather_statistics_mut(table),
+            #[cfg(feature = "sqlite-support")]
             Self::SQLite(c) => crate::connector::DatabaseConnector::gather_statistics(c, table),
             #[cfg(feature = "duckdb-support")]
             Self::DuckDB(c) => c.gather_statistics_mut(table),
@@ -104,8 +111,6 @@ impl AnyConnector {
             Self::SqlServer(c) => c.gather_statistics_mut(table),
             #[cfg(feature = "oracle-support")]
             Self::Oracle(c) => c.gather_statistics_mut(table),
-            #[cfg(feature = "monetdb-support")]
-            Self::MonetDB(c) => c.gather_statistics_mut(table),
         }
     }
 
@@ -117,8 +122,11 @@ impl AnyConnector {
     /// parsing fails.
     pub fn explain_query(&mut self, sql: &str) -> MetadataResult<ExplainPlan> {
         match self {
+            #[cfg(feature = "postgres-support")]
             Self::Postgres(c) => c.explain_query_mut(sql),
+            #[cfg(feature = "mysql-support")]
             Self::MySql(c) => c.explain_query_mut(sql),
+            #[cfg(feature = "sqlite-support")]
             Self::SQLite(c) => crate::connector::DatabaseConnector::explain_query(c, sql),
             #[cfg(feature = "duckdb-support")]
             Self::DuckDB(c) => c.explain_query_mut(sql),
@@ -126,8 +134,6 @@ impl AnyConnector {
             Self::SqlServer(c) => c.explain_query_mut(sql),
             #[cfg(feature = "oracle-support")]
             Self::Oracle(c) => c.explain_query_mut(sql),
-            #[cfg(feature = "monetdb-support")]
-            Self::MonetDB(c) => c.explain_query_mut(sql),
         }
     }
 }
@@ -145,24 +151,25 @@ impl AnyConnector {
 /// - `sqlserver://` or `mssql://` -- SQL Server (requires
 ///   `sqlserver-support` feature)
 /// - `oracle://` -- Oracle (requires `oracle-support` feature)
-/// - `monetdb://` -- `MonetDB` (requires `monetdb-support`
-///   feature)
 ///
 /// # Errors
 ///
 /// Returns `MetadataError::Connection` if the scheme is
 /// unrecognized or the connection fails.
 pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
+    #[cfg(feature = "postgres-support")]
     if url.starts_with("postgresql://") || url.starts_with("postgres://") {
         let connector = PostgresConnector::connect(url)?;
         return Ok(AnyConnector::Postgres(connector));
     }
 
+    #[cfg(feature = "mysql-support")]
     if url.starts_with("mysql://") {
         let connector = MySqlConnector::connect(url)?;
         return Ok(AnyConnector::MySql(connector));
     }
 
+    #[cfg(feature = "sqlite-support")]
     if url.starts_with("sqlite://") {
         let path = url.strip_prefix("sqlite://").unwrap_or(url);
         let connector = if path == ":memory:" {
@@ -173,6 +180,7 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
         return Ok(AnyConnector::SQLite(connector));
     }
 
+    #[cfg(feature = "sqlite-support")]
     if url == ":memory:" {
         let connector = SqliteConnector::open_in_memory()?;
         return Ok(AnyConnector::SQLite(connector));
@@ -207,12 +215,7 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
         return Ok(AnyConnector::Oracle(connector));
     }
 
-    #[cfg(feature = "monetdb-support")]
-    if url.starts_with("monetdb://") {
-        let connector = MonetDBConnector::connect(url)?;
-        return Ok(AnyConnector::MonetDB(connector));
-    }
-
+    #[cfg(feature = "sqlite-support")]
     if has_sqlite_extension(url) {
         let connector = SqliteConnector::connect(url)?;
         return Ok(AnyConnector::SQLite(connector));
@@ -223,7 +226,7 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
             "unrecognized database URL: {url}. \
              Expected postgresql://, mysql://, sqlite://, \
              duckdb://, sqlserver://, oracle://, \
-             monetdb://, or a .db/.sqlite/.sqlite3 file path"
+             or a .db/.sqlite/.sqlite3 file path"
         ),
     })
 }

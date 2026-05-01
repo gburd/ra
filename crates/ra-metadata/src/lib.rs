@@ -2,7 +2,7 @@
 //!
 //! Provides a uniform interface for gathering schema metadata,
 //! statistics, and EXPLAIN plans from `PostgreSQL`, `MySQL`, `SQLite`,
-//! and optionally `DuckDB`, SQL Server, Oracle, and `MonetDB`.
+//! and optionally `DuckDB`, SQL Server, and Oracle.
 //!
 //! - [`connector`]: `DatabaseConnector` trait.
 //! - [`schema`]: Schema types (`SchemaInfo`, `TableInfo`, `ColumnInfo`, etc.).
@@ -15,7 +15,6 @@
 //! - `duckdb-support`: `DuckDB` via the `duckdb` crate.
 //! - `sqlserver-support`: SQL Server via the `tiberius` crate.
 //! - `oracle-support`: Oracle via the `oracle` crate.
-//! - `monetdb-support`: `MonetDB` via the `odbc-api` crate.
 
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
@@ -33,9 +32,12 @@ pub mod error;
 pub mod explain;
 pub mod explain_gen;
 pub mod factory;
+#[cfg(feature = "mysql-support")]
 pub mod mysql;
+#[cfg(feature = "postgres-support")]
 pub mod postgres;
 pub mod schema;
+#[cfg(feature = "sqlite-support")]
 pub mod sqlite;
 
 #[cfg(feature = "duckdb-support")]
@@ -46,9 +48,6 @@ pub mod sqlserver;
 
 #[cfg(feature = "oracle-support")]
 pub mod oracle;
-
-#[cfg(feature = "monetdb-support")]
-pub mod monetdb;
 
 pub use connector::{DatabaseConnector, MetadataResult};
 pub use error::MetadataError;

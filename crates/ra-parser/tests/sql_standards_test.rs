@@ -203,7 +203,10 @@ fn test_sql_compliance_matrix() {
     // Not a runtime test, but serves as documentation
 
     #[expect(dead_code, reason = "documentation struct")]
-    #[expect(clippy::struct_excessive_bools, reason = "documentation struct mapping standards to support flags")]
+    #[expect(
+        clippy::struct_excessive_bools,
+        reason = "documentation struct mapping standards to support flags"
+    )]
     struct DatabaseCompliance {
         name: &'static str,
         sql_92: bool,

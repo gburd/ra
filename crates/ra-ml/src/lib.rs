@@ -53,12 +53,18 @@
 //! 5. Load in Rust with [`nn::FeedForwardNet::from_json`]
 
 #![warn(missing_docs)]
-#![allow(non_local_definitions)] // Abomonation derive macro generates this warning
+#![cfg_attr(
+    feature = "streaming",
+    allow(non_local_definitions) // Abomonation derive macro generates this warning
+)]
 
+#[cfg(feature = "streaming")]
 pub mod belief_network;
 pub mod estimator;
 pub mod features;
 pub mod nn;
+#[cfg(feature = "streaming")]
 pub mod storage;
+#[cfg(feature = "streaming")]
 pub mod streaming;
 pub mod training;
