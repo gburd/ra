@@ -8,16 +8,20 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = []
+default = ["postgres-support", "mysql-support", "sqlite-support"]
+postgres-support = ["dep:postgres"]
+mysql-support = ["dep:mysql"]
+sqlite-support = ["dep:rusqlite"]
 duckdb-support = ["duckdb"]
 sqlserver-support = ["tiberius", "tokio", "tokio-util", "futures-util"]
 oracle-support = ["oracle"]
-monetdb-support = ["odbc-api"]
 all-databases = [
+    "postgres-support",
+    "mysql-support",
+    "sqlite-support",
     "duckdb-support",
     "sqlserver-support",
     "oracle-support",
-    "monetdb-support",
 ]
 
 [dependencies]
@@ -26,9 +30,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-postgres = { version = "0.19", features = ["with-serde_json-1"] }
-mysql = "28"
-rusqlite = { version = "0.39", features = ["bundled"] }
+postgres = { version = "0.19", features = ["with-serde_json-1"], optional = true }
+mysql = { version = "28", optional = true }
+rusqlite = { version = "0.39", features = ["bundled"], optional = true }
 
 # Optional database backends
 duckdb = { version = "1.1", optional = true, features = ["bundled"] }
@@ -37,7 +41,6 @@ tokio = { version = "1", optional = true, features = ["rt-multi-thread", "net"] 
 futures-util = { version = "0.3", optional = true }
 tokio-util = { version = "0.7", optional = true, features = ["compat"] }
 oracle = { version = "0.6.3", optional = true }
-odbc-api = { version = "9", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
