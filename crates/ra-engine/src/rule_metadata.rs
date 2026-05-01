@@ -428,10 +428,21 @@ fn evaluate_hardware_requirement(requirement: &str, facts: &dyn FactsProvider) -
 
 /// Evaluate feature flags.
 fn evaluate_feature_flag(flag: &str, _facts: &dyn FactsProvider) -> bool {
-    // For now, assume all features are enabled
-    // TODO: Add feature flag configuration
-    debug!("Feature flag check: {} (assuming enabled)", flag);
-    true
+    // Check environment variable for feature flag configuration
+    // Format: RA_FEATURE_<FLAG>=true/false
+    let env_var = format!("RA_FEATURE_{}", flag.to_uppercase());
+    match std::env::var(&env_var) {
+        Ok(value) => {
+            let enabled = value.to_lowercase() == "true";
+            debug!("Feature flag check: {} = {} (from {})", flag, enabled, env_var);
+            enabled
+        }
+        Err(_) => {
+            // Default: all features enabled unless explicitly disabled
+            debug!("Feature flag check: {} = true (default)", flag);
+            true
+        }
+    }
 }
 
 /// Build a rule ID -> `RuleMetadata` map for quick lookup.
