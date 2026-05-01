@@ -24,4 +24,4 @@ pub use error::Error;
 pub use parse_session::ParseSession;
 pub use snapshot::Snapshot;
 pub use token_table::TokenTable;
-pub use tokenizer::{Token, TokenKind, Tokenizer};
+pub use tokenizer::{RawToken, Token, TokenKind, Tokenizer};

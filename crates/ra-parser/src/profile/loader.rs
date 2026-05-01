@@ -178,8 +178,37 @@ impl ProfileLoader {
             let parent = self.load_with_inheritance(&parent_name)?;
 
             // Merge parent into current profile
-            // For now, just use the current profile's values
-            // TODO: Implement actual feature merging
+            // Child profile values take precedence over parent values
+
+            // Merge features: parent features + child overrides
+            let mut merged_features = parent.features.clone();
+            merged_features.extend(profile.features.clone());
+            profile.features = merged_features;
+
+            // Merge syntax: parent syntax + child overrides
+            let mut merged_syntax = parent.syntax.clone();
+            merged_syntax.extend(profile.syntax.clone());
+            profile.syntax = merged_syntax;
+
+            // Merge operators: parent operators + child additions (deduplicated)
+            let mut merged_operators = parent.operators.clone();
+            for op in &profile.operators {
+                if !merged_operators.contains(op) {
+                    merged_operators.push(op.clone());
+                }
+            }
+            profile.operators = merged_operators;
+
+            // Merge functions: parent functions + child additions (deduplicated)
+            let mut merged_functions = parent.functions.clone();
+            for func in &profile.functions {
+                if !merged_functions.contains(func) {
+                    merged_functions.push(func.clone());
+                }
+            }
+            profile.functions = merged_functions;
+
+            // Keep parent name for reference
             profile.inherits_from = Some(parent.name);
         }
 

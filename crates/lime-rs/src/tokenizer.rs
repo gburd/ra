@@ -216,6 +216,56 @@ impl TokenKind {
     }
 }
 
+/// A zero-copy token that references the original input buffer.
+///
+/// Unlike `Token`, this type does not allocate a `String` for the
+/// token text. Instead it stores the byte offset and length into
+/// the input buffer passed to the `Tokenizer`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RawToken {
+    /// Classified token type.
+    pub kind: TokenKind,
+    /// Byte offset of the token start in the input buffer.
+    pub offset: usize,
+    /// Length of the token in bytes.
+    pub length: usize,
+    /// 1-based line number in the source.
+    pub line: u32,
+    /// 1-based column number in the source.
+    pub column: u32,
+}
+
+impl RawToken {
+    /// Convert the raw C `Token` fields into a `RawToken` by
+    /// computing the byte offset from the buffer base pointer.
+    ///
+    /// # Safety
+    ///
+    /// `raw.start` must be a valid pointer into `buffer_base`, and
+    /// `buffer_base` must be the start of the tokenizer's buffer.
+    unsafe fn from_raw(raw: &lime_sys::Token, buffer_base: *const u8) -> Self {
+        let offset = if raw.start.is_null() {
+            0
+        } else {
+            // SAFETY: both pointers are into the same buffer.
+            unsafe { raw.start.cast::<u8>().offset_from(buffer_base) as usize }
+        };
+        Self {
+            kind: TokenKind::from_raw(raw.type_),
+            offset,
+            length: raw.length,
+            line: raw.line,
+            column: raw.column,
+        }
+    }
+
+    /// The raw integer token code.
+    #[must_use]
+    pub fn raw_code(&self) -> i32 {
+        self.kind.to_raw()
+    }
+}
+
 /// A SIMD-accelerated SQL tokenizer.
 ///
 /// The tokenizer splits SQL input into tokens, using the `TokenTable` to
@@ -227,7 +277,7 @@ impl TokenKind {
 pub struct Tokenizer<'t> {
     inner: *mut lime_sys::Tokenizer,
     /// Owned padded copy of the input buffer.
-    _buffer: Vec<u8>,
+    buffer: Vec<u8>,
     /// Ensures the `TokenTable` outlives this tokenizer.
     _table: PhantomData<&'t TokenTable>,
 }
@@ -265,9 +315,27 @@ impl<'t> Tokenizer<'t> {
 
         Ok(Self {
             inner,
-            _buffer: buffer,
+            buffer,
             _table: PhantomData,
         })
+    }
+
+    /// Get the next token as a zero-copy `RawToken`, or `None` at
+    /// end-of-input.
+    ///
+    /// This avoids the `String` allocation of `next_token` by
+    /// returning byte offsets into the internal buffer instead.
+    pub fn next_raw_token(&mut self) -> Option<RawToken> {
+        let mut raw = MaybeUninit::<lime_sys::Token>::uninit();
+        // SAFETY: inner is a valid tokenizer. raw is a valid out-param.
+        let has_token = unsafe { lime_sys::tokenizer_next(self.inner, raw.as_mut_ptr()) };
+        if has_token {
+            // SAFETY: tokenizer_next returned true, so raw is
+            // initialized. raw.start points into buffer.
+            Some(unsafe { RawToken::from_raw(&raw.assume_init(), self.buffer.as_ptr()) })
+        } else {
+            None
+        }
     }
 
     /// Get the next token, or `None` at end-of-input.
@@ -278,7 +346,7 @@ impl<'t> Tokenizer<'t> {
         let has_token = unsafe { lime_sys::tokenizer_next(self.inner, raw.as_mut_ptr()) };
         if has_token {
             // SAFETY: tokenizer_next returned true, so raw is fully
-            // initialized. raw.start points into our _buffer which is
+            // initialized. raw.start points into our buffer which is
             // alive.
             Some(unsafe { Token::from_raw(&raw.assume_init()) })
         } else {

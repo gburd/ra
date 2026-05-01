@@ -26,7 +26,7 @@ pub enum ParseError {
         /// Approximate line in the source file.
         line: usize,
         /// Underlying YAML error.
-        source: serde_yaml::Error,
+        source: serde_yml::Error,
     },
 
     /// Frontmatter values failed validation.
@@ -264,7 +264,7 @@ pub fn parse_rule_file(source: &str) -> Result<RuleFile, ParseError> {
     let (yaml, body, yaml_end_line) = split_frontmatter(source)?;
 
     let metadata: RuleMetadata =
-        serde_yaml::from_str(yaml).map_err(|e| ParseError::InvalidYaml {
+        serde_yml::from_str(yaml).map_err(|e| ParseError::InvalidYaml {
             line: yaml_end_line,
             source: e,
         })?;
@@ -293,7 +293,7 @@ pub fn parse_rule_file(source: &str) -> Result<RuleFile, ParseError> {
 /// contains invalid YAML.
 pub fn parse_metadata(source: &str) -> Result<RuleMetadata, ParseError> {
     let (yaml, _, yaml_end_line) = split_frontmatter(source)?;
-    serde_yaml::from_str(yaml).map_err(|e| ParseError::InvalidYaml {
+    serde_yml::from_str(yaml).map_err(|e| ParseError::InvalidYaml {
         line: yaml_end_line,
         source: e,
     })

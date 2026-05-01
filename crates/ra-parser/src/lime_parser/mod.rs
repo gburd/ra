@@ -15,6 +15,7 @@
 //! ```
 
 pub mod lexer;
+pub mod lime_tokenizer;
 
 use std::os::raw::{c_int, c_void};
 
@@ -64,12 +65,18 @@ unsafe extern "C" fn parser_free(ptr: *mut c_void) {
 
 /// Parse a SQL string into a `RelExpr` using the Lime parser.
 ///
+/// Uses the SIMD-accelerated lime tokenizer for tokenization,
+/// falling back to the pure-Rust tokenizer on failure.
+///
 /// # Errors
 ///
 /// Returns a list of error messages if the SQL cannot be parsed.
 pub fn parse_sql(sql: &str) -> Result<RelExpr, Vec<String>> {
-    // Tokenize the input.
-    let tokens = lexer::tokenize(sql).map_err(|e| vec![e])?;
+    // Tokenize using SIMD-accelerated lime tokenizer, falling
+    // back to the pure-Rust lexer if the C tokenizer fails.
+    let tokens = lime_tokenizer::tokenize_simd(sql)
+        .or_else(|_| lexer::tokenize(sql))
+        .map_err(|e| vec![e])?;
 
     // Allocate the generated parser.
     //
