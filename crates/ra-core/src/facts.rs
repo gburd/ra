@@ -292,6 +292,18 @@ pub struct IndexInfo {
     pub is_unique: bool,
 }
 
+/// CPU instruction set architecture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CpuArchitecture {
+    /// x86-64 (Intel/AMD)
+    #[default]
+    X86_64,
+    /// ARM64 (Graviton, Ampere, Apple Silicon)
+    ARM64,
+    /// RISC-V (emerging architecture)
+    RISCV,
+}
+
 /// Hardware profile
 #[derive(Debug, Clone)]
 pub struct HardwareProfile {
@@ -313,6 +325,8 @@ pub struct HardwareProfile {
     pub l2_cache_size: u64,
     /// L3 cache size in bytes
     pub l3_cache_size: u64,
+    /// CPU instruction set architecture
+    pub cpu_architecture: CpuArchitecture,
 }
 
 /// Runtime statistics for an operator
@@ -516,6 +530,7 @@ impl EmptyFactsProvider {
                 l1_cache_size: 32 * 1024,
                 l2_cache_size: 256 * 1024,
                 l3_cache_size: 8 * 1024 * 1024,
+                cpu_architecture: CpuArchitecture::X86_64,
             },
         }
     }

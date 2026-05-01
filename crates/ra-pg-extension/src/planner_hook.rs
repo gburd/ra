@@ -876,6 +876,7 @@ impl SimpleFactsProvider {
             l1_cache_size: 32 * 1024,
             l2_cache_size: hw.l2_cache_bytes,
             l3_cache_size: hw.l3_cache_bytes,
+            cpu_architecture: ra_core::CpuArchitecture::X86_64,
         };
 
         Self {

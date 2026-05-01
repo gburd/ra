@@ -255,6 +255,7 @@ impl HardwareProfileDef {
             l1_cache_size: self.l1_cache_size,
             l2_cache_size: self.l2_cache_size,
             l3_cache_size: self.l3_cache_size,
+            cpu_architecture: ra_core::CpuArchitecture::X86_64,
         }
     }
 }

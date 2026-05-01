@@ -1032,6 +1032,7 @@ mod tests {
             l1_cache_size: 32768,
             l2_cache_size: 262_144,
             l3_cache_size: 8_388_608,
+            cpu_architecture: ra_core::CpuArchitecture::X86_64,
         };
 
         let current = HardwareProfile {
@@ -1044,6 +1045,7 @@ mod tests {
             l1_cache_size: 32768,
             l2_cache_size: 262_144,
             l3_cache_size: 8_388_608,
+            cpu_architecture: ra_core::CpuArchitecture::X86_64,
         };
 
         let changes = detect_hardware_changes(&prev, &current);

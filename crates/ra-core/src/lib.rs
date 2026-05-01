@@ -46,7 +46,7 @@ pub use distributed_agg::*;
 pub use distribution::*;
 pub use expr::*;
 pub use facts::{
-    DataType, EmptyFactsProvider, FactsProvider, ForeignKey,
+    CpuArchitecture, DataType, EmptyFactsProvider, FactsProvider, ForeignKey,
     HardwareProfile as CoreHardwareProfile, IndexInfo, IndexType, OperatorStats, SqlDialect,
     TableInfo, TableStats as CoreTableStats,
 };
