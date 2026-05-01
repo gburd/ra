@@ -4,10 +4,12 @@
 //! database facts and statistics during property-based testing to better
 //! find corner cases in query optimization.
 
+use crate::cloud_profiles::ProfileSelector;
+use crate::deployment_profiles::DeploymentProfile;
 use proptest::prelude::*;
 use ra_core::facts::{
-    DataType, ForeignKey, HardwareProfile, IndexInfo, IndexType,
-    OperatorStats, SqlDialect, StorageFormat, TableInfo, TableStats, FactsProvider
+    CpuArchitecture, DataType, ForeignKey, HardwareProfile, IndexInfo, IndexType,
+    OperatorStats, SqlDialect, StorageFormat, TableInfo, TableStats, FactsProvider,
 };
 use ra_core::statistics::ColumnStats;
 use std::collections::HashMap;
@@ -38,6 +40,8 @@ pub struct DynamicFactsProvider {
     hardware: HardwareProfile,
     /// Runtime statistics (empty for baseline fuzzing)
     runtime_stats: HashMap<String, OperatorStats>,
+    /// Optional deployment profile providing additional infrastructure context
+    deployment_profile: Option<DeploymentProfile>,
 }
 
 /// Different database scenarios to test optimizer robustness.
@@ -89,6 +93,7 @@ impl DatabaseScenario {
                 l1_cache_size: 32 * 1024,
                 l2_cache_size: 256 * 1024,
                 l3_cache_size: 8 * 1024 * 1024,
+                cpu_architecture: CpuArchitecture::X86_64,
             },
             Self::MediumProd => HardwareProfile {
                 cpu_cores: 8,
@@ -100,6 +105,7 @@ impl DatabaseScenario {
                 l1_cache_size: 32 * 1024,
                 l2_cache_size: 256 * 1024,
                 l3_cache_size: 16 * 1024 * 1024,
+                cpu_architecture: CpuArchitecture::X86_64,
             },
             Self::LargeEnterprise => HardwareProfile {
                 cpu_cores: 32,
@@ -111,6 +117,7 @@ impl DatabaseScenario {
                 l1_cache_size: 64 * 1024,
                 l2_cache_size: 512 * 1024,
                 l3_cache_size: 64 * 1024 * 1024,
+                cpu_architecture: CpuArchitecture::X86_64,
             },
             Self::DataWarehouse => HardwareProfile {
                 cpu_cores: 64,
@@ -122,6 +129,7 @@ impl DatabaseScenario {
                 l1_cache_size: 64 * 1024,
                 l2_cache_size: 1024 * 1024,
                 l3_cache_size: 128 * 1024 * 1024,
+                cpu_architecture: CpuArchitecture::X86_64,
             },
             Self::MemoryConstrained => HardwareProfile {
                 cpu_cores: 2,
@@ -133,6 +141,7 @@ impl DatabaseScenario {
                 l1_cache_size: 16 * 1024,
                 l2_cache_size: 128 * 1024,
                 l3_cache_size: 2 * 1024 * 1024,
+                cpu_architecture: CpuArchitecture::X86_64,
             },
             Self::HighPerformance => HardwareProfile {
                 cpu_cores: 128,
@@ -144,6 +153,7 @@ impl DatabaseScenario {
                 l1_cache_size: 128 * 1024,
                 l2_cache_size: 2 * 1024 * 1024,
                 l3_cache_size: 256 * 1024 * 1024,
+                cpu_architecture: CpuArchitecture::X86_64,
             },
             Self::StaleStats | Self::SkewedData => {
                 // Use medium profile as baseline
@@ -182,7 +192,34 @@ impl DynamicFactsProvider {
             schemas: HashMap::new(),
             hardware,
             runtime_stats: HashMap::new(),
+            deployment_profile: None,
         }
+    }
+
+    /// Create a facts provider with a specific deployment profile.
+    ///
+    /// The hardware profile is derived from the deployment profile,
+    /// overriding the scenario's default.
+    pub fn with_deployment_profile(
+        scenario: DatabaseScenario,
+        profile: DeploymentProfile,
+    ) -> Self {
+        let hardware = profile.to_hardware_profile();
+        Self {
+            scenario,
+            table_stats: HashMap::new(),
+            column_stats: HashMap::new(),
+            schemas: HashMap::new(),
+            hardware,
+            runtime_stats: HashMap::new(),
+            deployment_profile: Some(profile),
+        }
+    }
+
+    /// Return the deployment profile, if one was set.
+    #[must_use]
+    pub fn deployment_profile(&self) -> Option<&DeploymentProfile> {
+        self.deployment_profile.as_ref()
     }
 
     /// Generate realistic statistics for a table based on the scenario.
@@ -219,10 +256,9 @@ impl DynamicFactsProvider {
                 live_tuples: Some(row_count * 0.95), // 95% live
                 dead_tuples: Some(row_count * 0.05), // 5% dead
                 last_analyzed: Some(
-                    (std::time::SystemTime::now()
+                    std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs() as i64)
+                        .map_or(0, |d| d.as_secs() as i64)
                     - (staleness as i64 * 86400)
                 ), // Age based on staleness
                 confidence: if staleness > 5.0 { 0.3 } else { 0.9 },
@@ -236,6 +272,11 @@ impl DynamicFactsProvider {
     }
 
     /// Generate realistic column statistics based on the scenario.
+    ///
+    /// # Panics
+    ///
+    /// Panics if internal state is inconsistent (should not happen).
+    #[expect(clippy::expect_used, reason = "generate_table_stats guarantees entry exists")]
     pub fn generate_column_stats(&mut self, table_name: &str, column_name: &str) -> &ColumnStats {
         // Get scenario data first to avoid borrowing issues
         let skew_factor = self.scenario.skew_factor();
@@ -246,7 +287,8 @@ impl DynamicFactsProvider {
         let table_cols = self.column_stats.entry(table_name.to_string()).or_default();
 
         if !table_cols.contains_key(column_name) {
-            let table_stats = self.table_stats.get(table_name).unwrap();
+            let table_stats = self.table_stats.get(table_name)
+                .expect("generate_table_stats was called above");
 
             // Generate NDV based on column semantics and skew
             let ndv = match column_name {
@@ -503,13 +545,36 @@ impl FactsProvider for DynamicFactsProvider {
     }
 
     fn supports_feature(&self, feature: &str) -> bool {
+        // If a deployment profile is set, derive capabilities from it
+        if let Some(profile) = &self.deployment_profile {
+            return match feature {
+                "btree_indexes" | "hash_joins" | "sort_merge_joins" => true,
+                "hash_indexes" | "nested_loop_joins" => {
+                    self.hardware.cpu_cores >= 2
+                }
+                "bitmap_indexes" | "columnar_storage" => {
+                    self.hardware.available_memory >= 16 * 1024 * 1024 * 1024
+                }
+                "parallel_execution" => self.hardware.cpu_cores >= 4,
+                "vectorized_execution" => self.hardware.simd_width >= 256,
+                "gpu_acceleration" => self.hardware.has_gpu,
+                "compression" => true,
+                "distributed_execution" => {
+                    profile.supports_distributed_execution()
+                }
+                "tiered_storage" => profile.supports_tiered_storage(),
+                "partition_pruning" => {
+                    profile.topology.node_count() > 1
+                }
+                _ => false,
+            };
+        }
+
         match self.scenario {
             DatabaseScenario::SmallDev | DatabaseScenario::MemoryConstrained => {
-                // Limited feature set
                 matches!(feature, "btree_indexes" | "hash_joins" | "sort_merge_joins")
             }
             DatabaseScenario::HighPerformance | DatabaseScenario::DataWarehouse => {
-                // Full feature set including advanced features
                 matches!(feature,
                     "btree_indexes" | "hash_indexes" | "bitmap_indexes" |
                     "hash_joins" | "sort_merge_joins" | "nested_loop_joins" |
@@ -518,7 +583,6 @@ impl FactsProvider for DynamicFactsProvider {
                 )
             }
             _ => {
-                // Standard production feature set
                 matches!(feature,
                     "btree_indexes" | "hash_indexes" |
                     "hash_joins" | "sort_merge_joins" | "nested_loop_joins" |
@@ -566,6 +630,16 @@ pub fn arb_database_scenario() -> impl Strategy<Value = DatabaseScenario> {
     ]
 }
 
+/// Proptest strategy for generating a `DynamicFactsProvider` with a random
+/// cloud deployment profile applied to a random scenario.
+pub fn arb_facts_with_profile() -> impl Strategy<Value = DynamicFactsProvider> {
+    arb_database_scenario().prop_map(|scenario| {
+        let profile =
+            crate::cloud_profiles::CloudProfileSelector::select_random();
+        DynamicFactsProvider::with_deployment_profile(scenario, profile)
+    })
+}
+
 /// Enhanced property validator that uses dynamic facts providers.
 pub struct EnhancedPropertyValidator {
     properties: Vec<crate::properties::OptimizerProperty>,
@@ -603,7 +677,8 @@ impl EnhancedPropertyValidator {
         scenarios
             .iter()
             .map(|&scenario| {
-                let mut facts_provider = DynamicFactsProvider::new(scenario);
+                let profile = crate::cloud_profiles::CloudProfileSelector::select_for_scenario(&scenario);
+                let mut facts_provider = DynamicFactsProvider::with_deployment_profile(scenario, profile);
 
                 // Pre-generate statistics for tables mentioned in the query
                 self.populate_facts_for_query(&mut facts_provider, expr);

@@ -22,6 +22,8 @@
 // Test-oriented crate: property tests legitimately use expect/unwrap.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
+pub mod cloud_profiles;
+pub mod deployment_profiles;
 pub mod dynamic_facts;
 pub mod generator;
 pub mod minimizer;
@@ -30,6 +32,11 @@ pub mod properties;
 pub mod reference;
 pub mod storyline;
 
+pub use cloud_profiles::{CloudProfileSelector, ProfileSelector};
+pub use deployment_profiles::{
+    ClusterTopology, ComputeInstance, DeploymentProfile, InstanceClass,
+    StorageInstance, StorageTier,
+};
 pub use dynamic_facts::{DatabaseScenario, DynamicFactsProvider, EnhancedPropertyValidator};
 pub use generator::SqlGenerator;
 pub use minimizer::TestMinimizer;
