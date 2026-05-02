@@ -37,7 +37,6 @@ mod tk {
     pub const GE: i32 = -21;
     pub const CONCAT: i32 = -27;
     pub const DQUOTE_ID: i32 = -28;
-    pub const ILLEGAL: i32 = -32;
 }
 
 /// Map a raw C token code to the ra grammar token code.

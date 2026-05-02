@@ -164,7 +164,7 @@ pub fn render_ascii_sparkline(series: &[Series], config: &ChartConfig) -> String
             out.push(blocks[idx]);
         }
         let _ = writeln!(out);
-        let _ = writeln!(out, "    range: [{:.1}, {:.1}]", min_val, max_val,);
+        let _ = writeln!(out, "    range: [{:.1}, {:.1}]", min_val, max_val);
     }
 
     // X-axis labels (first and last)
@@ -341,7 +341,7 @@ pub fn render_html_chart(series: &[Series], config: &ChartConfig) -> String {
             }
 
             // Data point dot
-            let _ = write!(svg, r#"<circle cx="{x}" cy="{y}" r="3" fill="{color}"/>"#,);
+            let _ = write!(svg, r#"<circle cx="{x}" cy="{y}" r="3" fill="{color}"/>"#);
         }
 
         let _ = write!(
@@ -466,9 +466,9 @@ pub fn format_cost_delta(previous: f64, current: f64) -> String {
     if pct.abs() < 0.5 {
         "unchanged".to_owned()
     } else if pct > 0.0 {
-        format!("{current:.0} (\u{2191}{pct:.0}%)",)
+        format!("{current:.0} (\u{2191}{pct:.0}%)")
     } else {
-        format!("{current:.0} (\u{2193}{:.0}%)", pct.abs(),)
+        format!("{current:.0} (\u{2193}{:.0}%)", pct.abs())
     }
 }
 
@@ -533,10 +533,10 @@ pub fn render_plan_evolution_ascii(trace: &PlanEvolutionTrace) -> String {
 
     for (i, snap) in trace.snapshots.iter().enumerate() {
         if i == 0 {
-            let _ = write!(out, "{:<12}Initial: {}", snap.time_label, snap.operator,);
+            let _ = write!(out, "{:<12}Initial: {}", snap.time_label, snap.operator);
             if let Some(cost) = snap.cost {
                 let _ = writeln!(out);
-                let _ = write!(out, "{:>12}Cost: {cost:.0}", "",);
+                let _ = write!(out, "{:>12}Cost: {cost:.0}", "");
             }
             let _ = writeln!(out);
         } else if snap.changed {
@@ -544,23 +544,23 @@ pub fn render_plan_evolution_ascii(trace: &PlanEvolutionTrace) -> String {
             let _ = write!(
                 out,
                 "{:<12}PLAN CHANGED: {}",
-                snap.time_label, snap.operator,
+                snap.time_label, snap.operator
             );
             let _ = writeln!(out);
             if let Some(ref reason) = snap.reason {
-                let _ = writeln!(out, "{:>12}Reason: {reason}", "",);
+                let _ = writeln!(out, "{:>12}Reason: {reason}", "");
             }
             if let Some(cost) = snap.cost {
                 let prev_cost = trace.snapshots[..i].iter().rev().find_map(|s| s.cost);
                 if let Some(prev) = prev_cost {
-                    let _ = writeln!(out, "{:>12}Cost: {}", "", format_cost_delta(prev, cost),);
+                    let _ = writeln!(out, "{:>12}Cost: {}", "", format_cost_delta(prev, cost));
                 } else {
-                    let _ = writeln!(out, "{:>12}Cost: {cost:.0}", "",);
+                    let _ = writeln!(out, "{:>12}Cost: {cost:.0}", "");
                 }
             }
         } else {
             let _ = writeln!(out);
-            let _ = write!(out, "{:<12}Plan unchanged", snap.time_label,);
+            let _ = write!(out, "{:<12}Plan unchanged", snap.time_label);
             if let Some(cost) = snap.cost {
                 let prev_cost = trace.snapshots[..i].iter().rev().find_map(|s| s.cost);
                 if let Some(prev) = prev_cost {

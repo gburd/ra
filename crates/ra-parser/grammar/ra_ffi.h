@@ -60,6 +60,13 @@ RaNode *ra_table_function(RaParseState *st, const char *name,
 /* Window function marker — wraps function call with __window_ prefix */
 RaNode *ra_window_marker(RaParseState *st, const char *name,
                           RaNode *args);
+/* Window function marker with partition and order lists.
+ * Encodes partition_list and order_list as sentinel args so the
+ * post-parse transformer can reconstruct the full OVER clause. */
+RaNode *ra_window_marker_full(RaParseState *st, const char *name,
+                               RaNode *args,
+                               RaNode *partition_list,
+                               RaNode *order_list);
 RaNode *ra_cte(RaParseState *st, const char *name,
                RaNode *definition, RaNode *body);
 RaNode *ra_window(RaParseState *st, RaNode *input, RaNode *funcs);

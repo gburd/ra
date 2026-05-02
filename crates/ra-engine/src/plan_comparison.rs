@@ -47,7 +47,7 @@ impl ComparisonMetrics {
     #[must_use]
     pub fn summary(&self) -> String {
         let mut lines = Vec::new();
-        lines.push(format!("RA parse:     {:?}", self.ra_parse_time,));
+        lines.push(format!("RA parse:     {:?}", self.ra_parse_time));
         lines.push(format!(
             "RA optimize:  {:?} ({} iterations)",
             self.ra_optimize_time, self.ra_iterations,
@@ -57,7 +57,7 @@ impl ComparisonMetrics {
             self.ra_rules_considered, self.ra_rules_applied,
         ));
         if self.ra_peak_memory > 0 {
-            lines.push(format!("RA memory:    {} KB", self.ra_peak_memory / 1024,));
+            lines.push(format!("RA memory:    {} KB", self.ra_peak_memory / 1024));
         }
         if let Some(dt) = self.db_plan_time {
             lines.push(format!("DB plan time: {dt:?}"));

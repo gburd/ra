@@ -1181,6 +1181,63 @@ pub unsafe extern "C" fn ra_window_marker(
     })
 }
 
+/// Build a window function marker expression with partition and order info.
+///
+/// Encodes partition and order lists as sentinel args appended after the
+/// real function args so the post-parse transformer can reconstruct the
+/// full OVER clause:
+/// - `__window_partition(exprs...)` — one sentinel per partition expr
+/// - `__window_order_asc(expr)` or `__window_order_desc(expr)` — one per
+///   sort key, encoding direction.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `name` must be a valid NUL-terminated C string.
+/// - `args_list`, `partition_list`, `order_list` must be valid tagged list
+///   pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_window_marker_full(
+    state: *mut RaParseState,
+    name: *const c_char,
+    args_list: *mut RaNode,
+    partition_list: *mut RaNode,
+    order_list: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let raw_name = unsafe { c_str_to_string(name) };
+    let marker_name = format!("__window_{raw_name}");
+    let mut args = collect_exprs(st, args_list);
+
+    // Encode partition exprs as a single __window_partition sentinel arg.
+    let partition_exprs = collect_exprs(st, partition_list);
+    if !partition_exprs.is_empty() {
+        args.push(Expr::Function {
+            name: "__window_partition".to_string(),
+            args: partition_exprs,
+        });
+    }
+
+    // Encode each sort key as __window_order_asc(expr) or __window_order_desc(expr).
+    let order_keys = collect_sort_keys(st, order_list);
+    for key in order_keys {
+        let sentinel_name = match key.direction {
+            SortDirection::Asc => "__window_order_asc",
+            SortDirection::Desc => "__window_order_desc",
+        };
+        args.push(Expr::Function {
+            name: sentinel_name.to_string(),
+            args: vec![key.expr],
+        });
+    }
+
+    st.push_expr(Expr::Function {
+        name: marker_name,
+        args,
+    })
+}
+
 /// Build a `FieldAccess` expression (e.g., `(row).field_name`).
 ///
 /// # Safety
@@ -1517,15 +1574,15 @@ pub unsafe extern "C" fn ra_record_parse_error(
         Vec::new()
     };
 
-    let token_text = if !token.text.is_null() {
+    let token_text = if token.text.is_null() {
+        None
+    } else {
         // SAFETY: token.text is a valid NUL-terminated C string.
         Some(
             unsafe { CStr::from_ptr(token.text) }
                 .to_string_lossy()
                 .into_owned(),
         )
-    } else {
-        None
     };
 
     let position = usize::try_from(token.location).unwrap_or(0);

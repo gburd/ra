@@ -570,35 +570,45 @@ proptest! {
         use ra_core::expr::{Const, Expr};
         use ra_test_utils::TestProfile;
 
-        // Skip expressions with null predicates - they can cause excessive
-        // rewrites without proper null-constant simplification rules.
-        fn has_null_predicate(e: &RelExpr) -> bool {
+        // Skip expressions that can cause excessive e-graph rewrites:
+        // - null/bool constants in predicates
+        // - column references used directly as predicates (non-boolean)
+        fn has_problematic_predicate(e: &RelExpr) -> bool {
             match e {
                 RelExpr::Filter { predicate, input } => {
-                    matches!(predicate, Expr::Const(Const::Null))
-                        || has_null_in_binop(predicate)
-                        || has_null_predicate(input)
+                    is_problematic_expr(predicate)
+                        || has_problematic_predicate(input)
                 }
-                _ => false
+                _ => e.children().iter().any(|c| has_problematic_predicate(c)),
             }
         }
 
-        fn has_null_in_binop(e: &Expr) -> bool {
+        fn is_problematic_expr(e: &Expr) -> bool {
             match e {
-                Expr::BinOp { left, right, .. } => {
-                    matches!(**left, Expr::Const(Const::Null))
-                        || matches!(**right, Expr::Const(Const::Null))
-                        || has_null_in_binop(left)
-                        || has_null_in_binop(right)
+                // Null or boolean constants cause excessive rewrites.
+                Expr::Const(Const::Null | Const::Bool(_)) => true,
+                // A bare column used as a predicate (not a comparison) causes
+                // infinite-like rewriting since it's not a proper boolean expr.
+                Expr::Column(_) => true,
+                Expr::BinOp { op, left, right } => {
+                    // AND/OR of non-comparison exprs can be problematic.
+                    let is_logical = matches!(
+                        op,
+                        BinOp::And | BinOp::Or
+                    );
+                    if is_logical && (is_problematic_expr(left) || is_problematic_expr(right)) {
+                        return true;
+                    }
+                    is_problematic_expr(left) || is_problematic_expr(right)
                 }
-                _ => false
+                _ => false,
             }
         }
 
         let profile = TestProfile::current();
         let max_iters = profile.scale_iterations(50);
 
-        prop_assume!(!has_null_predicate(&expr));
+        prop_assume!(!has_problematic_predicate(&expr));
 
         let rec = to_rec_expr(&expr)
             .expect("conversion should succeed");

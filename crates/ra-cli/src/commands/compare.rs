@@ -100,10 +100,10 @@ pub fn cmd_compare(
         if !comparison.disagreements.is_empty() {
             eprintln!("{}", "Disagreements:".bold());
             for d in &comparison.disagreements {
-                eprintln!("  {} {}:", "[DIFF]".yellow().bold(), d.aspect,);
-                eprintln!("    {}: {}", "RA optimizer".bold(), d.ra_choice,);
-                eprintln!("    {}:     {}", "Database".bold(), d.db_choice,);
-                eprintln!("    {}: {}", "Severity".dimmed(), d.severity,);
+                eprintln!("  {} {}:", "[DIFF]".yellow().bold(), d.aspect);
+                eprintln!("    {}: {}", "RA optimizer".bold(), d.ra_choice);
+                eprintln!("    {}:     {}", "Database".bold(), d.db_choice);
+                eprintln!("    {}: {}", "Severity".dimmed(), d.severity);
             }
         }
     }

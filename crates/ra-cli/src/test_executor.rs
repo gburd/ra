@@ -251,7 +251,7 @@ fn collect_slowest(results: &[TestResult], limit: usize) -> Vec<(String, Duratio
         .filter(|r| matches!(r.outcome, TestOutcome::Pass))
         .map(|r| (r.name.clone(), r.duration))
         .collect();
-    timed.sort_by(|a, b| b.1.cmp(&a.1));
+    timed.sort_by_key(|b| std::cmp::Reverse(b.1));
     timed.truncate(limit);
     timed
 }

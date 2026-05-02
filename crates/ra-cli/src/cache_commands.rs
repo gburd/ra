@@ -82,7 +82,7 @@ pub fn cmd_cache_list(verbose: bool, quiet: bool) -> Result<()> {
         }
 
         eprintln!();
-        eprintln!("  {} entries cached", entries.len().to_string().bold(),);
+        eprintln!("  {} entries cached", entries.len().to_string().bold());
     }
 
     Ok(())
@@ -108,15 +108,15 @@ pub fn cmd_cache_stats(quiet: bool) -> Result<()> {
             "Utilization".bold(),
             metrics.utilization() * 100.0,
         );
-        eprintln!("  {}: {}", "Hits".bold(), metrics.hits,);
-        eprintln!("  {}: {}", "Misses".bold(), metrics.misses,);
+        eprintln!("  {}: {}", "Hits".bold(), metrics.hits);
+        eprintln!("  {}: {}", "Misses".bold(), metrics.misses);
         eprintln!(
             "  {}: {:.1}%",
             "Hit Rate".bold(),
             metrics.hit_rate() * 100.0,
         );
-        eprintln!("  {}: {}", "Evictions".bold(), metrics.evictions,);
-        eprintln!("  {}: {}", "Clears".bold(), metrics.clears,);
+        eprintln!("  {}: {}", "Evictions".bold(), metrics.evictions);
+        eprintln!("  {}: {}", "Clears".bold(), metrics.clears);
     }
 
     Ok(())

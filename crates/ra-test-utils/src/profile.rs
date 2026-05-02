@@ -105,10 +105,11 @@ impl TestProfile {
     /// Scale a time expectation (milliseconds) based on platform performance.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
+    /// use ra_test_utils::TestProfile;
     /// let profile = TestProfile::current();
     /// let expected_ms = profile.scale_time_ms(1000.0);
-    /// assert!(duration.as_millis() < expected_ms as u128);
+    /// // assert!(duration.as_millis() < expected_ms as u128);
     /// ```
     #[must_use]
     pub fn scale_time_ms(&self, baseline_ms: f64) -> f64 {
@@ -118,10 +119,11 @@ impl TestProfile {
     /// Scale an iteration count based on platform performance.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
+    /// use ra_test_utils::TestProfile;
     /// let profile = TestProfile::current();
     /// let max_iters = profile.scale_iterations(50);
-    /// runner.with_iter_limit(max_iters);
+    /// // runner.with_iter_limit(max_iters);
     /// ```
     #[must_use]
     pub fn scale_iterations(&self, baseline: usize) -> usize {
@@ -131,10 +133,11 @@ impl TestProfile {
     /// Scale a memory limit (bytes) based on available memory.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
+    /// use ra_test_utils::TestProfile;
     /// let profile = TestProfile::current();
     /// let memory_limit = profile.scale_memory(1_000_000_000);
-    /// config.set_memory_limit(memory_limit);
+    /// // config.set_memory_limit(memory_limit);
     /// ```
     #[must_use]
     pub fn scale_memory(&self, baseline_bytes: u64) -> u64 {

@@ -47,7 +47,7 @@ pub fn render_side_by_side_width(original: &str, optimized: &str, width: usize) 
         format!("{}", "Original".bold()),
         format!("{}", "Optimized".bold()),
     );
-    let _ = writeln!(out, "{:<cw$}{sep}{:<cw$}", "-".repeat(cw), "-".repeat(cw),);
+    let _ = writeln!(out, "{:<cw$}{sep}{:<cw$}", "-".repeat(cw), "-".repeat(cw));
 
     for idx in 0..max_lines {
         let left = orig_lines.get(idx).copied().unwrap_or("");

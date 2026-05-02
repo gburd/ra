@@ -154,6 +154,7 @@ typedef struct RaToken {
 %token INTERVAL_KW.
 %token EXTRACT.
 %token PLACEHOLDER.     /* ? parameter placeholder */
+%token COLONCOLON.      /* :: PostgreSQL type cast operator */
 
 /* ================================================================== */
 /* Precedence (low to high)                                            */
@@ -694,6 +695,11 @@ expr(A) ::= CAST LPAREN expr(B) AS type_name(C) RPAREN. {
     A = ra_cast(pstate, B, C.text, (size_t)C.int_val);
 }
 
+/* PostgreSQL :: type cast operator: expr::type */
+expr(A) ::= expr(B) COLONCOLON type_name(C). {
+    A = ra_cast(pstate, B, C.text, (size_t)C.int_val);
+}
+
 %type type_name {RaToken}
 type_name(A) ::= IDENT(B). {
     A.text = B.text;
@@ -749,22 +755,19 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN. {
 
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER LPAREN
              opt_partition(D) opt_window_order(E) RPAREN. {
-    (void)D; (void)E;
-    A = ra_window_marker(pstate, B.text, C);
+    A = ra_window_marker_full(pstate, B.text, C, D, E);
 }
 
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) RPAREN. {
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
-    (void)C; (void)D;
-    A = ra_window_marker(pstate, B.text, l);
+    A = ra_window_marker_full(pstate, B.text, l, C, D);
 }
 
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) RPAREN. {
-    (void)C; (void)D;
-    A = ra_window_marker(pstate, B.text, ra_list_new(pstate));
+    A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), C, D);
 }
 
 opt_partition(A) ::= PARTITION BY expr_list(B). { A = B; }
@@ -772,6 +775,20 @@ opt_partition(A) ::= .                          { A = 0; }
 
 opt_window_order(A) ::= ORDER BY sort_list(B).  { A = B; }
 opt_window_order(A) ::= .                       { A = 0; }
+
+/* -- TRIM special syntax: TRIM(BOTH/LEADING/TRAILING 'chars' FROM expr) --- */
+/* This handles SQL's special TRIM syntax that uses FROM as a keyword.
+ * The direction identifier (BOTH/LEADING/TRAILING) and the trim character
+ * string are discarded; only the source expression is kept.
+ * This rule creates a shift-reduce conflict with the IDENT SCONST typed
+ * literal rule: both begin with IDENT SCONST. Lime resolves by SHIFT, which
+ * picks up the FROM and creates a TRIM call. build.rs tolerates this. */
+expr(A) ::= IDENT(B) LPAREN IDENT SCONST FROM expr(C) RPAREN. {
+    /* TRIM(BOTH/LEADING/TRAILING 'chars' FROM col) — keep the source expr */
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, B.text, args);
+}
 
 /* -- Typed string literals: DATE '...', INTERVAL '...', etc. ------- */
 /* When an identifier is immediately followed by a string constant it is

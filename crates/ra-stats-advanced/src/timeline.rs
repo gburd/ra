@@ -2036,12 +2036,13 @@ ndv = 50
     // -- Integration: parse example timeline files --
 
     fn load_example(name: &str) -> Timeline {
-        let path = format!(
-            "{}/timelines/{name}",
-            env!("CARGO_MANIFEST_DIR")
-                .strip_suffix("/crates/ra-stats")
-                .unwrap_or(env!("CARGO_MANIFEST_DIR")),
-        );
+        // Compute workspace root by stripping the "/crates/<name>" suffix.
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let workspace_root = manifest
+            .strip_suffix("/crates/ra-stats-advanced")
+            .or_else(|| manifest.strip_suffix("/crates/ra-stats"))
+            .unwrap_or(manifest);
+        let path = format!("{workspace_root}/timelines/{name}");
         let content = std::fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!("failed to read {path}: {e}");
         });

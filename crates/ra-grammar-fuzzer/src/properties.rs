@@ -155,8 +155,9 @@ impl PropertyValidator {
         }
     }
 
-    /// Roundtrip: to_rec_expr -> optimizer -> extract preserves
+    /// Roundtrip: `to_rec_expr` -> optimizer -> extract preserves
     /// essential structure.
+    #[expect(clippy::unused_self, reason = "self kept for method dispatch consistency")]
     fn check_roundtrip(&self, expr: &RelExpr) -> PropertyResult {
         let result = ra_engine::to_rec_expr(expr);
         match result {
@@ -340,20 +341,17 @@ impl PropertyValidator {
 
     /// Rule safety: feeding the expression through all rewrite rules
     /// does not panic.
+    #[expect(clippy::unused_self, reason = "self kept for method dispatch consistency")]
     fn check_rule_safety(&self, expr: &RelExpr) -> PropertyResult {
         use egg::Runner;
         use ra_engine::{all_rules, RelAnalysis, RelLang};
 
-        let rec = match ra_engine::to_rec_expr(expr) {
-            Ok(r) => r,
-            Err(_) => {
-                return PropertyResult {
-                    property: OptimizerProperty::RuleSafety,
-                    passed: true,
-                    details: "skipped (unsupported construct)"
-                        .to_owned(),
-                };
-            }
+        let Ok(rec) = ra_engine::to_rec_expr(expr) else {
+            return PropertyResult {
+                property: OptimizerProperty::RuleSafety,
+                passed: true,
+                details: "skipped (unsupported construct)".to_owned(),
+            };
         };
 
         // Run equality saturation with a tight node limit to prevent
@@ -405,8 +403,7 @@ fn collect_tables_inner(expr: &RelExpr, tables: &mut HashSet<String>) {
             collect_tables_inner(body, tables);
             collect_tables_inner(definition, tables);
         }
-        RelExpr::Values { .. } => {}
-        // Catch other variants defensively
+        // Values and other variants contain no table references
         _ => {}
     }
 }

@@ -165,7 +165,7 @@ fn print_cost_breakdown(cost: &FederatedCostBreakdown) {
             cost.local_exec_ms,
         );
     }
-    eprintln!("  {}: {:.0}ms", "Total".bold().underline(), cost.total_ms,);
+    eprintln!("  {}: {:.0}ms", "Total".bold().underline(), cost.total_ms);
 }
 
 /// Parse a database type from a connection string or type name.

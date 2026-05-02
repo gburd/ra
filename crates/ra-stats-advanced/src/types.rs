@@ -444,7 +444,7 @@ impl WorkloadStats {
             .iter()
             .map(|(k, v)| (k.as_str(), *v))
             .collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|b| std::cmp::Reverse(b.1));
         entries.truncate(n);
         entries
     }

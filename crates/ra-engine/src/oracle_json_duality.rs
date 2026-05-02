@@ -583,17 +583,16 @@ fn contains_json_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, dep
             | RelLang::Gt([l, r])
             | RelLang::Ge([l, r])
             | RelLang::And([l, r])
-            | RelLang::Or([l, r]) => {
-                if contains_json_pattern(egraph, *l, depth - 1)
-                    || contains_json_pattern(egraph, *r, depth - 1)
-                {
-                    return true;
-                }
+            | RelLang::Or([l, r])
+                if (contains_json_pattern(egraph, *l, depth - 1)
+                    || contains_json_pattern(egraph, *r, depth - 1)) =>
+            {
+                return true;
             }
-            RelLang::Not([inner]) => {
-                if contains_json_pattern(egraph, *inner, depth - 1) {
-                    return true;
-                }
+            RelLang::Not([inner])
+                if contains_json_pattern(egraph, *inner, depth - 1) =>
+            {
+                return true;
             }
             _ => {}
         }

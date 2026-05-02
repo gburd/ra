@@ -108,6 +108,7 @@ impl TestMinimizer {
         })
     }
 
+    #[expect(clippy::unused_self, reason = "self kept for consistency with other methods")]
     fn still_fails(
         &self,
         expr: &RelExpr,
@@ -124,6 +125,10 @@ impl TestMinimizer {
     ///
     /// Each candidate is a simplified version that might still
     /// trigger the same failure.
+    #[expect(
+        clippy::self_only_used_in_recursion,
+        reason = "self is needed for method dispatch in recursive calls"
+    )]
     fn generate_reductions(&self, expr: &RelExpr) -> Vec<RelExpr> {
         let mut candidates = Vec::new();
 
@@ -222,9 +227,7 @@ impl TestMinimizer {
                 // Replace with right side
                 candidates.push(*right.clone());
             }
-            // Leaf nodes cannot be further reduced
-            RelExpr::Scan { .. }
-            | RelExpr::Values { .. } => {}
+            // Leaf nodes and other variants cannot be further reduced
             _ => {}
         }
 
@@ -243,7 +246,6 @@ impl Default for TestMinimizer {
 #[must_use]
 pub fn expr_size(expr: &RelExpr) -> usize {
     match expr {
-        RelExpr::Scan { .. } | RelExpr::Values { .. } => 1,
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }

@@ -1238,17 +1238,18 @@ fn contains_xml_function(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, dep
             | RelLang::Gt([l, r])
             | RelLang::Ge([l, r])
             | RelLang::And([l, r])
-            | RelLang::Or([l, r]) => {
-                if contains_xml_function(egraph, *l, depth - 1)
-                    || contains_xml_function(egraph, *r, depth - 1)
-                {
-                    return true;
-                }
+            | RelLang::Or([l, r])
+                if (contains_xml_function(egraph, *l, depth - 1)
+                    || contains_xml_function(egraph, *r, depth - 1)) =>
+            {
+                return true;
             }
-            RelLang::Not([inner]) | RelLang::IsNull([inner]) | RelLang::IsNotNull([inner]) => {
-                if contains_xml_function(egraph, *inner, depth - 1) {
-                    return true;
-                }
+            RelLang::Not([inner])
+            | RelLang::IsNull([inner])
+            | RelLang::IsNotNull([inner])
+                if contains_xml_function(egraph, *inner, depth - 1) =>
+            {
+                return true;
             }
             _ => {}
         }

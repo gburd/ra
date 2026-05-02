@@ -322,7 +322,7 @@ pub fn cmd_optimize(
         if let Some(stats) = optimizer.advisor_stats() {
             eprintln!();
             eprintln!("{}", "Rule Advisor Statistics:".bold());
-            eprintln!("  Total rules:      {}", stats.total_rules,);
+            eprintln!("  Total rules:      {}", stats.total_rules);
             eprintln!(
                 "  After Stage 1:    {} (context elimination)",
                 stats.after_stage1,
@@ -336,10 +336,10 @@ pub fn cmd_optimize(
                 stats.after_stage3,
             );
             if !stats.stage1_eliminated.is_empty() {
-                eprintln!("  Stage 1 excluded: {}", stats.stage1_eliminated.join(", "),);
+                eprintln!("  Stage 1 excluded: {}", stats.stage1_eliminated.join(", "));
             }
             if !stats.stage2_eliminated.is_empty() {
-                eprintln!("  Stage 2 excluded: {}", stats.stage2_eliminated.join(", "),);
+                eprintln!("  Stage 2 excluded: {}", stats.stage2_eliminated.join(", "));
             }
         }
     }

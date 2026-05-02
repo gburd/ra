@@ -101,7 +101,7 @@ pub fn cmd_stats(dir: &str, verbose: bool, quiet: bool) -> Result<()> {
         eprintln!();
         eprintln!("{}", "Rules by Category:".bold());
         for (cat, rules) in &by_category {
-            eprintln!("  {:>4}  {}", rules.len().to_string().cyan(), cat,);
+            eprintln!("  {:>4}  {}", rules.len().to_string().cyan(), cat);
         }
 
         if !duplicates.is_empty() {

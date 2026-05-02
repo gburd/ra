@@ -182,10 +182,8 @@ fn parse_body(body: &str) -> BodyParts {
                     text_buf.push_str(t);
                 }
             }
-            Event::SoftBreak | Event::HardBreak => {
-                if !in_heading {
-                    text_buf.push('\n');
-                }
+            Event::SoftBreak | Event::HardBreak if !in_heading => {
+                text_buf.push('\n');
             }
             _ => {}
         }

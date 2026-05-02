@@ -106,14 +106,14 @@ fn play_table(player: &mut TimelinePlayer, speed: f64, verbose: bool) -> Result<
         )
         .bold()
     );
-    eprintln!("  {}: {}", "Description".bold(), tl.metadata.description,);
+    eprintln!("  {}: {}", "Description".bold(), tl.metadata.description);
     if let Some(db) = &tl.metadata.database {
         eprintln!("  {}: {db}", "Database".bold());
     }
     if let Some(schema) = &tl.metadata.schema {
         eprintln!("  {}: {schema}", "Schema".bold());
     }
-    eprintln!("  {}: {:.1}x", "Playback speed".bold(), speed,);
+    eprintln!("  {}: {:.1}x", "Playback speed".bold(), speed);
     eprintln!();
 
     let delay_base = if speed > 0.0 {
@@ -245,7 +245,7 @@ fn play_html(player: &TimelinePlayer) -> Result<()> {
     }
 
     let config = ChartConfig {
-        title: format!("{} - Statistics Evolution", tl.metadata.name,),
+        title: format!("{} - Statistics Evolution", tl.metadata.name),
         y_label: "Row Count".to_owned(),
         x_label: "Time (s)".to_owned(),
         width: 800,
@@ -422,7 +422,7 @@ fn feedback_table(
             if let (Some(first), Some(last)) = (first_rows, last_rows) {
                 let delta = last as i64 - first as i64;
                 let sign = if delta >= 0 { "+" } else { "" };
-                eprintln!("  {}: {} -> {} ({sign}{delta})", table_name, first, last,);
+                eprintln!("  {}: {} -> {} ({sign}{delta})", table_name, first, last);
             }
         }
     }
@@ -504,7 +504,7 @@ fn feedback_html(tl: &Timeline) -> Result<()> {
     let q_series = build_q_error_series(tl);
 
     let config = ChartConfig {
-        title: format!("{} - Estimation Accuracy", tl.metadata.name,),
+        title: format!("{} - Estimation Accuracy", tl.metadata.name),
         y_label: "Rows".to_owned(),
         x_label: "Time (s)".to_owned(),
         width: 800,
@@ -539,7 +539,7 @@ fn visualize_table(tl: &Timeline, player: &TimelinePlayer, verbose: bool) -> Res
     eprintln!();
     eprintln!(
         "{}",
-        format!("Timeline Visualization: {}", tl.metadata.name,).bold()
+        format!("Timeline Visualization: {}", tl.metadata.name).bold()
     );
     eprintln!();
 
@@ -721,7 +721,7 @@ fn visualize_html(tl: &Timeline, _player: &TimelinePlayer) -> Result<()> {
     }
 
     let config = ChartConfig {
-        title: format!("{} - Statistics Visualization", tl.metadata.name,),
+        title: format!("{} - Statistics Visualization", tl.metadata.name),
         y_label: "Value".to_owned(),
         x_label: "Time (s)".to_owned(),
         width: 900,

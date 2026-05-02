@@ -494,13 +494,13 @@ impl EmitContext {
                 let r = self.emit_expr(&args[1])?;
                 Ok(Some(format!("({l} % {r})")))
             }
-            // ILIKE operator
-            "ILIKE" if args.len() == 2 => {
+            // ILIKE operator — ra-parser emits __ilike(a, b) which uppercases to __ILIKE
+            "__ILIKE" if args.len() == 2 => {
                 let result = self.emit_ilike(&args[0], &args[1])?;
                 Ok(Some(result))
             }
-            // LIKE operator
-            "LIKE" if args.len() == 2 => {
+            // LIKE operator — ra-parser emits __like(a, b) which uppercases to __LIKE
+            "__LIKE" if args.len() == 2 => {
                 let l = self.emit_expr(&args[0])?;
                 let r = self.emit_expr(&args[1])?;
                 Ok(Some(format!("({l} LIKE {r})")))
@@ -790,7 +790,7 @@ impl EmitContext {
         if q == '`' {
             format!("`{}`", ident.replace('`', "``"))
         } else {
-            format!("\"{ident}\"",)
+            format!("\"{ident}\"")
         }
     }
 }

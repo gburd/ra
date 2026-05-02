@@ -9,7 +9,7 @@
 //! - [`generator`] -- Grammar-guided SQL expression generation
 //! - [`properties`] -- Optimizer property validators (convergence, cost monotonicity)
 //! - [`minimizer`] -- Automatic test case minimization for failure reproduction
-//! - [`reference`] -- Reference optimizer comparison (PostgreSQL, DuckDB)
+//! - [`reference`] -- Reference optimizer comparison (`PostgreSQL`, `DuckDB`)
 //!
 //! # Feature Flags
 //!

@@ -16,9 +16,9 @@ pub fn print_header(msg: &str) {
 
 pub fn print_status(label: &str, detail: &str, ok: bool) {
     if ok {
-        eprintln!("  {} {detail}", format!("[{label}]").green().bold(),);
+        eprintln!("  {} {detail}", format!("[{label}]").green().bold());
     } else {
-        eprintln!("  {} {detail}", format!("[{label}]").red().bold(),);
+        eprintln!("  {} {detail}", format!("[{label}]").red().bold());
     }
 }
 

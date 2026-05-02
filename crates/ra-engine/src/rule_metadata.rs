@@ -431,17 +431,14 @@ fn evaluate_feature_flag(flag: &str, _facts: &dyn FactsProvider) -> bool {
     // Check environment variable for feature flag configuration
     // Format: RA_FEATURE_<FLAG>=true/false
     let env_var = format!("RA_FEATURE_{}", flag.to_uppercase());
-    match std::env::var(&env_var) {
-        Ok(value) => {
-            let enabled = value.to_lowercase() == "true";
-            debug!("Feature flag check: {} = {} (from {})", flag, enabled, env_var);
-            enabled
-        }
-        Err(_) => {
-            // Default: all features enabled unless explicitly disabled
-            debug!("Feature flag check: {} = true (default)", flag);
-            true
-        }
+    if let Ok(value) = std::env::var(&env_var) {
+        let enabled = value.to_lowercase() == "true";
+        debug!("Feature flag check: {} = {} (from {})", flag, enabled, env_var);
+        enabled
+    } else {
+        // Default: all features enabled unless explicitly disabled
+        debug!("Feature flag check: {} = true (default)", flag);
+        true
     }
 }
 

@@ -6,8 +6,8 @@
 //! high-level operators.
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, ProjectionColumn, RelExpr, WindowExpr,
-    WindowFunction,
+    AggregateExpr, AggregateFunction, NullOrdering, ProjectionColumn, RelExpr, SortDirection,
+    SortKey, WindowExpr, WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::search_types::DistanceMetric;
@@ -128,9 +128,9 @@ fn try_vector_filter(rel: RelExpr) -> RelExpr {
         return rel;
     };
 
+    // Only Float thresholds are supported for VectorFilter rewrites.
     let threshold = match right.as_ref() {
         Expr::Const(Const::Float(f)) => *f,
-        Expr::Const(Const::Int(i)) => *i as f64,
         _ => return rel,
     };
 
@@ -207,6 +207,11 @@ fn window_function_for(marker_name: &str) -> Option<WindowFunction> {
 /// Extract `__window_*` marker functions from projection columns.
 ///
 /// Returns `(window_exprs, cleaned_columns)`.
+///
+/// The marker function args may contain sentinel entries appended by
+/// `ra_window_marker_full` to carry partition and order info:
+/// - `__window_partition(exprs...)` — partition-by expressions
+/// - `__window_order_asc(expr)` / `__window_order_desc(expr)` — sort keys
 fn extract_window_exprs(
     columns: Vec<ProjectionColumn>,
 ) -> (Vec<WindowExpr>, Vec<ProjectionColumn>) {
@@ -217,12 +222,14 @@ fn extract_window_exprs(
         if let Expr::Function { ref name, ref args } = col.expr {
             if name.starts_with("__window_") {
                 if let Some(func) = window_function_for(name) {
-                    let arg = args.first().cloned();
+                    let (real_args, partition_by, order_by) =
+                        decode_window_sentinels(args.clone());
+                    let arg = real_args.into_iter().next();
                     window_exprs.push(WindowExpr {
                         function: func,
                         arg,
-                        partition_by: vec![],
-                        order_by: vec![],
+                        partition_by,
+                        order_by,
                         frame: None,
                         alias: col.alias.clone(),
                     });
@@ -235,6 +242,46 @@ fn extract_window_exprs(
     }
 
     (window_exprs, clean_cols)
+}
+
+/// Separate real function args from sentinel args encoding window OVER clause.
+///
+/// Returns `(real_args, partition_by_exprs, order_by_sort_keys)`.
+fn decode_window_sentinels(
+    args: Vec<Expr>,
+) -> (Vec<Expr>, Vec<Expr>, Vec<SortKey>) {
+    let mut real_args = Vec::new();
+    let mut partition_by = Vec::new();
+    let mut order_by = Vec::new();
+
+    for arg in args {
+        match &arg {
+            Expr::Function { name, args: inner } if name == "__window_partition" => {
+                partition_by.extend(inner.iter().cloned());
+            }
+            Expr::Function { name, args: inner } if name == "__window_order_asc" => {
+                if let Some(expr) = inner.first() {
+                    order_by.push(SortKey {
+                        expr: expr.clone(),
+                        direction: SortDirection::Asc,
+                        nulls: NullOrdering::Last,
+                    });
+                }
+            }
+            Expr::Function { name, args: inner } if name == "__window_order_desc" => {
+                if let Some(expr) = inner.first() {
+                    order_by.push(SortKey {
+                        expr: expr.clone(),
+                        direction: SortDirection::Desc,
+                        nulls: NullOrdering::Last,
+                    });
+                }
+            }
+            _ => real_args.push(arg),
+        }
+    }
+
+    (real_args, partition_by, order_by)
 }
 
 fn promote_window_in_project(rel: RelExpr) -> RelExpr {
@@ -287,7 +334,7 @@ fn aggregate_function_for(name: &str) -> Option<AggregateFunction> {
 }
 
 
-/// Build an AggregateExpr from a function call, returning `None` if it
+/// Build an `AggregateExpr` from a function call, returning `None` if it
 /// is not a recognised aggregate.
 fn make_agg_expr(expr: &Expr) -> Option<AggregateExpr> {
     let Expr::Function { name, args } = expr else {
@@ -357,6 +404,7 @@ fn transform_scalar_aggregates(rel: RelExpr) -> RelExpr {
 // Tree-walk helper
 // ---------------------------------------------------------------------------
 
+#[expect(clippy::too_many_lines, reason = "exhaustive match over all RelExpr variants")]
 fn map_children<F>(rel: RelExpr, f: F) -> RelExpr
 where
     F: Fn(RelExpr) -> RelExpr,

@@ -442,7 +442,7 @@ pub fn recommend_gin_indexes(
 
     for (collection, mut paths) in collection_paths {
         // Sort by frequency descending (most selective first)
-        paths.sort_by(|a, b| b.1.cmp(&a.1));
+        paths.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         if paths.len() >= 2 {
             // Recommend compound index for multi-path queries
@@ -636,17 +636,16 @@ fn contains_bson_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, dep
             | RelLang::Gt([l, r])
             | RelLang::Ge([l, r])
             | RelLang::And([l, r])
-            | RelLang::Or([l, r]) => {
-                if contains_bson_pattern(egraph, *l, depth - 1)
-                    || contains_bson_pattern(egraph, *r, depth - 1)
-                {
-                    return true;
-                }
+            | RelLang::Or([l, r])
+                if (contains_bson_pattern(egraph, *l, depth - 1)
+                    || contains_bson_pattern(egraph, *r, depth - 1)) =>
+            {
+                return true;
             }
-            RelLang::Not([inner]) => {
-                if contains_bson_pattern(egraph, *inner, depth - 1) {
-                    return true;
-                }
+            RelLang::Not([inner])
+                if contains_bson_pattern(egraph, *inner, depth - 1) =>
+            {
+                return true;
             }
             _ => {}
         }

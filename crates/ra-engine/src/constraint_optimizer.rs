@@ -528,10 +528,8 @@ fn collect_used_tables_recursive(expr: &RelExpr, tables: &mut Vec<String>) {
 
 fn collect_table_refs_from_expr(expr: &Expr, tables: &mut Vec<String>) {
     match expr {
-        Expr::Column(ColumnRef { table: Some(t), .. }) => {
-            if !tables.contains(t) {
-                tables.push(t.clone());
-            }
+        Expr::Column(ColumnRef { table: Some(t), .. }) if !tables.contains(t) => {
+            tables.push(t.clone());
         }
         Expr::BinOp { left, right, .. } => {
             collect_table_refs_from_expr(left, tables);

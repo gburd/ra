@@ -30,13 +30,13 @@ pub fn cmd_config_list(quiet: bool) -> Result<()> {
 
     for key in RaConfig::keys() {
         if let Ok(val) = config.get(key) {
-            eprintln!("  {:<width$}  {}", key.cyan(), val, width = max_key_len,);
+            eprintln!("  {:<width$}  {}", key.cyan(), val, width = max_key_len);
         }
     }
 
     eprintln!();
     if let Some(path) = config_path() {
-        eprintln!("  {}: {}", "Config file".dimmed(), path.display(),);
+        eprintln!("  {}: {}", "Config file".dimmed(), path.display());
     }
     eprintln!();
 
@@ -66,7 +66,7 @@ pub fn cmd_config_set(key: &str, value: &str, quiet: bool) -> Result<()> {
     loader.save_user(&config).context("saving configuration")?;
 
     if !quiet {
-        eprintln!("{} {} = {}", "Set".green().bold(), key.cyan(), value,);
+        eprintln!("{} {} = {}", "Set".green().bold(), key.cyan(), value);
     }
 
     Ok(())

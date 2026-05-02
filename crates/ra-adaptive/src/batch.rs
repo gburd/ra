@@ -407,11 +407,11 @@ impl BatchExecutor {
         managed_stats: &HashMap<String, ManagedTableStats>,
         executor: &mut AdaptiveExecutor,
     ) -> HashMap<NodeId, f64> {
-        let mut node_id: NodeId = 1;
         let mut estimates = HashMap::new();
         let is_join = Self::is_join_node(&self.current_plan);
 
-        for (table_name, stats) in managed_stats {
+        for (i, (table_name, stats)) in managed_stats.iter().enumerate() {
+            let node_id: NodeId = (i + 1) as NodeId;
             let estimated_rows = stats.table.row_count as f64;
             estimates.insert(node_id, estimated_rows);
 
@@ -423,7 +423,6 @@ impl BatchExecutor {
 
             let core_stats = self.adapter.to_core_statistics(stats);
             executor.add_table_stats(table_name, core_stats);
-            node_id += 1;
         }
         estimates
     }
@@ -649,12 +648,11 @@ impl BatchExecutor {
     ) -> NodeId {
         // Map feedback to node by matching table name in operator
         if let Some(operator) = &fb.operator {
-            let mut nid: NodeId = 1;
-            for name in managed_stats.keys() {
+            for (i, name) in managed_stats.keys().enumerate() {
+                let nid: NodeId = (i + 1) as NodeId;
                 if operator.contains(name.as_str()) {
                     return nid;
                 }
-                nid += 1;
             }
         }
         1 // Default to first node

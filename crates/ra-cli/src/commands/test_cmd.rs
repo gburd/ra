@@ -34,7 +34,7 @@ pub fn cmd_test(path: &str, filter: Option<&str>, verbose: bool, quiet: bool) ->
             eprintln!();
             eprintln!("{}", "Slowest tests:".bold());
             for (name, dur) in &summary.slowest {
-                eprintln!("  {:>6.0}ms  {}", dur.as_secs_f64() * 1000.0, name.dimmed(),);
+                eprintln!("  {:>6.0}ms  {}", dur.as_secs_f64() * 1000.0, name.dimmed());
             }
         }
     }
@@ -67,7 +67,7 @@ fn print_file_results(file_results: &[FileResult], verbose: bool) {
                 fr.total,
             );
             for (name, reason) in &fr.failures {
-                eprintln!("        - {} {}", name, format!("({reason})").yellow(),);
+                eprintln!("        - {} {}", name, format!("({reason})").yellow());
             }
         }
     }
@@ -87,7 +87,7 @@ fn print_individual_results(results: &[TestResult]) {
                 );
             }
             TestOutcome::Fail { reason } => {
-                eprintln!("  {} {}", "[FAIL]".red().bold(), result.name,);
+                eprintln!("  {} {}", "[FAIL]".red().bold(), result.name);
                 eprintln!("        {}", reason.yellow());
             }
             TestOutcome::Skip { reason } => {
@@ -130,13 +130,13 @@ fn print_test_summary(summary: &crate::test_executor::TestSummary) {
     }
 
     if summary.failed > 0 {
-        eprintln!("  {}: {} tests", "Failed".red().bold(), summary.failed,);
+        eprintln!("  {}: {} tests", "Failed".red().bold(), summary.failed);
     }
     if summary.skipped > 0 {
-        eprintln!("  {}: {} tests", "Skipped".dimmed(), summary.skipped,);
+        eprintln!("  {}: {} tests", "Skipped".dimmed(), summary.skipped);
     }
     if summary.errored > 0 {
-        eprintln!("  {}: {} tests", "Errors".red(), summary.errored,);
+        eprintln!("  {}: {} tests", "Errors".red(), summary.errored);
     }
     eprintln!(
         "  {}: {:.1}s",

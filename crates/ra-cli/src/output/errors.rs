@@ -81,13 +81,14 @@ fn format_structured_errors(
 
             // Context: up to 2 lines above
             let context_start = line_idx.saturating_sub(2);
-            for ctx_idx in context_start..line_idx {
+            for (i, ctx_line) in lines[context_start..line_idx].iter().enumerate() {
+                let ctx_num = context_start + i + 1;
                 let _ = writeln!(
                     output,
                     "{} {} {}",
-                    format!("{:4}", ctx_idx + 1).blue().bold(),
+                    format!("{ctx_num:4}").blue().bold(),
                     "|".blue().bold(),
-                    lines[ctx_idx].dimmed()
+                    ctx_line.dimmed()
                 );
             }
 
@@ -497,8 +498,7 @@ fn suggest_cast_replacement(line: &str, col_idx: usize) -> Option<String> {
         // Simple identifier
         let start = before
             .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
-            .map(|i| i + 1)
-            .unwrap_or(0);
+            .map_or(0, |i| i + 1);
         Some(&before[start..])
     };
 
@@ -562,13 +562,14 @@ fn format_error_with_location(
 
     // Context: up to 2 lines above
     let context_start = line_idx.saturating_sub(2);
-    for ctx_idx in context_start..line_idx {
+    for (i, ctx_line) in lines[context_start..line_idx].iter().enumerate() {
+        let ctx_num = context_start + i + 1;
         let _ = writeln!(
             output,
             "{} {} {}",
-            format!("{:4}", ctx_idx + 1).blue().bold(),
+            format!("{ctx_num:4}").blue().bold(),
             "|".blue().bold(),
-            lines[ctx_idx].dimmed()
+            ctx_line.dimmed()
         );
     }
 

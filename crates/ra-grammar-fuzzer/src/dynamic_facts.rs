@@ -67,20 +67,21 @@ pub enum DatabaseScenario {
 
 impl DatabaseScenario {
     /// Generate table row counts appropriate for this scenario.
+    #[must_use]
     pub fn table_row_range(self) -> (u64, u64) {
         match self {
             Self::SmallDev => (1_000, 100_000),
-            Self::MediumProd => (100_000, 10_000_000),
+            Self::MediumProd | Self::StaleStats => (100_000, 10_000_000),
             Self::LargeEnterprise => (10_000_000, 1_000_000_000),
             Self::DataWarehouse => (1_000_000_000, 10_000_000_000),
             Self::MemoryConstrained => (10_000, 1_000_000), // Smaller due to memory limits
             Self::HighPerformance => (1_000_000, 100_000_000),
-            Self::StaleStats => (100_000, 10_000_000), // Medium size, stale stats
             Self::SkewedData => (1_000_000, 50_000_000), // Large enough for skew effects
         }
     }
 
     /// Generate hardware profile for this scenario.
+    #[must_use]
     pub fn hardware_profile(self) -> HardwareProfile {
         match self {
             Self::SmallDev => HardwareProfile {
@@ -163,6 +164,7 @@ impl DatabaseScenario {
     }
 
     /// Get staleness characteristics for this scenario.
+    #[must_use]
     pub fn staleness_factor(self) -> f64 {
         match self {
             Self::StaleStats => 10.0, // Very stale
@@ -172,6 +174,7 @@ impl DatabaseScenario {
     }
 
     /// Get data skew characteristics for this scenario.
+    #[must_use]
     pub fn skew_factor(self) -> f64 {
         match self {
             Self::SkewedData => 0.95, // 95% of data in top 5% of values
@@ -183,6 +186,7 @@ impl DatabaseScenario {
 
 impl DynamicFactsProvider {
     /// Create a new dynamic facts provider for the given scenario.
+    #[must_use]
     pub fn new(scenario: DatabaseScenario) -> Self {
         let hardware = scenario.hardware_profile();
         Self {
@@ -200,6 +204,7 @@ impl DynamicFactsProvider {
     ///
     /// The hardware profile is derived from the deployment profile,
     /// overriding the scenario's default.
+    #[must_use]
     pub fn with_deployment_profile(
         scenario: DatabaseScenario,
         profile: DeploymentProfile,
@@ -226,22 +231,35 @@ impl DynamicFactsProvider {
     pub fn generate_table_stats(&mut self, table_name: &str) -> &TableStats {
         if !self.table_stats.contains_key(table_name) {
             let (min_rows, max_rows) = self.scenario.table_row_range();
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "row counts are statistical approximations; f64 precision is sufficient"
+            )]
             let row_count = fastrand::u64(min_rows..=max_rows) as f64;
 
             // Calculate derived statistics
             let avg_row_size = match table_name {
                 "users" | "customers" => fastrand::f64() * 100.0 + 50.0, // 50-150 bytes
-                "orders" | "transactions" => fastrand::f64() * 200.0 + 100.0, // 100-300 bytes
                 "events" | "logs" => fastrand::f64() * 500.0 + 200.0, // 200-700 bytes (JSON)
                 "products" | "inventory" => fastrand::f64() * 150.0 + 75.0, // 75-225 bytes
-                _ => fastrand::f64() * 200.0 + 100.0, // Default range
+                _ => fastrand::f64() * 200.0 + 100.0, // 100-300 bytes (orders/transactions/default)
             };
 
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "table size is a positive statistical estimate; truncation is acceptable"
+            )]
             let table_size_bytes = (row_count * avg_row_size) as u64;
             let page_count = (table_size_bytes / 8192).max(1); // 8KB pages
 
             // Apply scenario-specific characteristics
             let staleness = self.scenario.staleness_factor();
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "modification estimate is a positive approximation; truncation is acceptable"
+            )]
             let estimated_modifications = if staleness > 1.0 {
                 ((row_count * (staleness - 1.0) / 10.0) as u64).max(1)
             } else {
@@ -255,12 +273,20 @@ impl DynamicFactsProvider {
                 table_size_bytes,
                 live_tuples: Some(row_count * 0.95), // 95% live
                 dead_tuples: Some(row_count * 0.05), // 5% dead
-                last_analyzed: Some(
-                    std::time::SystemTime::now()
+                last_analyzed: {
+                    #[expect(
+                        clippy::cast_possible_wrap,
+                        reason = "unix timestamp fits in i64 for any realistic date"
+                    )]
+                    let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |d| d.as_secs() as i64)
-                    - (staleness as i64 * 86400)
-                ), // Age based on staleness
+                        .map_or(0, |d| d.as_secs() as i64);
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "staleness factor is a small value (1-10); truncation is safe"
+                    )]
+                    Some(now_secs - (staleness as i64 * 86400))
+                }, // Age based on staleness
                 confidence: if staleness > 5.0 { 0.3 } else { 0.9 },
                 estimated_modifications,
             };
@@ -323,11 +349,10 @@ impl DynamicFactsProvider {
                 min_value: None,
                 max_value: None,
                 avg_length: Some(match column_name {
-                    "id" | "user_id" | "order_id" => 8.0, // 64-bit integers
+                    "id" | "user_id" | "order_id" | "created_at" | "updated_at" => 8.0, // 8-byte fixed-width
                     "name" | "title" => fastrand::f64() * 30.0 + 10.0, // 10-40 chars
                     "description" | "notes" => fastrand::f64() * 200.0 + 50.0, // 50-250 chars
                     "email" => 25.0, // Typical email length
-                    "created_at" | "updated_at" => 8.0, // Timestamps
                     _ => fastrand::f64() * 20.0 + 5.0, // 5-25 bytes default
                 }),
                 histogram: None, // TODO: Generate realistic histograms
@@ -407,7 +432,7 @@ impl DynamicFactsProvider {
 
         // Always have primary key index
         indexes.push(IndexInfo {
-            name: format!("{}_pkey", table_name),
+            name: format!("{table_name}_pkey"),
             columns: vec!["id".to_string()],
             included_columns: vec![],
             index_type: IndexType::BTree,
@@ -548,7 +573,7 @@ impl FactsProvider for DynamicFactsProvider {
         // If a deployment profile is set, derive capabilities from it
         if let Some(profile) = &self.deployment_profile {
             return match feature {
-                "btree_indexes" | "hash_joins" | "sort_merge_joins" => true,
+                "btree_indexes" | "hash_joins" | "sort_merge_joins" | "compression" => true,
                 "hash_indexes" | "nested_loop_joins" => {
                     self.hardware.cpu_cores >= 2
                 }
@@ -558,7 +583,6 @@ impl FactsProvider for DynamicFactsProvider {
                 "parallel_execution" => self.hardware.cpu_cores >= 4,
                 "vectorized_execution" => self.hardware.simd_width >= 256,
                 "gpu_acceleration" => self.hardware.has_gpu,
-                "compression" => true,
                 "distributed_execution" => {
                     profile.supports_distributed_execution()
                 }
@@ -648,6 +672,7 @@ pub struct EnhancedPropertyValidator {
 
 impl EnhancedPropertyValidator {
     /// Create a validator that tests properties across multiple scenarios.
+    #[must_use]
     pub fn new(properties: Vec<crate::properties::OptimizerProperty>) -> Self {
         Self {
             properties,
@@ -659,6 +684,7 @@ impl EnhancedPropertyValidator {
     ///
     /// This tests the same query against different database configurations
     /// to find scenario-specific optimization bugs.
+    #[must_use]
     pub fn validate_across_scenarios(
         &self,
         expr: &ra_core::algebra::RelExpr,
@@ -717,6 +743,10 @@ impl EnhancedPropertyValidator {
     }
 
     /// Extract all table names from a query expression.
+    #[expect(
+        clippy::self_only_used_in_recursion,
+        reason = "self is needed for method dispatch in recursive calls"
+    )]
     fn collect_table_names(&self, expr: &ra_core::algebra::RelExpr) -> std::collections::HashSet<String> {
         use ra_core::algebra::RelExpr;
         let mut tables = std::collections::HashSet::new();

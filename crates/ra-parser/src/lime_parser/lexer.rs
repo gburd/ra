@@ -106,6 +106,7 @@ pub mod token {
     pub const INTERVAL_KW: i32 = 84;
     pub const EXTRACT: i32 = 85;
     pub const PLACEHOLDER: i32 = 86; /* ? parameter */
+    pub const COLONCOLON: i32 = 87;  /* :: PostgreSQL type cast operator */
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -280,6 +281,7 @@ fn match_two_char_op(sql: &str, pos: usize) -> Option<i32> {
         "<@" => Some(token::LT_AT),
         "@?" => Some(token::AT_QUESTION),
         "@@" => Some(token::AT_AT),
+        "::" => Some(token::COLONCOLON),
         _ => None,
     }
 }

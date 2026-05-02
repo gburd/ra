@@ -13,6 +13,7 @@ use super::{raExpectedTokens, raState, raTokenName};
 ///
 /// Returns `None` if `code` is out of range or the function
 /// returns NULL.
+#[must_use]
 pub fn token_name(code: i32) -> Option<&'static str> {
     // SAFETY: raTokenName returns a static string pointer or NULL.
     let ptr = unsafe { raTokenName(code as c_int) };
@@ -45,6 +46,7 @@ pub unsafe fn parser_state(parser: *mut c_void) -> Option<i32> {
 ///
 /// Uses the two-call pattern: first call with a zero-length buffer
 /// to get the count, then allocate and fill.
+#[must_use]
 pub fn expected_tokens(stateno: i32) -> Vec<&'static str> {
     // First call: get total count.
     // SAFETY: NULL out buffer with max=0 is safe per the API.
@@ -55,7 +57,7 @@ pub fn expected_tokens(stateno: i32) -> Vec<&'static str> {
         return Vec::new();
     }
 
-    let count_usize = count as usize;
+    let count_usize = usize::try_from(count).unwrap_or(0);
     let mut codes: Vec<c_int> = vec![0; count_usize];
 
     // Second call: fill the buffer.
@@ -68,7 +70,7 @@ pub fn expected_tokens(stateno: i32) -> Vec<&'static str> {
         )
     };
 
-    let actual = (filled as usize).min(count_usize);
+    let actual = usize::try_from(filled).unwrap_or(0).min(count_usize);
     let mut names = Vec::with_capacity(actual);
     for &code in &codes[..actual] {
         if let Some(name) = token_name(code) {

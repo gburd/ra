@@ -174,7 +174,7 @@ pub fn print_resource_usage(result: &ra_engine::OptimizationResult, verbose: boo
         "Time".bold(),
         usage.elapsed_time.as_secs_f64() * 1000.0,
     );
-    eprintln!("  {}: {}", "Iterations".bold(), usage.iterations_used,);
+    eprintln!("  {}: {}", "Iterations".bold(), usage.iterations_used);
     eprintln!(
         "  {}: {}",
         "Peak e-graph nodes".bold(),
@@ -183,8 +183,8 @@ pub fn print_resource_usage(result: &ra_engine::OptimizationResult, verbose: boo
 
     if verbose {
         let mem_mb = usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
-        eprintln!("  {}: {mem_mb:.2} MB", "Peak memory (est.)".bold(),);
-        eprintln!("  {}: {:.2}", "Plan cost".bold(), result.cost,);
+        eprintln!("  {}: {mem_mb:.2} MB", "Peak memory (est.)".bold());
+        eprintln!("  {}: {:.2}", "Plan cost".bold(), result.cost);
     }
 }
 
@@ -195,16 +195,16 @@ pub fn print_optimization_stats(usage: &ra_engine::ResourceUsageReport) {
         "Planning time".bold(),
         usage.elapsed_time.as_secs_f64() * 1000.0,
     );
-    eprintln!("  {}: {}", "Iterations used".bold(), usage.iterations_used,);
+    eprintln!("  {}: {}", "Iterations used".bold(), usage.iterations_used);
     eprintln!(
         "  {}: {}",
         "Peak e-graph nodes".bold(),
         usage.peak_egraph_nodes,
     );
     let mem_mb = usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
-    eprintln!("  {}: {mem_mb:.2} MB", "Peak memory".bold(),);
+    eprintln!("  {}: {mem_mb:.2} MB", "Peak memory".bold());
     if let Some(ref exceeded) = usage.budget_exceeded {
-        eprintln!("  {}: {exceeded}", "Budget exceeded".bold().yellow(),);
+        eprintln!("  {}: {exceeded}", "Budget exceeded".bold().yellow());
     }
 }
 

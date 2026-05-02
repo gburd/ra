@@ -613,17 +613,16 @@ fn contains_text_search_pattern(
             | RelLang::Gt([l, r])
             | RelLang::Ge([l, r])
             | RelLang::And([l, r])
-            | RelLang::Or([l, r]) => {
-                if contains_text_search_pattern(egraph, *l, depth - 1)
-                    || contains_text_search_pattern(egraph, *r, depth - 1)
-                {
-                    return true;
-                }
+            | RelLang::Or([l, r])
+                if (contains_text_search_pattern(egraph, *l, depth - 1)
+                    || contains_text_search_pattern(egraph, *r, depth - 1)) =>
+            {
+                return true;
             }
-            RelLang::Not([inner]) => {
-                if contains_text_search_pattern(egraph, *inner, depth - 1) {
-                    return true;
-                }
+            RelLang::Not([inner])
+                if contains_text_search_pattern(egraph, *inner, depth - 1) =>
+            {
+                return true;
             }
             _ => {}
         }
