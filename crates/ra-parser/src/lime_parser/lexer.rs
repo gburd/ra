@@ -107,6 +107,8 @@ pub mod token {
     pub const EXTRACT: i32 = 85;
     pub const PLACEHOLDER: i32 = 86; /* ? parameter */
     pub const COLONCOLON: i32 = 87;  /* :: PostgreSQL type cast operator */
+    pub const ARROW: i32 = 88;       /* ->  JSON field access (returns JSON) */
+    pub const ARROW_TEXT: i32 = 89;  /* ->> JSON field text extraction */
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -267,6 +269,20 @@ fn keyword_lookup(word: &str) -> Option<i32> {
     }
 }
 
+/// Match a three-character operator starting at `pos`.
+///
+/// Must be checked BEFORE `match_two_char_op` to avoid ambiguity
+/// (e.g. `->>` vs `->`).
+fn match_three_char_op(sql: &str, pos: usize) -> Option<i32> {
+    if pos + 2 >= sql.len() {
+        return None;
+    }
+    match &sql[pos..pos + 3] {
+        "->>" => Some(token::ARROW_TEXT),
+        _ => None,
+    }
+}
+
 /// Match a two-character operator starting at `pos`.
 fn match_two_char_op(sql: &str, pos: usize) -> Option<i32> {
     if pos + 1 >= sql.len() {
@@ -282,6 +298,7 @@ fn match_two_char_op(sql: &str, pos: usize) -> Option<i32> {
         "@?" => Some(token::AT_QUESTION),
         "@@" => Some(token::AT_AT),
         "::" => Some(token::COLONCOLON),
+        "->" => Some(token::ARROW),
         _ => None,
     }
 }
@@ -561,6 +578,9 @@ pub fn tokenize(sql: &str) -> Result<Vec<LexToken>, String> {
             tokens.push(lex_word(&mut cur)?);
         } else if b == b'"' {
             tokens.push(lex_quoted_ident(&mut cur)?);
+        } else if let Some(code) = match_three_char_op(cur.sql, cur.pos) {
+            tokens.push(simple_token(code, cur.pos, 3));
+            cur.advance_by(3);
         } else if let Some(code) = match_two_char_op(cur.sql, cur.pos) {
             tokens.push(simple_token(code, cur.pos, 2));
             cur.advance_by(2);
