@@ -895,15 +895,22 @@ mod tests {
 
     #[test]
     fn render_colored_contains_ansi_on_changes() {
+        // Serialize tests that modify colored's global override to prevent
+        // parallel test interference.
+        use std::sync::Mutex;
+        static COLORED_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = COLORED_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         colored::control::set_override(true);
         let diff = compute_diff(&simple_scan(), &scan_with_filter());
         let output = render_colored(&diff);
+        colored::control::unset_override();
+
         // ANSI escape codes start with \x1b[
         assert!(
             output.contains("\x1b["),
             "expected ANSI codes in colored output"
         );
-        colored::control::unset_override();
     }
 
     #[test]

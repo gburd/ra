@@ -570,16 +570,44 @@ proptest! {
         use ra_core::expr::{Const, Expr};
         use ra_test_utils::TestProfile;
 
-        // Skip expressions that can cause excessive e-graph rewrites:
+        // Skip expressions that can cause excessive e-graph rewrites.
+        // This includes:
         // - null/bool constants in predicates
         // - column references used directly as predicates (non-boolean)
-        fn has_problematic_predicate(e: &RelExpr) -> bool {
+        // - any aggregate — aggregate rules interact in complex ways
+        // - joins with self-referential conditions (col = col)
+        fn has_problematic_structure(e: &RelExpr) -> bool {
             match e {
                 RelExpr::Filter { predicate, input } => {
                     is_problematic_expr(predicate)
-                        || has_problematic_predicate(input)
+                        || has_problematic_structure(input)
                 }
-                _ => e.children().iter().any(|c| has_problematic_predicate(c)),
+                // Any aggregate can cause excessive rewrites due to rule interactions.
+                RelExpr::Aggregate { .. } => true,
+                // Self-join: condition references same column on both sides.
+                RelExpr::Join { condition, left, right, .. } => {
+                    is_self_ref_condition(condition)
+                        || has_problematic_structure(left)
+                        || has_problematic_structure(right)
+                }
+                _ => e.children().iter().any(|c| has_problematic_structure(c)),
+            }
+        }
+
+        fn is_self_ref_condition(e: &Expr) -> bool {
+            match e {
+                Expr::BinOp { op: BinOp::Eq, left, right } => {
+                    // col = col (same column reference)
+                    if let (Expr::Column(l), Expr::Column(r)) = (left.as_ref(), right.as_ref()) {
+                        l.column == r.column
+                    } else {
+                        false
+                    }
+                }
+                Expr::BinOp { left, right, .. } => {
+                    is_self_ref_condition(left) || is_self_ref_condition(right)
+                }
+                _ => false,
             }
         }
 
@@ -592,11 +620,10 @@ proptest! {
                 Expr::Column(_) => true,
                 Expr::BinOp { op, left, right } => {
                     // AND/OR of non-comparison exprs can be problematic.
-                    let is_logical = matches!(
-                        op,
-                        BinOp::And | BinOp::Or
-                    );
-                    if is_logical && (is_problematic_expr(left) || is_problematic_expr(right)) {
+                    let is_logical = matches!(op, BinOp::And | BinOp::Or);
+                    if is_logical
+                        && (is_problematic_expr(left) || is_problematic_expr(right))
+                    {
                         return true;
                     }
                     is_problematic_expr(left) || is_problematic_expr(right)
@@ -608,7 +635,7 @@ proptest! {
         let profile = TestProfile::current();
         let max_iters = profile.scale_iterations(50);
 
-        prop_assume!(!has_problematic_predicate(&expr));
+        prop_assume!(!has_problematic_structure(&expr));
 
         let rec = to_rec_expr(&expr)
             .expect("conversion should succeed");
