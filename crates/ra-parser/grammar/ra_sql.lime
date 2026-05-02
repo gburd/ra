@@ -136,6 +136,25 @@ typedef struct RaToken {
 %token EXCEPT.
 %token USING.
 
+/* JSONB operators */
+%token AT_GT.           /* @>  JSON contains */
+%token LT_AT.           /* <@  JSON contained by */
+%token AT_QUESTION.     /* @?  JSON path exists */
+%token AT_AT.           /* @@  JSON path match */
+
+/* Array subscript brackets */
+%token LBRACKET.        /* [ */
+%token RBRACKET.        /* ] */
+
+/* New keywords */
+%token ARRAY.
+%token UNNEST.
+%token ORDINALITY.
+%token DATE_KW.
+%token INTERVAL_KW.
+%token EXTRACT.
+%token PLACEHOLDER.     /* ? parameter placeholder */
+
 /* ================================================================== */
 /* Precedence (low to high)                                            */
 /* ================================================================== */
@@ -145,10 +164,11 @@ typedef struct RaToken {
 %left OR.
 %left AND.
 %right NOT.
-%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE BETWEEN.
+%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE BETWEEN AT_GT LT_AT AT_QUESTION AT_AT.
 %left PLUS MINUS CONCAT.
 %left STAR SLASH PERCENT.
 %right UMINUS.
+%left LBRACKET.
 
 /* ================================================================== */
 /* Grammar rules                                                       */
@@ -324,6 +344,48 @@ table_ref(A) ::= table_ref(B) CROSS JOIN table_ref(C). {
     A = ra_join(pstate, 4, B, C, cond); /* 4 = Cross */
 }
 
+/* Table function in FROM: func(args) AS alias or func(args) AS alias(cols) */
+table_ref(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN AS IDENT. {
+    A = ra_table_function(pstate, B.text, strlen(B.text), C);
+}
+table_ref(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN AS IDENT LPAREN ident_list RPAREN. {
+    A = ra_table_function(pstate, B.text, strlen(B.text), C);
+}
+table_ref(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN IDENT. {
+    A = ra_table_function(pstate, B.text, strlen(B.text), C);
+}
+table_ref(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN. {
+    A = ra_table_function(pstate, B.text, strlen(B.text), C);
+}
+
+/* Qualified table function: schema.func(args) */
+table_ref(A) ::= IDENT(B) DOT IDENT(C) LPAREN expr_list RPAREN AS IDENT. {
+    (void)C;
+    A = ra_scan(pstate, B.text);  /* schema-qualified: use outer name */
+}
+table_ref(A) ::= IDENT(B) DOT IDENT(C) LPAREN expr_list RPAREN. {
+    (void)C;
+    A = ra_scan(pstate, B.text);
+}
+table_ref(A) ::= IDENT(B) DOT IDENT(C) LPAREN RPAREN. {
+    (void)C;
+    A = ra_scan(pstate, B.text);
+}
+
+/* UNNEST in FROM clause */
+table_ref(A) ::= UNNEST LPAREN expr(B) RPAREN AS IDENT LPAREN ident_list RPAREN. {
+    A = ra_unnest(pstate, B);
+}
+table_ref(A) ::= UNNEST LPAREN expr(B) RPAREN AS IDENT. {
+    A = ra_unnest(pstate, B);
+}
+table_ref(A) ::= UNNEST LPAREN expr(B) RPAREN WITH ORDINALITY AS IDENT LPAREN ident_list RPAREN. {
+    A = ra_unnest_ord(pstate, B);
+}
+table_ref(A) ::= UNNEST LPAREN expr(B) RPAREN WITH ORDINALITY AS IDENT. {
+    A = ra_unnest_ord(pstate, B);
+}
+
 /* JOIN USING: treat as inner join with true condition (column equality
  * semantics are handled by the optimizer layer). */
 table_ref(A) ::= table_ref(B) JOIN table_ref(C) USING LPAREN ident_list(D) RPAREN. {
@@ -481,6 +543,34 @@ expr(A) ::= MINUS expr(B). [UMINUS]  { A = ra_binop(pstate, 1, ra_const_int(psta
 
 expr(A) ::= NOT expr(B). {
     A = ra_unary_op(pstate, 0, B); /* 0 = Not */
+}
+
+/* -- JSONB operators ----------------------------------------------- */
+/* Represented as function calls to avoid BinOp enum changes. */
+
+expr(A) ::= expr(B) AT_GT expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_contains", args);
+}
+expr(A) ::= expr(B) LT_AT expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_contained_by", args);
+}
+expr(A) ::= expr(B) AT_QUESTION expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_path_exists", args);
+}
+expr(A) ::= expr(B) AT_AT expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_path_match", args);
 }
 
 /* -- IS NULL / IS NOT NULL ----------------------------------------- */
@@ -653,15 +743,14 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN. {
 }
 
 /* -- Window function ----------------------------------------------- */
-/* func(args) OVER (opt_partition opt_order) */
+/* func(args) OVER (opt_partition opt_order)
+ * The __window_ prefix marks this as a window expression so the
+ * post-parse transformer can detect and promote it to Window nodes. */
 
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER LPAREN
              opt_partition(D) opt_window_order(E) RPAREN. {
-    /* Use first arg from C, encode via ra_func for now.
-       Proper window support requires knowing the window function code.
-       Use ra_func with a __window_ prefix for the optimizer to handle. */
-    (void)C; (void)D; (void)E;
-    A = ra_func(pstate, B.text, C);
+    (void)D; (void)E;
+    A = ra_window_marker(pstate, B.text, C);
 }
 
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
@@ -669,13 +758,13 @@ expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
     (void)C; (void)D;
-    A = ra_func(pstate, B.text, l);
+    A = ra_window_marker(pstate, B.text, l);
 }
 
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) RPAREN. {
     (void)C; (void)D;
-    A = ra_func(pstate, B.text, ra_list_new(pstate));
+    A = ra_window_marker(pstate, B.text, ra_list_new(pstate));
 }
 
 opt_partition(A) ::= PARTITION BY expr_list(B). { A = B; }
@@ -683,6 +772,52 @@ opt_partition(A) ::= .                          { A = 0; }
 
 opt_window_order(A) ::= ORDER BY sort_list(B).  { A = B; }
 opt_window_order(A) ::= .                       { A = 0; }
+
+/* -- Typed string literals: DATE '...', INTERVAL '...', etc. ------- */
+/* When an identifier is immediately followed by a string constant it is
+ * treated as a type-qualified literal (DATE '2024-01-01', INTERVAL '1 hour',
+ * TIMESTAMP '...', etc.).  The type name is discarded; the string value is
+ * returned as a Const::String.
+ *
+ * This rule creates a shift-reduce conflict: when the parser has just
+ * seen an IDENT and the lookahead is SCONST, it must choose between
+ * reducing IDENT to expr (column reference) or shifting SCONST.  Lime
+ * resolves the conflict by preferring SHIFT, so IDENT SCONST becomes a
+ * typed literal.  build.rs tolerates this known resolved conflict. */
+expr(A) ::= IDENT SCONST(B). {
+    A = ra_const_str(pstate, B.text);
+}
+
+/* -- EXTRACT function ---------------------------------------------- */
+/* EXTRACT(field FROM expr) — encoded as __extract_<field>(expr). */
+
+expr(A) ::= EXTRACT LPAREN IDENT(F) FROM expr(E) RPAREN. {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, E);
+    A = ra_func(pstate, "__extract", l);
+    (void)F;
+}
+
+/* -- ARRAY literal ------------------------------------------------- */
+
+expr(A) ::= ARRAY LBRACKET expr_list(B) RBRACKET. {
+    A = ra_array(pstate, B);
+}
+expr(A) ::= ARRAY LBRACKET RBRACKET. {
+    A = ra_array(pstate, ra_list_new(pstate));
+}
+
+/* -- Array subscript: expr[index] ---------------------------------- */
+
+expr(A) ::= expr(B) LBRACKET expr(C) RBRACKET. [LBRACKET] {
+    A = ra_array_index(pstate, B, C);
+}
+
+/* -- Parameter placeholder ----------------------------------------- */
+
+expr(A) ::= PLACEHOLDER. {
+    A = ra_const_null(pstate); /* placeholder maps to NULL for now */
+}
 
 /* -- Parenthesized expression -------------------------------------- */
 

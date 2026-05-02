@@ -14,6 +14,7 @@
 
 mod api;
 mod error;
+pub(crate) mod transform;
 
 pub use api::{sql_to_relexpr, sql_to_relexprs};
 pub use error::SqlConversionError;

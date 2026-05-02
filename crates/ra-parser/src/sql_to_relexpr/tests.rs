@@ -326,7 +326,6 @@ fn test_cross_join() {
 // not as Window RelExpr nodes.
 
 #[test]
-#[ignore = "Lime grammar does not yet produce Window nodes"]
 fn test_row_number_window() {
     let sql = "SELECT id, ROW_NUMBER() OVER (ORDER BY id) as rn \
                FROM users";
@@ -338,7 +337,6 @@ fn test_row_number_window() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce Window nodes"]
 fn test_rank_window_with_partition() {
     let sql = "SELECT dept, salary, \
                RANK() OVER (PARTITION BY dept ORDER BY salary DESC) as rnk \
@@ -351,7 +349,6 @@ fn test_rank_window_with_partition() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce Window nodes"]
 fn test_window_sum() {
     let sql = "SELECT id, \
                SUM(amount) OVER (ORDER BY id) as running_total \
@@ -398,7 +395,6 @@ fn test_except() {
 // Aggregate nodes. Only GROUP BY triggers Aggregate creation.
 
 #[test]
-#[ignore = "Lime grammar does not produce Aggregate nodes for bare aggregates without GROUP BY"]
 fn test_stddev_aggregate() {
     let sql = "SELECT STDDEV(salary) FROM employees";
     let result = sql_to_relexpr(sql).expect("should parse");
@@ -413,7 +409,6 @@ fn test_stddev_aggregate() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not produce Aggregate nodes for bare aggregates without GROUP BY"]
 fn test_variance_aggregate() {
     let sql = "SELECT VARIANCE(score) FROM tests";
     let result = sql_to_relexpr(sql).expect("should parse");
@@ -868,7 +863,6 @@ fn test_like() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support INTERVAL literals"]
 fn test_interval() {
     let sql = "SELECT * FROM events \
                WHERE created_at > INTERVAL '1 hour'";
@@ -877,7 +871,6 @@ fn test_interval() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support DATE literals"]
 fn test_date_literal() {
     let sql = "SELECT * FROM orders \
                WHERE order_date > DATE '2024-01-01'";
@@ -886,7 +879,6 @@ fn test_date_literal() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support placeholder syntax"]
 fn test_placeholder() {
     let sql = "SELECT * FROM users WHERE id = ?";
     let result = sql_to_relexpr(sql);
@@ -894,7 +886,6 @@ fn test_placeholder() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support EXTRACT"]
 fn test_extract() {
     let sql = "SELECT EXTRACT(YEAR FROM order_date) \
                FROM orders";
@@ -905,7 +896,6 @@ fn test_extract() {
 // ---- PostgreSQL-specific operators ----
 
 #[test]
-#[ignore = "Lime grammar does not yet support JSONB operators"]
 fn test_jsonb_contains() {
     let sql = "SELECT * FROM users \
                WHERE data @> '{\"age\": 25}'";
@@ -914,7 +904,6 @@ fn test_jsonb_contains() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support JSONB operators"]
 fn test_jsonb_contained_by() {
     let sql = "SELECT * FROM users \
                WHERE '{\"age\": 25}' <@ data";
@@ -923,7 +912,6 @@ fn test_jsonb_contained_by() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support JSONB operators"]
 fn test_jsonb_path_exists() {
     let sql = "SELECT * FROM users \
                WHERE data @? '$.age ? (@ > 25)'";
@@ -932,7 +920,6 @@ fn test_jsonb_path_exists() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support JSONB operators"]
 fn test_jsonb_path_match() {
     let sql = "SELECT * FROM users \
                WHERE data @@ '$.status == \"active\"'";
@@ -941,7 +928,6 @@ fn test_jsonb_path_match() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support JSONB operators"]
 fn test_documentdb_query() {
     // DocumentDB query with standard PostgreSQL JSONB operators
     let sql = "SELECT document FROM documentdb_api.collection('mydb', 'users') \
@@ -959,7 +945,6 @@ fn test_documentdb_query() {
 // VectorFilter nodes. The Lime grammar produces standard Sort/Filter nodes.
 
 #[test]
-#[ignore = "Lime grammar does not yet produce TopK nodes for vector search"]
 fn test_sqlite_vec_topk_l2() {
     // sqlite-vec with vec_distance_l2 function
     let sql = "SELECT * FROM items \
@@ -977,7 +962,6 @@ fn test_sqlite_vec_topk_l2() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce TopK nodes for vector search"]
 fn test_sqlite_vec_topk_cosine() {
     // sqlite-vec with cosine distance
     let sql = "SELECT id, vec_distance_cosine(embedding, query_vec) AS similarity \
@@ -996,7 +980,6 @@ fn test_sqlite_vec_topk_cosine() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce VectorFilter nodes"]
 fn test_sqlite_vec_filter() {
     // sqlite-vec with threshold filter
     let sql = "SELECT * FROM items \
@@ -1015,7 +998,6 @@ fn test_sqlite_vec_filter() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce VectorFilter nodes"]
 fn test_vector_hybrid_search() {
     // Simple vector filter works
     let sql = "SELECT * FROM products \
@@ -1032,7 +1014,6 @@ fn test_vector_hybrid_search() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce TopK nodes for vector search"]
 fn test_pgvector_topk_l2_function() {
     // pgvector with l2_distance function
     let sql = "SELECT * FROM items \
@@ -1050,7 +1031,6 @@ fn test_pgvector_topk_l2_function() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce TopK nodes for vector search"]
 fn test_pgvector_topk_cosine_function() {
     // pgvector with cosine_distance function
     let sql = "SELECT id, text FROM documents \
@@ -1068,7 +1048,6 @@ fn test_pgvector_topk_cosine_function() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce VectorFilter nodes"]
 fn test_pgvector_filter_function() {
     // pgvector with distance threshold in WHERE using function
     let sql = "SELECT * FROM items WHERE l2_distance(embedding, query_vec) < 0.5";
@@ -1116,7 +1095,6 @@ fn test_vector_multiple_order_by_columns() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce TopK nodes for vector search"]
 fn test_vector_with_projection() {
     // Vector search with specific columns selected
     let sql = "SELECT id, title, cosine_distance(embedding, query) AS similarity \

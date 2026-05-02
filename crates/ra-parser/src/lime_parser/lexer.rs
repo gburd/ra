@@ -87,6 +87,25 @@ pub mod token {
     pub const INTERSECT: i32 = 71;
     pub const EXCEPT: i32 = 72;
     pub const USING: i32 = 73;
+
+    // JSONB operators (two-character symbol tokens)
+    pub const AT_GT: i32 = 74;      /* @>  JSON contains */
+    pub const LT_AT: i32 = 75;      /* <@  JSON contained by */
+    pub const AT_QUESTION: i32 = 76; /* @?  JSON path exists */
+    pub const AT_AT: i32 = 77;      /* @@  JSON path match */
+
+    // Square brackets for array subscripting
+    pub const LBRACKET: i32 = 78;   /* [ */
+    pub const RBRACKET: i32 = 79;   /* ] */
+
+    // New keywords
+    pub const ARRAY: i32 = 80;
+    pub const UNNEST: i32 = 81;
+    pub const ORDINALITY: i32 = 82;
+    pub const DATE_KW: i32 = 83;
+    pub const INTERVAL_KW: i32 = 84;
+    pub const EXTRACT: i32 = 85;
+    pub const PLACEHOLDER: i32 = 86; /* ? parameter */
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -237,6 +256,12 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "INTERSECT" => Some(token::INTERSECT),
         "EXCEPT" => Some(token::EXCEPT),
         "USING" => Some(token::USING),
+        "ARRAY" => Some(token::ARRAY),
+        "UNNEST" => Some(token::UNNEST),
+        "ORDINALITY" => Some(token::ORDINALITY),
+        "EXTRACT" => Some(token::EXTRACT),
+        // Note: DATE and INTERVAL intentionally NOT keywords — they are
+        // commonly used as column names and would cause parse conflicts.
         _ => None,
     }
 }
@@ -251,6 +276,10 @@ fn match_two_char_op(sql: &str, pos: usize) -> Option<i32> {
         "<=" => Some(token::LE),
         ">=" => Some(token::GE),
         "||" => Some(token::CONCAT),
+        "@>" => Some(token::AT_GT),
+        "<@" => Some(token::LT_AT),
+        "@?" => Some(token::AT_QUESTION),
+        "@@" => Some(token::AT_AT),
         _ => None,
     }
 }
@@ -271,6 +300,9 @@ fn match_single_char_op(byte: u8) -> Option<i32> {
         b'-' => Some(token::MINUS),
         b'/' => Some(token::SLASH),
         b'%' => Some(token::PERCENT),
+        b'[' => Some(token::LBRACKET),
+        b']' => Some(token::RBRACKET),
+        b'?' => Some(token::PLACEHOLDER),
         _ => None,
     }
 }

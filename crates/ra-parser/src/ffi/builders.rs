@@ -555,6 +555,15 @@ pub unsafe extern "C" fn ra_recursive_cte_auto(
         return std::ptr::null_mut();
     };
 
+    // If the CTE body is a plain UNION (not ALL) inside RECURSIVE, that is
+    // invalid SQL: recursive CTEs must use UNION ALL.
+    if let RelExpr::Union { all: false, .. } = body_rel {
+        st.push_error(
+            "WITH RECURSIVE requires UNION ALL, not plain UNION".to_owned(),
+        );
+        return std::ptr::null_mut();
+    }
+
     // If the CTE body is a UNION ALL, split into base and recursive cases.
     if let RelExpr::Union { left, right, all: true } = body_rel {
         st.push_rel(RelExpr::RecursiveCTE {
@@ -1076,6 +1085,100 @@ pub unsafe extern "C" fn ra_array_index(
         return std::ptr::null_mut();
     };
     st.push_expr(Expr::ArrayIndex(Box::new(array), Box::new(index)))
+}
+
+/// Build an `Unnest` relational node.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `array_expr` must be a valid tagged expression pointer or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_unnest(
+    state: *mut RaParseState,
+    array_expr: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(expr) = decode_expr(st, array_expr) else {
+        st.push_error("ra_unnest: invalid array expression".to_owned());
+        return std::ptr::null_mut();
+    };
+    st.push_rel(RelExpr::unnest(expr, None))
+}
+
+/// Build an `Unnest` relational node with `WITH ORDINALITY`.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `array_expr` must be a valid tagged expression pointer or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_unnest_ord(
+    state: *mut RaParseState,
+    array_expr: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(expr) = decode_expr(st, array_expr) else {
+        st.push_error("ra_unnest_ord: invalid array expression".to_owned());
+        return std::ptr::null_mut();
+    };
+    st.push_rel(RelExpr::Unnest {
+        expr,
+        alias: None,
+        input: None,
+        with_ordinality: true,
+    })
+}
+
+/// Build a `TableFunction` relational node (for `generate_series` etc.).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `name` must be a valid C string of length `name_len`.
+/// - `args_list` must be a valid tagged list pointer or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_table_function(
+    state: *mut RaParseState,
+    name: *const c_char,
+    name_len: usize,
+    args_list: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let func_name = unsafe { c_str_len_to_string(name, name_len) };
+    let args = collect_exprs(st, args_list);
+    st.push_rel(RelExpr::table_function(func_name, args, vec![]))
+}
+
+/// Build a window function marker expression.
+///
+/// The function name is prefixed with `__window_` so the post-parse
+/// transformer can detect it and promote the result to a `Window` node.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `name` must be a valid NUL-terminated C string.
+/// - `args_list` must be a valid tagged list pointer or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_window_marker(
+    state: *mut RaParseState,
+    name: *const c_char,
+    args_list: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let raw_name = unsafe { c_str_to_string(name) };
+    let marker_name = format!("__window_{raw_name}");
+    let args = collect_exprs(st, args_list);
+    let func_name = marker_name;
+    st.push_expr(Expr::Function {
+        name: func_name,
+        args,
+    })
 }
 
 /// Build a `FieldAccess` expression (e.g., `(row).field_name`).

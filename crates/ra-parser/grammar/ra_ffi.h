@@ -48,6 +48,18 @@ RaNode *ra_recursive_cte(RaParseState *st, const char *name,
 RaNode *ra_recursive_cte_auto(RaParseState *st, const char *name,
                                size_t name_len,
                                RaNode *cte_body, RaNode *query_body);
+
+/* UNNEST table reference */
+RaNode *ra_unnest(RaParseState *st, RaNode *array_expr);
+RaNode *ra_unnest_ord(RaParseState *st, RaNode *array_expr);
+
+/* Generic table-valued function in FROM clause */
+RaNode *ra_table_function(RaParseState *st, const char *name,
+                           size_t name_len, RaNode *args);
+
+/* Window function marker — wraps function call with __window_ prefix */
+RaNode *ra_window_marker(RaParseState *st, const char *name,
+                          RaNode *args);
 RaNode *ra_cte(RaParseState *st, const char *name,
                RaNode *definition, RaNode *body);
 RaNode *ra_window(RaParseState *st, RaNode *input, RaNode *funcs);

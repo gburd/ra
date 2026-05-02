@@ -1,6 +1,7 @@
 use ra_core::algebra::RelExpr;
 
 use super::error::SqlConversionError;
+use super::transform;
 use crate::ffi::node::ParseErrors;
 use crate::lime_parser;
 
@@ -40,6 +41,7 @@ pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
         .iter()
         .map(|stmt| {
             lime_parser::parse_sql(stmt)
+                .map(transform::apply_all)
                 .map_err(convert_parse_errors)
         })
         .collect()
@@ -70,7 +72,7 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
     let mut last_err = None;
     for stmt in &statements {
         match lime_parser::parse_sql(stmt) {
-            Ok(rel) => return Ok(rel),
+            Ok(rel) => return Ok(transform::apply_all(rel)),
             Err(errs) => {
                 last_err = Some(errs);
             }

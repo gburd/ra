@@ -158,7 +158,6 @@ fn running_totals_cte_parses() {
 // ── Error cases ────────────────────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet distinguish UNION from UNION ALL in recursive CTEs"]
 fn recursive_cte_without_union_all_fails() {
     let sql = "
         WITH RECURSIVE bad AS (

@@ -13,7 +13,6 @@ use ra_parser::sql_to_relexpr;
 // ── UNNEST parsing ────────────────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet support UNNEST syntax"]
 fn parse_unnest_array_literal() {
     fn find_unnest(e: &RelExpr) -> bool {
         match e {
@@ -31,7 +30,6 @@ fn parse_unnest_array_literal() {
 }
 
 #[test]
-#[ignore = "UNNEST WITH ORDINALITY not yet implemented"]
 fn parse_unnest_with_ordinality() {
     fn find_unnest_ordinality(e: &RelExpr) -> bool {
         match e {
@@ -53,7 +51,6 @@ fn parse_unnest_with_ordinality() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support UNNEST/ARRAY syntax"]
 fn parse_unnest_column_ref() {
     // UNNEST used as a function call (not keyword syntax)
     let sql = "SELECT * FROM unnest(ARRAY[1, 2]) AS vals";
@@ -69,7 +66,6 @@ fn parse_unnest_column_ref() {
 // ── generate_series parsing ───────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet produce TableFunction nodes"]
 fn parse_generate_series_basic() {
     fn find_table_func(e: &RelExpr) -> Option<String> {
         match e {
@@ -88,7 +84,6 @@ fn parse_generate_series_basic() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce TableFunction nodes"]
 fn parse_generate_series_with_step() {
     fn count_args(e: &RelExpr) -> Option<usize> {
         match e {
@@ -105,7 +100,6 @@ fn parse_generate_series_with_step() {
 // ── Array expression parsing ──────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet support ARRAY literal syntax"]
 fn parse_array_literal_in_select() {
     fn find_array(e: &RelExpr) -> bool {
         match e {
@@ -122,7 +116,6 @@ fn parse_array_literal_in_select() {
 }
 
 #[test]
-#[ignore = "Array subscript not yet supported in expression converter"]
 fn parse_array_subscript() {
     fn find_array_index(e: &RelExpr) -> bool {
         match e {
@@ -168,7 +161,6 @@ fn parse_empty_array() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support ARRAY literal syntax"]
 fn parse_nested_array() {
     let sql = "SELECT ARRAY[ARRAY[1, 2], ARRAY[3, 4]]";
     let result = sql_to_relexpr(sql);
@@ -178,7 +170,6 @@ fn parse_nested_array() {
 // ── Array in WHERE clause ─────────────────────────────────
 
 #[test]
-#[ignore = "Array subscript not yet supported in expression converter"]
 fn parse_array_subscript_in_where() {
     fn contains_array_index(e: &Expr) -> bool {
         match e {
@@ -208,7 +199,6 @@ fn parse_array_subscript_in_where() {
 // ── UNNEST in JOIN context ────────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet support UNNEST syntax"]
 fn parse_unnest_in_cross_join() {
     let sql = "\
         SELECT t.id, u.val \

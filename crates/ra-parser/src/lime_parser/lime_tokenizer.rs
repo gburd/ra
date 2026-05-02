@@ -120,9 +120,14 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         b"RIGHT" => Some(token::RIGHT),
         b"UNION" => Some(token::UNION),
         b"WHERE" => Some(token::WHERE),
+        b"ARRAY" => Some(token::ARRAY),
         b"EXCEPT" => Some(token::EXCEPT),
         b"EXISTS" => Some(token::EXISTS),
+        b"EXTRACT" => Some(token::EXTRACT),
+        b"UNNEST" => Some(token::UNNEST),
         b"USING" => Some(token::USING),
+        b"ORDINALITY" => Some(token::ORDINALITY),
+        // DATE and INTERVAL are NOT keywords — used as column names commonly.
         b"HAVING" => Some(token::HAVING),
         b"OFFSET" => Some(token::OFFSET),
         b"SELECT" => Some(token::SELECT),
@@ -238,14 +243,14 @@ fn process_token(
     }
 
     let Some(code) = map_c_code(c_code) else {
-        if c_code == tk::ILLEGAL {
-            let ch = String::from_utf8_lossy(text_bytes);
-            return Err(format!(
-                "unexpected character '{ch}' at line {}:{}",
-                raw.line, raw.column,
-            ));
-        }
-        return Ok(None);
+        // For characters the C tokenizer doesn't know about, or ILLEGAL:
+        // return an error to trigger fallback to the Rust lexer.
+        // This handles `[`, `]`, `@`, `?` and other extended-SQL characters.
+        let ch = String::from_utf8_lossy(text_bytes);
+        return Err(format!(
+            "unrecognized token '{ch}' at line {}:{}",
+            raw.line, raw.column,
+        ));
     };
 
     if code == token::IDENT || code == token::SCONST {
