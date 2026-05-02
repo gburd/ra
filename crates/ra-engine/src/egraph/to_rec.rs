@@ -408,11 +408,36 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
             }
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
-        Expr::Case { .. } => Err(EGraphError::ConversionError(
-            "CASE expressions are not yet supported in the \
-                 e-graph representation"
-                .into(),
-        )),
+        Expr::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } => {
+            // Encode as Func(["__CASE", operand_or_null, w1, t1, w2, t2, ..., else_or_null])
+            // Null sentinels mark "no operand" and "no else".
+            let case_tag = add_symbol(rec, "__CASE");
+            let null_sentinel = rec.add(RelLang::ConstNull);
+
+            let operand_id = if let Some(op) = operand {
+                add_scalar_expr(rec, op)?
+            } else {
+                null_sentinel
+            };
+
+            let mut ids = vec![case_tag, operand_id];
+            for (cond, result) in when_clauses {
+                ids.push(add_scalar_expr(rec, cond)?);
+                ids.push(add_scalar_expr(rec, result)?);
+            }
+            let else_id = if let Some(e) = else_result {
+                add_scalar_expr(rec, e)?
+            } else {
+                null_sentinel
+            };
+            ids.push(else_id);
+
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
         Expr::Cast { expr, target_type } => {
             let expr_id = add_scalar_expr(rec, expr)?;
             let type_id = add_symbol(rec, target_type);
@@ -626,14 +651,27 @@ fn add_aggregate_list(
                 let arg_id = add_agg_arg(rec, agg.arg.as_ref())?;
                 RelLang::Max([arg_id])
             }
-            AggregateFunction::StdDev
-            | AggregateFunction::Variance
-            | AggregateFunction::StringAgg
-            | AggregateFunction::ArrayAgg => {
-                return Err(EGraphError::ConversionError(format!(
-                    "aggregate function {:?} not yet supported in e-graph",
-                    agg.function
-                )));
+            // Extended aggregates: encode as opaque Func nodes so the
+            // e-graph can optimize around them without specific rules.
+            AggregateFunction::StdDev => {
+                let arg_id = add_agg_arg(rec, agg.arg.as_ref())?;
+                let tag = add_symbol(rec, "STDDEV");
+                RelLang::Func(vec![tag, arg_id].into_boxed_slice())
+            }
+            AggregateFunction::Variance => {
+                let arg_id = add_agg_arg(rec, agg.arg.as_ref())?;
+                let tag = add_symbol(rec, "VARIANCE");
+                RelLang::Func(vec![tag, arg_id].into_boxed_slice())
+            }
+            AggregateFunction::StringAgg => {
+                let arg_id = add_agg_arg(rec, agg.arg.as_ref())?;
+                let tag = add_symbol(rec, "STRING_AGG");
+                RelLang::Func(vec![tag, arg_id].into_boxed_slice())
+            }
+            AggregateFunction::ArrayAgg => {
+                let arg_id = add_agg_arg(rec, agg.arg.as_ref())?;
+                let tag = add_symbol(rec, "ARRAY_AGG");
+                RelLang::Func(vec![tag, arg_id].into_boxed_slice())
             }
         };
         let func_id = rec.add(func_node);
@@ -739,5 +777,85 @@ fn add_frame_bound(rec: &mut RecExpr<RelLang>, bound: &WindowFrameBound) -> Id {
             rec.add(RelLang::FrameFollowing([n_id]))
         }
         WindowFrameBound::UnboundedFollowing => rec.add(RelLang::FrameUnboundedFollowing),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ra_core::algebra::RelExpr;
+    use ra_core::expr::{BinOp, Const, Expr};
+
+    #[test]
+    fn case_expr_roundtrip() {
+        let case_expr = Expr::Case {
+            operand: None,
+            when_clauses: vec![(
+                Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(ra_core::expr::ColumnRef {
+                    table: None, column: "x".to_owned()
+                })),
+                    right: Box::new(Expr::Const(Const::Int(0))),
+                },
+                Expr::Const(Const::Int(1)),
+            )],
+            else_result: Some(Box::new(Expr::Const(Const::Int(0)))),
+        };
+
+        let plan = RelExpr::filter(RelExpr::scan("t"), case_expr);
+        let result = to_rec_expr(&plan);
+        assert!(result.is_ok(), "CASE should convert: {:?}", result.err());
+    }
+
+    #[test]
+    fn case_in_aggregate_roundtrip() {
+        use crate::egraph::optimizer::Optimizer;
+        use crate::ResourceBudget;
+        use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
+        use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+
+        let case_expr = Expr::Case {
+            operand: None,
+            when_clauses: vec![(
+                Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(ColumnRef {
+                        table: None,
+                        column: "x".to_owned(),
+                    })),
+                    right: Box::new(Expr::Const(Const::Int(0))),
+                },
+                Expr::Const(Const::Int(1)),
+            )],
+            else_result: Some(Box::new(Expr::Const(Const::Int(0)))),
+        };
+
+        let plan = RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Sum,
+                arg: Some(case_expr),
+                distinct: false,
+                alias: None,
+            }],
+            input: Box::new(RelExpr::scan("t")),
+        };
+
+        let result = to_rec_expr(&plan);
+        assert!(
+            result.is_ok(),
+            "Aggregate(SUM(CASE...)) should convert: {:?}",
+            result.err()
+        );
+
+        let mut optimizer = Optimizer::new();
+        optimizer.set_resource_budget(ResourceBudget::standard());
+        let opt_result = optimizer.optimize_bounded(&plan);
+        assert!(
+            opt_result.is_ok(),
+            "optimize should work: {:?}",
+            opt_result.err()
+        );
     }
 }

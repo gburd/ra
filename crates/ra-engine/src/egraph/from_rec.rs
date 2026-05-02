@@ -444,6 +444,10 @@ fn scalar_from_node(
                 ));
             }
             let name = extract_symbol(egraph, ids[0])?;
+            // CASE expression was encoded as Func("__CASE", operand, w1, t1, ..., else).
+            if name == "__CASE" {
+                return decode_case_expr(egraph, &ids[1..]);
+            }
             let mut args = Vec::with_capacity(ids.len() - 1);
             for &arg_id in &ids[1..] {
                 args.push(extract_scalar_expr(egraph, arg_id)?);
@@ -637,6 +641,21 @@ fn extract_agg_function(
             RelLang::Avg([a]) => (AggregateFunction::Avg, *a),
             RelLang::Min([a]) => (AggregateFunction::Min, *a),
             RelLang::Max([a]) => (AggregateFunction::Max, *a),
+            // Extended aggregates encoded as Func(["NAME", arg]).
+            RelLang::Func(ids) if ids.len() == 2 => {
+                let Ok(name) = extract_symbol(egraph, ids[0]) else {
+                    continue;
+                };
+                let func = match name.as_str() {
+                    "STDDEV" => AggregateFunction::StdDev,
+                    "VARIANCE" => AggregateFunction::Variance,
+                    "STRING_AGG" => AggregateFunction::StringAgg,
+                    "ARRAY_AGG" => AggregateFunction::ArrayAgg,
+                    _ => continue,
+                };
+                let arg = extract_optional_expr(egraph, ids[1])?;
+                return Ok((func, arg));
+            }
             _ => continue,
         };
         let arg = extract_optional_expr(egraph, arg_id)?;
@@ -941,4 +960,55 @@ fn extract_null_ordering(
     Err(EGraphError::ExtractionError(
         "expected NullsFirst/NullsLast node".into(),
     ))
+}
+
+/// Decode a CASE expression from its `Func("__CASE", ...)` encoding.
+///
+/// Encoding layout (all in `ids`, the function args after the `__CASE` tag):
+///   `[operand_or_null, when1, then1, when2, then2, ..., whenN, thenN, else_or_null]`
+///
+/// Total length = `2 + 2*N` where N is the number of WHEN clauses.
+/// A `ConstNull` node is used as a sentinel for "no operand" and "no else".
+fn decode_case_expr(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    ids: &[Id],
+) -> Result<Expr, EGraphError> {
+    // ids must be [operand, w1, t1, ..., wN, tN, else] → length 2 + 2N (≥ 2, even).
+    let n = ids.len();
+    if n < 2 || !n.is_multiple_of(2) {
+        return Err(EGraphError::ExtractionError(format!(
+            "__CASE encoding invalid: expected ≥2 even elements, got {n}"
+        )));
+    }
+
+    // ids[0] = operand sentinel
+    let raw_operand = extract_scalar_expr(egraph, ids[0])?;
+    let operand = if matches!(raw_operand, Expr::Const(Const::Null)) {
+        None
+    } else {
+        Some(Box::new(raw_operand))
+    };
+
+    // ids[n-1] = else sentinel
+    let raw_else = extract_scalar_expr(egraph, ids[n - 1])?;
+    let else_result = if matches!(raw_else, Expr::Const(Const::Null)) {
+        None
+    } else {
+        Some(Box::new(raw_else))
+    };
+
+    // ids[1..n-1] in pairs = when/then clauses
+    let num_clauses = (n - 2) / 2;
+    let mut when_clauses = Vec::with_capacity(num_clauses);
+    for k in 0..num_clauses {
+        let cond = extract_scalar_expr(egraph, ids[1 + 2 * k])?;
+        let result = extract_scalar_expr(egraph, ids[2 + 2 * k])?;
+        when_clauses.push((cond, result));
+    }
+
+    Ok(Expr::Case {
+        operand,
+        when_clauses,
+        else_result,
+    })
 }
