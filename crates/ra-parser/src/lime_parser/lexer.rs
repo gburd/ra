@@ -86,6 +86,7 @@ pub mod token {
     pub const VALUES: i32 = 70;
     pub const INTERSECT: i32 = 71;
     pub const EXCEPT: i32 = 72;
+    pub const USING: i32 = 73;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -235,6 +236,7 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "VALUES" => Some(token::VALUES),
         "INTERSECT" => Some(token::INTERSECT),
         "EXCEPT" => Some(token::EXCEPT),
+        "USING" => Some(token::USING),
         _ => None,
     }
 }

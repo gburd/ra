@@ -15,7 +15,6 @@ use ra_parser::sql_to_relexpr;
 // ── Basic parsing ──────────────────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn simple_recursive_cte_parses() {
     let sql = "
         WITH RECURSIVE cnt(x) AS (
@@ -46,7 +45,6 @@ fn simple_recursive_cte_parses() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn recursive_cte_body_is_scan_of_cte_name() {
     let sql = "
         WITH RECURSIVE nums AS (
@@ -70,7 +68,6 @@ fn recursive_cte_body_is_scan_of_cte_name() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn recursive_cte_base_case_does_not_reference_cte() {
     let sql = "
         WITH RECURSIVE r AS (
@@ -104,7 +101,6 @@ fn recursive_cte_base_case_does_not_reference_cte() {
 // ── Graph traversal pattern ────────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn graph_reachability_cte_parses() {
     let sql = "
         WITH RECURSIVE reachable(node) AS (
@@ -137,7 +133,6 @@ fn graph_reachability_cte_parses() {
 // ── Running totals pattern ─────────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn running_totals_cte_parses() {
     let sql = "
         WITH RECURSIVE running(id, total) AS (
@@ -200,7 +195,6 @@ fn non_recursive_with_clause_not_recursive_cte() {
 // ── Fibonacci-like pattern ─────────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn fibonacci_cte_parses() {
     let sql = "
         WITH RECURSIVE fib(n, a, b) AS (
@@ -222,7 +216,6 @@ fn fibonacci_cte_parses() {
 // ── Hierarchy traversal ────────────────────────────────────
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn employee_hierarchy_cte_parses() {
     let sql = "
         WITH RECURSIVE org_chart(emp_id, manager_id, level) AS (

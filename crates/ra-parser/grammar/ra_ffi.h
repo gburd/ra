@@ -43,6 +43,11 @@ RaNode *ra_values(RaParseState *st, RaNode *rows_list);
 RaNode *ra_recursive_cte(RaParseState *st, const char *name,
                          size_t name_len, RaNode *base,
                          RaNode *recursive, RaNode *body);
+/* Called from WITH RECURSIVE; auto-detects UNION ALL body to create
+ * RecursiveCTE, falls back to regular CTE if body is not UNION ALL. */
+RaNode *ra_recursive_cte_auto(RaParseState *st, const char *name,
+                               size_t name_len,
+                               RaNode *cte_body, RaNode *query_body);
 RaNode *ra_cte(RaParseState *st, const char *name,
                RaNode *definition, RaNode *body);
 RaNode *ra_window(RaParseState *st, RaNode *input, RaNode *funcs);

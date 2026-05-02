@@ -122,6 +122,7 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         b"WHERE" => Some(token::WHERE),
         b"EXCEPT" => Some(token::EXCEPT),
         b"EXISTS" => Some(token::EXISTS),
+        b"USING" => Some(token::USING),
         b"HAVING" => Some(token::HAVING),
         b"OFFSET" => Some(token::OFFSET),
         b"SELECT" => Some(token::SELECT),

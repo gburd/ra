@@ -134,6 +134,7 @@ typedef struct RaToken {
 %token VALUES.
 %token INTERSECT.
 %token EXCEPT.
+%token USING.
 
 /* ================================================================== */
 /* Precedence (low to high)                                            */
@@ -163,8 +164,40 @@ stmt(A) ::= with_clause(B).                 { A = B; }
 
 /* -- WITH (CTE) clause --------------------------------------------- */
 
+/* Single non-recursive CTE */
 with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
+}
+
+/* CTE with optional column-name list: WITH name(col1, col2) AS (...) */
+with_clause(A) ::= WITH IDENT(B) LPAREN ident_list RPAREN AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D); /* column list is informational only */
+}
+
+/* WITH RECURSIVE with column-name list */
+with_clause(A) ::= WITH RECURSIVE IDENT(B) LPAREN ident_list RPAREN AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_recursive_cte_auto(pstate, B.text, strlen(B.text), C, D);
+}
+
+/* Multiple CTEs: WITH a AS (...), b AS (...) ... */
+/* with_rest represents the tail of the CTE list applied to a body */
+with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+
+/* with_rest is the remaining CTEs (after the first comma) */
+with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+
+/* WITH RECURSIVE: body is select_stmt (may or may not include UNION ALL).
+ * ra_recursive_cte_auto inspects the body: if it's a UNION ALL node it creates
+ * RecursiveCTE; otherwise it creates a regular CTE. */
+with_clause(A) ::= WITH RECURSIVE IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_recursive_cte_auto(pstate, B.text, strlen(B.text), C, D);
 }
 
 /* -- SELECT statement with set operations -------------------------- */
@@ -200,7 +233,9 @@ select_no_parens(A) ::= SELECT target_list(B) from_clause(C)
     if (H) { base = ra_filter(pstate, base, H); }
     base = ra_project(pstate, base, B);
     if (F) { base = ra_sort(pstate, base, F); }
-    if (G) { base = G; }
+    if (G.float_val != 0.0) {
+        base = ra_limit(pstate, base, (uint64_t)G.int_val, (uint64_t)G.location);
+    }
     A = base;
 }
 
@@ -214,7 +249,9 @@ select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
     base = ra_project(pstate, base, B);
     base = ra_distinct(pstate, base);
     if (F) { base = ra_sort(pstate, base, F); }
-    if (G) { base = G; }
+    if (G.float_val != 0.0) {
+        base = ra_limit(pstate, base, (uint64_t)G.int_val, (uint64_t)G.location);
+    }
     A = base;
 }
 
@@ -238,6 +275,10 @@ target_item(A) ::= expr(B).                 { A = B; }
 target_item(A) ::= expr(B) AS IDENT.        { A = B; }
 target_item(A) ::= STAR. {
     A = ra_column(pstate, "*");
+}
+target_item(A) ::= IDENT(B) DOT STAR. {
+    /* Qualified wildcard: table.* */
+    A = ra_qualified_column(pstate, B.text, "*");
 }
 
 /* -- FROM clause --------------------------------------------------- */
@@ -283,14 +324,31 @@ table_ref(A) ::= table_ref(B) CROSS JOIN table_ref(C). {
     A = ra_join(pstate, 4, B, C, cond); /* 4 = Cross */
 }
 
+/* JOIN USING: treat as inner join with true condition (column equality
+ * semantics are handled by the optimizer layer). */
+table_ref(A) ::= table_ref(B) JOIN table_ref(C) USING LPAREN ident_list(D) RPAREN. {
+    (void)D; /* column list — kept for future optimizer use */
+    RaNode *cond = ra_const_int(pstate, 1);
+    A = ra_join(pstate, 0, B, C, cond); /* 0 = Inner */
+}
+
+/* Identifier list for USING clause */
+ident_list(A) ::= IDENT(B). {
+    RaNode *l = ra_list_new(pstate);
+    A = ra_list_push(pstate, l, ra_column(pstate, B.text));
+}
+ident_list(A) ::= ident_list(B) COMMA IDENT(C). {
+    A = ra_list_push(pstate, B, ra_column(pstate, C.text));
+}
+
 %type join_type {RaToken}
-join_type(A) ::= INNER.         { A.int_val = 0; A.text = 0; A.location = 0; A.float_val = 0; }
-join_type(A) ::= LEFT OUTER.    { A.int_val = 1; A.text = 0; A.location = 0; A.float_val = 0; }
-join_type(A) ::= LEFT.          { A.int_val = 1; A.text = 0; A.location = 0; A.float_val = 0; }
-join_type(A) ::= RIGHT OUTER.   { A.int_val = 2; A.text = 0; A.location = 0; A.float_val = 0; }
-join_type(A) ::= RIGHT.         { A.int_val = 2; A.text = 0; A.location = 0; A.float_val = 0; }
-join_type(A) ::= FULL OUTER.    { A.int_val = 3; A.text = 0; A.location = 0; A.float_val = 0; }
-join_type(A) ::= FULL.          { A.int_val = 3; A.text = 0; A.location = 0; A.float_val = 0; }
+join_type(A) ::= INNER.         { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+join_type(A) ::= LEFT OUTER.    { A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+join_type(A) ::= LEFT.          { A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+join_type(A) ::= RIGHT OUTER.   { A.int_val = 2; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+join_type(A) ::= RIGHT.         { A.int_val = 2; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+join_type(A) ::= FULL OUTER.    { A.int_val = 3; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+join_type(A) ::= FULL.          { A.int_val = 3; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
 
 /* -- WHERE clause -------------------------------------------------- */
 
@@ -331,21 +389,30 @@ sort_item(A) ::= expr(B) nulls_order(C). {
 }
 
 %type nulls_order {RaToken}
-nulls_order(A) ::= NULLS FIRST. { A.int_val = 1; A.text = 0; A.location = 0; A.float_val = 0; }
-nulls_order(A) ::= NULLS LAST.  { A.int_val = 0; A.text = 0; A.location = 0; A.float_val = 0; }
-nulls_order(A) ::= .            { A.int_val = 0; A.text = 0; A.location = 0; A.float_val = 0; }
+nulls_order(A) ::= NULLS FIRST. { A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+nulls_order(A) ::= NULLS LAST.  { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+nulls_order(A) ::= .            { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
 
 /* -- LIMIT clause -------------------------------------------------- */
+/* Uses float_val as a "has limit" flag (1.0 = present, 0.0 = absent).
+ * int_val carries the row count, location carries the offset. */
 
+%type limit_clause {RaToken}
 limit_clause(A) ::= LIMIT ICONST(B) OFFSET ICONST(C). {
-    (void)B; (void)C;
-    A = 0; /* Placeholder: LIMIT applied in select_no_parens */
+    A.text = 0; A.length = 0;
+    A.int_val = B.int_val;           /* count */
+    A.location = (int)C.int_val;     /* offset (fits in i32 for any practical offset) */
+    A.float_val = 1.0;               /* flag: limit present */
 }
-limit_clause(A) ::= LIMIT ICONST. {
-    A = 0;
+limit_clause(A) ::= LIMIT ICONST(B). {
+    A.text = 0; A.length = 0;
+    A.int_val = B.int_val;           /* count */
+    A.location = 0;                  /* no offset */
+    A.float_val = 1.0;               /* flag: limit present */
 }
 limit_clause(A) ::= . {
-    A = 0;
+    A.text = 0; A.length = 0; A.int_val = 0; A.location = 0;
+    A.float_val = 0.0;               /* flag: no limit */
 }
 
 /* -- VALUES rows --------------------------------------------------- */
@@ -542,6 +609,7 @@ type_name(A) ::= IDENT(B). {
     A.text = B.text;
     A.int_val = (int64_t)strlen(B.text);
     A.location = B.location;
+    A.length = 0;
     A.float_val = 0;
 }
 type_name(A) ::= IDENT(B) LPAREN ICONST RPAREN. {
@@ -549,6 +617,7 @@ type_name(A) ::= IDENT(B) LPAREN ICONST RPAREN. {
     A.text = B.text;
     A.int_val = (int64_t)strlen(B.text);
     A.location = B.location;
+    A.length = 0;
     A.float_val = 0;
 }
 

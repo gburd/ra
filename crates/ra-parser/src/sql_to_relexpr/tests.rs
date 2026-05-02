@@ -120,7 +120,6 @@ fn test_order_by_nulls() {
 // Lime grammar does not yet produce Limit nodes (placeholder only).
 
 #[test]
-#[ignore = "Lime grammar does not yet produce Limit nodes"]
 fn test_limit() {
     let sql = "SELECT * FROM users LIMIT 10";
     let result = sql_to_relexpr(sql).expect("should parse");
@@ -133,7 +132,6 @@ fn test_limit() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce Limit nodes"]
 fn test_limit_offset() {
     let sql = "SELECT * FROM users LIMIT 10 OFFSET 20";
     let result = sql_to_relexpr(sql).expect("should parse");
@@ -146,7 +144,6 @@ fn test_limit_offset() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce Limit nodes"]
 fn test_order_by_with_limit() {
     let sql = "SELECT * FROM users ORDER BY name LIMIT 5";
     let result = sql_to_relexpr(sql).expect("should parse");
@@ -201,7 +198,6 @@ fn test_simple_cte() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support multiple CTEs"]
 fn test_multiple_ctes() {
     let sql = "WITH \
                  a AS (SELECT * FROM t1), \
@@ -495,7 +491,6 @@ fn test_distinct_with_order_by() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce Limit nodes"]
 fn test_having_with_limit() {
     let sql = "SELECT dept_id, COUNT(*) as cnt \
                FROM employees \
@@ -540,7 +535,6 @@ fn test_multiple_from_items() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support JOIN USING"]
 fn test_join_using() {
     let sql = "SELECT * FROM orders JOIN customers USING (customer_id)";
     let result = sql_to_relexpr(sql);
@@ -552,7 +546,6 @@ fn test_join_using() {
 // It produces CTE nodes instead of RecursiveCTE nodes.
 
 #[test]
-#[ignore = "Lime grammar does not yet support WITH RECURSIVE"]
 fn test_simple_recursive_cte() {
     let sql = "\
         WITH RECURSIVE counter AS (\
@@ -563,15 +556,13 @@ fn test_simple_recursive_cte() {
     let result = sql_to_relexpr(sql);
     assert!(result.is_ok(), "simple recursive CTE: {result:?}");
     let plan = result.expect("already checked");
-    // Lime grammar produces CTE, not RecursiveCTE
     assert!(
-        has_node(&plan, |r| matches!(r, RelExpr::CTE { .. })),
-        "expected CTE node (Lime does not yet produce RecursiveCTE)"
+        matches!(&plan, RelExpr::RecursiveCTE { .. }),
+        "expected RecursiveCTE node, got: {plan:?}"
     );
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_recursive_cte_name() {
     let sql = "\
         WITH RECURSIVE nums AS (\
@@ -588,7 +579,6 @@ fn test_recursive_cte_name() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_recursive_cte_base_is_non_recursive() {
     let sql = "\
         WITH RECURSIVE r AS (\
@@ -611,7 +601,6 @@ fn test_recursive_cte_base_is_non_recursive() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_recursive_cte_recursive_references_cte() {
     let sql = "\
         WITH RECURSIVE r AS (\
@@ -636,7 +625,6 @@ fn test_recursive_cte_recursive_references_cte() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes with cycle detection"]
 fn test_recursive_cte_has_cycle_detection() {
     let sql = "\
         WITH RECURSIVE r AS (\
@@ -661,7 +649,6 @@ fn test_recursive_cte_has_cycle_detection() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_recursive_cte_with_order_by() {
     let sql = "\
         WITH RECURSIVE r AS (\
@@ -670,17 +657,20 @@ fn test_recursive_cte_with_order_by() {
             SELECT n + 1 FROM r WHERE n < 10\
         ) SELECT * FROM r ORDER BY n";
     let plan = sql_to_relexpr(sql).expect("should parse");
+    // RecursiveCTE is the outermost node; the body contains the Sort.
     assert!(
-        matches!(plan, RelExpr::Sort { .. }),
-        "ORDER BY wraps RecursiveCTE in Sort"
+        matches!(plan, RelExpr::RecursiveCTE { .. }),
+        "RecursiveCTE is outermost, got: {plan:?}"
     );
-    if let RelExpr::Sort { input, .. } = &plan {
-        assert!(matches!(input.as_ref(), RelExpr::RecursiveCTE { .. }));
+    if let RelExpr::RecursiveCTE { body, .. } = &plan {
+        assert!(
+            has_node(body, |r| matches!(r, RelExpr::Sort { .. })),
+            "Sort should appear in CTE body"
+        );
     }
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE or Limit nodes"]
 fn test_recursive_cte_with_limit() {
     let sql = "\
         WITH RECURSIVE r AS (\
@@ -689,27 +679,34 @@ fn test_recursive_cte_with_limit() {
             SELECT n + 1 FROM r WHERE n < 100\
         ) SELECT * FROM r LIMIT 10";
     let plan = sql_to_relexpr(sql).expect("should parse");
-    assert!(matches!(plan, RelExpr::Limit { .. }));
+    // RecursiveCTE is outermost; body contains the Limit.
+    assert!(
+        matches!(plan, RelExpr::RecursiveCTE { .. }),
+        "RecursiveCTE is outermost, got: {plan:?}"
+    );
+    if let RelExpr::RecursiveCTE { body, .. } = &plan {
+        assert!(
+            has_node(body, |r| matches!(r, RelExpr::Limit { .. })),
+            "Limit should appear in CTE body"
+        );
+    }
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet support WITH RECURSIVE"]
 fn test_non_recursive_with_recursive_keyword() {
-    // WITH RECURSIVE keyword but CTE doesn't reference itself
+    // WITH RECURSIVE keyword but body is not UNION ALL — treated as regular CTE
     let sql = "\
         WITH RECURSIVE t AS (\
             SELECT id FROM users\
         ) SELECT * FROM t";
     let plan = sql_to_relexpr(sql).expect("should parse");
-    // Should fall through to non-recursive CTE
     assert!(
         matches!(plan, RelExpr::CTE { .. }),
-        "non-self-referencing WITH RECURSIVE produces CTE"
+        "WITH RECURSIVE without UNION ALL body produces CTE, got: {plan:?}"
     );
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_running_totals_query() {
     let sql = "\
         WITH RECURSIVE DatewiseTotal AS (\
@@ -738,26 +735,22 @@ fn test_running_totals_query() {
     );
     let plan = result.expect("already checked");
 
-    // Top level is Sort (ORDER BY date)
+    // RecursiveCTE is the outermost node; body contains the Sort.
     assert!(
-        matches!(plan, RelExpr::Sort { .. }),
-        "expected Sort at top, got {plan:?}"
+        matches!(plan, RelExpr::RecursiveCTE { .. }),
+        "expected RecursiveCTE at top, got {plan:?}"
     );
 
-    // Under Sort is RecursiveCTE
-    if let RelExpr::Sort { input, .. } = &plan {
+    if let RelExpr::RecursiveCTE { name, body, .. } = &plan {
+        assert_eq!(name.to_lowercase(), "datewisetotal");
         assert!(
-            matches!(input.as_ref(), RelExpr::RecursiveCTE { .. }),
-            "expected RecursiveCTE under Sort"
+            has_node(body, |r| matches!(r, RelExpr::Sort { .. })),
+            "Sort should appear in CTE body"
         );
-        if let RelExpr::RecursiveCTE { name, .. } = input.as_ref() {
-            assert_eq!(name.to_lowercase(), "datewisetotal");
-        }
     }
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_graph_reachability_recursive_cte() {
     let sql = "\
         WITH RECURSIVE reachable AS (\
@@ -774,7 +767,6 @@ fn test_graph_reachability_recursive_cte() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_fibonacci_recursive_cte() {
     let sql = "\
         WITH RECURSIVE fib AS (\
@@ -788,7 +780,6 @@ fn test_fibonacci_recursive_cte() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_tree_hierarchy_recursive_cte() {
     let sql = "\
         WITH RECURSIVE hierarchy AS (\
@@ -800,11 +791,20 @@ fn test_tree_hierarchy_recursive_cte() {
             JOIN hierarchy h ON e.parent_id = h.id\
         ) SELECT * FROM hierarchy ORDER BY depth, name";
     let plan = sql_to_relexpr(sql).expect("should parse");
-    assert!(matches!(plan, RelExpr::Sort { .. }));
+    // RecursiveCTE is outermost; Sort is in the body.
+    assert!(
+        matches!(plan, RelExpr::RecursiveCTE { .. }),
+        "expected RecursiveCTE at top, got: {plan:?}"
+    );
+    if let RelExpr::RecursiveCTE { body, .. } = &plan {
+        assert!(
+            has_node(body, |r| matches!(r, RelExpr::Sort { .. })),
+            "Sort should appear in CTE body (ORDER BY depth, name)"
+        );
+    }
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce RecursiveCTE nodes"]
 fn test_recursive_cte_children_count() {
     let sql = "\
         WITH RECURSIVE r AS (\
@@ -836,7 +836,6 @@ fn test_select_without_from() {
 // ---- Qualified wildcard and mixed wildcard ----
 
 #[test]
-#[ignore = "Lime grammar does not yet support qualified wildcards (t.*)"]
 fn test_qualified_wildcard() {
     let sql = "SELECT o.*, u.name \
                FROM orders o JOIN users u ON o.uid = u.id";
@@ -1100,7 +1099,6 @@ fn test_vector_without_limit() {
 }
 
 #[test]
-#[ignore = "Lime grammar does not yet produce Limit nodes"]
 fn test_vector_multiple_order_by_columns() {
     // Multiple ORDER BY expressions should use regular Sort
     let sql = "SELECT * FROM items \

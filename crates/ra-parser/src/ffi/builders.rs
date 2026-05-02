@@ -15,8 +15,8 @@ use crate::lime_parser::diagnostics;
 use crate::lime_parser::lexer::RaToken;
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
-    SortDirection, SortKey, WindowExpr, WindowFunction,
+    AggregateExpr, AggregateFunction, CycleDetection, JoinType, NullOrdering, ProjectionColumn,
+    RelExpr, SortDirection, SortKey, WindowExpr, WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
@@ -513,8 +513,70 @@ pub unsafe extern "C" fn ra_recursive_cte(
         base_case: Box::new(base_rel),
         recursive_case: Box::new(recursive_rel),
         body: Box::new(body_rel),
-        cycle_detection: None,
+        cycle_detection: Some(CycleDetection {
+            track_columns: Vec::new(),
+            max_depth: Some(1000),
+            cycle_mark_column: None,
+            path_column: None,
+        }),
     })
+}
+
+/// Build a `RecursiveCTE` or `CTE` node from a `WITH RECURSIVE` clause.
+///
+/// Inspects `cte_body`:
+/// - If it is `RelExpr::Union { all: true, .. }`, splits it into base and
+///   recursive cases and creates a `RecursiveCTE` node.
+/// - Otherwise creates a regular `CTE` node (RECURSIVE keyword was present
+///   but the body is not a UNION ALL).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `name` must be a valid C string of length `name_len`.
+/// - `cte_body` and `query_body` must be valid tagged relational nodes or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_recursive_cte_auto(
+    state: *mut RaParseState,
+    name: *const c_char,
+    name_len: usize,
+    cte_body: *mut RaNode,
+    query_body: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let cte_name = unsafe { c_str_len_to_string(name, name_len) };
+    let Some(body_rel) = decode_rel(st, cte_body) else {
+        st.push_error("ra_recursive_cte_auto: invalid cte_body node".to_owned());
+        return std::ptr::null_mut();
+    };
+    let Some(query_rel) = decode_rel(st, query_body) else {
+        st.push_error("ra_recursive_cte_auto: invalid query_body node".to_owned());
+        return std::ptr::null_mut();
+    };
+
+    // If the CTE body is a UNION ALL, split into base and recursive cases.
+    if let RelExpr::Union { left, right, all: true } = body_rel {
+        st.push_rel(RelExpr::RecursiveCTE {
+            name: cte_name,
+            base_case: left,
+            recursive_case: right,
+            body: Box::new(query_rel),
+            cycle_detection: Some(CycleDetection {
+                track_columns: Vec::new(),
+                max_depth: Some(1000),
+                cycle_mark_column: None,
+                path_column: None,
+            }),
+        })
+    } else {
+        // Not a UNION ALL: treat as regular CTE (RECURSIVE keyword ignored).
+        st.push_rel(RelExpr::CTE {
+            name: cte_name,
+            definition: Box::new(body_rel),
+            body: Box::new(query_rel),
+        })
+    }
 }
 
 /// Build a `CTE` node.
@@ -2198,7 +2260,9 @@ mod tests {
         } = &rel
         {
             assert_eq!(name, "reachable");
-            assert!(cycle_detection.is_none());
+            // Builder now sets a default cycle detection with max_depth=1000.
+            let cd = cycle_detection.as_ref().expect("cycle_detection should be Some");
+            assert_eq!(cd.max_depth, Some(1000));
         } else {
             panic!("expected RecursiveCTE variant");
         }
