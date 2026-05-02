@@ -15,4 +15,4 @@ pub mod builders;
 pub mod node;
 
 pub use builders::*;
-pub use node::{RaNode, RaParseState};
+pub use node::{ParseErrors, RaNode, RaParseState, StructuredParseError};

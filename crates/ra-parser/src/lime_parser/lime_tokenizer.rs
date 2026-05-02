@@ -170,7 +170,7 @@ fn token_offset(raw: &lime_sys::Token, buf_base: *const u8) -> usize {
 }
 
 /// Build a `LexToken` for a text-bearing token (ident, string).
-fn build_text_lex(code: i32, offset: i32, text: &[u8]) -> Result<LexToken, String> {
+fn build_text_lex(code: i32, offset: i32, length: i32, text: &[u8]) -> Result<LexToken, String> {
     let stripped = strip_quotes(text);
     let cstr = CString::new(stripped).map_err(|e| format!("text token at offset {offset}: {e}"))?;
     let ptr = cstr.as_ptr();
@@ -179,6 +179,7 @@ fn build_text_lex(code: i32, offset: i32, text: &[u8]) -> Result<LexToken, Strin
         value: RaToken {
             text: ptr,
             location: offset,
+            length,
             int_val: 0,
             float_val: 0.0,
         },
@@ -187,12 +188,13 @@ fn build_text_lex(code: i32, offset: i32, text: &[u8]) -> Result<LexToken, Strin
 }
 
 /// Build a simple (non-text) `LexToken`.
-fn simple_lex(code: i32, offset: i32) -> LexToken {
+fn simple_lex(code: i32, offset: i32, length: i32) -> LexToken {
     LexToken {
         code,
         value: RaToken {
             text: std::ptr::null(),
             location: offset,
+            length,
             int_val: 0,
             float_val: 0.0,
         },
@@ -210,12 +212,13 @@ fn process_token(
     let offset = token_offset(raw, buf_base);
     let len = raw.length;
     let offset_i32 = i32::try_from(offset).unwrap_or(0);
+    let length_i32 = i32::try_from(len).unwrap_or(0);
     let text_bytes = &sql_bytes[offset..offset + len];
 
     // Identifiers: check keyword table in Rust.
     if c_code == tk::IDENTIFIER {
         if let Some(kw) = keyword_lookup(text_bytes) {
-            return Ok(Some(simple_lex(kw, offset_i32)));
+            return Ok(Some(simple_lex(kw, offset_i32, length_i32)));
         }
         let cstr = CString::new(String::from_utf8_lossy(text_bytes).as_ref())
             .map_err(|e| format!("ident at {offset}: {e}"))?;
@@ -225,6 +228,7 @@ fn process_token(
             value: RaToken {
                 text: ptr,
                 location: offset_i32,
+                length: length_i32,
                 int_val: 0,
                 float_val: 0.0,
             },
@@ -244,7 +248,7 @@ fn process_token(
     };
 
     if code == token::IDENT || code == token::SCONST {
-        Ok(Some(build_text_lex(code, offset_i32, text_bytes)?))
+        Ok(Some(build_text_lex(code, offset_i32, length_i32, text_bytes)?))
     } else if code == token::ICONST {
         let text = std::str::from_utf8(text_bytes).map_err(|e| format!("int at {offset}: {e}"))?;
         let ival: i64 = text
@@ -255,6 +259,7 @@ fn process_token(
             value: RaToken {
                 text: std::ptr::null(),
                 location: offset_i32,
+                length: length_i32,
                 int_val: ival,
                 float_val: 0.0,
             },
@@ -271,13 +276,14 @@ fn process_token(
             value: RaToken {
                 text: std::ptr::null(),
                 location: offset_i32,
+                length: length_i32,
                 int_val: 0,
                 float_val: fval,
             },
             text_backing: None,
         }))
     } else {
-        Ok(Some(simple_lex(code, offset_i32)))
+        Ok(Some(simple_lex(code, offset_i32, length_i32)))
     }
 }
 

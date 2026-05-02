@@ -11,8 +11,98 @@
 //! |       arena index          |   tag   |
 //! ```
 
+use std::fmt;
+
 use ra_core::algebra::{AggregateExpr, RelExpr, SortKey, WindowExpr};
 use ra_core::expr::Expr;
+
+/// A structured syntax error captured from the Lime parser.
+///
+/// Carries precise position, token length, and expected-token hints
+/// from the LALR parser state, enabling exact caret widths and
+/// helpful "expected one of ..." messages.
+#[derive(Debug, Clone)]
+pub struct StructuredParseError {
+    /// Byte offset in the source string where the rejected token starts.
+    pub position: usize,
+    /// Length of the rejected token in bytes.
+    pub token_length: usize,
+    /// The raw text of the rejected token, if available.
+    pub token_text: Option<String>,
+    /// The grammar name of the rejected token (e.g. "IDENT", "FROM").
+    pub token_name: String,
+    /// Human-readable error message.
+    pub message: String,
+    /// Grammar names of tokens that would have been valid at this point.
+    pub expected_tokens: Vec<String>,
+}
+
+impl fmt::Display for StructuredParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)?;
+        if !self.expected_tokens.is_empty() {
+            write!(
+                f,
+                " (expected one of: {})",
+                self.expected_tokens.join(", ")
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Error type returned by `RaParseState::take_result()`.
+///
+/// Distinguishes structured syntax errors (from `%syntax_error`) from
+/// plain string errors (from builder/semantic actions).
+#[derive(Debug)]
+pub enum ParseErrors {
+    /// Rich syntax errors with position, token, and expected-token info.
+    Structured(Vec<StructuredParseError>),
+    /// Plain string errors from builder functions or fallback paths.
+    Strings(Vec<String>),
+}
+
+impl fmt::Display for ParseErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Structured(errs) => {
+                for (i, err) in errs.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str("; ")?;
+                    }
+                    write!(f, "{err}")?;
+                }
+                Ok(())
+            }
+            Self::Strings(errs) => f.write_str(&errs.join("; ")),
+        }
+    }
+}
+
+impl ParseErrors {
+    /// Return the string error messages (for builder/semantic errors).
+    ///
+    /// Returns `None` if this is a `Structured` variant.
+    #[must_use]
+    pub fn as_strings(&self) -> Option<&[String]> {
+        match self {
+            Self::Strings(ss) => Some(ss),
+            Self::Structured(_) => None,
+        }
+    }
+
+    /// Return the structured parse errors.
+    ///
+    /// Returns `None` if this is a `Strings` variant.
+    #[must_use]
+    pub fn as_structured(&self) -> Option<&[StructuredParseError]> {
+        match self {
+            Self::Structured(se) => Some(se),
+            Self::Strings(_) => None,
+        }
+    }
+}
 
 /// Opaque node handle returned to the Lime parser. Never dereferenced.
 pub enum RaNode {}
@@ -136,8 +226,10 @@ pub struct RaParseState {
     agg_exprs: Vec<AggregateExpr>,
     /// Arena for window expression nodes.
     window_exprs: Vec<WindowExpr>,
-    /// Accumulated parse errors.
+    /// Accumulated parse errors (from builder/semantic actions).
     errors: Vec<String>,
+    /// Structured syntax errors (from `%syntax_error` hook).
+    structured_errors: Vec<StructuredParseError>,
 }
 
 impl RaParseState {
@@ -152,6 +244,7 @@ impl RaParseState {
             agg_exprs: Vec::new(),
             window_exprs: Vec::new(),
             errors: Vec::new(),
+            structured_errors: Vec::new(),
         }
     }
 
@@ -209,9 +302,20 @@ impl RaParseState {
         }
     }
 
-    /// Record a parse error.
+    /// Record a parse error (from builder/semantic actions).
     pub fn push_error(&mut self, msg: String) {
         self.errors.push(msg);
+    }
+
+    /// Record a structured syntax error (from `%syntax_error` hook).
+    pub fn push_structured_error(&mut self, err: StructuredParseError) {
+        self.structured_errors.push(err);
+    }
+
+    /// Return the accumulated structured syntax errors.
+    #[must_use]
+    pub fn structured_errors(&self) -> &[StructuredParseError] {
+        &self.structured_errors
     }
 
     /// Retrieve a relational expression by arena index.
@@ -272,19 +376,27 @@ impl RaParseState {
     ///
     /// On success (no errors and at least one rel node), returns the last
     /// relational expression pushed — which is the root of the parse tree.
-    /// On failure, returns the accumulated error messages.
+    /// On failure, returns structured errors if available, otherwise
+    /// the accumulated string error messages.
     ///
     /// # Errors
-    /// Returns the accumulated error messages if any errors were recorded
-    /// or if no relational expression was pushed.
-    pub fn take_result(self) -> Result<RelExpr, Vec<String>> {
+    /// Returns `ParseResult::Err` with structured or string errors if any
+    /// errors were recorded or if no relational expression was pushed.
+    pub fn take_result(self) -> Result<RelExpr, ParseErrors> {
+        if !self.structured_errors.is_empty() {
+            return Err(ParseErrors::Structured(self.structured_errors));
+        }
         if !self.errors.is_empty() {
-            return Err(self.errors);
+            return Err(ParseErrors::Strings(self.errors));
         }
         self.rel_nodes
             .into_iter()
             .last()
-            .ok_or_else(|| vec!["no relational expression produced".to_owned()])
+            .ok_or_else(|| {
+                ParseErrors::Strings(
+                    vec!["no relational expression produced".to_owned()],
+                )
+            })
     }
 }
 
@@ -413,7 +525,8 @@ mod tests {
         let result = state.take_result();
         assert!(result.is_err());
         let errs = result.expect_err("should be err");
-        assert_eq!(errs, vec!["syntax error"]);
+        let strings = errs.as_strings().expect("should be string errors");
+        assert_eq!(strings, &["syntax error"]);
     }
 
     #[test]

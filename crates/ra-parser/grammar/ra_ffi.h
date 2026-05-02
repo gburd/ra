@@ -16,6 +16,9 @@
 typedef struct RaParseState RaParseState;
 typedef struct RaNode       RaNode;
 
+/* RaToken is defined in the grammar %include block before this header
+ * is included, so it is already available here. */
+
 /* ------------------------------------------------------------------
  * Relational builders
  * ------------------------------------------------------------------ */
@@ -94,5 +97,13 @@ RaNode *ra_list_new(RaParseState *st);
 RaNode *ra_list_push(RaParseState *st, RaNode *list, RaNode *item);
 RaNode *ra_sort_key(RaParseState *st, RaNode *expr,
                     uint32_t ascending, uint32_t nulls_first);
+
+/* ------------------------------------------------------------------
+ * Error recording (called from %syntax_error / %parse_failure)
+ * ------------------------------------------------------------------ */
+
+void ra_record_parse_error(RaParseState *st, int token_code,
+                           RaToken token, void *parser);
+void ra_record_parse_failure(RaParseState *st);
 
 #endif /* RA_FFI_H */

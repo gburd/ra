@@ -99,6 +99,8 @@ pub struct RaToken {
     pub text: *const c_char,
     /// Byte offset in the source string where this token starts.
     pub location: i32,
+    /// Length of this token in bytes (for precise caret widths).
+    pub length: i32,
     /// Integer value for `ICONST` tokens.
     pub int_val: i64,
     /// Float value for `FCONST` tokens.
@@ -110,6 +112,7 @@ impl Default for RaToken {
         Self {
             text: std::ptr::null(),
             location: 0,
+            length: 0,
             int_val: 0,
             float_val: 0.0,
         }
@@ -121,6 +124,7 @@ impl std::fmt::Debug for RaToken {
         f.debug_struct("RaToken")
             .field("text", &self.text)
             .field("location", &self.location)
+            .field("length", &self.length)
             .field("int_val", &self.int_val)
             .field("float_val", &self.float_val)
             .finish()
@@ -140,12 +144,13 @@ pub struct LexToken {
 }
 
 /// Create a simple token with no text backing.
-fn simple_token(code: i32, location: usize) -> LexToken {
+fn simple_token(code: i32, location: usize, length: i32) -> LexToken {
     LexToken {
         code,
         value: RaToken {
             text: std::ptr::null(),
             location: i32::try_from(location).unwrap_or(0),
+            length,
             int_val: 0,
             float_val: 0.0,
         },
@@ -154,7 +159,12 @@ fn simple_token(code: i32, location: usize) -> LexToken {
 }
 
 /// Create a token backed by a C string.
-fn text_token(code: i32, location: usize, text: &str) -> Result<LexToken, String> {
+fn text_token(
+    code: i32,
+    location: usize,
+    length: i32,
+    text: &str,
+) -> Result<LexToken, String> {
     let cstr =
         CString::new(text).map_err(|e| format!("invalid text at position {location}: {e}"))?;
     let ptr = cstr.as_ptr();
@@ -163,6 +173,7 @@ fn text_token(code: i32, location: usize, text: &str) -> Result<LexToken, String
         value: RaToken {
             text: ptr,
             location: i32::try_from(location).unwrap_or(0),
+            length,
             int_val: 0,
             float_val: 0.0,
         },
@@ -369,6 +380,7 @@ fn lex_string(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
         value.push(char::from(cur.peek()));
         cur.advance();
     }
+    let length = i32::try_from(cur.pos - start).unwrap_or(0);
     let cstr =
         CString::new(value).map_err(|e| format!("invalid string at position {start}: {e}"))?;
     let ptr = cstr.as_ptr();
@@ -377,6 +389,7 @@ fn lex_string(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
         value: RaToken {
             text: ptr,
             location: i32::try_from(start).unwrap_or(0),
+            length,
             int_val: 0,
             float_val: 0.0,
         },
@@ -407,6 +420,7 @@ fn lex_number(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
             }
         }
         let text = cur.slice(start, cur.pos);
+        let length = i32::try_from(cur.pos - start).unwrap_or(0);
         let fval: f64 = text.parse().map_err(|e| {
             format!(
                 "invalid float literal '{text}' at position \
@@ -418,6 +432,7 @@ fn lex_number(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
             value: RaToken {
                 text: std::ptr::null(),
                 location: i32::try_from(start).unwrap_or(0),
+                length,
                 int_val: 0,
                 float_val: fval,
             },
@@ -425,6 +440,7 @@ fn lex_number(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
         })
     } else {
         let text = cur.slice(start, cur.pos);
+        let length = i32::try_from(cur.pos - start).unwrap_or(0);
         let ival: i64 = text.parse().map_err(|e| {
             format!(
                 "invalid integer literal '{text}' at position \
@@ -436,6 +452,7 @@ fn lex_number(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
             value: RaToken {
                 text: std::ptr::null(),
                 location: i32::try_from(start).unwrap_or(0),
+                length,
                 int_val: ival,
                 float_val: 0.0,
             },
@@ -451,11 +468,12 @@ fn lex_word(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
     while !cur.at_end() && (cur.peek().is_ascii_alphanumeric() || cur.peek() == b'_') {
         cur.advance();
     }
+    let length = i32::try_from(cur.pos - start).unwrap_or(0);
     let word = cur.slice(start, cur.pos);
     if let Some(kw_code) = keyword_lookup(word) {
-        Ok(simple_token(kw_code, start))
+        Ok(simple_token(kw_code, start, length))
     } else {
-        text_token(token::IDENT, start, word)
+        text_token(token::IDENT, start, length, word)
     }
 }
 
@@ -475,7 +493,8 @@ fn lex_quoted_ident(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
     }
     let ident = cur.slice(content_start, cur.pos);
     cur.advance(); // skip closing '"'
-    text_token(token::IDENT, start, ident)
+    let length = i32::try_from(cur.pos - start).unwrap_or(0);
+    text_token(token::IDENT, start, length, ident)
 }
 
 /// Tokenize a SQL string into a sequence of `LexToken` values.
@@ -507,10 +526,10 @@ pub fn tokenize(sql: &str) -> Result<Vec<LexToken>, String> {
         } else if b == b'"' {
             tokens.push(lex_quoted_ident(&mut cur)?);
         } else if let Some(code) = match_two_char_op(cur.sql, cur.pos) {
-            tokens.push(simple_token(code, cur.pos));
+            tokens.push(simple_token(code, cur.pos, 2));
             cur.advance_by(2);
         } else if let Some(code) = match_single_char_op(b) {
-            tokens.push(simple_token(code, cur.pos));
+            tokens.push(simple_token(code, cur.pos, 1));
             cur.advance();
         } else {
             return Err(format!(

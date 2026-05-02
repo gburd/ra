@@ -19,7 +19,6 @@
 %extra_argument {RaParseState *pstate}
 
 %include {
-#include "ra_ffi.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,20 +26,20 @@
 typedef struct RaToken {
     const char *text;
     int         location;
+    int         length;
     int64_t     int_val;
     double      float_val;
 } RaToken;
+
+#include "ra_ffi.h"
 }
 
 %syntax_error {
-    /* recorded via pstate; handled in Rust */
-    (void)pstate;
-    (void)yymajor;
-    (void)yyminor;
+    ra_record_parse_error(pstate, yymajor, yyminor, yypParser);
 }
 
 %parse_failure {
-    (void)pstate;
+    ra_record_parse_failure(pstate);
 }
 
 /* Default non-terminal type: an opaque node pointer. */

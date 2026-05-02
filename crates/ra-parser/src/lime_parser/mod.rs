@@ -14,14 +14,15 @@
 //! let rel = lime_parser::parse_sql("SELECT id FROM users WHERE age > 21")?;
 //! ```
 
+pub mod diagnostics;
 pub mod lexer;
 pub mod lime_tokenizer;
 
-use std::os::raw::{c_int, c_void};
+use std::os::raw::{c_char, c_int, c_void};
 
 use ra_core::algebra::RelExpr;
 
-use crate::ffi::node::RaParseState;
+use crate::ffi::node::{ParseErrors, RaParseState};
 use lexer::RaToken;
 
 // ---------------------------------------------------------------------------
@@ -44,6 +45,20 @@ extern "C" {
     fn raFree(parser: *mut c_void, free_fn: Option<unsafe extern "C" fn(*mut c_void)>);
 
     fn ra(parser: *mut c_void, token_type: c_int, token_value: RaToken, state: *mut RaParseState);
+
+    /// Return the string name of a terminal token code, or NULL.
+    fn raTokenName(token_code: c_int) -> *const c_char;
+
+    /// Return the current parser state number, or -1 if invalid.
+    fn raState(parser: *mut c_void) -> c_int;
+
+    /// Fill `out` with token codes valid at `stateno`.
+    /// Returns total count (may exceed `max`).
+    fn raExpectedTokens(
+        stateno: c_int,
+        out: *mut c_int,
+        max: c_int,
+    ) -> c_int;
 }
 
 extern "C" {
@@ -71,19 +86,21 @@ unsafe extern "C" fn parser_free(ptr: *mut c_void) {
 /// # Errors
 ///
 /// Returns a list of error messages if the SQL cannot be parsed.
-pub fn parse_sql(sql: &str) -> Result<RelExpr, Vec<String>> {
+pub fn parse_sql(sql: &str) -> Result<RelExpr, ParseErrors> {
     // Tokenize using SIMD-accelerated lime tokenizer, falling
     // back to the pure-Rust lexer if the C tokenizer fails.
     let tokens = lime_tokenizer::tokenize_simd(sql)
         .or_else(|_| lexer::tokenize(sql))
-        .map_err(|e| vec![e])?;
+        .map_err(|e| ParseErrors::Strings(vec![e]))?;
 
     // Allocate the generated parser.
     //
     // SAFETY: parser_malloc is a valid allocation function.
     let parser = unsafe { raAlloc(Some(parser_malloc)) };
     if parser.is_null() {
-        return Err(vec!["failed to allocate parser".to_owned()]);
+        return Err(ParseErrors::Strings(
+            vec!["failed to allocate parser".to_owned()],
+        ));
     }
 
     let mut state = RaParseState::new();
@@ -97,9 +114,16 @@ pub fn parse_sql(sql: &str) -> Result<RelExpr, Vec<String>> {
     }
 
     // Feed EOF (token code 0) to finalize parsing.
+    // Set location to end of input so any error at EOF points to
+    // the right position.
+    let eof_token = RaToken {
+        location: i32::try_from(sql.len()).unwrap_or(0),
+        length: 0,
+        ..RaToken::default()
+    };
     // SAFETY: same as above.
     unsafe {
-        ra(parser, 0, RaToken::default(), &raw mut state);
+        ra(parser, 0, eof_token, &raw mut state);
     }
 
     // Free the parser.

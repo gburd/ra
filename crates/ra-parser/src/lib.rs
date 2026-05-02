@@ -32,6 +32,7 @@ pub use parser::*;
 pub use profile::*;
 pub use rule_file_parser::*;
 pub use rule_registry::*;
+pub use ffi::node::StructuredParseError;
 pub use sql_to_relexpr::*;
 pub use test_case::*;
 pub use validator::*;

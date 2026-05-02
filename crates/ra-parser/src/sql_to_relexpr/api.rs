@@ -1,7 +1,20 @@
 use ra_core::algebra::RelExpr;
 
 use super::error::SqlConversionError;
+use crate::ffi::node::ParseErrors;
 use crate::lime_parser;
+
+/// Convert a `ParseErrors` into a `SqlConversionError`.
+fn convert_parse_errors(errs: ParseErrors) -> SqlConversionError {
+    match errs {
+        ParseErrors::Structured(se) => {
+            SqlConversionError::StructuredParseErrors(se)
+        }
+        ParseErrors::Strings(ss) => {
+            SqlConversionError::ParseError(ss.join("; "))
+        }
+    }
+}
 
 /// Parse multiple SQL statements and convert each to a `RelExpr`.
 ///
@@ -27,7 +40,7 @@ pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
         .iter()
         .map(|stmt| {
             lime_parser::parse_sql(stmt)
-                .map_err(|errs| SqlConversionError::ParseError(errs.join("; ")))
+                .map_err(convert_parse_errors)
         })
         .collect()
 }
@@ -64,8 +77,12 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
         }
     }
 
-    Err(SqlConversionError::ParseError(last_err.map_or_else(
-        || "no SQL statement found".to_owned(),
-        |e| e.join("; "),
-    )))
+    Err(last_err.map_or_else(
+        || {
+            SqlConversionError::InvalidSql(
+                "no SQL statement found".to_owned(),
+            )
+        },
+        convert_parse_errors,
+    ))
 }

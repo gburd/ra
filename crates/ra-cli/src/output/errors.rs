@@ -3,6 +3,7 @@
 use std::fmt::Write;
 
 use colored::Colorize;
+use ra_parser::StructuredParseError;
 
 /// Format SQL parsing errors in Rust compiler style
 /// with helpful pointers.
@@ -10,6 +11,15 @@ pub fn format_sql_error(
     err: &ra_parser::SqlConversionError,
     sql: &str,
 ) -> anyhow::Error {
+    // Handle structured errors with precise position info.
+    if let ra_parser::SqlConversionError::StructuredParseErrors(
+        ref errors,
+    ) = err
+    {
+        return format_structured_errors(sql, errors);
+    }
+
+    // Fallback: heuristic-based error display for string errors.
     let error_msg = err.to_string();
 
     let (line_num, col_num) = extract_error_position(&error_msg);
@@ -21,6 +31,134 @@ pub fn format_sql_error(
         format_error_with_location(sql, line, col, &error_msg)
     } else {
         format_error_with_context(sql, &error_msg)
+    }
+}
+
+/// Format structured parse errors with precise positions and
+/// expected-token hints.
+fn format_structured_errors(
+    sql: &str,
+    errors: &[StructuredParseError],
+) -> anyhow::Error {
+    let lines: Vec<&str> = sql.lines().collect();
+    let mut output = String::new();
+
+    let debug_level = std::env::var("DEBUG_RA")
+        .or_else(|_| std::env::var("RA_DEBUG"))
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    for error in errors {
+        let (line_num, col_num) =
+            position_to_line_col(sql, error.position);
+        let line_idx = line_num.saturating_sub(1);
+        let carets = error.token_length.max(1);
+
+        // Header
+        let _ = writeln!(
+            output,
+            "{}: {}",
+            "error".red().bold(),
+            error.message.bold()
+        );
+
+        // Location
+        let _ = writeln!(
+            output,
+            "  {} query:{}:{}",
+            "-->".blue().bold(),
+            line_num,
+            col_num
+        );
+
+        let _ = writeln!(output, "   {}", "|".blue().bold());
+
+        if line_idx < lines.len() {
+            let error_line = lines[line_idx];
+            let col_idx =
+                col_num.saturating_sub(1).min(error_line.len());
+
+            // Context: up to 2 lines above
+            let context_start = line_idx.saturating_sub(2);
+            for ctx_idx in context_start..line_idx {
+                let _ = writeln!(
+                    output,
+                    "{} {} {}",
+                    format!("{:4}", ctx_idx + 1).blue().bold(),
+                    "|".blue().bold(),
+                    lines[ctx_idx].dimmed()
+                );
+            }
+
+            // The error line
+            let _ = writeln!(
+                output,
+                "{} {} {}",
+                format!("{line_num:4}").blue().bold(),
+                "|".blue().bold(),
+                error_line
+            );
+
+            // Caret line with token name annotation
+            let annotation = if let Some(ref text) = error.token_text {
+                format!("unexpected {} '{text}'", error.token_name)
+            } else if error.token_name.is_empty() {
+                error.message.clone()
+            } else {
+                format!("unexpected {}", error.token_name)
+            };
+            let _ = writeln!(
+                output,
+                "     {} {}{}  {}",
+                "|".blue().bold(),
+                " ".repeat(col_idx),
+                "^".repeat(carets).red().bold(),
+                annotation.red()
+            );
+
+            // Context: 1 line below
+            if line_idx + 1 < lines.len() {
+                let _ = writeln!(
+                    output,
+                    "{} {} {}",
+                    format!("{:4}", line_num + 1).blue().bold(),
+                    "|".blue().bold(),
+                    lines[line_idx + 1].dimmed()
+                );
+            }
+
+            let _ = writeln!(output, "   {}", "|".blue().bold());
+
+            // Expected tokens hint
+            if !error.expected_tokens.is_empty() {
+                let _ = write!(
+                    output,
+                    "{}: ",
+                    "help".green().bold()
+                );
+                let _ = writeln!(
+                    output,
+                    "expected one of: {}",
+                    error.expected_tokens.join(", ")
+                );
+            }
+
+            // Contextual help from heuristics (secondary)
+            output.push_str(&format_contextual_help(
+                &error.message,
+                error_line,
+                col_idx,
+            ));
+        }
+
+        output.push('\n');
+    }
+
+    if debug_level > 1 {
+        anyhow::anyhow!("{output}")
+    } else {
+        anyhow::Error::msg(output)
     }
 }
 
