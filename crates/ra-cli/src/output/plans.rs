@@ -134,18 +134,35 @@ pub fn print_optimization_header(
 
     eprintln!();
 
-    let formatted_query = match ra_parser::formatter::SqlFormatter::default_style().format(query) {
+    eprintln!("  {}:", "SQL".bold());
+    print_formatted_sql(query);
+    eprintln!();
+}
+
+/// Format and print a SQL query with indentation.
+///
+/// Uses the Ra SQL formatter to capitalize keywords and break the query
+/// onto multiple lines (one clause per line, CTE bodies expanded).
+/// Falls back to printing the original SQL if the formatter fails to parse it.
+pub fn print_formatted_sql(query: &str) {
+    let formatted = match ra_parser::formatter::SqlFormatter::default_style().format(query) {
         Ok(formatted) => formatted
             .lines()
             .map(|line| format!("    {line}"))
             .collect::<Vec<_>>()
             .join("\n"),
-        Err(_) => format!("    {query}"),
+        Err(_) => {
+            // Formatter failed (e.g. query contains unsupported syntax).
+            // Print the original, indenting every line by 4 spaces so
+            // the caller's already-indented SQL looks consistent.
+            query
+                .lines()
+                .map(|line| format!("    {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
     };
-
-    eprintln!("  {}:", "SQL".bold());
-    eprintln!("{formatted_query}");
-    eprintln!();
+    eprintln!("{formatted}");
 }
 
 /// Display resource usage from a bounded optimization result.

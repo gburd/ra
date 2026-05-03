@@ -75,7 +75,8 @@ fn print_analysis(plan: &FederatedPlan, query_sql: &str, remote_db: &str, verbos
     eprintln!();
     eprintln!("{}", "Federated Query Analysis".bold());
     eprintln!();
-    eprintln!("  {}: {query_sql}", "SQL".bold());
+    eprintln!("  {}:", "SQL".bold());
+    crate::output::plans::print_formatted_sql(query_sql);
     eprintln!("  {}: {remote_db}", "Remote".bold());
     eprintln!();
 

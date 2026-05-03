@@ -126,10 +126,16 @@ impl SqlFormatter {
 
     fn apply_clause_breaks(&self, sql: &str) -> String {
         let indent = self.indent_string();
+        let inner_indent = format!("{indent}{indent}"); // extra indent inside CTE bodies
         // Alignment width for right-aligning keywords
         let align_width: usize = 9; // len("RETURNING") + 1
-        let mut result = String::with_capacity(sql.len() + 64);
+        let mut result = String::with_capacity(sql.len() + 128);
         let mut depth: usize = 0;
+        // Depths at which we opened a CTE/subquery body with an `AS (` open,
+        // so we can add a closing newline before `)` and indent inner clauses.
+        let mut cte_body_depths: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+        let mut prev_upper = String::new();
         let mut in_string = false;
         let mut string_char: char = '\'';
 
@@ -138,11 +144,12 @@ impl SqlFormatter {
         for (i, token) in tokens.iter().enumerate() {
             let upper = token.to_uppercase();
 
-            // Track string literals
+            // Track string literals — don't tokenize inside them.
             if !in_string && (token == "'" || token == "\"") {
                 in_string = true;
                 string_char = token.chars().next().unwrap_or('\'');
                 result.push_str(token);
+                prev_upper = upper;
                 continue;
             }
             if in_string {
@@ -150,26 +157,56 @@ impl SqlFormatter {
                 if token.len() == 1 && token.starts_with(string_char) {
                     in_string = false;
                 }
+                // Don't update prev_upper inside strings
                 continue;
             }
 
-            // Track parenthesis depth
+            // Skip whitespace — just emit it and don't update prev_upper.
+            if token.trim().is_empty() {
+                result.push_str(token);
+                continue;
+            }
+
+            // Opening parenthesis: detect CTE/subquery bodies.
             if token == "(" {
                 depth += 1;
+                // An `AS (` at any tracked depth opens a formatted subquery.
+                if prev_upper == "AS" {
+                    cte_body_depths.insert(depth);
+                    result.push('(');
+                    result.push('\n');
+                    result.push_str(&inner_indent);
+                    prev_upper = upper;
+                    continue;
+                }
                 result.push_str(token);
-                continue;
-            }
-            if token == ")" {
-                depth = depth.saturating_sub(1);
-                result.push_str(token);
+                prev_upper = upper;
                 continue;
             }
 
-            // Only break at top level
-            if depth == 0 {
+            // Closing parenthesis: emit newline before `)` if it closes a CTE body.
+            if token == ")" {
+                if cte_body_depths.contains(&depth) {
+                    cte_body_depths.remove(&depth);
+                    let trimmed_len = result.trim_end().len();
+                    result.truncate(trimmed_len);
+                    result.push('\n');
+                }
+                depth = depth.saturating_sub(1);
+                result.push_str(token);
+                prev_upper = upper;
+                continue;
+            }
+
+            let in_cte_body = cte_body_depths.contains(&depth);
+
+            // Break clause keywords at the top level (depth 0)
+            // or inside a CTE/subquery body (depth in cte_body_depths).
+            if depth == 0 || in_cte_body {
                 let is_clause = matches!(
                     upper.as_str(),
-                    "FROM"
+                    "SELECT"
+                        | "FROM"
                         | "WHERE"
                         | "GROUP"
                         | "HAVING"
@@ -190,22 +227,32 @@ impl SqlFormatter {
 
                 let is_subclause = matches!(upper.as_str(), "AND" | "OR");
 
+                // The line prefix differs between top-level and inner bodies.
+                let base_prefix = if in_cte_body { &inner_indent } else { "" };
+                let join_prefix = if in_cte_body {
+                    format!("{inner_indent}{indent}")
+                } else {
+                    indent.clone()
+                };
+
                 if is_clause && i > 0 {
                     let trimmed_len = result.trim_end().len();
                     result.truncate(trimmed_len);
                     result.push('\n');
-                    if self.config.align_keywords {
+                    if depth == 0 && self.config.align_keywords {
                         let padding = align_width.saturating_sub(token.len());
                         for _ in 0..padding {
                             result.push(' ');
                         }
+                    } else {
+                        result.push_str(base_prefix);
                     }
                     result.push_str(token);
                 } else if (is_join || is_subclause) && i > 0 {
                     let trimmed_len = result.trim_end().len();
                     result.truncate(trimmed_len);
                     result.push('\n');
-                    result.push_str(&indent);
+                    result.push_str(&join_prefix);
                     result.push_str(token);
                 } else {
                     result.push_str(token);
@@ -213,6 +260,8 @@ impl SqlFormatter {
             } else {
                 result.push_str(token);
             }
+
+            prev_upper = upper;
         }
 
         result
@@ -656,3 +705,16 @@ mod tests {
         assert!(upper.contains("RETURNING"), "expected RETURNING: {result}");
     }
 }
+
+
+    #[test]
+    fn test_simple_query_formatting() {
+        let formatter = SqlFormatter::default_style();
+        // This should parse successfully with ra-sql-parser
+        let result = formatter.format("with a as (select id from t1), b as (select id from t2) select a.id from a join b on a.id = b.id");
+        match &result {
+            Ok(s) => eprintln!("OK:\n{s}"),
+            Err(e) => eprintln!("ERROR: {e}"),
+        }
+        assert!(result.is_ok(), "should format: {:?}", result.err());
+    }

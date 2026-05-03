@@ -54,7 +54,8 @@ pub fn cmd_explain(
 
     if !quiet {
         print_header("Query Plan Explanation");
-        eprintln!("  {}: {query}", "SQL".bold());
+        eprintln!("  {}:", "SQL".bold());
+        crate::output::plans::print_formatted_sql(query);
 
         if let Some((timeline, idx)) = &timeline_context {
             let snapshot = &timeline.snapshots[*idx];

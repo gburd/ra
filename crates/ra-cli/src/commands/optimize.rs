@@ -261,7 +261,8 @@ pub fn cmd_optimize(
 
             if !quiet {
                 print_header("Query Optimization (Timeline Snapshot)");
-                eprintln!("  {}: {query}", "SQL".bold());
+                eprintln!("  {}:", "SQL".bold());
+                crate::output::plans::print_formatted_sql(query);
                 eprintln!(
                     "  {}: {} (snapshot {})",
                     "Timeline".bold(),

@@ -51,7 +51,8 @@ pub fn cmd_compare(
 
     if !quiet {
         print_header("Plan Comparison");
-        eprintln!("  {}: {sql}", "SQL".bold());
+        eprintln!("  {}:", "SQL".bold());
+        crate::output::plans::print_formatted_sql(sql);
 
         if verbose {
             eprintln!(
