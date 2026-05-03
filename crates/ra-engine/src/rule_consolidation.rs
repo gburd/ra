@@ -872,7 +872,6 @@ pub fn default_consolidator(config: ConsolidationConfig) -> RuleConsolidator {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 

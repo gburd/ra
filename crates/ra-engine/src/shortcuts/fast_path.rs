@@ -566,7 +566,7 @@ pub fn can_use_fast_path(expr: &RelExpr) -> bool {
 // ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used)]
+#[expect(clippy::panic, reason = "test assertions use panic! for negative checks")]
 mod tests {
     use super::*;
     use ra_core::algebra::{

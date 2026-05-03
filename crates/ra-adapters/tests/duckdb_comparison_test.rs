@@ -6,6 +6,8 @@
 
 #[cfg(feature = "duckdb")]
 use ra_adapters::{DatabaseAdapter, DuckDBAdapter};
+#[cfg(feature = "duckdb")]
+use tempfile::NamedTempFile;
 
 #[test]
 #[cfg(feature = "duckdb")]

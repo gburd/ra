@@ -654,7 +654,7 @@ mod tests {
     fn distributed_profiles_exist() {
         let distributed: Vec<_> = CloudProfileSelector::all_profiles()
             .into_iter()
-            .filter(|p| p.supports_distributed_execution())
+            .filter(DeploymentProfile::supports_distributed_execution)
             .collect();
         assert!(
             distributed.len() >= 10,
@@ -667,7 +667,7 @@ mod tests {
     fn tiered_storage_profiles_exist() {
         let tiered: Vec<_> = CloudProfileSelector::all_profiles()
             .into_iter()
-            .filter(|p| p.supports_tiered_storage())
+            .filter(DeploymentProfile::supports_tiered_storage)
             .collect();
         assert!(
             tiered.len() >= 5,

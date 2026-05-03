@@ -414,7 +414,7 @@ mod tests {
         let mut cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
         let node = RelLang::Join([Id::from(0), Id::from(1), Id::from(2), Id::from(3)]);
         let c = cost_fn.cost(&node, zero_child_cost);
-        assert!(c > 0.0, "Join cost should be positive, got {c}",);
+        assert!(c > 0.0, "Join cost should be positive, got {c}");
     }
 
     #[test]

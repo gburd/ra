@@ -1,9 +1,6 @@
 #![expect(
     clippy::panic,
     clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::needless_pass_by_value,
-    clippy::print_stderr,
     reason = "test assertions and diagnostic output"
 )]
 //! Performance testing framework for the Ra optimizer.
@@ -182,12 +179,12 @@ fn avg_col(name: &str) -> AggregateExpr {
 
 // ── Query generators: OLTP workloads ────────────────────────
 
-/// Simple point lookup: SELECT * FROM orders WHERE o_orderkey = 42
+/// Simple point lookup: SELECT * FROM orders WHERE `o_orderkey` = 42
 fn oltp_point_lookup() -> RelExpr {
     filter(scan("orders"), eq(col("o_orderkey"), int(42)))
 }
 
-/// Simple filtered scan: SELECT * FROM lineitem WHERE l_quantity > 10
+/// Simple filtered scan: SELECT * FROM lineitem WHERE `l_quantity` > 10
 fn oltp_filtered_scan() -> RelExpr {
     filter(scan("lineitem"), gt(col("l_quantity"), int(10)))
 }
@@ -368,7 +365,7 @@ fn tproc_c_payment_customer_lookup() -> RelExpr {
     )
 }
 
-/// Order-Status: join customer -> orders -> order_line
+/// Order-Status: join customer -> orders -> `order_line`
 fn tproc_c_order_status() -> RelExpr {
     join(
         join(
@@ -381,7 +378,7 @@ fn tproc_c_order_status() -> RelExpr {
     )
 }
 
-/// Delivery: scan with range predicate on new_order
+/// Delivery: scan with range predicate on `new_order`
 fn tproc_c_delivery() -> RelExpr {
     filter(
         scan("new_order"),
@@ -392,7 +389,7 @@ fn tproc_c_delivery() -> RelExpr {
     )
 }
 
-/// Stock-Level: join district -> order_line -> stock with threshold
+/// Stock-Level: join district -> `order_line` -> stock with threshold
 fn tproc_c_stock_level() -> RelExpr {
     aggregate(
         filter(
@@ -534,14 +531,14 @@ fn target_ms(profile: &TestProfile, release_target_ms: f64) -> f64 {
 
 /// Result of a performance measurement run.
 #[derive(Debug)]
-#[allow(dead_code)]
+#[expect(dead_code, reason = "struct fields used via methods only")]
 struct PerfMeasurement {
     label: String,
     durations: Vec<Duration>,
     reports: Vec<ResourceUsageReport>,
 }
 
-#[allow(dead_code)]
+#[expect(dead_code, reason = "methods unused in current test suite")]
 impl PerfMeasurement {
     fn median_duration(&self) -> Duration {
         let mut sorted: Vec<Duration> = self.durations.clone();
@@ -581,11 +578,11 @@ impl PerfMeasurement {
     }
 
     fn all_completed_within_budget(&self) -> bool {
-        self.reports.iter().all(|r| r.completed_within_budget())
+        self.reports.iter().all(ResourceUsageReport::completed_within_budget)
     }
 }
 
-/// Run a query through optimize_bounded multiple times, collecting metrics.
+/// Run a query through `optimize_bounded` multiple times, collecting metrics.
 fn measure_bounded(
     optimizer: &Optimizer,
     label: &str,
@@ -1083,7 +1080,7 @@ fn tproc_c_full_workload_mix() {
         for _ in 0..*count {
             let start = Instant::now();
             let result = optimizer
-                .optimize_bounded(&expr)
+                .optimize_bounded(expr)
                 .expect("TPROC-C query should succeed");
             total_elapsed += start.elapsed();
             total_queries += 1;
@@ -1217,7 +1214,7 @@ fn regression_bounded_optimization_produces_reports() {
     let mut optimizer = make_tpch_optimizer();
     optimizer.set_resource_budget(ResourceBudget::standard());
 
-    let queries = vec![
+    let queries = [
         oltp_point_lookup(),
         oltp_two_table_join(),
         olap_tpch_q1(),
@@ -1321,12 +1318,10 @@ fn ab_compare(
 
         let cost_a = opt_a
             .optimize_bounded(expr)
-            .map(|r| r.cost)
-            .unwrap_or(f64::INFINITY);
+            .map_or(f64::INFINITY, |r| r.cost);
         let cost_b = opt_b
             .optimize_bounded(expr)
-            .map(|r| r.cost)
-            .unwrap_or(f64::INFINITY);
+            .map_or(f64::INFINITY, |r| r.cost);
 
         results.push((
             label.to_string(),
@@ -1343,8 +1338,10 @@ fn ab_compare(
 #[test]
 fn ab_test_default_vs_adaptive_limits() {
     let mut opt_default = make_tpch_optimizer();
-    let mut config_no_adaptive = OptimizerConfig::default();
-    config_no_adaptive.use_adaptive_limits = false;
+    let config_no_adaptive = OptimizerConfig {
+        use_adaptive_limits: false,
+        ..Default::default()
+    };
     let opt_no_adaptive = {
         let mut o = Optimizer::with_config(config_no_adaptive);
         for (name, stats) in [

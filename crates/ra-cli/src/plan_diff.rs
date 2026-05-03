@@ -899,7 +899,7 @@ mod tests {
         // parallel test interference.
         use std::sync::Mutex;
         static COLORED_LOCK: Mutex<()> = Mutex::new(());
-        let _guard = COLORED_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = COLORED_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         colored::control::set_override(true);
         let diff = compute_diff(&simple_scan(), &scan_with_filter());

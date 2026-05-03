@@ -647,7 +647,7 @@ fn throughput_cached_exceeds_uncached() {
             "Cached:   {cached_qps:.0} queries/sec \
              ({cached_elapsed:?})",
         );
-        println!("Speedup:  {:.1}x", cached_qps / uncached_qps,);
+        println!("Speedup:  {:.1}x", cached_qps / uncached_qps);
     }
 }
 
@@ -771,7 +771,7 @@ fn per_template_hit_rate_report() {
     // Report
     #[expect(clippy::print_stdout)]
     {
-        println!("\n=== Per-Template Hit Rate (200 queries each) ===",);
+        println!("\n=== Per-Template Hit Rate (200 queries each) ===" );
         println!(
             "{:<20} {:>6} {:>6} {:>8}",
             "Template", "Hits", "Misses", "Hit Rate",
@@ -884,7 +884,7 @@ fn comprehensive_oltp_report() {
 
     #[expect(clippy::print_stdout)]
     {
-        println!("\n=== Comprehensive OLTP Report (1000 queries) ===",);
+        println!("\n=== Comprehensive OLTP Report (1000 queries) ===");
         println!();
         println!(
             "{:<14} | {:>10} {:>10} {:>10} | {:>10} {:>10} {:>10} | {:>8}",
@@ -926,7 +926,7 @@ fn comprehensive_oltp_report() {
         println!("Misses:        {}", stats.misses);
         println!("Evictions:     {}", stats.evictions);
         println!("Entries:       {}", stats.current_entries);
-        println!("Hit rate:      {:.2}%", stats.hit_rate() * 100.0,);
+        println!("Hit rate:      {:.2}%", stats.hit_rate() * 100.0);
     }
 
     // Assertions

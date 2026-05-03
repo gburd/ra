@@ -941,9 +941,9 @@ mod tests {
 
     #[test]
     fn oltp_time_less_than_olap() {
-        let oltp = ResourceBudget::oltp();
-        let olap = ResourceBudget::olap();
-        assert!(oltp.max_time.unwrap() < olap.max_time.unwrap());
+        let oltp_budget = ResourceBudget::oltp();
+        let olap_budget = ResourceBudget::olap();
+        assert!(oltp_budget.max_time.unwrap() < olap_budget.max_time.unwrap());
     }
 
     #[test]
@@ -955,11 +955,11 @@ mod tests {
 
     #[test]
     fn oltp_iterations_less_than_olap() {
-        let oltp = ResourceBudget::oltp();
-        let olap = ResourceBudget::olap();
+        let oltp_budget = ResourceBudget::oltp();
+        let olap_budget = ResourceBudget::olap();
         assert!(
-            oltp.max_iterations.unwrap()
-                < olap.max_iterations.unwrap()
+            oltp_budget.max_iterations.unwrap()
+                < olap_budget.max_iterations.unwrap()
         );
     }
 

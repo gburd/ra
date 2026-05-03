@@ -3,9 +3,6 @@
 //! Short tests run in normal CI. Long-duration tests are gated
 //! behind the `long-duration-testing` feature flag.
 
-#![expect(clippy::unwrap_used, reason = "test code")]
-#![expect(clippy::expect_used, reason = "test code")]
-
 use proptest::prelude::*;
 use ra_grammar_fuzzer::generator::SqlGenerator;
 use ra_grammar_fuzzer::properties::{OptimizerProperty, PropertyValidator};

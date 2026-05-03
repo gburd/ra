@@ -247,6 +247,11 @@ pub fn load_rules_from_directory(dir: &Path) -> Result<Vec<ParsedRule>> {
 }
 
 #[cfg(not(feature = "file-discovery"))]
+/// Stub: returns an empty rule list when `file-discovery` feature is disabled.
+///
+/// # Errors
+///
+/// Never returns an error in this stub implementation.
 pub fn load_rules_from_directory(_dir: &Path) -> Result<Vec<ParsedRule>> {
     Ok(Vec::new())
 }
@@ -976,7 +981,7 @@ mod tests {
         let result = parse_rra_file(&rra);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("Invalid .rra file format"), "got: {msg}",);
+        assert!(msg.contains("Invalid .rra file format"), "got: {msg}");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -998,7 +1003,7 @@ mod tests {
         let result = parse_rra_file(&rra);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("Failed to parse YAML"), "got: {msg}",);
+        assert!(msg.contains("Failed to parse YAML"), "got: {msg}");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1009,7 +1014,7 @@ mod tests {
         let result = parse_rra_file(path);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("Failed to read rule file"), "got: {msg}",);
+        assert!(msg.contains("Failed to read rule file"), "got: {msg}");
     }
 
     // ---- load_rules_from_directory tests ----

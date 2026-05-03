@@ -3,9 +3,11 @@
 //! This example shows how the enhanced fuzzer uses different database
 //! scenarios to test optimizer robustness across varying facts and statistics.
 
+// This is a demo binary; printing to stdout is intentional.
+#![expect(clippy::print_stdout, reason = "demo example binary")]
+
 use ra_core::algebra::RelExpr;
 use ra_grammar_fuzzer::dynamic_facts::{DatabaseScenario, EnhancedPropertyValidator};
-use ra_grammar_fuzzer::generator::SqlGenerator;
 use ra_grammar_fuzzer::properties::OptimizerProperty;
 
 fn main() {
@@ -28,7 +30,9 @@ fn main() {
                     table: Some("users".to_string()),
                     column: "status".to_string(),
                 })),
-                right: Box::new(ra_core::expr::Expr::Const(ra_core::expr::Const::String("active".to_string()))),
+                right: Box::new(ra_core::expr::Expr::Const(
+                    ra_core::expr::Const::String("active".to_string()),
+                )),
             },
             input: Box::new(RelExpr::Scan {
                 table: "users".to_string(),
@@ -54,12 +58,11 @@ fn main() {
     let results = validator.validate_across_scenarios(&expr);
 
     for (scenario, property_results) in results {
-        println!("🏗️  Scenario: {:?}", scenario);
-        println!("   Hardware: {} cores, {} GB RAM, GPU: {}",
-            get_scenario_cores(scenario),
-            get_scenario_memory_gb(scenario),
-            get_scenario_has_gpu(scenario)
-        );
+        let cores = get_scenario_cores(scenario);
+        let memory = get_scenario_memory_gb(scenario);
+        let gpu = get_scenario_has_gpu(scenario);
+        println!("🏗️  Scenario: {scenario:?}");
+        println!("   Hardware: {cores} cores, {memory} GB RAM, GPU: {gpu}");
 
         let mut all_passed = true;
         for result in &property_results {
@@ -90,29 +93,32 @@ fn main() {
 fn get_scenario_cores(scenario: DatabaseScenario) -> u32 {
     match scenario {
         DatabaseScenario::SmallDev => 4,
-        DatabaseScenario::MediumProd => 8,
+        DatabaseScenario::MediumProd
+        | DatabaseScenario::StaleStats
+        | DatabaseScenario::SkewedData => 8,
         DatabaseScenario::LargeEnterprise => 32,
         DatabaseScenario::DataWarehouse => 64,
         DatabaseScenario::MemoryConstrained => 2,
         DatabaseScenario::HighPerformance => 128,
-        DatabaseScenario::StaleStats => 8,
-        DatabaseScenario::SkewedData => 8,
     }
 }
 
 fn get_scenario_memory_gb(scenario: DatabaseScenario) -> u64 {
     match scenario {
         DatabaseScenario::SmallDev => 8,
-        DatabaseScenario::MediumProd => 32,
+        DatabaseScenario::MediumProd
+        | DatabaseScenario::StaleStats
+        | DatabaseScenario::SkewedData => 32,
         DatabaseScenario::LargeEnterprise => 128,
         DatabaseScenario::DataWarehouse => 512,
         DatabaseScenario::MemoryConstrained => 2,
         DatabaseScenario::HighPerformance => 1024,
-        DatabaseScenario::StaleStats => 32,
-        DatabaseScenario::SkewedData => 32,
     }
 }
 
 fn get_scenario_has_gpu(scenario: DatabaseScenario) -> bool {
-    matches!(scenario, DatabaseScenario::DataWarehouse | DatabaseScenario::HighPerformance)
+    matches!(
+        scenario,
+        DatabaseScenario::DataWarehouse | DatabaseScenario::HighPerformance
+    )
 }

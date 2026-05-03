@@ -3,6 +3,8 @@
 //! These tests demonstrate the enhanced fuzzer's ability to find
 //! optimization bugs by varying database facts and statistics.
 
+#![expect(clippy::unwrap_used, reason = "test code")]
+
 use proptest::prelude::*;
 use ra_grammar_fuzzer::dynamic_facts::{arb_database_scenario, DatabaseScenario, EnhancedPropertyValidator};
 use ra_grammar_fuzzer::generator::SqlGenerator;
@@ -150,7 +152,7 @@ mod scenario_tests {
 
         // Stale stats should have high staleness factor
         let staleness = stats.staleness_factor();
-        assert!(staleness > 5.0, "Stale stats should have high staleness factor, got {}", staleness);
+        assert!(staleness > 5.0, "Stale stats should have high staleness factor, got {staleness}");
 
         // Should have low confidence
         assert!(stats.confidence < 0.5, "Stale stats should have low confidence, got {}", stats.confidence);
@@ -170,7 +172,7 @@ mod scenario_tests {
         // Skewed data should have correlation with physical ordering
         assert!(stats.correlation.is_some());
         if let Some(correlation) = stats.correlation {
-            assert!(correlation > 0.5, "Skewed data should have high correlation, got {}", correlation);
+            assert!(correlation > 0.5, "Skewed data should have high correlation, got {correlation}");
         }
     }
 

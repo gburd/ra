@@ -1,15 +1,13 @@
 //! Reference optimizer comparison for correctness validation.
 //!
 //! Compares Ra optimizer output against reference databases
-//! (PostgreSQL, DuckDB) to detect semantic divergence.
+//! (`PostgreSQL`, `DuckDB`) to detect semantic divergence.
 //!
 //! Requires the `reference-comparison` feature flag and running
 //! database instances.
 
-use std::collections::HashMap;
-
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Errors from reference comparison.
 #[derive(Debug, Error)]
@@ -28,9 +26,9 @@ pub enum ReferenceError {
 /// A reference database that can explain queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReferenceDb {
-    /// PostgreSQL.
+    /// `PostgreSQL`.
     PostgreSQL,
-    /// DuckDB (in-process).
+    /// `DuckDB` (in-process).
     DuckDB,
 }
 
@@ -97,7 +95,7 @@ pub struct ComparisonResult {
     pub structurally_similar: bool,
     /// Whether the join ordering matches.
     pub join_order_match: bool,
-    /// Cost ratio (ra_cost / reference_cost), if available.
+    /// Cost ratio (`ra_cost` / `reference_cost`), if available.
     pub cost_ratio: Option<f64>,
     /// Detailed notes about differences.
     pub notes: Vec<String>,
@@ -124,7 +122,7 @@ impl ReferenceComparator {
         }
     }
 
-    /// Set the PostgreSQL connection string.
+    /// Set the `PostgreSQL` connection string.
     #[cfg(feature = "reference-comparison")]
     #[must_use]
     pub fn with_postgresql(mut self, conn_str: &str) -> Self {
@@ -132,7 +130,7 @@ impl ReferenceComparator {
         self
     }
 
-    /// Set the DuckDB database path.
+    /// Set the `DuckDB` database path.
     #[cfg(feature = "reference-comparison")]
     #[must_use]
     pub fn with_duckdb(mut self, path: &str) -> Self {
@@ -140,11 +138,11 @@ impl ReferenceComparator {
         self
     }
 
-    /// Compare a SQL query's plan against PostgreSQL.
+    /// Compare a SQL query's plan against `PostgreSQL`.
     ///
     /// # Errors
     ///
-    /// Returns error if the connection fails or EXPLAIN returns
+    /// Returns error if the connection fails or `EXPLAIN` returns
     /// unexpected output.
     #[cfg(feature = "reference-comparison")]
     pub fn compare_with_postgresql(
@@ -192,11 +190,11 @@ impl ReferenceComparator {
         })
     }
 
-    /// Compare a SQL query's plan against DuckDB.
+    /// Compare a SQL query's plan against `DuckDB`.
     ///
     /// # Errors
     ///
-    /// Returns error if DuckDB initialization fails or EXPLAIN
+    /// Returns error if `DuckDB` initialization fails or `EXPLAIN`
     /// returns unexpected output.
     #[cfg(feature = "reference-comparison")]
     pub fn compare_with_duckdb(
@@ -243,6 +241,7 @@ impl ReferenceComparator {
     /// Returns the first error encountered from any reference
     /// database.
     #[cfg(feature = "reference-comparison")]
+    #[must_use]
     pub fn compare_all(
         &self,
         sql: &str,

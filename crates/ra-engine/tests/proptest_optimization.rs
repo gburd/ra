@@ -613,11 +613,8 @@ proptest! {
 
         fn is_problematic_expr(e: &Expr) -> bool {
             match e {
-                // Null or boolean constants cause excessive rewrites.
-                Expr::Const(Const::Null | Const::Bool(_)) => true,
-                // A bare column used as a predicate (not a comparison) causes
-                // infinite-like rewriting since it's not a proper boolean expr.
-                Expr::Column(_) => true,
+                // Null/boolean constants and bare columns cause excessive rewrites.
+                Expr::Const(Const::Null | Const::Bool(_)) | Expr::Column(_) => true,
                 Expr::BinOp { op, left, right } => {
                     // AND/OR of non-comparison exprs can be problematic.
                     let is_logical = matches!(op, BinOp::And | BinOp::Or);

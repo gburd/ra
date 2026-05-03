@@ -770,5 +770,5 @@ fn mixed_oltp_and_analytical_workload() {
         "Mixed workload hit rate {:.1}% should be >90%",
         stats.hit_rate() * 100.0,
     );
-    assert_eq!(stats.current_entries, 2, "Should have 2 cached templates",);
+    assert_eq!(stats.current_entries, 2, "Should have 2 cached templates");
 }
