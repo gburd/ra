@@ -592,9 +592,9 @@ fn print_plan_with_changes_inline(
 
             if removed_depth <= line_depth && removed_depth + 4 >= line_depth {
                 eprintln!(
-                    "    {} {}",
+                    "  {} {}",
                     "−".red().bold(),
-                    removed_line.trim().red().strikethrough()
+                    removed_line.red().strikethrough()
                 );
                 shown_removed_indices.insert(*removed_idx);
             }
@@ -603,16 +603,16 @@ fn print_plan_with_changes_inline(
         if before_ops.contains(op) {
             eprintln!("    {}", line.dimmed());
         } else {
-            eprintln!("    {} {}", "+".green().bold(), line.green());
+            eprintln!("  {} {}", "+".green().bold(), line.green());
         }
     }
 
     for (removed_idx, removed_line) in &removed_ops {
         if !shown_removed_indices.contains(removed_idx) {
             eprintln!(
-                "    {} {}",
+                "  {} {}",
                 "−".red().bold(),
-                removed_line.trim().red().strikethrough()
+                removed_line.red().strikethrough()
             );
         }
     }
