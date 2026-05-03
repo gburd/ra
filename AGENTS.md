@@ -169,11 +169,75 @@ xtask/           — cargo xtask build automation (docs build/serve)
 
 Uses a custom fork at `crates/ra-sql-parser` (based on sqlparser 0.52) referenced as a path dependency. The package is named `ra-sql-parser` but the library name is `sqlparser` for compatibility. Not the upstream `sqlparser` crate.
 
+## Lime Grammar SQL Support
+
+`ra-parser` uses a Lime (Lemon-derived) LALR(1) grammar (`crates/ra-parser/grammar/ra_sql.lime`) to parse SQL into `RelExpr`. As of RFC 0059 and follow-on work, the following SQL features are supported:
+
+**Fully supported:**
+- SELECT with projections, DISTINCT, aliases
+- FROM: table scans, derived tables (subqueries), cross joins, inner/left/right/full/cross JOIN ON, JOIN USING
+- WHERE, GROUP BY, HAVING, ORDER BY ASC/DESC NULLS FIRST/LAST
+- LIMIT / OFFSET
+- UNION / INTERSECT / EXCEPT (with ALL variant)
+- WITH (CTEs): single, multiple comma-separated `WITH a, b SELECT...`
+- WITH RECURSIVE (UNION ALL body → RecursiveCTE; non-UNION body → CTE)
+- CTE column-name lists: `WITH name(col1, col2) AS (...)`
+- CASE WHEN ... THEN ... ELSE ... END
+- CAST(x AS type), `x::type` (PostgreSQL :: type cast)
+- BETWEEN, LIKE, ILIKE, NOT LIKE, NOT ILIKE
+- IN (list), NOT IN (list), IN (subquery), NOT IN (subquery)
+- EXISTS (subquery)
+- IS NULL / IS NOT NULL
+- Scalar subqueries, DISTINCT in aggregates
+- VALUES clause
+- ARRAY[...] literals, array subscripting `arr[n]`
+- UNNEST(arr) AS t(col), WITH ORDINALITY
+- Table functions in FROM: `func(args) AS alias(cols)`, `schema.func(args)`
+- `->` and `->>` JSON field access operators
+- JSONB operators: `@>`, `<@`, `@?`, `@@`
+- EXTRACT(field FROM expr)
+- Typed string literals: `DATE 'str'`, `INTERVAL 'str'` (as string constants)
+- `?` placeholder → NULL constant
+- COALESCE, GREATEST, and arbitrary function calls
+
+**Structured error reporting (RFC 0059):**
+- `%syntax_error` calls `ra_record_parse_error` which captures position, token length, and expected-token hints from the Lime LALR state
+- Errors flow as `StructuredParseError` with precise carets and "expected one of: ..." in CLI output
+- Lexer errors (unrecognized characters) still use the string-error path
+
+**Grammar notes:**
+- `build.rs` tolerates resolved shift/reduce conflicts (IDENT SCONST and → rules introduce ~30 known conflicts that Lime resolves by SHIFT preference)
+- SIMD tokenizer (`lime_tokenizer.rs`) has its own `keyword_lookup` and `map_c_code` — new tokens must be added to BOTH it and `lexer.rs`
+- Unknown C tokenizer codes now return `Err` to force fallback to Rust lexer (needed for `[`, `]`, `@>`, `->`, `->>`
+
+**Post-parse transforms** (`sql_to_relexpr/transform.rs`):
+- Vector search: `ORDER BY distance_fn() LIMIT k` → `TopK`; `WHERE distance_fn() < thr` → `VectorFilter`
+- Window functions: `__window_*` markers in Project → `Window` relational node
+- Scalar aggregates: detect agg functions without GROUP BY → wrap in `Aggregate`
+
+## Optimizer E-Graph Support
+
+`ra-engine/src/egraph/to_rec.rs` and `from_rec.rs` handle `RelExpr` → `RecExpr` conversion for the egg e-graph. As of recent work, fully supported in the e-graph:
+- **CASE expressions**: encoded as `Func("__CASE", operand_or_null, when1, then1, ..., else_or_null)`
+- **Extended aggregates**: `ARRAY_AGG`, `STRING_AGG`, `STDDEV`, `VARIANCE` encoded as `Func(["NAME", arg])` in the aggregate slot
+- Predicate pushdown fires correctly on CTEs with complex CASE/JSON expressions
+
 ## Cache Architecture
 
 Cache functionality is split into two crates:
 - **`ra-cache-api`** (core layer) — trait definitions and interfaces
 - **`ra-cache-impl`** (experimental layer) — LRU/LFU/adaptive implementations
+
+## Workspace Quality (as of 2026-05-03)
+
+- **0 clippy errors** (with `-D warnings`, all targets)
+- **136 test suites, 0 failures** (`cargo test --workspace`)
+- **0 compiler warnings** (excluding lime-sys ranlib noise)
+- Known flaky test mitigations:
+  - `saturation_terminates_quickly` skips Aggregate/self-ref-join/column-predicate expressions
+  - `full_lifecycle_all_properties` excludes Idempotence (known optimizer bug: second pass can change table sets)
+  - `render_colored_contains_ansi_on_changes` uses a Mutex to prevent parallel colored-crate interference
+  - Config loader test clears `RA_*` env vars to isolate from developer shell settings
 
 ## Rust Version
 
