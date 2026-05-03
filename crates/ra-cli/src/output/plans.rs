@@ -591,31 +591,31 @@ fn print_plan_with_changes_inline(
 
 /// Compute the Longest Common Subsequence of two line slices.
 /// Returns the matched lines in order (not their indices).
-fn lcs_lines<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<&'a str> {
-    let m = a.len();
-    let n = b.len();
-    let mut dp = vec![vec![0u32; n + 1]; m + 1];
-    for i in 1..=m {
-        for j in 1..=n {
-            if a[i - 1] == b[j - 1] {
-                dp[i][j] = dp[i - 1][j - 1] + 1;
+fn lcs_lines<'a>(before: &[&'a str], after: &[&'a str]) -> Vec<&'a str> {
+    let rows = before.len();
+    let cols = after.len();
+    let mut dp = vec![vec![0u32; cols + 1]; rows + 1];
+    for row in 1..=rows {
+        for col in 1..=cols {
+            if before[row - 1] == after[col - 1] {
+                dp[row][col] = dp[row - 1][col - 1] + 1;
             } else {
-                dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+                dp[row][col] = dp[row - 1][col].max(dp[row][col - 1]);
             }
         }
     }
     // Back-track to recover the LCS.
     let mut result = Vec::new();
-    let (mut i, mut j) = (m, n);
-    while i > 0 && j > 0 {
-        if a[i - 1] == b[j - 1] {
-            result.push(a[i - 1]);
-            i -= 1;
-            j -= 1;
-        } else if dp[i - 1][j] >= dp[i][j - 1] {
-            i -= 1;
+    let (mut row, mut col) = (rows, cols);
+    while row > 0 && col > 0 {
+        if before[row - 1] == after[col - 1] {
+            result.push(before[row - 1]);
+            row -= 1;
+            col -= 1;
+        } else if dp[row - 1][col] >= dp[row][col - 1] {
+            row -= 1;
         } else {
-            j -= 1;
+            col -= 1;
         }
     }
     result.reverse();
