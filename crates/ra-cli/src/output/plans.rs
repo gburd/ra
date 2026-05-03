@@ -542,12 +542,10 @@ fn find_scan_type(plan: &ra_core::algebra::RelExpr) -> Option<String> {
     }
 }
 
-fn extract_operator(line: &str) -> String {
-    line.trim_start_matches(|c: char| c.is_whitespace() || "└├─│".contains(c))
-        .trim()
-        .to_string()
-}
-
+/// Render the diff between `before` and `plan` as standard unified-diff
+/// format: `-` prefix for removed lines, `+` for added, ` ` for context.
+/// The sign character appears at column 0 so the tree indentation inside
+/// each line stays perfectly aligned across all three kinds of output.
 fn print_plan_with_changes_inline(
     plan: &ra_core::algebra::RelExpr,
     before: &ra_core::algebra::RelExpr,
@@ -558,64 +556,70 @@ fn print_plan_with_changes_inline(
     let before_lines: Vec<&str> = before_tree.lines().collect();
     let after_lines: Vec<&str> = after_tree.lines().collect();
 
-    let before_ops: Vec<String> = before_lines.iter().map(|l| extract_operator(l)).collect();
-    let after_ops: Vec<String> = after_lines.iter().map(|l| extract_operator(l)).collect();
+    // Build an LCS table over the raw tree lines so the diff is line-exact.
+    let lcs = lcs_lines(&before_lines, &after_lines);
 
-    let mut removed_ops: Vec<(usize, &str)> = Vec::new();
-    for (i, op) in before_ops.iter().enumerate() {
-        if !after_ops.contains(op) && !op.is_empty() {
-            removed_ops.push((i, before_lines[i]));
-        }
-    }
+    let mut bi = 0usize; // index into before_lines
+    let mut ai = 0usize; // index into after_lines
+    let mut li = 0usize; // index into lcs
 
-    let mut shown_removed_indices = std::collections::HashSet::new();
+    while bi < before_lines.len() || ai < after_lines.len() {
+        let in_lcs_before =
+            li < lcs.len() && bi < before_lines.len() && before_lines[bi] == lcs[li];
+        let in_lcs_after =
+            li < lcs.len() && ai < after_lines.len() && after_lines[ai] == lcs[li];
 
-    for (i, line) in after_lines.iter().enumerate() {
-        let op = &after_ops[i];
-
-        let line_depth = line
-            .chars()
-            .take_while(|c| c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─')
-            .count();
-
-        for (removed_idx, removed_line) in &removed_ops {
-            if shown_removed_indices.contains(removed_idx) {
-                continue;
-            }
-
-            let removed_depth = removed_line
-                .chars()
-                .take_while(|c| {
-                    c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─'
-                })
-                .count();
-
-            if removed_depth <= line_depth && removed_depth + 4 >= line_depth {
-                eprintln!(
-                    "  {} {}",
-                    "−".red().bold(),
-                    removed_line.red().strikethrough()
-                );
-                shown_removed_indices.insert(*removed_idx);
-            }
-        }
-
-        if before_ops.contains(op) {
-            eprintln!("    {}", line.dimmed());
+        if in_lcs_before && in_lcs_after {
+            // Unchanged context line.
+            eprintln!(" {}", before_lines[bi].dimmed());
+            bi += 1;
+            ai += 1;
+            li += 1;
+        } else if !in_lcs_before && bi < before_lines.len() {
+            // Line only in before → removed.
+            eprintln!("{}{}", "-".red().bold(), before_lines[bi].red());
+            bi += 1;
+        } else if !in_lcs_after && ai < after_lines.len() {
+            // Line only in after → added.
+            eprintln!("{}{}", "+".green().bold(), after_lines[ai].green());
+            ai += 1;
         } else {
-            eprintln!("  {} {}", "+".green().bold(), line.green());
+            break; // safety
         }
     }
+}
 
-    for (removed_idx, removed_line) in &removed_ops {
-        if !shown_removed_indices.contains(removed_idx) {
-            eprintln!(
-                "  {} {}",
-                "−".red().bold(),
-                removed_line.red().strikethrough()
-            );
+/// Compute the Longest Common Subsequence of two line slices.
+/// Returns the matched lines in order (not their indices).
+fn lcs_lines<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<&'a str> {
+    let m = a.len();
+    let n = b.len();
+    let mut dp = vec![vec![0u32; n + 1]; m + 1];
+    for i in 1..=m {
+        for j in 1..=n {
+            if a[i - 1] == b[j - 1] {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+            }
         }
     }
+    // Back-track to recover the LCS.
+    let mut result = Vec::new();
+    let (mut i, mut j) = (m, n);
+    while i > 0 && j > 0 {
+        if a[i - 1] == b[j - 1] {
+            result.push(a[i - 1]);
+            i -= 1;
+            j -= 1;
+        } else if dp[i - 1][j] >= dp[i][j - 1] {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
+    }
+    result.reverse();
+    result
 }
 
 fn has_scan_upgrade(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
