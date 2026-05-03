@@ -124,6 +124,7 @@ impl SqlFormatter {
         }
     }
 
+    #[expect(clippy::too_many_lines, reason = "handles CTE body tracking, depth, string literals, and all clause keywords")]
     fn apply_clause_breaks(&self, sql: &str) -> String {
         let indent = self.indent_string();
         let inner_indent = format!("{indent}{indent}"); // extra indent inside CTE bodies
@@ -705,16 +706,3 @@ mod tests {
         assert!(upper.contains("RETURNING"), "expected RETURNING: {result}");
     }
 }
-
-
-    #[test]
-    fn test_simple_query_formatting() {
-        let formatter = SqlFormatter::default_style();
-        // This should parse successfully with ra-sql-parser
-        let result = formatter.format("with a as (select id from t1), b as (select id from t2) select a.id from a join b on a.id = b.id");
-        match &result {
-            Ok(s) => eprintln!("OK:\n{s}"),
-            Err(e) => eprintln!("ERROR: {e}"),
-        }
-        assert!(result.is_ok(), "should format: {:?}", result.err());
-    }
