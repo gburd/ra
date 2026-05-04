@@ -89,17 +89,22 @@ impl SqlFormatter {
     /// Returns `FormatError` if the SQL cannot be parsed.
     pub fn format(&self, sql: &str) -> Result<String, FormatError> {
         let dialect = GenericDialect {};
-        let statements =
-            Parser::parse_sql(&dialect, sql).map_err(|e| FormatError::ParseError(e.to_string()))?;
 
-        let mut formatted_parts = Vec::new();
-        for stmt in &statements {
-            let raw = stmt.to_string();
-            let result = self.apply_style(&raw);
-            formatted_parts.push(result);
+        // Attempt AST round-trip for normalization (adds AS keywords, etc.).
+        // If the parser doesn't support the SQL dialect features (e.g. ->> or
+        // :: operators), fall back to formatting the original text directly.
+        // apply_style() is purely lexer-based and handles any SQL syntax.
+        match Parser::parse_sql(&dialect, sql) {
+            Ok(statements) => {
+                let mut formatted_parts = Vec::new();
+                for stmt in &statements {
+                    let raw = stmt.to_string();
+                    formatted_parts.push(self.apply_style(&raw));
+                }
+                Ok(formatted_parts.join(";\n"))
+            }
+            Err(_) => Ok(self.apply_style(sql)),
         }
-
-        Ok(formatted_parts.join(";\n"))
     }
 
     fn apply_style(&self, sql: &str) -> String {
@@ -602,9 +607,14 @@ mod tests {
 
     #[test]
     fn format_invalid_sql_returns_error() {
+        // format() now always succeeds: it falls back to formatting the
+        // original text directly when ra-sql-parser cannot parse it.
         let formatter = SqlFormatter::default_style();
         let result = formatter.format("NOT VALID SQL %%% !!!");
-        assert!(result.is_err());
+        assert!(result.is_ok(), "format() should always succeed");
+        // The output should at least contain the original tokens.
+        let out = result.expect("format succeeded");
+        assert!(out.contains("NOT") || out.contains("VALID"), "should contain original tokens: {out}");
     }
 
     #[test]
