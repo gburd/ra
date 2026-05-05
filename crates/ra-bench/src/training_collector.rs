@@ -5,7 +5,7 @@
 
 use ra_engine::cost_model::{ActualCost, QueryFeatures};
 use serde::{Deserialize, Serialize};
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 #[cfg(feature = "live-comparison")]
 use postgres::{Client, NoTls};
@@ -193,6 +193,7 @@ impl TrainingCollector {
     }
 
     /// Execute a single query and collect metrics.
+    #[allow(unused_variables)]
     fn execute_and_measure(
         &self,
         sql: &str,
