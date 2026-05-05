@@ -39,6 +39,7 @@
 pub mod adaptive_calibration;
 pub mod analysis;
 pub mod beam_search;
+pub mod cost_model;
 #[cfg(feature = "ml")]
 pub mod cardinality_cost;
 pub mod citus_optimizer;

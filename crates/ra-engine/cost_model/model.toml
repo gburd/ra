@@ -1,0 +1,84 @@
+# Ra Neural Cost Model Metadata
+# Human-readable configuration and hyperparameters
+# Binary weights stored separately in model.safetensors
+
+[model]
+type = "transformer_cost_predictor"
+version = "0.1.0"
+architecture = "encoder_only"  # BERT-like, not GPT
+created_at = "2026-05-05T00:00:00Z"
+
+[hyperparameters]
+vocab_size = 512
+embed_dim = 128  # Balanced: good accuracy, fast inference (~0.4ms)
+num_layers = 4
+num_heads = 8
+ff_dim = 512
+dropout = 0.1
+max_seq_len = 256
+
+# Embedding Dimensionality Trade-offs:
+# - 64 dims:  Fast inference (~0.2ms), limited expressiveness, good for OLTP
+# - 128 dims: Balanced performance (~0.4ms), recommended default for mixed workloads
+# - 256 dims: High expressiveness (~0.8ms), best for complex OLAP queries
+# - 512 dims: Maximum capacity (~1.5ms), only if prediction accuracy critical > latency
+#
+# Recommendation: Start with 128, adjust based on observed accuracy/latency trade-off
+
+[training]
+last_updated = "2026-05-05T00:00:00Z"
+training_queries = 0  # Bootstrap model, not yet trained
+average_error_pct = 0.0
+learning_rate = 0.0001
+batch_size = 32
+optimizer = "adamw"
+warmup_steps = 100
+
+[cost_heads]
+# Separate regression head for each cost dimension
+# Core resource dimensions
+cpu_time_ms = { loss = "mse", weight = 1.0 }
+memory_peak_mb = { loss = "mse", weight = 0.8 }
+memory_avg_mb = { loss = "mse", weight = 0.6 }
+
+# I/O dimensions
+io_storage_ops = { loss = "mse", weight = 2.0 }
+io_storage_bytes = { loss = "mse", weight = 1.5 }
+io_network_ops = { loss = "mse", weight = 1.5 }
+io_network_bytes = { loss = "mse", weight = 1.0 }
+
+# Concurrency & locking
+locks_acquired = { loss = "mse", weight = 0.5 }
+lock_hold_time_ms = { loss = "mse", weight = 0.8 }
+lock_contention_score = { loss = "mse", weight = 1.2 }
+
+# Postgres-specific
+vacuum_overhead = { loss = "mse", weight = 0.3 }
+wal_generation_bytes = { loss = "mse", weight = 0.4 }
+replication_lag_ms = { loss = "mse", weight = 0.6 }
+
+# Cache & system
+cache_hit_ratio = { loss = "mse", weight = 0.7 }
+page_faults = { loss = "mse", weight = 0.5 }
+context_switches = { loss = "mse", weight = 0.4 }
+
+# Total: 16 cost dimensions
+
+[latency_budgets]
+# Special tokens for latency context
+ultra_fast = "<1ms"   # Aggressive pruning, skip expensive rewrites
+fast = "1-10ms"       # Moderate exploration
+balanced = "10-100ms" # Standard optimization
+exhaustive = ">100ms" # Full e-graph search
+
+[rules_integration]
+# How to combine learned costs with rule priors
+mode = "multiplicative"  # rule_prior × learned_adjustment
+cold_start_fallback = "rules_only"  # Use rules before model is trained
+confidence_threshold = 0.7  # Only use model if confidence > threshold
+
+[bootstrap]
+# Initial model created from rule-based estimates
+method = "synthetic_tpch"
+queries_generated = 10000
+noise_factor = 0.1  # Add 10% noise to prevent overfitting to rules
