@@ -57,12 +57,14 @@
 
 mod tokenizer;
 pub mod simple_model;
+mod feature_extractor;
 // mod transformer;
 // mod learner;
 // mod cost_extractor;
 
 pub use tokenizer::{Tokenizer, TimeBudget};
 pub use simple_model::{SimpleCostModel, QueryFeatures, ModelStats};
+pub use feature_extractor::extract_features;
 
 /// Multi-dimensional cost prediction.
 #[derive(Debug, Clone, PartialEq)]

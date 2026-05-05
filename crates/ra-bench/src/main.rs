@@ -9,7 +9,7 @@
 
 mod report;
 mod runner;
-mod training_collector;
+pub mod training_collector;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -261,22 +261,17 @@ fn run_collect_training(args: CollectTrainingArgs) -> Result<()> {
 
     if matches!(args.mode, Mode::Corpus | Mode::Both) {
         for entry in corpus::all_queries() {
-            // Extract features from query
-            // For now, use placeholder features - would need actual feature extraction
-            let features = ra_engine::cost_model::QueryFeatures {
-                table_count: 1.0,
-                join_count: 0.0,
-                filter_count: 1.0,
-                aggregate_count: 0.0,
-                subquery_count: 0.0,
-                cte_count: 0.0,
-                window_function_count: 0.0,
-                order_by_count: 0.0,
-                group_by_count: 0.0,
-                distinct_flag: 0.0,
-                limit_present: 0.0,
-                max_join_cardinality: 0.0,
+            // Parse SQL to get RelExpr
+            let parsed = match ra_parser::lime_parser::parse_sql(&entry.sql) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Failed to parse {} query: {:?}", entry.category, e);
+                    continue;
+                }
             };
+
+            // Extract real features from parsed RelExpr
+            let features = ra_engine::cost_model::extract_features(&parsed);
             queries_with_features.push((entry.sql.to_owned(), features));
         }
     }
@@ -293,21 +288,18 @@ fn run_collect_training(args: CollectTrainingArgs) -> Result<()> {
         for _ in 0..args.fuzz_count {
             if let Ok(tree) = gen.strategy().new_tree(&mut runner) {
                 let sql = emitter.emit(&tree.current());
-                // Placeholder features
-                let features = ra_engine::cost_model::QueryFeatures {
-                    table_count: 2.0,
-                    join_count: 1.0,
-                    filter_count: 2.0,
-                    aggregate_count: 0.0,
-                    subquery_count: 0.0,
-                    cte_count: 0.0,
-                    window_function_count: 0.0,
-                    order_by_count: 0.0,
-                    group_by_count: 0.0,
-                    distinct_flag: 0.0,
-                    limit_present: 0.0,
-                    max_join_cardinality: 1000.0,
+
+                // Parse SQL to get RelExpr
+                let parsed = match ra_parser::lime_parser::parse_sql(&sql) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("Failed to parse fuzz-generated query: {:?}", e);
+                        continue;
+                    }
                 };
+
+                // Extract real features from parsed RelExpr
+                let features = ra_engine::cost_model::extract_features(&parsed);
                 queries_with_features.push((sql, features));
             }
         }

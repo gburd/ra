@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 description = "Benchmarking and comparison harness for the Ra SQL optimizer"
 
+[lib]
+name = "ra_bench"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ra-bench"
 path = "src/main.rs"
