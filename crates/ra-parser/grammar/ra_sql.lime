@@ -109,6 +109,8 @@ typedef struct RaToken {
 %token OFFSET.
 %token UNION.
 %token ALL.
+%token ANY.
+%token SOME.
 %token DISTINCT.
 %token NULL_KW.
 %token IS.
@@ -157,6 +159,10 @@ typedef struct RaToken {
 %token COLONCOLON.      /* :: PostgreSQL type cast operator */
 %token ARROW.           /* ->  JSON field access (returns JSON) */
 %token ARROW_TEXT.      /* ->> JSON text extraction */
+%token JSONB_EXISTS.    /* ?  JSONB key exists */
+%token JSONB_TEXT_PATH. /* #>> JSONB text path extraction */
+%token JSONB_ANY_KEY.   /* ?| JSONB any key exists */
+%token JSONB_ALL_KEYS.  /* ?& JSONB all keys exist */
 
 /* ================================================================== */
 /* Precedence (low to high)                                            */
@@ -167,8 +173,8 @@ typedef struct RaToken {
 %left OR.
 %left AND.
 %right NOT.
-%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE BETWEEN AT_GT LT_AT AT_QUESTION AT_AT.
-%left ARROW ARROW_TEXT.
+%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE BETWEEN AT_GT LT_AT AT_QUESTION AT_AT PLACEHOLDER JSONB_EXISTS JSONB_ANY_KEY JSONB_ALL_KEYS.
+%left ARROW ARROW_TEXT JSONB_TEXT_PATH.
 %left PLUS MINUS CONCAT.
 %left STAR SLASH PERCENT.
 %right UMINUS.
@@ -230,19 +236,37 @@ select_stmt(A) ::= select_no_parens(B).     { A = B; }
 select_stmt(A) ::= select_no_parens(B) UNION ALL select_no_parens(C). {
     A = ra_union(pstate, B, C, 1);
 }
+select_stmt(A) ::= select_stmt(B) UNION ALL select_no_parens(C). {
+    A = ra_union(pstate, B, C, 1);
+}
 select_stmt(A) ::= select_no_parens(B) UNION select_no_parens(C). {
+    A = ra_union(pstate, B, C, 0);
+}
+select_stmt(A) ::= select_stmt(B) UNION select_no_parens(C). {
     A = ra_union(pstate, B, C, 0);
 }
 select_stmt(A) ::= select_no_parens(B) INTERSECT ALL select_no_parens(C). {
     A = ra_intersect(pstate, B, C, 1);
 }
+select_stmt(A) ::= select_stmt(B) INTERSECT ALL select_no_parens(C). {
+    A = ra_intersect(pstate, B, C, 1);
+}
 select_stmt(A) ::= select_no_parens(B) INTERSECT select_no_parens(C). {
+    A = ra_intersect(pstate, B, C, 0);
+}
+select_stmt(A) ::= select_stmt(B) INTERSECT select_no_parens(C). {
     A = ra_intersect(pstate, B, C, 0);
 }
 select_stmt(A) ::= select_no_parens(B) EXCEPT ALL select_no_parens(C). {
     A = ra_except(pstate, B, C, 1);
 }
+select_stmt(A) ::= select_stmt(B) EXCEPT ALL select_no_parens(C). {
+    A = ra_except(pstate, B, C, 1);
+}
 select_stmt(A) ::= select_no_parens(B) EXCEPT select_no_parens(C). {
+    A = ra_except(pstate, B, C, 0);
+}
+select_stmt(A) ::= select_stmt(B) EXCEPT select_no_parens(C). {
     A = ra_except(pstate, B, C, 0);
 }
 
@@ -423,8 +447,44 @@ where_clause(A) ::= .                       { A = 0; }
 
 /* -- GROUP BY clause ----------------------------------------------- */
 
-group_clause(A) ::= GROUP BY expr_list(B).   { A = B; }
-group_clause(A) ::= .                        { A = 0; }
+group_clause(A) ::= GROUP BY group_by_list(B).   { A = B; }
+group_clause(A) ::= .                            { A = 0; }
+
+/* GROUP BY can contain expressions or GROUPING SETS/ROLLUP/CUBE */
+group_by_list(A) ::= group_by_item(B). {
+    RaNode *l = ra_list_new(pstate);
+    A = ra_list_push(pstate, l, B);
+}
+group_by_list(A) ::= group_by_list(B) COMMA group_by_item(C). {
+    A = ra_list_push(pstate, B, C);
+}
+
+group_by_item(A) ::= expr(B). { A = B; }
+
+/* GROUPING SETS ((col1, col2), (col1), ()) */
+group_by_item(A) ::= IDENT IDENT LPAREN grouping_set_list(B) RPAREN. {
+    /* GROUPING SETS (...) - mark with special function */
+    A = ra_func(pstate, "__grouping_sets", B);
+}
+
+/* ROLLUP (col1, col2, ...) */
+group_by_item(A) ::= IDENT LPAREN expr_list(B) RPAREN. {
+    /* ROLLUP(...) or CUBE(...) - mark with function based on ident */
+    A = ra_func(pstate, "__rollup", B);
+}
+
+/* List of grouping sets: (col1, col2), (col1), () */
+grouping_set_list(A) ::= grouping_set(B). {
+    RaNode *l = ra_list_new(pstate);
+    A = ra_list_push(pstate, l, B);
+}
+grouping_set_list(A) ::= grouping_set_list(B) COMMA grouping_set(C). {
+    A = ra_list_push(pstate, B, C);
+}
+
+/* Single grouping set: (col1, col2) or () */
+grouping_set(A) ::= LPAREN expr_list(B) RPAREN. { A = B; }
+grouping_set(A) ::= LPAREN RPAREN. { A = ra_list_new(pstate); }
 
 /* -- HAVING clause ------------------------------------------------- */
 
@@ -539,6 +599,121 @@ expr(A) ::= expr(B) OR expr(C).      { A = ra_binop(pstate, 11, B, C); }
 expr(A) ::= expr(B) PERCENT expr(C). { A = ra_binop(pstate, 12, B, C); }
 expr(A) ::= expr(B) CONCAT expr(C).  { A = ra_binop(pstate, 13, B, C); }
 
+/* -- ALL/ANY/SOME predicates --------------------------------------- */
+/* Comparison with ALL/ANY subquery: value > ALL (subquery) */
+
+expr(A) ::= expr(B) EQ ALL LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__eq_all", args);
+}
+expr(A) ::= expr(B) NE ALL LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__ne_all", args);
+}
+expr(A) ::= expr(B) LT ALL LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__lt_all", args);
+}
+expr(A) ::= expr(B) LE ALL LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__le_all", args);
+}
+expr(A) ::= expr(B) GT ALL LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__gt_all", args);
+}
+expr(A) ::= expr(B) GE ALL LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__ge_all", args);
+}
+
+expr(A) ::= expr(B) EQ ANY LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__eq_any", args);
+}
+expr(A) ::= expr(B) NE ANY LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__ne_any", args);
+}
+expr(A) ::= expr(B) LT ANY LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__lt_any", args);
+}
+expr(A) ::= expr(B) LE ANY LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__le_any", args);
+}
+expr(A) ::= expr(B) GT ANY LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__gt_any", args);
+}
+expr(A) ::= expr(B) GE ANY LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__ge_any", args);
+}
+
+/* SOME is a synonym for ANY */
+expr(A) ::= expr(B) EQ SOME LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__eq_any", args);
+}
+expr(A) ::= expr(B) NE SOME LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__ne_any", args);
+}
+expr(A) ::= expr(B) LT SOME LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__lt_any", args);
+}
+expr(A) ::= expr(B) LE SOME LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__le_any", args);
+}
+expr(A) ::= expr(B) GT SOME LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__gt_any", args);
+}
+expr(A) ::= expr(B) GE SOME LPAREN select_stmt(S) RPAREN. {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, S);
+    A = ra_func(pstate, "__ge_any", args);
+}
+
 /* -- Unary minus --------------------------------------------------- */
 
 expr(A) ::= MINUS expr(B). [UMINUS]  { A = ra_binop(pstate, 1, ra_const_int(pstate, 0), B); }
@@ -592,6 +767,38 @@ expr(A) ::= expr(B) AT_AT expr(C). {
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_path_match", args);
+}
+
+/* JSONB key-exists operators (?, ?|, ?&) and #>> text path */
+expr(A) ::= expr(B) JSONB_EXISTS expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_key_exists", args);
+}
+expr(A) ::= expr(B) PLACEHOLDER expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_key_exists", args);
+}
+expr(A) ::= expr(B) JSONB_TEXT_PATH expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_text_path", args);
+}
+expr(A) ::= expr(B) JSONB_ANY_KEY expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_any_key", args);
+}
+expr(A) ::= expr(B) JSONB_ALL_KEYS expr(C). {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__jsonb_all_keys", args);
 }
 
 /* -- IS NULL / IS NOT NULL ----------------------------------------- */
@@ -774,20 +981,23 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN. {
  * post-parse transformer can detect and promote it to Window nodes. */
 
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER LPAREN
-             opt_partition(D) opt_window_order(E) RPAREN. {
+             opt_partition(D) opt_window_order(E) opt_window_frame(F) RPAREN. {
     A = ra_window_marker_full(pstate, B.text, C, D, E);
+    (void)F; /* Frame clause parsed but not yet used in optimizer */
 }
 
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
-             opt_partition(C) opt_window_order(D) RPAREN. {
+             opt_partition(C) opt_window_order(D) opt_window_frame(E) RPAREN. {
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
     A = ra_window_marker_full(pstate, B.text, l, C, D);
+    (void)E;
 }
 
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER LPAREN
-             opt_partition(C) opt_window_order(D) RPAREN. {
+             opt_partition(C) opt_window_order(D) opt_window_frame(E) RPAREN. {
     A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), C, D);
+    (void)E;
 }
 
 opt_partition(A) ::= PARTITION BY expr_list(B). { A = B; }
@@ -795,6 +1005,24 @@ opt_partition(A) ::= .                          { A = 0; }
 
 opt_window_order(A) ::= ORDER BY sort_list(B).  { A = B; }
 opt_window_order(A) ::= .                       { A = 0; }
+
+/* Window frame clause: ROWS/RANGE BETWEEN ... AND ... */
+opt_window_frame(A) ::= IDENT BETWEEN frame_bound(B) AND frame_bound(C). {
+    /* ROWS BETWEEN start AND end, RANGE BETWEEN start AND end */
+    A = 0; /* Parsed but frame semantics not implemented yet */
+    (void)B; (void)C;
+}
+opt_window_frame(A) ::= . { A = 0; }
+
+/* Frame bounds: UNBOUNDED PRECEDING, CURRENT ROW, expr PRECEDING/FOLLOWING */
+frame_bound(A) ::= IDENT IDENT. {
+    /* UNBOUNDED PRECEDING, UNBOUNDED FOLLOWING, CURRENT ROW */
+    A = 0;
+}
+frame_bound(A) ::= expr(B) IDENT. {
+    /* N PRECEDING, N FOLLOWING */
+    A = B;
+}
 
 /* -- TRIM special syntax: TRIM(BOTH/LEADING/TRAILING 'chars' FROM expr) --- */
 /* This handles SQL's special TRIM syntax that uses FROM as a keyword.
@@ -835,6 +1063,19 @@ expr(A) ::= EXTRACT LPAREN IDENT(F) FROM expr(E) RPAREN. {
     (void)F;
 }
 
+/* -- SUBSTRING function -------------------------------------------- */
+/* SQL standard: SUBSTRING(str FROM start FOR length) */
+/* SUBSTRING is an IDENT, not a keyword, so it works as a regular function too */
+/* FOR is also an IDENT */
+expr(A) ::= IDENT LPAREN expr(S) FROM expr(F) IDENT expr(L) RPAREN. {
+    /* Match any function with FROM...FOR pattern, but primarily for SUBSTRING */
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, S);
+    args = ra_list_push(pstate, args, F);
+    args = ra_list_push(pstate, args, L);
+    A = ra_func(pstate, "substring", args);
+}
+
 /* -- ARRAY literal ------------------------------------------------- */
 
 expr(A) ::= ARRAY LBRACKET expr_list(B) RBRACKET. {
@@ -859,6 +1100,16 @@ expr(A) ::= PLACEHOLDER. {
 /* -- Parenthesized expression -------------------------------------- */
 
 expr(A) ::= LPAREN expr(B) RPAREN.  { A = B; }
+
+/* -- Row constructor (tuple) --------------------------------------- */
+/* Multi-column tuple: (col1, col2, ...) for use with IN, comparisons */
+
+expr(A) ::= LPAREN expr_list(B) COMMA expr(C) RPAREN. {
+    /* Create a tuple/row constructor with 2+ elements */
+    RaNode *args = B; /* B is already a list */
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__row_constructor", args);
+}
 
 /* ================================================================== */
 /* Expression list                                                     */

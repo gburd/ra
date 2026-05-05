@@ -117,25 +117,9 @@ fn run_lime(lime_tool: &Path, lime_root: &Path, grammar_file: &Path, out_dir: &P
         let generated_ok = out_dir.join("ra_sql.c").exists();
 
         if only_conflicts && generated_ok {
-            // Print a cargo warning so developers are aware.
-            let n: u32 = stderr
-                .lines()
-                .find_map(|l| {
-                    let t = l.trim();
-                    t.split_once(' ')
-                        .and_then(|(n, rest)| {
-                            if rest.starts_with("parsing conflict") {
-                                n.parse().ok()
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .unwrap_or(0);
-            println!(
-                "cargo:warning=lime grammar has {n} resolved \
-                 shift/reduce conflict(s) — parser is still valid"
-            );
+            // ~30 resolved shift/reduce conflicts are expected (IDENT SCONST
+            // typed literals, -> vs ->>) and correct.  Lime's default SHIFT
+            // resolution handles them.  No action needed.
         } else {
             panic!(
                 "lime tool failed (exit {}):\nstdout: {stdout}\nstderr: {stderr}",

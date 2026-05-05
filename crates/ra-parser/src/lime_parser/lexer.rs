@@ -61,54 +61,62 @@ pub mod token {
     pub const OFFSET: i32 = 47;
     pub const UNION: i32 = 48;
     pub const ALL: i32 = 49;
-    pub const DISTINCT: i32 = 50;
-    pub const NULL_KW: i32 = 51;
-    pub const IS: i32 = 52;
-    pub const TRUE_KW: i32 = 53;
-    pub const FALSE_KW: i32 = 54;
+    pub const ANY: i32 = 50;
+    pub const SOME: i32 = 51;
+    pub const DISTINCT: i32 = 52;
+    pub const NULL_KW: i32 = 53;
+    pub const IS: i32 = 54;
+    pub const TRUE_KW: i32 = 55;
+    pub const FALSE_KW: i32 = 56;
 
     // New keywords for expanded grammar
-    pub const CASE: i32 = 55;
-    pub const WHEN: i32 = 56;
-    pub const THEN: i32 = 57;
-    pub const ELSE: i32 = 58;
-    pub const END: i32 = 59;
-    pub const CAST: i32 = 60;
-    pub const BETWEEN: i32 = 61;
-    pub const LIKE: i32 = 62;
-    pub const ILIKE: i32 = 63;
-    pub const IN: i32 = 64;
-    pub const EXISTS: i32 = 65;
-    pub const WITH: i32 = 66;
-    pub const RECURSIVE: i32 = 67;
-    pub const PARTITION: i32 = 68;
-    pub const OVER: i32 = 69;
-    pub const VALUES: i32 = 70;
-    pub const INTERSECT: i32 = 71;
-    pub const EXCEPT: i32 = 72;
-    pub const USING: i32 = 73;
+    pub const CASE: i32 = 57;
+    pub const WHEN: i32 = 58;
+    pub const THEN: i32 = 59;
+    pub const ELSE: i32 = 60;
+    pub const END: i32 = 61;
+    pub const CAST: i32 = 62;
+    pub const BETWEEN: i32 = 63;
+    pub const LIKE: i32 = 64;
+    pub const ILIKE: i32 = 65;
+    pub const IN: i32 = 66;
+    pub const EXISTS: i32 = 67;
+    pub const WITH: i32 = 68;
+    pub const RECURSIVE: i32 = 69;
+    pub const PARTITION: i32 = 70;
+    pub const OVER: i32 = 71;
+    pub const VALUES: i32 = 72;
+    pub const INTERSECT: i32 = 73;
+    pub const EXCEPT: i32 = 74;
+    pub const USING: i32 = 75;
 
     // JSONB operators (two-character symbol tokens)
-    pub const AT_GT: i32 = 74;      /* @>  JSON contains */
-    pub const LT_AT: i32 = 75;      /* <@  JSON contained by */
-    pub const AT_QUESTION: i32 = 76; /* @?  JSON path exists */
-    pub const AT_AT: i32 = 77;      /* @@  JSON path match */
+    pub const AT_GT: i32 = 76;      /* @>  JSON contains */
+    pub const LT_AT: i32 = 77;      /* <@  JSON contained by */
+    pub const AT_QUESTION: i32 = 78; /* @?  JSON path exists */
+    pub const AT_AT: i32 = 79;      /* @@  JSON path match */
 
     // Square brackets for array subscripting
-    pub const LBRACKET: i32 = 78;   /* [ */
-    pub const RBRACKET: i32 = 79;   /* ] */
+    pub const LBRACKET: i32 = 80;   /* [ */
+    pub const RBRACKET: i32 = 81;   /* ] */
 
     // New keywords
-    pub const ARRAY: i32 = 80;
-    pub const UNNEST: i32 = 81;
-    pub const ORDINALITY: i32 = 82;
-    pub const DATE_KW: i32 = 83;
-    pub const INTERVAL_KW: i32 = 84;
-    pub const EXTRACT: i32 = 85;
-    pub const PLACEHOLDER: i32 = 86; /* ? parameter */
-    pub const COLONCOLON: i32 = 87;  /* :: PostgreSQL type cast operator */
-    pub const ARROW: i32 = 88;       /* ->  JSON field access (returns JSON) */
-    pub const ARROW_TEXT: i32 = 89;  /* ->> JSON field text extraction */
+    pub const ARRAY: i32 = 82;
+    pub const UNNEST: i32 = 83;
+    pub const ORDINALITY: i32 = 84;
+    pub const DATE_KW: i32 = 85;
+    pub const INTERVAL_KW: i32 = 86;
+    pub const EXTRACT: i32 = 87;
+    pub const PLACEHOLDER: i32 = 88; /* ? parameter */
+    pub const COLONCOLON: i32 = 89;  /* :: PostgreSQL type cast operator */
+    pub const ARROW: i32 = 90;       /* ->  JSON field access (returns JSON) */
+    pub const ARROW_TEXT: i32 = 91;  /* ->> JSON field text extraction */
+
+    // JSONB operators (key-exists family + path extraction)
+    pub const JSONB_EXISTS: i32 = 92;    /* ?   JSONB key exists */
+    pub const JSONB_TEXT_PATH: i32 = 93; /* #>> JSONB text path extraction */
+    pub const JSONB_ANY_KEY: i32 = 94;   /* ?|  JSONB any key exists */
+    pub const JSONB_ALL_KEYS: i32 = 95;  /* ?&  JSONB all keys exist */
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -235,6 +243,8 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "OFFSET" => Some(token::OFFSET),
         "UNION" => Some(token::UNION),
         "ALL" => Some(token::ALL),
+        "ANY" => Some(token::ANY),
+        "SOME" => Some(token::SOME),
         "DISTINCT" => Some(token::DISTINCT),
         "NULL" => Some(token::NULL_KW),
         "IS" => Some(token::IS),
@@ -263,8 +273,9 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "UNNEST" => Some(token::UNNEST),
         "ORDINALITY" => Some(token::ORDINALITY),
         "EXTRACT" => Some(token::EXTRACT),
-        // Note: DATE and INTERVAL intentionally NOT keywords — they are
-        // commonly used as column names and would cause parse conflicts.
+        // Note: DATE, INTERVAL, and SUBSTRING are intentionally NOT keywords
+        // — they are commonly used as column/function names. SUBSTRING is
+        // handled via IDENT rules for FROM...FOR syntax.
         _ => None,
     }
 }
@@ -279,6 +290,7 @@ fn match_three_char_op(sql: &str, pos: usize) -> Option<i32> {
     }
     match &sql[pos..pos + 3] {
         "->>" => Some(token::ARROW_TEXT),
+        "#>>" => Some(token::JSONB_TEXT_PATH),
         _ => None,
     }
 }
@@ -299,6 +311,8 @@ fn match_two_char_op(sql: &str, pos: usize) -> Option<i32> {
         "@@" => Some(token::AT_AT),
         "::" => Some(token::COLONCOLON),
         "->" => Some(token::ARROW),
+        "?|" => Some(token::JSONB_ANY_KEY),
+        "?&" => Some(token::JSONB_ALL_KEYS),
         _ => None,
     }
 }

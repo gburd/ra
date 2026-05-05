@@ -1,0 +1,49 @@
+[package]
+name = "ra-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Benchmarking and comparison harness for the Ra SQL optimizer"
+
+[[bin]]
+name = "ra-bench"
+path = "src/main.rs"
+
+[features]
+default = []
+# Enable live comparison against a running Postgres instance.
+live-comparison = ["dep:postgres", "ra-grammar-fuzzer/reference-comparison"]
+# Enable EXPLAIN ANALYZE (requires real data).
+execute = ["live-comparison"]
+
+[dependencies]
+ra-core      = { workspace = true }
+ra-parser    = { path = "../ra-parser" }
+ra-engine    = { workspace = true }
+ra-grammar-fuzzer = { path = "../ra-grammar-fuzzer" }
+
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap         = { workspace = true }
+criterion    = { workspace = true }
+proptest     = { workspace = true }
+
+# Optional live-comparison dependency
+postgres = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "parse_optimize"
+harness = false
+
+[lints]
+workspace = true

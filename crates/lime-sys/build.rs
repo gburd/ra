@@ -47,8 +47,33 @@ fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
         .compile("tokenize_simd");
 
     // --- Compile JIT stubs (no LLVM dependency) -------------------------
+    // Under LIME_NO_JIT, jit_codegen.c compiles to an empty translation
+    // unit (all code is #ifndef LIME_NO_JIT guarded).  Substitute a
+    // minimal stub that exports one symbol so ranlib doesn't warn about
+    // an archive member with no symbols.
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
+    let stub_path =
+        std::path::PathBuf::from(&out_dir).join("jit_codegen_nojit.c");
+    std::fs::write(
+        &stub_path,
+        "/* stub: real impl requires LLVM JIT */\n\
+         void lime_jit_codegen_init(void) {}\n",
+    )
+    .expect("failed to write jit_codegen stub");
+
+    let jit_files: Vec<std::path::PathBuf> = jit_sources
+        .iter()
+        .map(|&f| {
+            if f == "jit_codegen.c" {
+                stub_path.clone()
+            } else {
+                lime_src.join(f)
+            }
+        })
+        .collect();
+
     cc::Build::new()
-        .files(jit_sources.iter().map(|f| lime_src.join(f)))
+        .files(jit_files.iter().map(std::path::PathBuf::as_path))
         .include(lime_inc)
         .define("_GNU_SOURCE", None)
         .define("LIME_NO_JIT", None)

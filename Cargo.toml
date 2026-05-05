@@ -34,6 +34,7 @@ members = [
     "crates/ra-test-utils",
     "crates/ra-quel-parser",
     "crates/ra-grammar-fuzzer",
+    "crates/ra-bench",
 ]
 default-members = [
     # Core layer: cargo build builds only these by default
@@ -172,7 +173,7 @@ ra-quel-parser = { path = "crates/ra-quel-parser" }
 ra-cli = { path = "crates/ra-cli" }
 lime-sys = { path = "crates/lime-sys" }
 lime-rs = { path = "crates/lime-rs" }
-postgres = "0.19"
+postgres = { version = "0.19", features = ["with-serde_json-1"] }
 stoolap = "0.3"
 toml = "0.8"
 

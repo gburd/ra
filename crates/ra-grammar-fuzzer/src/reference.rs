@@ -97,6 +97,12 @@ pub struct ComparisonResult {
     pub join_order_match: bool,
     /// Cost ratio (`ra_cost` / `reference_cost`), if available.
     pub cost_ratio: Option<f64>,
+    /// Actual execution time (ms) from EXPLAIN ANALYZE, if available.
+    pub actual_execution_time_ms: Option<f64>,
+    /// Actual rows returned from EXPLAIN ANALYZE, if available.
+    pub actual_rows: Option<u64>,
+    /// Estimated rows from EXPLAIN (before execution).
+    pub estimated_rows: Option<u64>,
     /// Detailed notes about differences.
     pub notes: Vec<String>,
 }
@@ -138,6 +144,95 @@ impl ReferenceComparator {
         self
     }
 
+    /// Compare a SQL query's plan against `PostgreSQL` using EXPLAIN ANALYZE.
+    ///
+    /// This actually executes the query to get real execution statistics.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the connection fails or `EXPLAIN ANALYZE` returns
+    /// unexpected output.
+    #[cfg(feature = "reference-comparison")]
+    pub fn compare_with_postgresql_analyze(
+        &self,
+        sql: &str,
+    ) -> Result<ComparisonResult, ReferenceError> {
+        let conn_str = self
+            .pg_connection
+            .as_deref()
+            .ok_or_else(|| {
+                ReferenceError::Connection(
+                    "PostgreSQL not configured".to_owned(),
+                )
+            })?;
+
+        let mut client = postgres::Client::connect(
+            conn_str,
+            postgres::NoTls,
+        )
+        .map_err(|e| ReferenceError::Connection(e.to_string()))?;
+
+        let explain_sql = format!("EXPLAIN (FORMAT JSON, ANALYZE, TIMING) {sql}");
+        let rows = client
+            .query(&explain_sql, &[])
+            .map_err(|e| ReferenceError::Explain(e.to_string()))?;
+
+        if rows.is_empty() {
+            return Err(ReferenceError::Explain(
+                "empty EXPLAIN ANALYZE result".to_owned(),
+            ));
+        }
+
+        let plan_json: serde_json::Value = rows[0].get(0);
+
+        // Extract execution statistics from JSON
+        let (actual_time_ms, actual_rows, estimated_rows) =
+            Self::extract_execution_stats(&plan_json);
+
+        debug!("PostgreSQL EXPLAIN ANALYZE: actual_time={actual_time_ms:?}ms, actual_rows={actual_rows:?}, estimated_rows={estimated_rows:?}");
+
+        Ok(ComparisonResult {
+            reference: ReferenceDb::PostgreSQL,
+            structurally_similar: true,
+            join_order_match: true,
+            cost_ratio: None,
+            actual_execution_time_ms: actual_time_ms,
+            actual_rows,
+            estimated_rows,
+            notes: vec![format!(
+                "PostgreSQL EXPLAIN ANALYZE completed (time: {actual_time_ms:?}ms, rows: {actual_rows:?})"
+            )],
+        })
+    }
+
+    /// Extract execution statistics from EXPLAIN (ANALYZE) JSON output.
+    #[cfg(feature = "reference-comparison")]
+    fn extract_execution_stats(plan_json: &serde_json::Value) -> (Option<f64>, Option<u64>, Option<u64>) {
+        // EXPLAIN (ANALYZE, FORMAT JSON) returns: [{"Plan": {...}}]
+        let plan = plan_json
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|obj| obj.get("Plan"));
+
+        if let Some(plan) = plan {
+            let actual_time = plan
+                .get("Actual Total Time")
+                .and_then(|v| v.as_f64());
+
+            let actual_rows = plan
+                .get("Actual Rows")
+                .and_then(|v| v.as_u64());
+
+            let estimated_rows = plan
+                .get("Plan Rows")
+                .and_then(|v| v.as_u64());
+
+            (actual_time, actual_rows, estimated_rows)
+        } else {
+            (None, None, None)
+        }
+    }
+
     /// Compare a SQL query's plan against `PostgreSQL`.
     ///
     /// # Errors
@@ -148,6 +243,7 @@ impl ReferenceComparator {
     pub fn compare_with_postgresql(
         &self,
         sql: &str,
+        ra_plan: &ra_core::algebra::RelExpr,
     ) -> Result<ComparisonResult, ReferenceError> {
         let conn_str = self
             .pg_connection
@@ -175,19 +271,254 @@ impl ReferenceComparator {
             ));
         }
 
-        let plan_json: String = rows[0].get(0);
-        debug!("PostgreSQL plan: {plan_json}");
+        let plan_json: serde_json::Value = rows[0].get(0);
+        let plan_json_str = plan_json.to_string();
+        debug!("PostgreSQL plan: {plan_json_str}");
+
+        // Parse Postgres plan to PlanNode
+        let pg_plan = Self::postgres_plan_to_plan_node(&plan_json)?;
+
+        // Convert Ra RelExpr to PlanNode
+        let ra_plan_node = Self::ra_relexpr_to_plan_node(ra_plan);
+
+        // Compare plans structurally
+        let (similarity, join_match, notes) = Self::compare_plan_nodes(&pg_plan, &ra_plan_node);
+
+        // Extract cost ratio if available
+        let cost_ratio = pg_plan.estimated_cost.and_then(|pg_cost| {
+            ra_plan_node.estimated_cost.map(|ra_cost| pg_cost / ra_cost)
+        });
 
         Ok(ComparisonResult {
             reference: ReferenceDb::PostgreSQL,
-            structurally_similar: true,
-            join_order_match: true,
-            cost_ratio: None,
-            notes: vec![format!(
-                "PostgreSQL plan retrieved ({} chars)",
-                plan_json.len()
-            )],
+            structurally_similar: similarity > 0.8,  // Consider similar if >80% match
+            join_order_match: join_match,
+            cost_ratio,
+            actual_execution_time_ms: None,
+            actual_rows: None,
+            estimated_rows: None,
+            notes,
         })
+    }
+
+    /// Parse Postgres EXPLAIN JSON output into a PlanNode tree.
+    #[cfg(feature = "reference-comparison")]
+    fn postgres_plan_to_plan_node(json: &serde_json::Value) -> Result<PlanNode, ReferenceError> {
+        // EXPLAIN (FORMAT JSON) returns: [{"Plan": {...}}]
+        let plan = json
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|obj| obj.get("Plan"))
+            .ok_or_else(|| ReferenceError::Explain("invalid JSON structure".to_owned()))?;
+
+        Self::parse_pg_plan_node(plan)
+    }
+
+    #[cfg(feature = "reference-comparison")]
+    fn parse_pg_plan_node(node: &serde_json::Value) -> Result<PlanNode, ReferenceError> {
+        let node_type = node
+            .get("Node Type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ReferenceError::Explain("missing Node Type".to_owned()))?;
+
+        let operator = Self::pg_node_type_to_operator(node_type);
+
+        let estimated_rows = node.get("Plan Rows").and_then(|v| v.as_f64());
+        let estimated_cost = node.get("Total Cost").and_then(|v| v.as_f64());
+
+        // Recursively parse child plans
+        let children = if let Some(plans) = node.get("Plans").and_then(|v| v.as_array()) {
+            plans
+                .iter()
+                .filter_map(|child| Self::parse_pg_plan_node(child).ok())
+                .collect()
+        } else {
+            vec![]
+        };
+
+        Ok(PlanNode {
+            operator,
+            estimated_rows,
+            estimated_cost,
+            children,
+        })
+    }
+
+    #[cfg(feature = "reference-comparison")]
+    fn pg_node_type_to_operator(node_type: &str) -> PlanOperator {
+        match node_type {
+            "Seq Scan" => PlanOperator::SeqScan,
+            "Index Scan" | "Index Only Scan" | "Bitmap Index Scan" => PlanOperator::IndexScan,
+            "Nested Loop" => PlanOperator::NestedLoop,
+            "Hash Join" => PlanOperator::HashJoin,
+            "Merge Join" => PlanOperator::MergeJoin,
+            "Sort" => PlanOperator::Sort,
+            "Hash Aggregate" | "HashAggregate" => PlanOperator::HashAggregate,
+            "Group" | "GroupAggregate" => PlanOperator::GroupAggregate,
+            "Limit" => PlanOperator::Limit,
+            "Result" => PlanOperator::Result,
+            "Append" => PlanOperator::Append,
+            _ => PlanOperator::Other(node_type.to_owned()),
+        }
+    }
+
+    /// Convert Ra RelExpr to PlanNode for comparison.
+    #[cfg(feature = "reference-comparison")]
+    fn ra_relexpr_to_plan_node(expr: &ra_core::algebra::RelExpr) -> PlanNode {
+        use ra_core::algebra::RelExpr;
+
+        match expr {
+            RelExpr::Scan { .. } => PlanNode {
+                operator: PlanOperator::SeqScan,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![],
+            },
+            RelExpr::Filter { predicate: _, input } => {
+                // Filter becomes part of scan or separate node
+                Self::ra_relexpr_to_plan_node(input)
+            },
+            RelExpr::Project { columns: _, input } => {
+                PlanNode {
+                    operator: PlanOperator::Result,
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![Self::ra_relexpr_to_plan_node(input)],
+                }
+            },
+            RelExpr::Join { left, right, .. } => {
+                PlanNode {
+                    operator: PlanOperator::HashJoin,  // Default to hash join
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![
+                        Self::ra_relexpr_to_plan_node(left),
+                        Self::ra_relexpr_to_plan_node(right),
+                    ],
+                }
+            },
+            RelExpr::Aggregate { input, .. } => {
+                PlanNode {
+                    operator: PlanOperator::HashAggregate,
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![Self::ra_relexpr_to_plan_node(input)],
+                }
+            },
+            RelExpr::Sort { input, .. } => {
+                PlanNode {
+                    operator: PlanOperator::Sort,
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![Self::ra_relexpr_to_plan_node(input)],
+                }
+            },
+            RelExpr::Limit { input, .. } => {
+                PlanNode {
+                    operator: PlanOperator::Limit,
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![Self::ra_relexpr_to_plan_node(input)],
+                }
+            },
+            RelExpr::Union { left, right, .. }
+            | RelExpr::Intersect { left, right, .. }
+            | RelExpr::Except { left, right, .. } => {
+                PlanNode {
+                    operator: PlanOperator::Append,
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![
+                        Self::ra_relexpr_to_plan_node(left),
+                        Self::ra_relexpr_to_plan_node(right),
+                    ],
+                }
+            },
+            RelExpr::Distinct { input } => {
+                PlanNode {
+                    operator: PlanOperator::HashAggregate,  // DISTINCT often uses hash aggregate
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![Self::ra_relexpr_to_plan_node(input)],
+                }
+            },
+            _ => PlanNode {
+                operator: PlanOperator::Other("Unknown".to_owned()),
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![],
+            },
+        }
+    }
+
+    /// Compare two plan nodes structurally using BFS traversal.
+    /// Returns (similarity_score, join_order_match, notes).
+    #[cfg(feature = "reference-comparison")]
+    fn compare_plan_nodes(pg: &PlanNode, ra: &PlanNode) -> (f64, bool, Vec<String>) {
+        use std::collections::VecDeque;
+
+        let mut notes = Vec::new();
+        let mut pg_queue = VecDeque::new();
+        let mut ra_queue = VecDeque::new();
+
+        pg_queue.push_back(pg);
+        ra_queue.push_back(ra);
+
+        let mut total = 0;
+        let mut matches = 0;
+
+        while let (Some(pg_node), Some(ra_node)) = (pg_queue.pop_front(), ra_queue.pop_front()) {
+            total += 1;
+
+            if pg_node.operator == ra_node.operator {
+                matches += 1;
+            } else {
+                notes.push(format!(
+                    "Operator mismatch: PG={:?} vs Ra={:?}",
+                    pg_node.operator, ra_node.operator
+                ));
+            }
+
+            // Enqueue children
+            for child in &pg_node.children {
+                pg_queue.push_back(child);
+            }
+            for child in &ra_node.children {
+                ra_queue.push_back(child);
+            }
+        }
+
+        // If one plan has more nodes, count as mismatches
+        total += pg_queue.len() + ra_queue.len();
+
+        if !pg_queue.is_empty() || !ra_queue.is_empty() {
+            notes.push(format!(
+                "Plan depth mismatch: PG has {} extra nodes, Ra has {} extra nodes",
+                pg_queue.len(),
+                ra_queue.len()
+            ));
+        }
+
+        let similarity = if total > 0 {
+            matches as f64 / total as f64
+        } else {
+            1.0
+        };
+
+        // Simple join order check: both plans have same number of joins
+        let join_match = Self::count_joins(pg) == Self::count_joins(ra);
+
+        (similarity, join_match, notes)
+    }
+
+    #[cfg(feature = "reference-comparison")]
+    fn count_joins(node: &PlanNode) -> usize {
+        let self_count = match node.operator {
+            PlanOperator::HashJoin | PlanOperator::NestedLoop | PlanOperator::MergeJoin => 1,
+            _ => 0,
+        };
+
+        self_count + node.children.iter().map(|child| Self::count_joins(child)).sum::<usize>()
     }
 
     /// Compare a SQL query's plan against `DuckDB`.
@@ -227,6 +558,9 @@ impl ReferenceComparator {
             structurally_similar: true,
             join_order_match: true,
             cost_ratio: None,
+            actual_execution_time_ms: None,
+            actual_rows: None,
+            estimated_rows: None,
             notes: vec![format!(
                 "DuckDB plan retrieved ({} lines)",
                 plan_text.len()
@@ -245,11 +579,12 @@ impl ReferenceComparator {
     pub fn compare_all(
         &self,
         sql: &str,
+        ra_plan: &ra_core::algebra::RelExpr,
     ) -> Vec<Result<ComparisonResult, ReferenceError>> {
         let mut results = Vec::new();
 
         if self.pg_connection.is_some() {
-            results.push(self.compare_with_postgresql(sql));
+            results.push(self.compare_with_postgresql(sql, ra_plan));
         }
 
         results.push(self.compare_with_duckdb(sql));

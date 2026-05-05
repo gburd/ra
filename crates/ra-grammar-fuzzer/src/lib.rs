@@ -23,6 +23,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
 pub mod cloud_profiles;
+pub mod corpus;
 pub mod deployment_profiles;
 pub mod dynamic_facts;
 pub mod generator;
@@ -30,6 +31,8 @@ pub mod minimizer;
 pub mod properties;
 #[cfg(feature = "reference-comparison")]
 pub mod reference;
+pub mod scoring;
+pub mod sql_emitter;
 pub mod storyline;
 
 pub use cloud_profiles::{CloudProfileSelector, ProfileSelector};

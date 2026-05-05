@@ -105,7 +105,7 @@ fn count_tables(expr: &RelExpr) -> usize {
 }
 
 /// Count number of join operations in the query.
-fn count_joins(expr: &RelExpr) -> usize {
+pub fn count_joins(expr: &RelExpr) -> usize {
     match expr {
         RelExpr::Join { left, right, .. } => 1 + count_joins(left) + count_joins(right),
         RelExpr::Filter { input, .. }

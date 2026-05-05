@@ -97,6 +97,49 @@ impl SqlGenerator {
     pub fn set_op_strategy(&self) -> impl Strategy<Value = RelExpr> {
         arb_set_operation()
     }
+
+    /// Return a strategy for GROUPING SETS/ROLLUP/CUBE queries.
+    pub fn grouping_sets_strategy(&self) -> impl Strategy<Value = RelExpr> {
+        arb_grouping_sets_query()
+    }
+
+    /// Return a strategy for chained UNION ALL queries.
+    pub fn chained_union_strategy(&self) -> impl Strategy<Value = RelExpr> {
+        arb_chained_set_operations()
+    }
+
+    /// Return a strategy for queries with JSONB operators.
+    pub fn jsonb_strategy(&self) -> impl Strategy<Value = RelExpr> {
+        (arb_jsonb_expr(), arb_scan()).prop_map(|(pred, input)| {
+            RelExpr::Filter {
+                predicate: pred,
+                input: Box::new(input),
+            }
+        })
+    }
+
+    /// Return a strategy for queries with ALL/ANY predicates.
+    pub fn all_any_strategy(&self) -> impl Strategy<Value = RelExpr> {
+        (arb_all_any_predicate(), arb_scan()).prop_map(|(pred, input)| {
+            RelExpr::Filter {
+                predicate: pred,
+                input: Box::new(input),
+            }
+        })
+    }
+
+    /// Return a strategy for queries with window functions.
+    pub fn window_function_strategy(&self) -> impl Strategy<Value = RelExpr> {
+        (arb_window_function(), arb_scan()).prop_map(|(window_expr, input)| {
+            RelExpr::Project {
+                columns: vec![ProjectionColumn {
+                    expr: window_expr,
+                    alias: Some("window_result".to_owned()),
+                }],
+                input: Box::new(input),
+            }
+        })
+    }
 }
 
 impl Default for SqlGenerator {
@@ -206,7 +249,15 @@ fn arb_unaryop() -> impl Strategy<Value = UnaryOp> {
 
 /// Generate arbitrary scalar expressions up to `depth`.
 pub fn arb_expr(depth: u32) -> impl Strategy<Value = Expr> {
-    let leaf = prop_oneof![arb_column_expr(), arb_const_expr(),];
+    let leaf = prop_oneof![
+        arb_column_expr(),
+        arb_const_expr(),
+        arb_jsonb_expr(),
+        arb_all_any_predicate(),
+        arb_tuple_in_expr(),
+        arb_substring_from_for(),
+        arb_window_function(),
+    ];
 
     leaf.prop_recursive(depth, 64, 2, |inner| {
         prop_oneof![
@@ -219,12 +270,18 @@ pub fn arb_expr(depth: u32) -> impl Strategy<Value = Expr> {
                 }
             ),
             // Unary operation
-            (arb_unaryop(), inner).prop_map(|(op, operand)| {
+            (arb_unaryop(), inner.clone()).prop_map(|(op, operand)| {
                 Expr::UnaryOp {
                     op,
                     operand: Box::new(operand),
                 }
             }),
+            // JSONB expressions
+            arb_jsonb_expr(),
+            // ALL/ANY predicates
+            arb_all_any_predicate(),
+            // Window functions
+            arb_window_function(),
         ]
     })
 }
@@ -325,6 +382,121 @@ fn arb_aggregate_expr() -> impl Strategy<Value = AggregateExpr> {
         })
 }
 
+// -------------------------------------------------------------------
+// New grammar features (JSONB, ALL/ANY, window frames, etc.)
+// -------------------------------------------------------------------
+
+/// Generate JSONB operators: ?, ?|, ?&, #>>
+fn arb_jsonb_expr() -> impl Strategy<Value = Expr> {
+    prop_oneof![
+        // JSONB key exists: jsonb_col ? 'key'
+        (arb_column_expr(), arb_const_expr()).prop_map(|(col, key)| {
+            Expr::Function {
+                name: "__jsonb_key_exists".to_owned(),
+                args: vec![col, key],
+            }
+        }),
+        // JSONB any key exists: jsonb_col ?| array['key1', 'key2']
+        (arb_column_expr(), arb_const_expr()).prop_map(|(col, keys)| {
+            Expr::Function {
+                name: "__jsonb_any_key".to_owned(),
+                args: vec![col, keys],
+            }
+        }),
+        // JSONB all keys exist: jsonb_col ?& array['key1', 'key2']
+        (arb_column_expr(), arb_const_expr()).prop_map(|(col, keys)| {
+            Expr::Function {
+                name: "__jsonb_all_keys".to_owned(),
+                args: vec![col, keys],
+            }
+        }),
+        // JSONB text path extraction: jsonb_col #>> '{a,b,c}'
+        (arb_column_expr(), arb_const_expr()).prop_map(|(col, path)| {
+            Expr::Function {
+                name: "__jsonb_text_path".to_owned(),
+                args: vec![col, path],
+            }
+        }),
+    ]
+}
+
+/// Generate ALL/ANY predicates with subqueries
+fn arb_all_any_predicate() -> impl Strategy<Value = Expr> {
+    prop_oneof![
+        // col > ALL (subquery)
+        (arb_column_expr(), arb_scan()).prop_map(|(col, _subq)| {
+            Expr::Function {
+                name: "__gt_all".to_owned(),
+                args: vec![col, Expr::Const(Const::Null)], // Simplified - real would need subquery support
+            }
+        }),
+        // col < ANY (subquery)
+        (arb_column_expr(), arb_scan()).prop_map(|(col, _subq)| {
+            Expr::Function {
+                name: "__lt_any".to_owned(),
+                args: vec![col, Expr::Const(Const::Null)],
+            }
+        }),
+        // col >= ALL (subquery)
+        (arb_column_expr(), arb_scan()).prop_map(|(col, _subq)| {
+            Expr::Function {
+                name: "__ge_all".to_owned(),
+                args: vec![col, Expr::Const(Const::Null)],
+            }
+        }),
+        // col <= ANY (subquery)
+        (arb_column_expr(), arb_scan()).prop_map(|(col, _subq)| {
+            Expr::Function {
+                name: "__le_any".to_owned(),
+                args: vec![col, Expr::Const(Const::Null)],
+            }
+        }),
+    ]
+}
+
+/// Generate tuple IN expressions: (col1, col2) IN ((val1, val2), ...)
+fn arb_tuple_in_expr() -> impl Strategy<Value = Expr> {
+    prop::collection::vec(arb_column_expr(), 2..=3).prop_map(|cols| {
+        Expr::Function {
+            name: "__row_constructor".to_owned(),
+            args: cols,
+        }
+    })
+}
+
+/// Generate SUBSTRING FROM FOR expressions
+fn arb_substring_from_for() -> impl Strategy<Value = Expr> {
+    (arb_column_expr(), arb_const_expr(), arb_const_expr()).prop_map(
+        |(col, from_pos, length)| Expr::Function {
+            name: "substring".to_owned(),
+            args: vec![col, from_pos, length],
+        },
+    )
+}
+
+/// Generate window function expressions with optional frames
+fn arb_window_function() -> impl Strategy<Value = Expr> {
+    prop_oneof![
+        // ROW_NUMBER() OVER (ORDER BY col)
+        arb_column_expr().prop_map(|col| Expr::Function {
+            name: "__window_row_number".to_owned(),
+            args: vec![col],
+        }),
+        // RANK() OVER (PARTITION BY col ORDER BY col)
+        (arb_column_expr(), arb_column_expr()).prop_map(|(part, ord)| {
+            Expr::Function {
+                name: "__window_rank".to_owned(),
+                args: vec![part, ord],
+            }
+        }),
+        // SUM(col) OVER (ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)
+        arb_column_expr().prop_map(|col| Expr::Function {
+            name: "__window_sum_with_frame".to_owned(),
+            args: vec![col],
+        }),
+    ]
+}
+
 fn arb_projection_column() -> impl Strategy<Value = ProjectionColumn> {
     arb_expr(0).prop_map(|expr| ProjectionColumn { expr, alias: None })
 }
@@ -359,6 +531,54 @@ fn arb_aggregate_query() -> impl Strategy<Value = RelExpr> {
             aggregates,
             input: Box::new(input),
         })
+}
+
+/// Generate aggregate queries with GROUPING SETS/ROLLUP/CUBE
+fn arb_grouping_sets_query() -> impl Strategy<Value = RelExpr> {
+    (
+        prop::collection::vec(arb_expr(0), 1..=3),
+        prop::collection::vec(arb_aggregate_expr(), 1..=2),
+        arb_scan(),
+        0..3u8,
+    )
+        .prop_map(|(group_cols, aggregates, input, grouping_type)| {
+            let grouping_func = match grouping_type {
+                0 => "__grouping_sets",
+                1 => "__rollup",
+                _ => "__cube",
+            };
+
+            // Wrap grouping columns in a special function
+            let group_by = vec![Expr::Function {
+                name: grouping_func.to_owned(),
+                args: group_cols,
+            }];
+
+            RelExpr::Aggregate {
+                group_by,
+                aggregates,
+                input: Box::new(input),
+            }
+        })
+}
+
+/// Generate chained UNION ALL queries
+fn arb_chained_set_operations() -> impl Strategy<Value = RelExpr> {
+    (arb_scan(), arb_scan(), arb_scan()).prop_map(
+        |(left, middle, right)| {
+            // Create: left UNION ALL middle UNION ALL right
+            let left_union = RelExpr::Union {
+                all: true,
+                left: Box::new(left),
+                right: Box::new(middle),
+            };
+            RelExpr::Union {
+                all: true,
+                left: Box::new(left_union),
+                right: Box::new(right),
+            }
+        },
+    )
 }
 
 fn arb_set_operation() -> impl Strategy<Value = RelExpr> {
