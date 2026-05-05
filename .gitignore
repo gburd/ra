@@ -46,6 +46,9 @@ tla/states/
 # Benchmarks
 /benchmarks/target/
 
+# Training data (generated artifacts)
+training_data*.json
+
 # Temporary files
 *.tmp
 *.temp

@@ -1,7 +1,7 @@
 # Database Setup for Neural Cost Model Training
 
 **Date**: May 5, 2026
-**Status**: Phase 1 Complete - tpch database ready for training
+**Status**: Phase 2 Complete ✅ - Two databases ready, model trained, 131.9% error achieved
 
 ---
 
@@ -13,13 +13,11 @@ This document covers setting up Postgres databases with TPROC-H (TPC-H) schema a
 
 ## Current Setup ✅
 
-### Database: `tpch`
+### Database 1: `tpch` (Tiny)
 - **Connection**: `postgres://localhost/tpch`
 - **Schema**: TPROC-H (TPC-H compatible)
 - **Scale**: ~0.01 (very small dataset)
-- **Status**: ✅ Ready for training
-
-### Table Information
+- **Status**: ✅ Active - used for Phase 1 & 2
 
 | Table | Row Count | Purpose |
 |-------|-----------|---------|
@@ -32,28 +30,46 @@ This document covers setting up Postgres databases with TPROC-H (TPC-H) schema a
 | `nation` | 25 | Nations (standard TPC-H) |
 | `region` | 5 | Regions (standard TPC-H) |
 
+### Database 2: `tpch_small` (Phase 2) ✅
+- **Connection**: `postgres://localhost/tpch_small`
+- **Schema**: TPROC-H (TPC-H compatible)
+- **Scale**: 0.1 (TPC-H standard)
+- **Status**: ✅ Active - provides larger dataset diversity
+
+| Table | Row Count | Purpose |
+|-------|-----------|---------|
+| `lineitem` | 600,572 | Order line items (main fact table) |
+| `orders` | 150,000 | Customer orders |
+| `partsupp` | 80,000 | Part-supplier relationships |
+| `part` | 20,000 | Part catalog |
+| `customer` | 15,000 | Customer information |
+| `supplier` | 1,000 | Supplier details |
+| `nation` | 25 | Nations (standard TPC-H) |
+| `region` | 5 | Regions (standard TPC-H) |
+
 ### Verification
 
 ```bash
-# Test connection
+# Test tpch (tiny) database
 psql postgres://localhost/tpch -c "SELECT COUNT(*) FROM lineitem;"
 # Result: 34 rows
 
-# Test query execution
-psql postgres://localhost/tpch -c "SELECT COUNT(*) FROM orders WHERE o_custkey < 10;"
+# Test tpch_small database
+psql postgres://localhost/tpch_small -c "SELECT COUNT(*) FROM lineitem;"
+# Result: 600,572 rows
 
 # Test EXPLAIN ANALYZE (used by training data collection)
-psql postgres://localhost/tpch -c "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT COUNT(*) FROM orders;"
+psql postgres://localhost/tpch_small -c "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT COUNT(*) FROM orders WHERE o_orderdate > '1998-01-01';"
 ```
 
 ---
 
 ## Usage with Neural Model Pipeline
 
-### 1. Data Collection
+### 1. Data Collection (Phase 2) ✅
 
 ```bash
-# Collect training data from current database
+# Collect from tiny database
 cargo run --release -p ra-bench --features live-comparison -- \
   collect-training \
   --db postgres://localhost/tpch \
@@ -61,28 +77,46 @@ cargo run --release -p ra-bench --features live-comparison -- \
   --sizes tiny \
   --mode corpus \
   --output training_data.json
+
+# Collect from larger database
+cargo run --release -p ra-bench --features live-comparison -- \
+  collect-training \
+  --db postgres://localhost/tpch_small \
+  --configs default \
+  --sizes tiny \
+  --mode corpus \
+  --output training_data_small.json
+
+# Merge datasets
+jq -s 'add' training_data.json training_data_small.json > training_data_combined.json
 ```
 
 **Results**:
-- **Samples**: 142 (one per TPROC-H corpus query)
-- **Features**: Correctly extracted (aggregates, joins, filters)
+- **Samples**: 284 (142 per database)
+- **Features**: Correctly extracted (aggregates 0-8, joins 0-7)
 - **Execution metrics**: CPU time, memory, I/O, cache hit ratio
-- **Collection time**: ~2-3 minutes
+- **Collection time**: ~5 minutes total
 
-### 2. Model Training
+### 2. Model Training (Phase 2) ✅
 
 ```bash
-# Train neural model on collected data
+# Train neural model on combined data
 cargo run --release --example train_model -p ra-bench -- \
-  --input training_data.json \
-  --epochs 20
+  --input training_data_combined.json \
+  --epochs 50 \
+  --train-ratio 0.8
 ```
 
-**Current Performance**:
-- **Training samples**: 142
-- **Test error**: 934.6% (high, but expected with small dataset)
-- **Improvement**: 7848.9 percentage points (massive improvement from fix)
+**Phase 2 Performance** ✅:
+- **Training samples**: 284 (combined from both databases)
+- **Train/Test split**: 227 train, 57 test
+- **Epochs**: 50
+- **Initial error**: 6264.9%
+- **Final test error**: 131.9% ✅ (exceeds 200-400% target)
+- **Train error**: 84.2%
+- **Median (p50) error**: 83.9% (excellent!)
 - **Feature diversity**: ✅ Working (aggregates: 0-8, joins: 0-7)
+- **Improvement from Phase 1**: 85.9% reduction (934.6% → 131.9%)
 
 ---
 
@@ -92,12 +126,12 @@ cargo run --release --example train_model -p ra-bench -- \
 
 For production-quality model (< 10% error), need diverse training data:
 
-| Database | Scale Factor | Approx Size | Target Row Count (lineitem) | Status |
+| Database | Scale Factor | Approx Size | Actual Row Count (lineitem) | Status |
 |----------|--------------|-------------|----------------------------|---------|
-| `tpch_tiny` | 0.01 | ~10 MB | ~60K | ⚠️ Use existing `tpch` |
-| `tpch_small` | 0.1 | ~100 MB | ~600K | ❌ Not created |
-| `tpch_medium` | 1.0 | ~1 GB | ~6M | ❌ Not created |
-| `tpch_large` | 10.0 | ~10 GB | ~60M | ❌ Not created |
+| `tpch` (tiny) | 0.01 | ~10 MB | 34 | ✅ Active (Phase 1 & 2) |
+| `tpch_small` | 0.1 | ~100 MB | 600,572 | ✅ Active (Phase 2) |
+| `tpch_medium` | 1.0 | ~1 GB | ~6M | 🎯 Next (Phase 3) |
+| `tpch_large` | 10.0 | ~10 GB | ~60M | 🎯 Future (Phase 4) |
 
 ### Why Multiple Sizes Matter
 
@@ -107,22 +141,35 @@ Different data sizes produce different execution patterns:
 - **Medium**: Realistic workload, significant I/O patterns
 - **Large**: Memory pressure, complex optimization decisions
 
-### Expected Training Results
+### Training Results by Phase
 
-| Dataset | Samples | Expected CPU Error | Expected Memory Error |
-|---------|---------|-------------------|----------------------|
-| Current (tiny only) | 142 | 500-1000% | 200-500% |
-| Mixed sizes | 1,000+ | 20-50% | 30-70% |
-| Full production | 10,000+ | 3-8% | 5-12% |
+| Phase | Dataset | Samples | Actual CPU Error | Status |
+|-------|---------|---------|------------------|--------|
+| **Phase 1** | tpch (tiny only) | 142 | 934.6% | ✅ Complete |
+| **Phase 2** | tpch + tpch_small | 284 | **131.9%** ✅ | ✅ Complete |
+| **Phase 3** | + tpch_medium | 1,000+ | 50-100% (target) | 🎯 Next |
+| **Phase 4** | + tpch_large | 10,000+ | <10% (target) | 🎯 Future |
 
 ---
 
 ## Creating Additional Databases
 
-### Prerequisites: Install dbgen
+### Prerequisites: Install dbgen ✅
 
-The TPC-H data generator is needed for larger datasets:
+The TPC-H data generator is needed for larger datasets.
 
+**Status**: ✅ Already compiled and available at `/tmp/tpch-kit/dbgen/dbgen`
+
+```bash
+# Verify installation
+/tmp/tpch-kit/dbgen/dbgen -h
+
+# To install system-wide (optional):
+sudo cp /tmp/tpch-kit/dbgen/dbgen /usr/local/bin/
+sudo cp /tmp/tpch-kit/dbgen/dists.dss /usr/local/bin/
+```
+
+If dbgen is not installed, follow these steps:
 ```bash
 # Clone TPC-H toolkit
 cd /tmp
@@ -131,45 +178,33 @@ cd tpch-kit/dbgen
 
 # Compile for macOS + PostgreSQL
 make MACHINE=MACOS DATABASE=POSTGRESQL
-
-# Install system-wide
-sudo cp dbgen /usr/local/bin/
-sudo cp dists.dss /usr/local/bin/
 ```
 
-### Create tpch_small (Scale 0.1)
+### Create tpch_small (Scale 0.1) ✅ DONE
 
+**Status**: ✅ Already created and active (Phase 2)
+**Connection**: `postgres://localhost/tpch_small`
+**Lineitem rows**: 600,572
+
+To recreate or create similar database:
 ```bash
 # 1. Generate data
-cd /tmp
-dbgen -s 0.1
+cd /tmp/tpch-kit/dbgen
+./dbgen -s 0.1
 
-# 2. Create database
+# 2. Create database and load schema
 createdb tpch_small
-psql tpch_small < $REPO/scripts/bench-schema.sql
+psql tpch_small < scripts/bench-schema.sql
 
-# 3. Load data
-for table in customer lineitem nation orders part partsupp region supplier; do
-    echo "Loading $table..."
-    psql tpch_small -c "\\copy $table FROM '${table}.tbl' DELIMITER '|' CSV;"
-done
+# 3. Load data (must handle foreign key constraints)
+# See Phase 2 Results doc for complete loading script
 
-# 4. Create indexes
-psql tpch_small -c "
-    CREATE INDEX idx_lineitem_orderkey ON lineitem(l_orderkey);
-    CREATE INDEX idx_lineitem_partkey ON lineitem(l_partkey);
-    CREATE INDEX idx_orders_custkey ON orders(o_custkey);
-    CREATE INDEX idx_customer_nationkey ON customer(c_nationkey);
-    CREATE INDEX idx_supplier_nationkey ON supplier(s_nationkey);
-    CREATE INDEX idx_partsupp_partkey ON partsupp(ps_partkey);
-"
-
-# 5. Update statistics
+# 4. Update statistics
 psql tpch_small -c "ANALYZE;"
 
-# 6. Verify
+# 5. Verify
 psql tpch_small -c "SELECT COUNT(*) FROM lineitem;"
-# Expected: ~600,000 rows
+# Result: 600,572 rows ✅
 ```
 
 ### Create tpch_medium (Scale 1.0)
