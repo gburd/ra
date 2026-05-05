@@ -316,17 +316,6 @@ impl Optimizer {
             self.config.time_limit_secs * 1000
         };
 
-        // Fast path: Trivial single-table queries with no joins need no optimization.
-        // Skip e-graph construction entirely to avoid the ~20ms overhead on simple queries
-        // like "SELECT * FROM orders" or "SELECT COUNT(*) FROM users WHERE status = 'active'".
-        if matches!(complexity, crate::query_complexity::QueryComplexity::Trivial)
-            && crate::query_complexity::count_joins(expr) == 0
-        {
-            debug!("Trivial single-table query: skipping e-graph optimization");
-            self.insert_into_cache(fingerprint.as_ref(), expr);
-            return Ok(expr.clone());
-        }
-
         // Standard e-graph optimization with timing
         info!(
             "Starting e-graph optimization: {} tables, complexity={:?}, iter_limit={}, timeout={}ms",

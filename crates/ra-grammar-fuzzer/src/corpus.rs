@@ -2,6 +2,16 @@
 //!
 //! The corpus is organized into named categories.  Each entry is a
 //! `(category, sql)` pair.  Call [`all_queries()`] to get the full set.
+//!
+//! ## Benchmark Naming
+//!
+//! We use HammerDB's TPROC-? naming convention for benchmarks:
+//! - **TPROC-H**: OLAP queries (based on TPC-H specification)
+//! - **TPROC-C**: OLTP queries (based on TPC-C specification)
+//!
+//! TPC-H, TPC-C, and TPC-DS are trademarks of the Transaction Processing
+//! Performance Council. HammerDB provides open-source implementations under
+//! the TPROC-? names to avoid trademark issues.
 
 /// One corpus entry: a category tag and a SQL string.
 #[derive(Debug, Clone)]
@@ -450,7 +460,8 @@ static JSONB: &[CorpusEntry] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// TPC-H (22)
+// TPROC-H (HammerDB OLAP benchmark, 22 queries)
+// Based on TPC-H spec but using HammerDB naming
 // ---------------------------------------------------------------------------
 
 static TPCH: &[CorpusEntry] = &[
