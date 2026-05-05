@@ -120,7 +120,7 @@ impl Default for CostVector {
 /// Actual observed costs from query execution.
 ///
 /// Used for online learning feedback loop.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ActualCost {
     pub cpu_time_ms: f32,
     pub memory_peak_mb: f32,

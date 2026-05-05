@@ -9,6 +9,7 @@
 
 mod report;
 mod runner;
+mod training_collector;
 
 use std::io::Write;
 use std::path::PathBuf;

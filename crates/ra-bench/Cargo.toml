@@ -34,6 +34,7 @@ tracing-subscriber = { workspace = true }
 clap         = { workspace = true }
 criterion    = { workspace = true }
 proptest     = { workspace = true }
+chrono       = { workspace = true }
 
 # Optional live-comparison dependency
 postgres = { workspace = true, optional = true }

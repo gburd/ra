@@ -33,7 +33,7 @@ pub struct SimpleCostModel {
 }
 
 /// Query features extracted for cost prediction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryFeatures {
     pub table_count: f32,
     pub join_count: f32,
