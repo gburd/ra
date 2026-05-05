@@ -33,6 +33,20 @@ use crate::runner::{run_query, QueryResult};
 #[derive(Debug, Parser)]
 #[command(name = "ra-bench", about = "Ra SQL optimizer benchmark harness")]
 struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum Commands {
+    /// Run benchmark against corpus and/or fuzz-generated queries
+    Bench(BenchArgs),
+    /// Collect training data from Postgres execution
+    CollectTraining(CollectTrainingArgs),
+}
+
+#[derive(Debug, Parser)]
+struct BenchArgs {
     /// Postgres connection string (enables live plan comparison).
     #[arg(long)]
     db: Option<String>,
@@ -66,6 +80,33 @@ struct Cli {
     weights: Option<String>,
 }
 
+#[derive(Debug, Parser)]
+struct CollectTrainingArgs {
+    /// Postgres connection string (required).
+    #[arg(long)]
+    db: String,
+
+    /// Postgres configurations to test (comma-separated: default,high-memory,low-memory,all-in-memory).
+    #[arg(long, default_value = "default,high-memory")]
+    configs: String,
+
+    /// Data sizes to test (comma-separated: tiny,small,medium,large).
+    #[arg(long, default_value = "tiny,small")]
+    sizes: String,
+
+    /// Output file for training data (JSON).
+    #[arg(long, default_value = "training_data.json")]
+    output: PathBuf,
+
+    /// Query source: corpus or both (corpus + fuzz).
+    #[arg(long, default_value = "corpus")]
+    mode: Mode,
+
+    /// Number of fuzz-generated queries (if mode=both).
+    #[arg(long, default_value_t = 100)]
+    fuzz_count: usize,
+}
+
 #[derive(Debug, Clone, clap::ValueEnum)]
 enum Mode {
     Corpus,
@@ -84,11 +125,19 @@ fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let weights = parse_weights(cli.weights.as_deref())?;
+
+    match cli.command {
+        Commands::Bench(args) => run_bench(args),
+        Commands::CollectTraining(args) => run_collect_training(args),
+    }
+}
+
+fn run_bench(args: BenchArgs) -> Result<()> {
+    let weights = parse_weights(args.weights.as_deref())?;
 
     let config = RunnerConfig {
         weights,
-        pg_connection: cli.db.clone(),
+        pg_connection: args.db.clone(),
     };
 
     let optimizer = Optimizer::new();
@@ -96,22 +145,22 @@ fn main() -> Result<()> {
     // Collect queries as (category, sql)
     let mut queries: Vec<(String, String)> = Vec::new();
 
-    if matches!(cli.mode, Mode::Corpus | Mode::Both) {
+    if matches!(args.mode, Mode::Corpus | Mode::Both) {
         for entry in corpus::all_queries() {
             queries.push((entry.category.to_owned(), entry.sql.to_owned()));
         }
     }
 
-    if matches!(cli.mode, Mode::Fuzz | Mode::Both) {
+    if matches!(args.mode, Mode::Fuzz | Mode::Both) {
         let emitter = SqlEmitter::new();
         let gen = SqlGenerator::with_config(GeneratorConfig {
-            max_depth: cli.fuzz_depth,
+            max_depth: args.fuzz_depth,
             ..GeneratorConfig::default()
         });
         use proptest::strategy::{Strategy, ValueTree};
         use proptest::test_runner::TestRunner;
         let mut runner = TestRunner::default();
-        for _ in 0..cli.fuzz_count {
+        for _ in 0..args.fuzz_count {
             if let Ok(tree) = gen.strategy().new_tree(&mut runner) {
                 let sql = emitter.emit(&tree.current());
                 queries.push(("fuzz".to_owned(), sql));
@@ -126,7 +175,7 @@ fn main() -> Result<()> {
     let mut failures: Vec<(String, String, String)> = Vec::new();
 
     for (i, (category, sql)) in queries.iter().enumerate() {
-        if !cli.quiet && i % 50 == 0 {
+        if !args.quiet && i % 50 == 0 {
             print!("\r  {i}/{total}");
             std::io::stdout().flush().ok();
         }
@@ -140,30 +189,150 @@ fn main() -> Result<()> {
         results.push(result);
     }
 
-    if !cli.quiet {
+    if !args.quiet {
         println!("\r  {total}/{total} done in {:.1}s", t_total.elapsed().as_secs_f64());
     }
 
     let report = BenchReport::from_results(&results);
     report.print_summary();
 
-    if let Some(ref path) = cli.output {
+    if let Some(ref path) = args.output {
         report.write_json(path)?;
-        if !cli.quiet {
+        if !args.quiet {
             println!("Report written to {}", path.display());
         }
     }
 
-    if let Some(ref path) = cli.failures {
+    if let Some(ref path) = args.failures {
         write_failures(path, &failures)?;
-        if !cli.quiet {
+        if !args.quiet {
             println!("Failures ({}) written to {}", failures.len(), path.display());
         }
-    } else if !failures.is_empty() && !cli.quiet {
+    } else if !failures.is_empty() && !args.quiet {
         println!("{} queries failed to parse.", failures.len());
     }
 
     Ok(())
+}
+
+#[cfg(feature = "live-comparison")]
+fn run_collect_training(args: CollectTrainingArgs) -> Result<()> {
+    use training_collector::{DataSize, PostgresConfig, TrainingCollector};
+
+    println!("Collecting training data from Postgres execution...");
+    println!("Database: {}", args.db);
+    println!("Configs: {}", args.configs);
+    println!("Sizes: {}", args.sizes);
+
+    // Parse configurations
+    let configs: Vec<PostgresConfig> = args
+        .configs
+        .split(',')
+        .filter_map(|s| match s.trim() {
+            "default" => Some(PostgresConfig::default()),
+            "high-memory" => Some(PostgresConfig::high_memory()),
+            "low-memory" => Some(PostgresConfig::low_memory()),
+            "all-in-memory" => Some(PostgresConfig::all_in_memory()),
+            _ => {
+                eprintln!("Warning: Unknown config '{}', skipping", s);
+                None
+            }
+        })
+        .collect();
+
+    // Parse data sizes
+    let sizes: Vec<DataSize> = args
+        .sizes
+        .split(',')
+        .filter_map(|s| match s.trim() {
+            "tiny" => Some(DataSize::Tiny),
+            "small" => Some(DataSize::Small),
+            "medium" => Some(DataSize::Medium),
+            "large" => Some(DataSize::Large),
+            _ => {
+                eprintln!("Warning: Unknown size '{}', skipping", s);
+                None
+            }
+        })
+        .collect();
+
+    // Collect queries with features
+    let mut queries_with_features: Vec<(String, ra_engine::cost_model::QueryFeatures)> = Vec::new();
+
+    if matches!(args.mode, Mode::Corpus | Mode::Both) {
+        for entry in corpus::all_queries() {
+            // Extract features from query
+            // For now, use placeholder features - would need actual feature extraction
+            let features = ra_engine::cost_model::QueryFeatures {
+                table_count: 1.0,
+                join_count: 0.0,
+                filter_count: 1.0,
+                aggregate_count: 0.0,
+                subquery_count: 0.0,
+                cte_count: 0.0,
+                window_function_count: 0.0,
+                order_by_count: 0.0,
+                group_by_count: 0.0,
+                distinct_flag: 0.0,
+                limit_present: 0.0,
+                max_join_cardinality: 0.0,
+            };
+            queries_with_features.push((entry.sql.to_owned(), features));
+        }
+    }
+
+    if matches!(args.mode, Mode::Both) {
+        let emitter = SqlEmitter::new();
+        let gen = SqlGenerator::with_config(GeneratorConfig {
+            max_depth: 4,
+            ..GeneratorConfig::default()
+        });
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+        let mut runner = TestRunner::default();
+        for _ in 0..args.fuzz_count {
+            if let Ok(tree) = gen.strategy().new_tree(&mut runner) {
+                let sql = emitter.emit(&tree.current());
+                // Placeholder features
+                let features = ra_engine::cost_model::QueryFeatures {
+                    table_count: 2.0,
+                    join_count: 1.0,
+                    filter_count: 2.0,
+                    aggregate_count: 0.0,
+                    subquery_count: 0.0,
+                    cte_count: 0.0,
+                    window_function_count: 0.0,
+                    order_by_count: 0.0,
+                    group_by_count: 0.0,
+                    distinct_flag: 0.0,
+                    limit_present: 0.0,
+                    max_join_cardinality: 1000.0,
+                };
+                queries_with_features.push((sql, features));
+            }
+        }
+    }
+
+    println!("Total queries: {}", queries_with_features.len());
+    println!("Expected samples: {} (queries × configs × sizes)",
+        queries_with_features.len() * configs.len() * sizes.len());
+
+    // Collect training samples
+    let mut collector = TrainingCollector::new();
+    collector.collect_tproc_h_samples(&queries_with_features, &configs, &sizes)?;
+
+    // Save to file
+    collector.save_to_file(args.output.to_str().unwrap())?;
+
+    println!("Training data collection complete!");
+    println!("Samples collected: {}", collector.samples().len());
+
+    Ok(())
+}
+
+#[cfg(not(feature = "live-comparison"))]
+fn run_collect_training(_args: CollectTrainingArgs) -> Result<()> {
+    anyhow::bail!("Training data collection requires --features live-comparison");
 }
 
 // ---------------------------------------------------------------------------

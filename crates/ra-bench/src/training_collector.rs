@@ -5,7 +5,10 @@
 
 use ra_engine::cost_model::{ActualCost, QueryFeatures};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use anyhow::{Context, Result};
+
+#[cfg(feature = "live-comparison")]
+use postgres::{Client, NoTls};
 
 /// Configuration for a Postgres test environment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,7 +168,7 @@ impl TrainingCollector {
         queries: &[(String, QueryFeatures)],
         configs: &[PostgresConfig],
         data_sizes: &[DataSize],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         for config in configs {
             for data_size in data_sizes {
                 println!(
@@ -196,40 +199,135 @@ impl TrainingCollector {
         features: &QueryFeatures,
         config: &PostgresConfig,
         data_size: DataSize,
-    ) -> Result<TrainingSample, Box<dyn std::error::Error>> {
-        // This will be implemented with actual Postgres connection
-        // For now, return a placeholder
-        let actual_cost = ActualCost {
-            cpu_time_ms: 0.0,
-            memory_peak_mb: 0.0,
-            memory_avg_mb: 0.0,
-            io_storage_ops: 0,
-            io_storage_bytes: 0,
-            io_network_ops: 0,
+    ) -> Result<TrainingSample> {
+        #[cfg(feature = "live-comparison")]
+        {
+            let actual_cost = self.execute_with_postgres(sql, config)?;
+
+            Ok(TrainingSample {
+                sql: sql.to_string(),
+                features: features.clone(),
+                actual_cost,
+                pg_config: config.clone(),
+                data_size,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            })
+        }
+
+        #[cfg(not(feature = "live-comparison"))]
+        {
+            anyhow::bail!("Training data collection requires --features live-comparison")
+        }
+    }
+
+    #[cfg(feature = "live-comparison")]
+    fn execute_with_postgres(
+        &self,
+        sql: &str,
+        config: &PostgresConfig,
+    ) -> Result<ActualCost> {
+        // Connect to Postgres
+        let mut client = Client::connect(&config.connection_string, NoTls)?;
+
+        // Configure session-level Postgres settings
+        // Note: shared_buffers cannot be set per-session, only at server start
+        client.execute(
+            &format!("SET work_mem = '{}MB'", config.work_mem_mb),
+            &[],
+        )?;
+        client.execute(
+            &format!("SET effective_cache_size = '{}MB'", config.effective_cache_size_mb),
+            &[],
+        )?;
+        client.execute(
+            &format!("SET random_page_cost = {}", config.random_page_cost),
+            &[],
+        )?;
+
+        // Enable timing and buffer statistics
+        client.execute("SET track_io_timing = on", &[])?;
+
+        // Run EXPLAIN ANALYZE with BUFFERS and JSON output
+        let explain_query = format!(
+            "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {}",
+            sql
+        );
+
+        let rows = client.query(&explain_query, &[])?;
+
+        if rows.is_empty() {
+            anyhow::bail!("EXPLAIN ANALYZE returned no rows");
+        }
+
+        // Parse JSON output
+        let json_value: serde_json::Value = rows[0].get(0);
+        let explain_results: Vec<ExplainAnalyze> = serde_json::from_value(json_value)?;
+
+        if explain_results.is_empty() {
+            anyhow::bail!("EXPLAIN ANALYZE JSON is empty");
+        }
+
+        let result = &explain_results[0];
+
+        // Extract actual costs from the plan tree
+        let actual_cost = self.extract_costs_from_plan(&result.plan, result.execution_time)?;
+
+        Ok(actual_cost)
+    }
+
+    #[cfg(feature = "live-comparison")]
+    fn extract_costs_from_plan(
+        &self,
+        plan: &PlanNode,
+        total_execution_time: f64,
+    ) -> Result<ActualCost> {
+        // Recursively sum costs from all plan nodes
+        let mut cpu_time_ms = plan.actual_total_time.unwrap_or(0.0) as f32;
+        let mut shared_hit = plan.shared_hit_blocks.unwrap_or(0);
+        let mut shared_read = plan.shared_read_blocks.unwrap_or(0);
+
+        // Traverse child nodes
+        for child in &plan.plans {
+            let child_cost = self.extract_costs_from_plan(child, total_execution_time)?;
+            cpu_time_ms += child_cost.cpu_time_ms;
+            shared_hit += child_cost.cache_hit_ratio as u64 * child_cost.io_storage_ops;
+            shared_read += child_cost.io_storage_ops;
+        }
+
+        // Calculate cache hit ratio (Postgres block size is 8KB)
+        let total_blocks = shared_hit + shared_read;
+        let cache_hit_ratio = if total_blocks > 0 {
+            shared_hit as f32 / total_blocks as f32
+        } else {
+            1.0
+        };
+
+        // Estimate memory usage (very rough approximation)
+        // In reality, would need to query pg_stat_statements or track work_mem usage
+        let memory_peak_mb = (total_blocks as f64 * 8.0 / 1024.0) as f32;
+
+        Ok(ActualCost {
+            cpu_time_ms,
+            memory_peak_mb,
+            memory_avg_mb: memory_peak_mb * 0.7, // Rough estimate
+            io_storage_ops: shared_read,
+            io_storage_bytes: shared_read * 8192, // 8KB per block
+            io_network_ops: 0, // Local execution
             io_network_bytes: 0,
-            locks_acquired: 0,
+            locks_acquired: 0, // Not exposed in EXPLAIN ANALYZE
             lock_hold_time_ms: 0.0,
             lock_contention_score: 0.0,
             vacuum_overhead: 0.0,
-            wal_generation_bytes: 0,
+            wal_generation_bytes: 0, // Would need pg_stat_statements
             replication_lag_ms: 0.0,
-            cache_hit_ratio: 1.0,
-            page_faults: 0,
-            context_switches: 0,
-        };
-
-        Ok(TrainingSample {
-            sql: sql.to_string(),
-            features: features.clone(),
-            actual_cost,
-            pg_config: config.clone(),
-            data_size,
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            cache_hit_ratio,
+            page_faults: 0, // Not exposed
+            context_switches: 0, // Not exposed
         })
     }
 
     /// Save collected samples to a file.
-    pub fn save_to_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_to_file(&self, path: &str) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.samples)?;
         std::fs::write(path, json)?;
         println!("Saved {} training samples to {}", self.samples.len(), path);
@@ -237,7 +335,7 @@ impl TrainingCollector {
     }
 
     /// Load samples from a file.
-    pub fn load_from_file(path: &str) -> Result<Vec<TrainingSample>, Box<dyn std::error::Error>> {
+    pub fn load_from_file(path: &str) -> Result<Vec<TrainingSample>> {
         let json = std::fs::read_to_string(path)?;
         let samples: Vec<TrainingSample> = serde_json::from_str(&json)?;
         Ok(samples)
