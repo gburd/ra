@@ -67,7 +67,11 @@ impl FeatureExtractor {
                 self.visit(input);
             }
 
-            RelExpr::Project { input, .. } => {
+            RelExpr::Project { input, columns } => {
+                // Check columns for aggregate expressions (like COUNT, SUM, etc.)
+                for column in columns {
+                    self.aggregate_count += Self::count_aggregates_in_expr(&column.expr);
+                }
                 self.visit(input);
             }
 
@@ -224,6 +228,43 @@ impl FeatureExtractor {
             RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
                 self.visit(input);
             }
+        }
+    }
+
+    /// Count aggregate functions in an expression.
+    fn count_aggregates_in_expr(expr: &Expr) -> u32 {
+        match expr {
+            Expr::Function { name, args } => {
+                // Check if this is an aggregate function
+                let aggregate_functions = [
+                    "count", "sum", "avg", "min", "max", "array_agg", "string_agg",
+                    "count_distinct", "stddev", "variance", "covar_pop", "covar_samp",
+                    "corr", "regr_slope", "regr_intercept", "percentile_cont", "percentile_disc"
+                ];
+
+                let mut count = 0;
+                if aggregate_functions.iter().any(|&func| name.eq_ignore_ascii_case(func)) {
+                    count += 1;
+                }
+
+                // Recursively check arguments
+                for arg in args {
+                    count += Self::count_aggregates_in_expr(arg);
+                }
+                count
+            }
+            Expr::BinOp { left, right, .. } => {
+                Self::count_aggregates_in_expr(left) + Self::count_aggregates_in_expr(right)
+            }
+            Expr::UnaryOp { operand, .. } => {
+                Self::count_aggregates_in_expr(operand)
+            }
+            Expr::Case { .. } => {
+                // For simplicity, don't traverse Case expressions
+                // Most CASE expressions won't contain aggregates in typical queries
+                0
+            }
+            _ => 0, // Constants, columns, etc.
         }
     }
 
