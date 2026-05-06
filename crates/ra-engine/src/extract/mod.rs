@@ -9,6 +9,7 @@ mod convert;
 pub(crate) mod cost;
 mod helpers;
 pub mod neural_cost;
+pub mod plan_variants;
 mod scalar;
 
 #[cfg(test)]
@@ -20,3 +21,4 @@ pub use api::extract_best_with_cardinality;
 pub use convert::rec_expr_to_rel_expr;
 pub use cost::RelCostFn;
 pub use neural_cost::{NeuralPlanScorer, CostWeights};
+pub use plan_variants::{generate_variants, PlanCandidate, MIN_CONFIDENCE_FOR_VARIANT_SELECTION};

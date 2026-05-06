@@ -67,7 +67,7 @@ mod feature_extractor;
 
 pub use tokenizer::{Tokenizer, TimeBudget};
 pub use simple_model::{SimpleCostModel, QueryFeatures, ModelStats};
-pub use feature_extractor::extract_features;
+pub use feature_extractor::{extract_features, extract_features_with_stats};
 pub use production_model::{ProductionCostModel, TrainingConfig, ProductionModelStats};
 pub use fast_model::FastCostModel;
 pub use online_learner::{OnlineLearner, OnlineLearnerConfig, OnlineLearnerStats};

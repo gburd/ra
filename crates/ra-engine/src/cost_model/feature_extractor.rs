@@ -3,8 +3,11 @@
 //! Walks a relational algebra tree and extracts numerical features
 //! used by the simple cost model for prediction.
 
+use std::collections::HashMap;
+
 use ra_core::algebra::{RelExpr, WindowExpr};
 use ra_core::expr::Expr;
+use ra_core::statistics::Statistics;
 
 use super::simple_model::QueryFeatures;
 
@@ -16,6 +19,126 @@ pub fn extract_features(expr: &RelExpr) -> QueryFeatures {
     let mut extractor = FeatureExtractor::new();
     extractor.visit(expr);
     extractor.into_features()
+}
+
+/// Extract query features using table statistics for improved cardinality estimates.
+///
+/// Produces the same 12-dimensional `QueryFeatures` as [`extract_features`], but
+/// replaces the structural `max_join_cardinality` heuristic with an estimate based
+/// on actual row counts from `table_stats`.
+///
+/// # Cardinality estimation
+///
+/// - When statistics are available for ≥1 table, `max_join_cardinality` is set to
+///   `log10(geometric_mean_rows × join_count_factor)` — a scale-aware estimate that
+///   distinguishes a 3-table join over 1 M-row tables from one over 1 K-row tables.
+/// - Falls back to the structural heuristic when no matching stats are found.
+pub fn extract_features_with_stats(
+    expr: &RelExpr,
+    table_stats: &HashMap<String, Statistics>,
+) -> QueryFeatures {
+    let mut base = extract_features(expr);
+    if table_stats.is_empty() {
+        return base;
+    }
+
+    // Collect row counts for tables referenced in the plan
+    let table_names = collect_table_names(expr);
+    let row_counts: Vec<f64> = table_names
+        .iter()
+        .filter_map(|name| {
+            // Try exact match first, then case-insensitive
+            table_stats
+                .get(name.as_str())
+                .or_else(|| {
+                    let lower = name.to_lowercase();
+                    table_stats.iter().find(|(k, _)| k.to_lowercase() == lower).map(|(_, v)| v)
+                })
+                .map(|s| s.row_count)
+        })
+        .filter(|&r| r > 0.0)
+        .collect();
+
+    if row_counts.is_empty() {
+        return base;
+    }
+
+    // Geometric mean of observed row counts (log-scale average)
+    let log_sum: f64 = row_counts.iter().map(|r| r.log10().max(0.0)).sum();
+    let log_mean = log_sum / row_counts.len() as f64;
+
+    // Scale by join count: each join multiplies cardinality, but real predicates
+    // reduce it.  Use join_count as a mild amplifier (cap at ×3).
+    let join_factor = (1.0 + base.join_count as f64 * 0.5).min(3.0);
+    let cardinality_estimate = (log_mean + join_factor.log10()).min(12.0).max(0.0);
+
+    base.max_join_cardinality = cardinality_estimate as f32;
+    base
+}
+
+/// Collect all base-table names referenced in an expression tree (lowercase).
+fn collect_table_names(expr: &RelExpr) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_table_names_inner(expr, &mut names);
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
+    match expr {
+        RelExpr::Scan { table, .. }
+        | RelExpr::IndexScan { table, .. }
+        | RelExpr::BitmapHeapScan { table, .. }
+        | RelExpr::BitmapIndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. }
+        | RelExpr::ParallelScan { table, .. }
+        | RelExpr::MvScan { view_name: table, .. } => {
+            out.push(table.to_lowercase());
+        }
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Aggregate { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input }
+        | RelExpr::Window { input, .. }
+        | RelExpr::Gather { input, .. }
+        | RelExpr::ParallelAggregate { input, .. } => collect_table_names_inner(input, out),
+        RelExpr::Join { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. }
+        | RelExpr::Union { left, right, .. }
+        | RelExpr::Intersect { left, right, .. }
+        | RelExpr::Except { left, right, .. } => {
+            collect_table_names_inner(left, out);
+            collect_table_names_inner(right, out);
+        }
+        RelExpr::CTE { definition, body, .. } => {
+            collect_table_names_inner(definition, out);
+            collect_table_names_inner(body, out);
+        }
+        RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
+            collect_table_names_inner(base_case, out);
+            collect_table_names_inner(recursive_case, out);
+            collect_table_names_inner(body, out);
+        }
+        RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
+            for i in inputs {
+                collect_table_names_inner(i, out);
+            }
+        }
+        RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. }
+        | RelExpr::IncrementalSort { input, .. } => collect_table_names_inner(input, out),
+        RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
+            if let Some(inp) = input {
+                collect_table_names_inner(inp, out);
+            }
+        }
+        RelExpr::Values { .. }
+        | RelExpr::MultiUnnest { .. }
+        | RelExpr::RowPattern { .. } => {}
+    }
 }
 
 /// Internal visitor that accumulates feature counts.

@@ -13,6 +13,7 @@ use crate::egraph::{EGraphError, RelLang};
 use super::convert::rec_expr_to_rel_expr;
 use super::cost::RelCostFn;
 use super::neural_cost::NeuralPlanScorer;
+use super::plan_variants::{generate_variants, select_best_by_neural};
 
 /// Extract the lowest-cost plan from the e-graph.
 ///
@@ -134,25 +135,24 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
     rec_expr_to_rel_expr(&best_expr)
 }
 
-/// Extract the lowest-cost plan and re-score it using the neural plan scorer.
+/// Extract the best plan using multi-candidate neural re-ranking.
 ///
-/// This is a two-phase extraction:
+/// # Algorithm
 ///
-/// 1. **E-graph extraction** — uses [`IntegratedCostFn`] (or [`RelCostFn`]
-///    when stats are absent) to find the lowest-cost plan from the e-graph.
-///    This is identical to [`extract_best`].
+/// 1. **E-graph extraction** — `IntegratedCostFn` selects the single best plan
+///    (identical to [`extract_best`]).
 ///
-/// 2. **Neural re-scoring** — converts the extracted plan to [`RelExpr`],
-///    extracts structural features, and applies the [`NeuralPlanScorer`]
-///    to compute a neural cost estimate.  The re-scored cost and confidence
-///    are logged at `DEBUG` level for monitoring; the returned plan is the
-///    same plan selected in step 1.
+/// 2. **Variant generation** — up to 3 structural variants are created by
+///    [`generate_variants`] (original + join-swapped + join-order-reversed).
 ///
-/// # Future work
+/// 3. **Neural selection** — each variant is scored by `scorer`.  When the
+///    model confidence exceeds [`MIN_CONFIDENCE_FOR_VARIANT_SELECTION`] (0.3),
+///    the variant with the lowest neural cost is returned.  Otherwise the
+///    original plan from step 1 is returned unchanged (safe fallback).
 ///
-/// When a multi-candidate extractor is available (beam search outputs),
-/// this function will select among top-K plans using the neural score rather
-/// than just re-scoring the single best plan.
+/// This upgrades the previous "monitoring only" approach: when the neural
+/// model has seen enough training data (≥1500 samples for 0.3 confidence),
+/// it actively influences plan selection by preferring cheaper alternatives.
 ///
 /// # Errors
 ///
@@ -165,16 +165,28 @@ pub fn extract_best_with_neural<S: BuildHasher>(
     hardware: &ra_hardware::HardwareProfile,
     scorer: &NeuralPlanScorer,
 ) -> Result<RelExpr, EGraphError> {
-    // Phase 1: standard extraction (unchanged cost model path)
-    let plan = extract_best(egraph, root, table_stats, hardware)?;
+    // Phase 1: standard e-graph extraction
+    let base_plan = extract_best(egraph, root, table_stats, hardware)?;
 
-    // Phase 2: neural re-scoring for monitoring / future re-ranking
-    let (neural_cost, confidence) = scorer.score(&plan);
+    // Phase 2: generate structural variants
+    let candidates = generate_variants(&base_plan);
+    if candidates.len() <= 1 {
+        // No join variants generated; log and return base
+        let (neural_cost, confidence) = scorer.score(&base_plan);
+        tracing::debug!(neural_cost, confidence, "neural plan score (no variants)");
+        return Ok(base_plan);
+    }
+
+    // Phase 3: neural selection
+    let (best_idx, best_neural_cost) = select_best_by_neural(&candidates, scorer);
+    let best = &candidates[best_idx];
+
     tracing::debug!(
-        neural_cost,
-        confidence,
-        "neural plan re-score (monitoring only)"
+        source = best.source,
+        neural_cost = best_neural_cost,
+        n_variants = candidates.len(),
+        "neural plan selection"
     );
 
-    Ok(plan)
+    Ok(best.plan.clone())
 }
