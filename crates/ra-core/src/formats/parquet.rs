@@ -408,6 +408,23 @@ mod tests {
 
     use super::*;
 
+    /// Create a temporary directory for tests.
+    ///
+    /// Falls back to `target/test-tmp/` when `$TMPDIR` points to a path
+    /// that does not exist (e.g., certain CI sandbox environments).
+    fn test_tempdir() -> tempfile::TempDir {
+        if let Ok(dir) = tempfile::tempdir() {
+            return dir;
+        }
+        let fallback = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-tmp");
+        std::fs::create_dir_all(&fallback).expect("create fallback test temp dir");
+        tempfile::Builder::new()
+            .prefix("ra-test-")
+            .tempdir_in(&fallback)
+            .expect("create temp dir in target/test-tmp")
+    }
+
     fn write_test_parquet(path: &Path, num_rows: usize) {
         let schema_str = "
             message test_schema {
@@ -594,7 +611,7 @@ mod tests {
 
     #[test]
     fn read_schema_invalid_file() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("bad.parquet");
         std::fs::write(&path, b"not a parquet file").expect("should write file");
 
@@ -610,7 +627,7 @@ mod tests {
 
     #[test]
     fn read_schema_real_parquet() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("test.parquet");
         write_test_parquet(&path, 10);
 
@@ -644,7 +661,7 @@ mod tests {
 
     #[test]
     fn read_metadata_row_count() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("test.parquet");
         write_test_parquet(&path, 100);
 
@@ -659,7 +676,7 @@ mod tests {
 
     #[test]
     fn read_metadata_column_statistics() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("stats.parquet");
         write_test_parquet(&path, 50);
 
@@ -690,7 +707,7 @@ mod tests {
 
     #[test]
     fn read_metadata_file_level_stats() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("file_stats.parquet");
         write_test_parquet(&path, 30);
 
@@ -707,7 +724,7 @@ mod tests {
 
     #[test]
     fn read_metadata_multiple_row_groups() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("multi_rg.parquet");
         write_multi_row_group_parquet(&path, 100, 3);
 
@@ -734,7 +751,7 @@ mod tests {
 
     #[test]
     fn read_metadata_row_group_boundaries() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("boundaries.parquet");
         write_multi_row_group_parquet(&path, 50, 2);
 
@@ -760,7 +777,7 @@ mod tests {
 
     #[test]
     fn read_metadata_has_mtime() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("mtime.parquet");
         write_test_parquet(&path, 5);
 
@@ -772,7 +789,7 @@ mod tests {
 
     #[test]
     fn read_metadata_compressed_size_nonzero() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("compressed.parquet");
         write_test_parquet(&path, 100);
 
@@ -865,7 +882,7 @@ mod tests {
 
     #[test]
     fn read_metadata_has_encoding_info() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("encoding.parquet");
         write_test_parquet(&path, 50);
 
@@ -891,7 +908,7 @@ mod tests {
 
     #[test]
     fn read_metadata_compression_ratio() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("ratio.parquet");
         write_test_parquet(&path, 100);
 
@@ -907,7 +924,7 @@ mod tests {
 
     #[test]
     fn zone_map_pruning_on_parquet() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("zonemap.parquet");
         write_multi_row_group_parquet(&path, 100, 3);
 
@@ -925,7 +942,7 @@ mod tests {
 
     #[test]
     fn write_dict_encoded_parquet_and_read_encoding() {
-        let dir = tempfile::tempdir().expect("should create temp dir");
+        let dir = test_tempdir();
         let path = dir.path().join("dict.parquet");
 
         // Write a parquet file with dictionary encoding enabled

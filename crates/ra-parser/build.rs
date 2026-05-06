@@ -2,7 +2,7 @@
 // then compiles and links the generated C code.
 //
 // Pipeline:
-//   1. Build the `lime` tool from _/lime/lime.c (host tool)
+//   1. Build the `lime` tool from lime/lime.c (host tool)
 //   2. Run `lime -T limpar.c -d OUT_DIR grammar/ra_sql.lime`
 //   3. Compile the generated ra_sql.c with cc
 //
@@ -22,7 +22,7 @@ fn main() {
         .and_then(Path::parent)
         .expect("workspace root not found");
 
-    let lime_root = workspace_root.join("_/lime");
+    let lime_root = workspace_root.join("crates/lime-sys/lime");
     let grammar_dir = manifest_dir.join("grammar");
     let grammar_file = grammar_dir.join("ra_sql.lime");
 

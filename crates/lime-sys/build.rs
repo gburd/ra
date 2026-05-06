@@ -214,7 +214,7 @@ fn generate_bindings(lime_inc: &std::path::Path, lime_src: &std::path::Path) {
 
 fn main() {
     let lime_root =
-        PathBuf::from(env::var("LIME_DIR").unwrap_or_else(|_| "../../_/lime".to_string()));
+        PathBuf::from(env::var("LIME_DIR").unwrap_or_else(|_| "lime".to_string()));
     let lime_src = lime_root.join("src");
     let lime_inc = lime_root.join("include");
 

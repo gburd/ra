@@ -185,15 +185,39 @@ mod tests {
     use super::*;
     use crate::config::model::EditorMode;
 
+    /// Serialize all tests that mutate environment variables to prevent
+    /// data races in parallel test execution.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Create a temporary directory for tests.
+    ///
+    /// Falls back to `target/test-tmp/` when `$TMPDIR` points to a path
+    /// that does not exist (e.g., certain CI sandbox environments).
+    fn test_tempdir() -> tempfile::TempDir {
+        if let Ok(dir) = tempfile::tempdir() {
+            return dir;
+        }
+        let fallback = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-tmp");
+        std::fs::create_dir_all(&fallback).expect("create fallback test temp dir");
+        tempfile::Builder::new()
+            .prefix("ra-test-")
+            .tempdir_in(&fallback)
+            .expect("create temp dir in target/test-tmp")
+    }
+
     #[test]
     fn loader_with_no_files_returns_defaults() {
-        // Remove RA_* env vars that would otherwise override defaults.
-        let ra_vars: Vec<String> = std::env::vars()
+        // Hold the env mutex for the duration of this test so concurrent tests
+        // cannot observe our env var removals.
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
+
+        // Snapshot and remove RA_* env vars that would otherwise override defaults.
+        let ra_vars: Vec<(String, String)> = std::env::vars()
             .filter(|(k, _)| k.starts_with("RA_"))
-            .map(|(k, _)| k)
             .collect();
-        for var in &ra_vars {
-            std::env::remove_var(var);
+        for (k, _) in &ra_vars {
+            std::env::remove_var(k);
         }
 
         let loader = ConfigLoader::new()
@@ -203,11 +227,9 @@ mod tests {
 
         let config = loader.load().expect("load");
 
-        // Restore env vars after the test.
-        for var in &ra_vars {
-            // We removed them above; they can't easily be restored without the
-            // original values. This is acceptable for a test that verifies defaults.
-            let _ = var;
+        // Restore all removed vars before releasing the mutex.
+        for (k, v) in &ra_vars {
+            std::env::set_var(k, v);
         }
 
         assert_eq!(config, RaConfig::default());
@@ -215,7 +237,7 @@ mod tests {
 
     #[test]
     fn loader_reads_toml_file() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = test_tempdir();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[editor]\nmode = \"vi\"\n").expect("write");
 
@@ -230,7 +252,7 @@ mod tests {
 
     #[test]
     fn local_overrides_user() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = test_tempdir();
 
         let user = dir.path().join("user.toml");
         std::fs::write(&user, "[editor]\nmode = \"vi\"\n").expect("write user");
@@ -249,7 +271,7 @@ mod tests {
 
     #[test]
     fn save_and_reload() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = test_tempdir();
         let path = dir.path().join("saved.toml");
 
         let mut config = RaConfig::default();
@@ -264,7 +286,7 @@ mod tests {
 
     #[test]
     fn save_creates_parent_dirs() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = test_tempdir();
         let path = dir.path().join("deep").join("nested").join("config.toml");
 
         let config = RaConfig::default();
@@ -281,7 +303,7 @@ mod tests {
 
     #[test]
     fn load_invalid_toml() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = test_tempdir();
         let path = dir.path().join("bad.toml");
         std::fs::write(&path, "not [valid toml {{{}}").expect("write");
 

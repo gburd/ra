@@ -1,0 +1,3 @@
+[submodule "lime"]
+	path = crates/lime-sys/lime
+	url = git@codeberg.org:gregburd/lime.git

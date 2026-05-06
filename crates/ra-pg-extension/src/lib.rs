@@ -14,6 +14,7 @@ mod cost_mapper;
 mod extension_state;
 mod metadata_cache;
 mod pg_constants;
+mod plan_builder;
 mod plan_converter;
 mod planner_hook;
 mod query_parser;

@@ -358,23 +358,32 @@ mod tests {
 
     #[test]
     fn full_lifecycle_generates_all_stages() {
-        let pattern = StorylinePattern::full_lifecycle();
-        let mut runner = TestRunner::default();
-        let storyline = arb_storyline(pattern)
-            .new_tree(&mut runner)
-            .expect("generate storyline")
-            .current();
+        // Spawn with a 32 MB stack — arb_storyline generates deeply nested
+        // RelExpr trees that can overflow the default 8 MB test thread stack.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                let pattern = StorylinePattern::full_lifecycle();
+                let mut runner = TestRunner::default();
+                let storyline = arb_storyline(pattern)
+                    .new_tree(&mut runner)
+                    .expect("generate storyline")
+                    .current();
 
-        assert_eq!(storyline.len(), 6);
+                assert_eq!(storyline.len(), 6);
 
-        let stages: Vec<_> =
-            storyline.steps.iter().map(|s| s.stage).collect();
-        assert_eq!(stages[0], StorylineStage::Create);
-        assert_eq!(stages[1], StorylineStage::Insert);
-        assert_eq!(stages[2], StorylineStage::Query);
-        assert_eq!(stages[3], StorylineStage::Update);
-        assert_eq!(stages[4], StorylineStage::Delete);
-        assert_eq!(stages[5], StorylineStage::Drop);
+                let stages: Vec<_> =
+                    storyline.steps.iter().map(|s| s.stage).collect();
+                assert_eq!(stages[0], StorylineStage::Create);
+                assert_eq!(stages[1], StorylineStage::Insert);
+                assert_eq!(stages[2], StorylineStage::Query);
+                assert_eq!(stages[3], StorylineStage::Update);
+                assert_eq!(stages[4], StorylineStage::Delete);
+                assert_eq!(stages[5], StorylineStage::Drop);
+            })
+            .expect("spawn test thread")
+            .join()
+            .expect("test thread panicked");
     }
 
     #[test]
