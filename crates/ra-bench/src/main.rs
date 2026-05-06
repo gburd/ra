@@ -9,6 +9,10 @@
 
 mod report;
 mod runner;
+pub mod benchmark_harness;
+pub mod job_benchmark;
+pub mod report_generator;
+pub mod statistical_analysis;
 pub mod training_collector;
 
 use std::io::Write;
@@ -43,6 +47,44 @@ enum Commands {
     Bench(BenchArgs),
     /// Collect training data from Postgres execution
     CollectTraining(CollectTrainingArgs),
+    /// Generate comprehensive analysis report from saved benchmark results
+    Analyze(AnalyzeArgs),
+    /// Run JOB (Join Order Benchmark) offline against Ra optimizer
+    BenchmarkJob(BenchmarkJobArgs),
+}
+
+#[derive(Debug, Parser)]
+struct AnalyzeArgs {
+    /// Input BenchmarkReport JSON files (one or more).
+    #[arg(required = true)]
+    inputs: Vec<PathBuf>,
+
+    /// Write Markdown report to this path.
+    #[arg(long, default_value = "ra_analysis_report.md")]
+    output: PathBuf,
+
+    /// Also write JSON executive summary to this path.
+    #[arg(long)]
+    json: Option<PathBuf>,
+}
+
+#[derive(Debug, Parser)]
+struct BenchmarkJobArgs {
+    /// Postgres connection string for live execution timing (optional).
+    #[arg(long)]
+    db: Option<String>,
+
+    /// Write JSON report to this path.
+    #[arg(long, default_value = "job_benchmark_results.json")]
+    output: PathBuf,
+
+    /// Number of Ra optimizer runs per query.
+    #[arg(long, default_value_t = 10)]
+    repetitions: usize,
+
+    /// Only run queries with at most this many tables.
+    #[arg(long, default_value_t = 20)]
+    max_tables: usize,
 }
 
 #[derive(Debug, Parser)]
@@ -129,6 +171,8 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Bench(args) => run_bench(args),
         Commands::CollectTraining(args) => run_collect_training(args),
+        Commands::Analyze(args) => run_analyze(args),
+        Commands::BenchmarkJob(args) => run_benchmark_job(args),
     }
 }
 
@@ -325,6 +369,101 @@ fn run_collect_training(args: CollectTrainingArgs) -> Result<()> {
 #[cfg(not(feature = "live-comparison"))]
 fn run_collect_training(_args: CollectTrainingArgs) -> Result<()> {
     anyhow::bail!("Training data collection requires --features live-comparison");
+}
+
+// ---------------------------------------------------------------------------
+// analyze subcommand
+// ---------------------------------------------------------------------------
+
+fn run_analyze(args: AnalyzeArgs) -> Result<()> {
+    use crate::report_generator::ReportGenerator;
+
+    let mut gen = ReportGenerator::new();
+    for path in &args.inputs {
+        let path_str = path.to_str().unwrap_or_default();
+        gen.add_report_file(path_str)?;
+        println!("Loaded: {path_str}");
+    }
+
+    let summary = gen.executive_summary();
+    println!("\nExecutive Summary");
+    println!("=================");
+    println!(
+        "Overall improvement: {:.1}% (95% CI: [{:.1}%, {:.1}%])",
+        summary.overall_improvement_pct, summary.ci_lower, summary.ci_upper,
+    );
+    println!(
+        "Significantly improved: {:.1}% of queries",
+        summary.pct_significantly_improved,
+    );
+    println!("Regressions: {}", summary.total_regressions);
+    println!("Recommendation: {}", summary.recommendation.as_str());
+
+    let out = args.output.to_str().unwrap_or("ra_analysis_report.md");
+    gen.save_markdown(out)?;
+    println!("\nMarkdown report written to: {out}");
+
+    if let Some(json_path) = &args.json {
+        let json_str = gen.executive_summary_json()?;
+        std::fs::write(json_path, json_str)?;
+        println!("JSON summary written to: {}", json_path.display());
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// benchmark-job subcommand
+// ---------------------------------------------------------------------------
+
+fn run_benchmark_job(args: BenchmarkJobArgs) -> Result<()> {
+    use crate::benchmark_harness::{BenchmarkHarness, WorkloadConfig};
+    use crate::job_benchmark::job_queries;
+
+    let queries = job_queries();
+    let filtered: Vec<_> = queries.iter()
+        .filter(|q| q.table_count <= args.max_tables)
+        .collect();
+
+    println!("JOB Benchmark: {} queries (max {} tables)", filtered.len(), args.max_tables);
+
+    let config = WorkloadConfig {
+        ra_repetitions: args.repetitions,
+        min_samples: args.repetitions.min(5),
+        ..Default::default()
+    };
+
+    let mut harness = BenchmarkHarness::new(config);
+    for (i, q) in filtered.iter().enumerate() {
+        print!("  [{:2}/{:2}] {} ({} tables) ... ",
+            i + 1, filtered.len(), q.id, q.table_count);
+        let timing = harness.add_query(
+            &format!("JOB_{}", q.id),
+            q.sql,
+            &[], // no PG baseline in offline mode
+        );
+        if timing.ra_success_count > 0 {
+            println!(
+                "ok  parse={:.2}ms  opt={:.2}ms",
+                timing.mean_parse_ms, timing.mean_optimize_ms,
+            );
+        } else {
+            println!("PARSE FAILED");
+        }
+    }
+
+    let report = harness.analyze("job_benchmark");
+    let successful = report.query_timings.iter().filter(|t| t.ra_success_count > 0).count();
+    println!(
+        "\nResults: {}/{} queries optimized successfully",
+        successful, filtered.len()
+    );
+
+    let out = args.output.to_str().unwrap_or("job_benchmark_results.json");
+    BenchmarkHarness::save_report(&report, out)?;
+    println!("Results written to: {out}");
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

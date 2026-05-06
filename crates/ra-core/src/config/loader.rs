@@ -237,6 +237,7 @@ mod tests {
 
     #[test]
     fn loader_reads_toml_file() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
         let dir = test_tempdir();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[editor]\nmode = \"vi\"\n").expect("write");
@@ -252,6 +253,7 @@ mod tests {
 
     #[test]
     fn local_overrides_user() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
         let dir = test_tempdir();
 
         let user = dir.path().join("user.toml");
@@ -271,6 +273,7 @@ mod tests {
 
     #[test]
     fn save_and_reload() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
         let dir = test_tempdir();
         let path = dir.path().join("saved.toml");
 
@@ -286,6 +289,7 @@ mod tests {
 
     #[test]
     fn save_creates_parent_dirs() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
         let dir = test_tempdir();
         let path = dir.path().join("deep").join("nested").join("config.toml");
 
@@ -303,6 +307,7 @@ mod tests {
 
     #[test]
     fn load_invalid_toml() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
         let dir = test_tempdir();
         let path = dir.path().join("bad.toml");
         std::fs::write(&path, "not [valid toml {{{}}").expect("write");

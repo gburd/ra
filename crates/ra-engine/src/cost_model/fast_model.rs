@@ -287,7 +287,10 @@ mod tests {
     fn test_predict_cpu_ms_positive() {
         let model = FastCostModel::new_random();
         let cpu = model.predict_cpu_ms(&sample_features());
-        assert!(cpu > 0.0, "CPU prediction must be positive (softplus output)");
+        // softplus is mathematically always > 0, but f32 exp() underflows to
+        // 0.0 for x < ~-103, making softplus return exactly 0.0 in that edge
+        // case. Non-negative is the correct invariant here.
+        assert!(cpu >= 0.0, "CPU prediction must be non-negative (softplus output)");
     }
 
     #[test]
