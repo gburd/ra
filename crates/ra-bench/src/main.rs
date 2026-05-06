@@ -13,6 +13,7 @@ pub mod benchmark_harness;
 pub mod job_benchmark;
 pub mod report_generator;
 pub mod statistical_analysis;
+pub mod tproc_c;
 pub mod training_collector;
 
 use std::io::Write;
@@ -51,6 +52,10 @@ enum Commands {
     Analyze(AnalyzeArgs),
     /// Run JOB (Join Order Benchmark) offline against Ra optimizer
     BenchmarkJob(BenchmarkJobArgs),
+    /// Train or fine-tune the neural cost model from collected data
+    Train(TrainArgs),
+    /// Run TPROC-C (TPC-C-like) OLTP queries offline against Ra optimizer
+    BenchmarkOltp(BenchmarkOltpArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -66,6 +71,44 @@ struct AnalyzeArgs {
     /// Also write JSON executive summary to this path.
     #[arg(long)]
     json: Option<PathBuf>,
+}
+
+#[derive(Debug, Parser)]
+struct TrainArgs {
+    /// Input training data JSON (produced by `collect-training`).
+    #[arg(required = true)]
+    input: PathBuf,
+
+    /// Model file to load (continue training) or create.
+    #[arg(long, default_value = "ra_cost_model.json")]
+    model: PathBuf,
+
+    /// Number of training epochs.
+    #[arg(long, default_value_t = 10)]
+    epochs: usize,
+
+    /// Training batch size.
+    #[arg(long, default_value_t = 64)]
+    batch_size: usize,
+
+    /// Fraction of data to hold out for evaluation (0.0–1.0).
+    #[arg(long, default_value_t = 0.1)]
+    eval_split: f64,
+}
+
+#[derive(Debug, Parser)]
+struct BenchmarkOltpArgs {
+    /// Postgres connection string for live execution timing (optional).
+    #[arg(long)]
+    db: Option<String>,
+
+    /// Write JSON report to this path.
+    #[arg(long, default_value = "oltp_benchmark_results.json")]
+    output: PathBuf,
+
+    /// Number of Ra optimizer runs per query.
+    #[arg(long, default_value_t = 10)]
+    repetitions: usize,
 }
 
 #[derive(Debug, Parser)]
@@ -173,6 +216,8 @@ fn main() -> Result<()> {
         Commands::CollectTraining(args) => run_collect_training(args),
         Commands::Analyze(args) => run_analyze(args),
         Commands::BenchmarkJob(args) => run_benchmark_job(args),
+        Commands::Train(args) => run_train(args),
+        Commands::BenchmarkOltp(args) => run_benchmark_oltp(args),
     }
 }
 
@@ -369,6 +414,124 @@ fn run_collect_training(args: CollectTrainingArgs) -> Result<()> {
 #[cfg(not(feature = "live-comparison"))]
 fn run_collect_training(_args: CollectTrainingArgs) -> Result<()> {
     anyhow::bail!("Training data collection requires --features live-comparison");
+}
+
+// ---------------------------------------------------------------------------
+// train subcommand
+// ---------------------------------------------------------------------------
+
+fn run_train(args: TrainArgs) -> Result<()> {
+    use ra_engine::cost_model::{OnlineLearner, OnlineLearnerConfig};
+    use ra_engine::cost_model::production_model::TrainingConfig;
+    use crate::training_collector::TrainingCollector;
+
+    println!("Loading training data from: {}", args.input.display());
+    let samples = TrainingCollector::load_from_file(args.input.to_str().unwrap())?;
+    if samples.is_empty() {
+        anyhow::bail!("No training samples found in {}", args.input.display());
+    }
+    println!("Loaded {} samples", samples.len());
+
+    // Train/eval split
+    let split = (samples.len() as f64 * (1.0 - args.eval_split)) as usize;
+    let (train_samples, eval_samples) = samples.split_at(split.min(samples.len()));
+    println!("Train: {} | Eval: {}", train_samples.len(), eval_samples.len());
+
+    let training_config = TrainingConfig {
+        batch_size: args.batch_size,
+        ..Default::default()
+    };
+    let learner_config = OnlineLearnerConfig {
+        batch_size: args.batch_size,
+        training_config,
+        ..Default::default()
+    };
+
+    let mut learner = OnlineLearner::load_or_create(&args.model, learner_config);
+    println!("Model loaded from: {}", args.model.display());
+
+    let train_pairs: Vec<_> = train_samples
+        .iter()
+        .map(|s| (s.features.clone(), s.actual_cost.clone()))
+        .collect();
+
+    println!("\nTraining ({} epochs, batch size {}):", args.epochs, args.batch_size);
+    println!("{:>6}  {:>10}  {:>10}", "Epoch", "Train Loss", "LR");
+    println!("{:>6}  {:>10}  {:>10}", "-----", "----------", "----------");
+
+    let losses = learner.train_offline(&train_pairs, args.epochs);
+    for (i, loss) in losses.iter().enumerate() {
+        let lr = learner.stats().current_lr;
+        println!("{:>6}  {:>10.6}  {:>10.2e}", i + 1, loss, lr);
+    }
+
+    // Evaluate on held-out set
+    if !eval_samples.is_empty() {
+        let mut total_err = 0.0f64;
+        for s in eval_samples {
+            let (pred, _) = learner.predict(&s.features);
+            let err = ((pred.cpu_time_ms - s.actual_cost.cpu_time_ms) as f64).abs()
+                / (s.actual_cost.cpu_time_ms as f64 + 1.0);
+            total_err += err;
+        }
+        let mape = total_err / eval_samples.len() as f64 * 100.0;
+        println!("\nEval MAPE (CPU): {:.2}%", mape);
+    }
+
+    learner.checkpoint()?;
+    println!("\nModel saved to: {}", args.model.display());
+
+    let stats = learner.stats();
+    println!("Total samples trained: {}", stats.total_trained);
+    println!("Checkpoints written:   {}", stats.checkpoints_written);
+    println!("Final avg loss:        {:.6}", stats.current_avg_loss);
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// benchmark-oltp subcommand
+// ---------------------------------------------------------------------------
+
+fn run_benchmark_oltp(args: BenchmarkOltpArgs) -> Result<()> {
+    use crate::benchmark_harness::{BenchmarkHarness, WorkloadConfig};
+    use crate::tproc_c::tproc_c_queries;
+
+    let queries = tproc_c_queries();
+    println!("TPROC-C Benchmark: {} queries", queries.len());
+
+    let config = WorkloadConfig {
+        ra_repetitions: args.repetitions,
+        min_samples: args.repetitions.min(5),
+        ..Default::default()
+    };
+
+    let mut harness = BenchmarkHarness::new(config);
+    for (i, q) in queries.iter().enumerate() {
+        print!("  [{:2}/{:2}] {} ... ", i + 1, queries.len(), q.id);
+        let timing = harness.add_query(&format!("TPCC_{}", q.id), q.sql, &[]);
+        if timing.ra_success_count > 0 {
+            println!(
+                "ok  parse={:.2}ms  opt={:.2}ms",
+                timing.mean_parse_ms, timing.mean_optimize_ms,
+            );
+        } else {
+            println!("PARSE FAILED");
+        }
+    }
+
+    let report = harness.analyze("tproc_c");
+    let successful = report.query_timings.iter().filter(|t| t.ra_success_count > 0).count();
+    println!(
+        "\nResults: {}/{} queries optimized",
+        successful, queries.len()
+    );
+
+    let out = args.output.to_str().unwrap_or("oltp_benchmark_results.json");
+    crate::benchmark_harness::BenchmarkHarness::save_report(&report, out)?;
+    println!("Results written to: {out}");
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

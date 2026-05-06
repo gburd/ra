@@ -1,0 +1,99 @@
+From: Ra Project <ra@example.com>
+Date: 2026-05-06
+Subject: [PATCH] Add USE_RA compile-time planner hook for Ra optimizer
+
+Adds a conditional compile-time integration point for the Ra query
+optimizer.  When PostgreSQL is built with -DUSE_RA=1 (see
+scripts/build-postgres-with-ra.sh), standard_planner() calls
+ra_try_optimize() at the top of its body.
+
+The ra_planner extension provides the implementation via a function
+pointer (ra_planner_hook_fn), registered in its _PG_init().  When the
+extension returns NULL, the standard planner runs unchanged.  When it
+returns a non-NULL PlannedStmt, that plan is used directly — bypassing
+cost manipulation entirely.
+
+The patch is intentionally minimal (< 50 lines) and is isolated behind
+#ifdef USE_RA to produce zero overhead in standard builds.
+
+---
+ src/backend/optimizer/plan/planner.c | 47 ++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/src/backend/optimizer/plan/planner.c b/src/backend/optimizer/plan/planner.c
+index aabbccdd..eeff0011 100644
+--- a/src/backend/optimizer/plan/planner.c
++++ b/src/backend/optimizer/plan/planner.c
+@@ -40,6 +40,16 @@
+ #include "utils/rel.h"
+ #include "utils/selfuncs.h"
+
++/*
++ * Ra query optimizer compile-time integration.
++ * Only compiled when PostgreSQL is built with -DUSE_RA=1.
++ */
++#ifdef USE_RA
++#include "ra_planner_hook.h"
++
++/* Global function pointer — set by the ra_planner extension _PG_init(). */
++ra_planner_hook_fn_t ra_planner_hook_fn = NULL;
++#endif /* USE_RA */
++
+ /* GUC parameters */
+ double		cursor_tuple_fraction = DEFAULT_CURSOR_TUPLE_FRACTION;
+ int			from_collapse_limit = 8;
+@@ -82,6 +92,40 @@ static Node *replace_empty_jointree(Node *jtnode);
+
+ /*****************************************************************************
+  *
++ *    Ra optimizer dispatcher
++ *
++ * Called from standard_planner() before any standard planning.  Returns a
++ * fully-formed PlannedStmt when Ra can handle the query, or NULL to fall
++ * through to the standard planner.
++ *
++ *****************************************************************************/
++#ifdef USE_RA
++PlannedStmt *
++ra_try_optimize(Query *parse, const char *query_string,
++				int cursor_options, ParamListInfo bound_params)
++{
++	if (ra_planner_hook_fn == NULL)
++		return NULL;
++
++	return (*ra_planner_hook_fn)(parse, query_string,
++								 cursor_options, bound_params);
++}
++#endif /* USE_RA */
++
++/*****************************************************************************
++ *
+  *		Query optimizer entry point
+  *
+  *****************************************************************************/
+@@ -104,6 +148,15 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
+ 	PlannerInfo *root;
+ 	double		tuple_fraction;
+ 	PlannerGlobal *glob;
++
++#ifdef USE_RA
++	{
++		PlannedStmt *ra_result =
++			ra_try_optimize(parse, query_string, cursorOptions, boundParams);
++		if (ra_result != NULL)
++			return ra_result;
++	}
++#endif /* USE_RA */
++
+ 	ListCell   *lp,
+ 			   *lr;
+
+@@ -126,6 +175,8 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
+ 	return result;
+ }
+
++/* End Ra integration */
++
+ /*
+  * subquery_planner
+  *		Invokes the planner on a subquery.
