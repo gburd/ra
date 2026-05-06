@@ -74,6 +74,7 @@ use pgrx::prelude::*;
 use pgrx::pg_sys;
 
 use ra_core::algebra::{AggregateExpr, JoinType, ProjectionColumn, RelExpr, SortKey};
+use ra_core::expr::{BinOp, Const as RaConst, Expr as RaExpr, UnaryOp};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -113,6 +114,8 @@ pub struct PlanBuilder {
     original_query: *mut pg_sys::Query,
     /// Maps table name (lowercase) → 1-based range-table index.
     rtindex_map: HashMap<String, pg_sys::Index>,
+    /// Maps table name (lowercase) → relation OID (for column type lookups).
+    rtoid_map: HashMap<String, pg_sys::Oid>,
     /// Accumulated cost estimates propagated up from child nodes.
     total_cost: f64,
     /// Estimated output row count propagated from child nodes.
@@ -132,11 +135,18 @@ impl PlanBuilder {
     /// allocated in the current memory context.
     pub unsafe fn new(
         query: *mut pg_sys::Query,
-        table_map: HashMap<String, pg_sys::Index>,
+        table_map: HashMap<String, (pg_sys::Index, pg_sys::Oid)>,
     ) -> Self {
+        let mut rtindex_map = HashMap::new();
+        let mut rtoid_map = HashMap::new();
+        for (name, (idx, oid)) in table_map {
+            rtindex_map.insert(name.clone(), idx);
+            rtoid_map.insert(name, oid);
+        }
         Self {
             original_query: query,
-            rtindex_map: table_map,
+            rtindex_map,
+            rtoid_map,
             total_cost: 0.0,
             plan_rows: 1.0,
         }
@@ -196,13 +206,13 @@ impl PlanBuilder {
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         match expr {
             RelExpr::Scan { table, .. } => self.build_seq_scan(table),
-            RelExpr::Filter { predicate: _, input } => {
-                // Fold filter into child node's qual list.
-                // TODO: convert Ra Expr → pg_sys Expr* and call lappend on qual.
+            RelExpr::Filter { predicate, input } => {
                 let child = self.build_plan(input)?;
-                // Expr conversion placeholder — set non-null qual to signal filter exists.
-                // A complete implementation calls expr_to_pg_qual(predicate) here.
-                let _ = predicate_placeholder();
+                // Translate predicate and append to the child node's qual list.
+                let pg_expr = expr_to_pg_expr(predicate, &self.rtindex_map, &self.rtoid_map);
+                if !child.is_null() && !pg_expr.is_null() {
+                    (*child).qual = pg_sys::lappend((*child).qual, pg_expr.cast());
+                }
                 Ok(child)
             }
             RelExpr::Project { columns, input } => {
@@ -792,16 +802,39 @@ impl PlanBuilder {
             .ok_or_else(|| PlanBuilderError::TableNotFound(table.to_string()))
     }
 
+    /// Look up the relation OID for a table by name.
+    fn rtoid_for(&self, table: &str) -> pg_sys::Oid {
+        self.rtoid_map
+            .get(&table.to_lowercase())
+            .copied()
+            .unwrap_or(pg_sys::InvalidOid)
+    }
+
     /// Set the targetlist on a plan node from Ra projection columns.
-    ///
-    /// Currently a no-op stub; a complete implementation translates each
-    /// `ProjectionColumn` to a `TargetEntry` and appends to `plan.targetlist`.
-    unsafe fn set_targetlist(&self, _plan: *mut pg_sys::Plan, _columns: &[ProjectionColumn]) {
-        // TODO: for each ProjectionColumn:
-        //   1. Convert pc.expr to *mut pg_sys::Expr via expr_to_pg_expr()
-        //   2. Allocate TargetEntry: palloc0(size_of::<pg_sys::TargetEntry>())
-        //   3. Set te.expr, te.resno (1-based), te.resname
-        //   4. lappend plan.targetlist with the TargetEntry
+    unsafe fn set_targetlist(&self, plan: *mut pg_sys::Plan, columns: &[ProjectionColumn]) {
+        if plan.is_null() {
+            return;
+        }
+        for (i, pc) in columns.iter().enumerate() {
+            let pg_expr = expr_to_pg_expr(&pc.expr, &self.rtindex_map, &self.rtoid_map);
+            if pg_expr.is_null() {
+                continue;
+            }
+            let te = self.alloc_node::<pg_sys::TargetEntry>();
+            if te.is_null() {
+                continue;
+            }
+            (*te).xpr.type_ = pg_sys::NodeTag::T_TargetEntry;
+            (*te).expr = pg_expr;
+            (*te).resno = (i + 1) as pg_sys::AttrNumber;
+            // Set resname from alias if available
+            if let Some(alias) = &pc.alias {
+                if let Ok(cs) = CString::new(alias.as_str()) {
+                    (*te).resname = pg_sys::pstrdup(cs.as_ptr());
+                }
+            }
+            (*plan).targetlist = pg_sys::lappend((*plan).targetlist, te.cast());
+        }
     }
 
     /// Set approximate cost estimates on a scan plan node.
@@ -853,26 +886,355 @@ fn ra_join_type_to_pg(jt: JoinType) -> pg_sys::JoinType {
     }
 }
 
-/// Placeholder called to signal that predicate expression conversion is needed.
-///
-/// A complete implementation would call `expr_to_pg_qual(predicate)` which
-/// recursively translates Ra `Expr` to PostgreSQL `Expr*` nodes. That
-/// translation requires access to column type OIDs and operator catalog entries
-/// and is the most complex remaining piece of the direct-plan integration.
-fn predicate_placeholder() {}
+// ---------------------------------------------------------------------------
+// Expression translation: Ra Expr → PostgreSQL Expr*
+// ---------------------------------------------------------------------------
 
-/// Build a `HashMap<String, pg_sys::Index>` from a PostgreSQL range table list.
+/// Translate a Ra [`RaExpr`] to a PostgreSQL `Expr*` node.
 ///
-/// This is a convenience function for callers (planner_hook) to construct the
-/// `table_map` argument for [`PlanBuilder::new`]. It iterates the original
-/// query's range table and maps relation names to 1-based RTE indexes.
+/// Returns `null_mut()` for unsupported expression types.
+/// The returned node is allocated in the current PostgreSQL memory context.
+///
+/// # Coverage
+///
+/// | Ra `Expr` variant              | PostgreSQL node       |
+/// |--------------------------------|----------------------|
+/// | `Const::Null`                  | `Const` (null)       |
+/// | `Const::Bool / Int / Float`    | `Const` (typed)      |
+/// | `Const::String`                | `Const` (text)       |
+/// | `Column(ref)`                  | `Var`                |
+/// | `BinOp::And / Or`              | `BoolExpr`           |
+/// | `BinOp::Eq / Ne / Lt / …`     | `OpExpr`             |
+/// | `BinOp::Add / Sub / Mul / Div` | `OpExpr`             |
+/// | `UnaryOp::Not`                 | `BoolExpr (NOT)`     |
+/// | `UnaryOp::IsNull / IsNotNull`  | `NullTest`           |
+/// | `UnaryOp::Neg`                 | `OpExpr` (unary -)   |
+/// | Other variants                 | `null_mut()`         |
+///
+/// # Safety
+///
+/// Must be called from within a live PostgreSQL backend process.
+pub unsafe fn expr_to_pg_expr(
+    expr: &RaExpr,
+    rtindex_map: &HashMap<String, pg_sys::Index>,
+    rtoid_map: &HashMap<String, pg_sys::Oid>,
+) -> *mut pg_sys::Expr {
+    match expr {
+        RaExpr::Const(c) => const_to_pg(c),
+        RaExpr::Column(col_ref) => column_to_var(col_ref, rtindex_map, rtoid_map),
+        RaExpr::BinOp { op, left, right } => match op {
+            BinOp::And => build_bool_expr(
+                pg_sys::BoolExprType::AND_EXPR,
+                left,
+                right,
+                rtindex_map,
+                rtoid_map,
+            ),
+            BinOp::Or => build_bool_expr(
+                pg_sys::BoolExprType::OR_EXPR,
+                left,
+                right,
+                rtindex_map,
+                rtoid_map,
+            ),
+            _ => build_op_expr(op, left, right, rtindex_map, rtoid_map),
+        },
+        RaExpr::UnaryOp { op, operand } => match op {
+            UnaryOp::Not => {
+                let arg = expr_to_pg_expr(operand, rtindex_map, rtoid_map);
+                if arg.is_null() {
+                    return std::ptr::null_mut();
+                }
+                let node = pg_sys::palloc0(std::mem::size_of::<pg_sys::BoolExpr>())
+                    as *mut pg_sys::BoolExpr;
+                (*node).xpr.type_ = pg_sys::NodeTag::T_BoolExpr;
+                (*node).boolop = pg_sys::BoolExprType::NOT_EXPR;
+                (*node).args = pg_sys::list_make1(arg.cast());
+                (*node).xpr.cast()
+            }
+            UnaryOp::IsNull => build_null_test(
+                operand,
+                pg_sys::NullTestType::IS_NULL,
+                rtindex_map,
+                rtoid_map,
+            ),
+            UnaryOp::IsNotNull => build_null_test(
+                operand,
+                pg_sys::NullTestType::IS_NOT_NULL,
+                rtindex_map,
+                rtoid_map,
+            ),
+            UnaryOp::Neg => build_unary_neg(operand, rtindex_map, rtoid_map),
+        },
+        // Unsupported: Function, Case, Cast, SubQuery, Array, etc.
+        _ => std::ptr::null_mut(),
+    }
+}
+
+/// Translate a Ra `Const` to a PostgreSQL `Const` node.
+unsafe fn const_to_pg(c: &RaConst) -> *mut pg_sys::Expr {
+    let node = pg_sys::palloc0(std::mem::size_of::<pg_sys::Const>()) as *mut pg_sys::Const;
+    (*node).xpr.type_ = pg_sys::NodeTag::T_Const;
+
+    match c {
+        RaConst::Null => {
+            (*node).consttype = pg_sys::TEXTOID;
+            (*node).consttypmod = -1;
+            (*node).constlen = -1;
+            (*node).constisnull = true;
+            (*node).constbyval = false;
+        }
+        RaConst::Bool(b) => {
+            (*node).consttype = pg_sys::BOOLOID;
+            (*node).consttypmod = -1;
+            (*node).constlen = 1;
+            (*node).constvalue = pg_sys::Datum::from(*b as i32);
+            (*node).constisnull = false;
+            (*node).constbyval = true;
+        }
+        RaConst::Int(i) => {
+            (*node).consttype = pg_sys::INT8OID;
+            (*node).consttypmod = -1;
+            (*node).constlen = 8;
+            (*node).constvalue = pg_sys::Datum::from(*i);
+            (*node).constisnull = false;
+            (*node).constbyval = true;
+        }
+        RaConst::Float(f) => {
+            // float8 is pass-by-value on 64-bit platforms
+            (*node).consttype = pg_sys::FLOAT8OID;
+            (*node).consttypmod = -1;
+            (*node).constlen = 8;
+            (*node).constvalue = pg_sys::Float8GetDatum(*f);
+            (*node).constisnull = false;
+            (*node).constbyval = true;
+        }
+        RaConst::String(s) => {
+            if let Ok(cs) = CString::new(s.as_str()) {
+                (*node).consttype = pg_sys::TEXTOID;
+                (*node).consttypmod = -1;
+                (*node).constlen = -1;
+                (*node).constvalue = pg_sys::CStringGetTextDatum(cs.as_ptr());
+                (*node).constisnull = false;
+                (*node).constbyval = false;
+            } else {
+                (*node).constisnull = true;
+            }
+        }
+    }
+    (*node).xpr.cast()
+}
+
+/// Translate a Ra `ColumnRef` to a PostgreSQL `Var` node.
+unsafe fn column_to_var(
+    col: &ra_core::expr::ColumnRef,
+    rtindex_map: &HashMap<String, pg_sys::Index>,
+    rtoid_map: &HashMap<String, pg_sys::Oid>,
+) -> *mut pg_sys::Expr {
+    let table = col.table.as_deref().unwrap_or("").to_lowercase();
+    let rtindex = match rtindex_map.get(&table) {
+        Some(&idx) => idx,
+        None => return std::ptr::null_mut(),
+    };
+    let reloid = match rtoid_map.get(&table) {
+        Some(&oid) => oid,
+        None => return std::ptr::null_mut(),
+    };
+
+    // Resolve column attribute number from catalog
+    let col_name = match CString::new(col.column.as_str()) {
+        Ok(cs) => cs,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let attnum = pg_sys::get_attnum(reloid, col_name.as_ptr());
+    if attnum == pg_sys::InvalidAttrNumber {
+        return std::ptr::null_mut();
+    }
+    let atttype = pg_sys::get_atttype(reloid, attnum);
+    if atttype == pg_sys::InvalidOid {
+        return std::ptr::null_mut();
+    }
+    let atttypmod = pg_sys::get_atttypmod(reloid, attnum);
+
+    let var = pg_sys::palloc0(std::mem::size_of::<pg_sys::Var>()) as *mut pg_sys::Var;
+    (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+    (*var).varno = rtindex;
+    (*var).varattno = attnum;
+    (*var).vartype = atttype;
+    (*var).vartypmod = atttypmod;
+    (*var).varcollid = pg_sys::InvalidOid;
+    (*var).varlevelsup = 0;
+    (*var).xpr.cast()
+}
+
+/// Translate a binary comparison/arithmetic op to a PostgreSQL `OpExpr`.
+unsafe fn build_op_expr(
+    op: &BinOp,
+    left: &RaExpr,
+    right: &RaExpr,
+    rtindex_map: &HashMap<String, pg_sys::Index>,
+    rtoid_map: &HashMap<String, pg_sys::Oid>,
+) -> *mut pg_sys::Expr {
+    let left_pg = expr_to_pg_expr(left, rtindex_map, rtoid_map);
+    let right_pg = expr_to_pg_expr(right, rtindex_map, rtoid_map);
+    if left_pg.is_null() || right_pg.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let op_str = match op {
+        BinOp::Eq => "=",
+        BinOp::Ne => "<>",
+        BinOp::Lt => "<",
+        BinOp::Le => "<=",
+        BinOp::Gt => ">",
+        BinOp::Ge => ">=",
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+        BinOp::Mod => "%",
+        BinOp::Concat => "||",
+        _ => return std::ptr::null_mut(),
+    };
+
+    // Look up operator OID via catalog
+    let op_cstr = match CString::new(op_str) {
+        Ok(cs) => cs,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let op_string_node = pg_sys::makeString(op_cstr.as_ptr().cast_mut());
+    let opname_list = pg_sys::list_make1(op_string_node.cast());
+
+    // Determine left/right type OIDs by examining the Expr types
+    let left_type = expr_result_type(left_pg);
+    let right_type = expr_result_type(right_pg);
+
+    let opno = pg_sys::OpernameGetOprid(opname_list, left_type, right_type);
+    if opno == pg_sys::InvalidOid {
+        return std::ptr::null_mut();
+    }
+
+    // Get function OID and result type from the operator catalog entry
+    let opfuncid = pg_sys::get_opcode(opno);
+    let opresulttype = pg_sys::get_func_rettype(opfuncid);
+
+    let node = pg_sys::palloc0(std::mem::size_of::<pg_sys::OpExpr>()) as *mut pg_sys::OpExpr;
+    (*node).xpr.type_ = pg_sys::NodeTag::T_OpExpr;
+    (*node).opno = opno;
+    (*node).opfuncid = opfuncid;
+    (*node).opresulttype = opresulttype;
+    (*node).opretset = false;
+    (*node).opcollid = pg_sys::InvalidOid;
+    (*node).inputcollid = pg_sys::InvalidOid;
+    let mut args = std::ptr::null_mut::<pg_sys::List>();
+    args = pg_sys::lappend(args, left_pg.cast());
+    args = pg_sys::lappend(args, right_pg.cast());
+    (*node).args = args;
+    (*node).xpr.cast()
+}
+
+/// Build a PostgreSQL `BoolExpr` (AND/OR) from two Ra expressions.
+unsafe fn build_bool_expr(
+    bool_type: pg_sys::BoolExprType,
+    left: &RaExpr,
+    right: &RaExpr,
+    rtindex_map: &HashMap<String, pg_sys::Index>,
+    rtoid_map: &HashMap<String, pg_sys::Oid>,
+) -> *mut pg_sys::Expr {
+    let left_pg = expr_to_pg_expr(left, rtindex_map, rtoid_map);
+    let right_pg = expr_to_pg_expr(right, rtindex_map, rtoid_map);
+    if left_pg.is_null() || right_pg.is_null() {
+        return std::ptr::null_mut();
+    }
+    let node = pg_sys::palloc0(std::mem::size_of::<pg_sys::BoolExpr>()) as *mut pg_sys::BoolExpr;
+    (*node).xpr.type_ = pg_sys::NodeTag::T_BoolExpr;
+    (*node).boolop = bool_type;
+    let mut args = std::ptr::null_mut::<pg_sys::List>();
+    args = pg_sys::lappend(args, left_pg.cast());
+    args = pg_sys::lappend(args, right_pg.cast());
+    (*node).args = args;
+    (*node).xpr.cast()
+}
+
+/// Build a PostgreSQL `NullTest` node (IS NULL / IS NOT NULL).
+unsafe fn build_null_test(
+    operand: &RaExpr,
+    test_type: pg_sys::NullTestType,
+    rtindex_map: &HashMap<String, pg_sys::Index>,
+    rtoid_map: &HashMap<String, pg_sys::Oid>,
+) -> *mut pg_sys::Expr {
+    let arg = expr_to_pg_expr(operand, rtindex_map, rtoid_map);
+    if arg.is_null() {
+        return std::ptr::null_mut();
+    }
+    let node =
+        pg_sys::palloc0(std::mem::size_of::<pg_sys::NullTest>()) as *mut pg_sys::NullTest;
+    (*node).xpr.type_ = pg_sys::NodeTag::T_NullTest;
+    (*node).arg = arg.cast();
+    (*node).nulltesttype = test_type;
+    (*node).argisrow = false;
+    (*node).xpr.cast()
+}
+
+/// Build a unary negation `OpExpr` (`-x`).
+unsafe fn build_unary_neg(
+    operand: &RaExpr,
+    rtindex_map: &HashMap<String, pg_sys::Index>,
+    rtoid_map: &HashMap<String, pg_sys::Oid>,
+) -> *mut pg_sys::Expr {
+    let arg = expr_to_pg_expr(operand, rtindex_map, rtoid_map);
+    if arg.is_null() {
+        return std::ptr::null_mut();
+    }
+    let arg_type = expr_result_type(arg);
+    let op_cstr = CString::new("-").expect("valid CString");
+    let op_node = pg_sys::makeString(op_cstr.as_ptr().cast_mut());
+    let opname = pg_sys::list_make1(op_node.cast());
+    let opno = pg_sys::OpernameGetOprid(opname, arg_type, pg_sys::InvalidOid);
+    if opno == pg_sys::InvalidOid {
+        return std::ptr::null_mut();
+    }
+    let opfuncid = pg_sys::get_opcode(opno);
+    let opresulttype = pg_sys::get_func_rettype(opfuncid);
+    let node = pg_sys::palloc0(std::mem::size_of::<pg_sys::OpExpr>()) as *mut pg_sys::OpExpr;
+    (*node).xpr.type_ = pg_sys::NodeTag::T_OpExpr;
+    (*node).opno = opno;
+    (*node).opfuncid = opfuncid;
+    (*node).opresulttype = opresulttype;
+    (*node).args = pg_sys::list_make1(arg.cast());
+    (*node).xpr.cast()
+}
+
+/// Infer the result type OID of a PostgreSQL `Expr*` node.
+///
+/// Used to determine operand types for operator catalog lookup.
+unsafe fn expr_result_type(expr: *mut pg_sys::Expr) -> pg_sys::Oid {
+    if expr.is_null() {
+        return pg_sys::InvalidOid;
+    }
+    match (*expr).type_ {
+        pg_sys::NodeTag::T_Const => (*(expr as *mut pg_sys::Const)).consttype,
+        pg_sys::NodeTag::T_Var => (*(expr as *mut pg_sys::Var)).vartype,
+        pg_sys::NodeTag::T_OpExpr => (*(expr as *mut pg_sys::OpExpr)).opresulttype,
+        pg_sys::NodeTag::T_BoolExpr => pg_sys::BOOLOID,
+        pg_sys::NodeTag::T_NullTest => pg_sys::BOOLOID,
+        pg_sys::NodeTag::T_FuncExpr => (*(expr as *mut pg_sys::FuncExpr)).funcresulttype,
+        _ => pg_sys::InvalidOid,
+    }
+}
+
+/// Build a `HashMap<String, (pg_sys::Index, pg_sys::Oid)>` from a PostgreSQL
+/// range table list.
+///
+/// Maps each relation name (lowercase) to its 1-based range-table index and
+/// its relation OID.  Pass the returned map to [`PlanBuilder::new`].
 ///
 /// # Safety
 ///
 /// `query` must be a valid, non-null pointer to a PostgreSQL `Query` node.
 pub unsafe fn build_table_map(
     query: *mut pg_sys::Query,
-) -> HashMap<String, pg_sys::Index> {
+) -> HashMap<String, (pg_sys::Index, pg_sys::Oid)> {
     let mut map = HashMap::new();
     if query.is_null() {
         return map;
@@ -881,7 +1243,6 @@ pub unsafe fn build_table_map(
     if rtable.is_null() {
         return map;
     }
-    // Iterate the List of RangeTblEntry*
     let length = (*rtable).length;
     let elements = (*rtable).elements;
     for i in 0..length {
@@ -893,18 +1254,14 @@ pub unsafe fn build_table_map(
         if (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
             continue;
         }
-        // Resolve relation name from the OID via catalog
         let relid = (*rte).relid;
         let relname = pg_sys::get_rel_name(relid);
         if relname.is_null() {
             continue;
         }
-        // SAFETY: relname is a palloc'd C string returned by get_rel_name
-        let name = std::ffi::CStr::from_ptr(relname)
-            .to_string_lossy()
-            .to_lowercase();
+        let name = std::ffi::CStr::from_ptr(relname).to_string_lossy().to_lowercase();
         let rtindex = (i + 1) as pg_sys::Index;
-        map.insert(name, rtindex);
+        map.insert(name, (rtindex, relid));
     }
     map
 }
