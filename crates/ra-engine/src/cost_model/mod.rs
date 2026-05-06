@@ -56,6 +56,7 @@
 //! ```
 
 mod tokenizer;
+pub mod fast_model;
 pub mod simple_model;
 pub mod production_model;
 mod feature_extractor;
@@ -67,6 +68,7 @@ pub use tokenizer::{Tokenizer, TimeBudget};
 pub use simple_model::{SimpleCostModel, QueryFeatures, ModelStats};
 pub use feature_extractor::extract_features;
 pub use production_model::{ProductionCostModel, TrainingConfig, ProductionModelStats};
+pub use fast_model::FastCostModel;
 
 /// Multi-dimensional cost prediction.
 #[derive(Debug, Clone, PartialEq)]

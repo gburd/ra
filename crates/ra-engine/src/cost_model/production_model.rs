@@ -258,6 +258,26 @@ impl ProductionCostModel {
         Ok(model)
     }
 
+    /// Return a reference to the W1 weight matrix (input→hidden), row-major.
+    pub fn w1_weights(&self) -> &[Vec<f32>] {
+        &self.w1
+    }
+
+    /// Return a reference to the b1 bias vector (hidden layer).
+    pub fn b1_weights(&self) -> &[f32] {
+        &self.b1
+    }
+
+    /// Return a reference to the W2 weight matrix (hidden→output), row-major.
+    pub fn w2_weights(&self) -> &[Vec<f32>] {
+        &self.w2
+    }
+
+    /// Return a reference to the b2 bias vector (output layer).
+    pub fn b2_weights(&self) -> &[f32] {
+        &self.b2
+    }
+
     /// Return model training statistics.
     pub fn stats(&self) -> ProductionModelStats {
         ProductionModelStats {

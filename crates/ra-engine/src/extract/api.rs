@@ -12,6 +12,7 @@ use crate::egraph::{EGraphError, RelLang};
 
 use super::convert::rec_expr_to_rel_expr;
 use super::cost::RelCostFn;
+use super::neural_cost::NeuralPlanScorer;
 
 /// Extract the lowest-cost plan from the e-graph.
 ///
@@ -131,4 +132,49 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
     let (cost, best_expr) = extractor.find_best(root);
     tracing::debug!("Extracted plan with cardinality-aware cost: {}", cost);
     rec_expr_to_rel_expr(&best_expr)
+}
+
+/// Extract the lowest-cost plan and re-score it using the neural plan scorer.
+///
+/// This is a two-phase extraction:
+///
+/// 1. **E-graph extraction** — uses [`IntegratedCostFn`] (or [`RelCostFn`]
+///    when stats are absent) to find the lowest-cost plan from the e-graph.
+///    This is identical to [`extract_best`].
+///
+/// 2. **Neural re-scoring** — converts the extracted plan to [`RelExpr`],
+///    extracts structural features, and applies the [`NeuralPlanScorer`]
+///    to compute a neural cost estimate.  The re-scored cost and confidence
+///    are logged at `DEBUG` level for monitoring; the returned plan is the
+///    same plan selected in step 1.
+///
+/// # Future work
+///
+/// When a multi-candidate extractor is available (beam search outputs),
+/// this function will select among top-K plans using the neural score rather
+/// than just re-scoring the single best plan.
+///
+/// # Errors
+///
+/// Returns an error if the extracted nodes cannot be converted back to
+/// a [`RelExpr`].
+pub fn extract_best_with_neural<S: BuildHasher>(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    root: Id,
+    table_stats: &HashMap<String, Statistics, S>,
+    hardware: &ra_hardware::HardwareProfile,
+    scorer: &NeuralPlanScorer,
+) -> Result<RelExpr, EGraphError> {
+    // Phase 1: standard extraction (unchanged cost model path)
+    let plan = extract_best(egraph, root, table_stats, hardware)?;
+
+    // Phase 2: neural re-scoring for monitoring / future re-ranking
+    let (neural_cost, confidence) = scorer.score(&plan);
+    tracing::debug!(
+        neural_cost,
+        confidence,
+        "neural plan re-score (monitoring only)"
+    );
+
+    Ok(plan)
 }

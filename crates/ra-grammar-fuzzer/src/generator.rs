@@ -724,30 +724,38 @@ mod tests {
 
     #[test]
     fn generator_produces_expressions() {
-        let gen = SqlGenerator::new();
-        let mut runner = TestRunner::default();
-        for _ in 0..10 {
-            let val = gen
-                .strategy()
-                .new_tree(&mut runner)
-                .expect("strategy should generate")
-                .current();
-            // Every generated value should be a valid RelExpr
-            assert!(matches!(
-                val,
-                RelExpr::Scan { .. }
-                    | RelExpr::Filter { .. }
-                    | RelExpr::Project { .. }
-                    | RelExpr::Join { .. }
-                    | RelExpr::Aggregate { .. }
-                    | RelExpr::Sort { .. }
-                    | RelExpr::Limit { .. }
-                    | RelExpr::Union { .. }
-                    | RelExpr::Intersect { .. }
-                    | RelExpr::Except { .. }
-                    | RelExpr::Distinct { .. }
-            ));
-        }
+        // Spawn with 32 MB stack — the proptest generator can create deeply
+        // nested RelExpr trees that overflow the default 8 MB test stack.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                let gen = SqlGenerator::new();
+                let mut runner = TestRunner::default();
+                for _ in 0..10 {
+                    let val = gen
+                        .strategy()
+                        .new_tree(&mut runner)
+                        .expect("strategy should generate")
+                        .current();
+                    assert!(matches!(
+                        val,
+                        RelExpr::Scan { .. }
+                            | RelExpr::Filter { .. }
+                            | RelExpr::Project { .. }
+                            | RelExpr::Join { .. }
+                            | RelExpr::Aggregate { .. }
+                            | RelExpr::Sort { .. }
+                            | RelExpr::Limit { .. }
+                            | RelExpr::Union { .. }
+                            | RelExpr::Intersect { .. }
+                            | RelExpr::Except { .. }
+                            | RelExpr::Distinct { .. }
+                    ));
+                }
+            })
+            .expect("spawn test thread")
+            .join()
+            .expect("test thread panicked");
     }
 
     #[test]
