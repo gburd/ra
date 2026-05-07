@@ -56,6 +56,11 @@
             gnumake
             gcc
             clang
+            # libclang is required by bindgen (lime-sys, etc.).  Without it,
+            # bindgen falls back to scanning the host system and can pick up
+            # an incompatible libclang (e.g. /usr/lib64/llvm22) whose
+            # libLLVM.so isn't on the nix library path.
+            llvmPackages.libclang
             stdenv.cc
             zlib
 
@@ -103,6 +108,12 @@
             export CC="${pkgs.clang}/bin/clang"
             export CXX="${pkgs.clang}/bin/clang++"
             export CMAKE="${pkgs.cmake}/bin/cmake"
+
+            # Point bindgen's clang-sys probe at the nix libclang so it
+            # doesn't wander off into /usr/lib64/llvm* on impure shells.
+            # clang-sys consults LIBCLANG_PATH *before* its filesystem
+            # heuristic, so this alone avoids the host-libclang fallback.
+            export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
 
             echo "🚀 Relational Algebra dev environment loaded"
             echo "Rust version: $(rustc --version)"
