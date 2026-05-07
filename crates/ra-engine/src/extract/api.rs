@@ -8,10 +8,13 @@ use ra_stats::accuracy::Staleness;
 
 use crate::analysis::RelAnalysis;
 use crate::cost::IntegratedCostFn;
+use crate::cost_model::fast_model::FastCostModel;
 use crate::egraph::{EGraphError, RelLang};
+use crate::state::SystemFingerprint;
 
 use super::convert::rec_expr_to_rel_expr;
 use super::cost::RelCostFn;
+use super::hybrid_cost::HybridCostFn;
 use super::neural_cost::NeuralPlanScorer;
 use super::plan_variants::{generate_variants, select_best_by_neural};
 
@@ -189,4 +192,51 @@ pub fn extract_best_with_neural<S: BuildHasher>(
     );
 
     Ok(best.plan.clone())
+}
+
+/// Extract the lowest-cost plan using the hybrid neural/traditional cost function.
+///
+/// This is the primary extraction path for the full neural pipeline. It replaces
+/// both `extract_best` and `extract_best_with_neural` by integrating the neural
+/// model directly into the egg cost function (rather than as a post-hoc re-ranker).
+///
+/// # Blend Behavior
+///
+/// - When `fast_model` is untrained (0 samples), blend_alpha = 0.0 and this
+///   produces identical results to `extract_best_with_staleness`.
+/// - As the model trains, alpha increases toward 0.9, blending neural predictions
+///   with traditional cost estimates at every node in the e-graph.
+/// - The blend never reaches 1.0 — traditional cost always contributes at least 10%.
+///
+/// # Errors
+///
+/// Returns an error if the extracted nodes cannot be converted back to a [`RelExpr`].
+pub fn extract_best_hybrid<S: BuildHasher, S2: BuildHasher>(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    root: Id,
+    table_stats: &HashMap<String, Statistics, S>,
+    staleness_map: &HashMap<String, Staleness, S2>,
+    hardware: &ra_hardware::HardwareProfile,
+    fast_model: &FastCostModel,
+    fingerprint: &SystemFingerprint,
+) -> Result<RelExpr, EGraphError> {
+    let cost_fn = HybridCostFn::new(
+        hardware.clone(),
+        table_stats
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        fast_model,
+        fingerprint,
+    );
+
+    tracing::debug!(
+        blend_alpha = cost_fn.blend_alpha(),
+        "hybrid extraction with neural blend"
+    );
+
+    let extractor = egg::Extractor::new(egraph, cost_fn);
+    let (_, best_expr) = extractor.find_best(root);
+    rec_expr_to_rel_expr(&best_expr)
 }

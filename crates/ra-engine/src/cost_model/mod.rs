@@ -57,6 +57,7 @@
 
 mod tokenizer;
 pub mod fast_model;
+pub mod feedback;
 pub mod online_learner;
 pub mod simple_model;
 pub mod production_model;
@@ -70,6 +71,7 @@ pub use simple_model::{SimpleCostModel, QueryFeatures, ModelStats};
 pub use feature_extractor::{extract_features, extract_features_with_stats};
 pub use production_model::{ProductionCostModel, TrainingConfig, ProductionModelStats};
 pub use fast_model::FastCostModel;
+pub use feedback::{ExecutionFeedback, FeedbackCollector, MapeTracker};
 pub use online_learner::{OnlineLearner, OnlineLearnerConfig, OnlineLearnerStats};
 
 /// Multi-dimensional cost prediction.

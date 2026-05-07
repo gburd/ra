@@ -80,6 +80,7 @@ pub mod ml_integration;
 pub mod mv_matching;
 pub mod mv_rewrite;
 pub mod network_cost;
+pub mod neural;
 pub mod null_simplification;
 pub mod parquet_pushdown;
 pub mod pattern_fingerprint;
@@ -103,6 +104,7 @@ pub mod rule_priority;
 pub mod rule_registry;
 pub mod shortcuts;
 pub(crate) mod sparsemap;
+pub mod state;
 pub mod stats_cache;
 // Phase 6: Timeline system (deferred)
 pub mod hybrid_search;
@@ -175,7 +177,10 @@ pub use egraph::{
 pub use executors::{
     LateralJoinExecutor, MultiUnnestExecutor, TableFunctionExecutor, UnnestExecutor,
 };
-pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
+pub use extract::{
+    extract_best, extract_best_hybrid, extract_best_with_staleness, rec_expr_to_rel_expr,
+    HybridCostFn, RelCostFn,
+};
 #[cfg(feature = "ml")]
 pub use extract::extract_best_with_cardinality;
 pub use facts_context::{FactsContext, FactsContextBuilder};
@@ -220,6 +225,8 @@ pub use shortcuts::fast_path::{
 };
 pub use mv_rewrite::{mv_rewrite_rules, mv_scan_cost_factor};
 pub use network_cost::{DistributionStrategy, JoinSides, NetworkCostEstimate, NetworkCostModel};
+pub use neural::{NeuralConvergenceDetector, NeuralRuleSelector, RuleStallingTracker};
+pub use state::{AtomicFingerprint, FingerprintReader, SystemFingerprint};
 pub use oracle_json_duality::{
     benchmark_access_patterns, choose_access_path, duality_document_scan_cost_factor,
     duality_rewrite_rules, eliminable_joins, estimate_document_cost, estimate_relational_cost,
