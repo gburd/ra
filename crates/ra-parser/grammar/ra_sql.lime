@@ -20,6 +20,7 @@
 
 %include {
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 /* Token value: carries text + location for identifiers/literals. */
