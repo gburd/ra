@@ -1,29 +1,23 @@
-//! Neural cost scoring for extracted plans.
+//! Neural cost scoring for whole-plan evaluation.
 //!
-//! After the e-graph produces a `best_expr` via `IntegratedCostFn`, the
-//! [`NeuralPlanScorer`] re-scores that plan using the [`FastCostModel`].
+//! [`NeuralPlanScorer`] scores a complete `RelExpr` tree using the
+//! [`FastCostModel`]. This provides a whole-plan neural cost estimate
+//! that can be used for:
+//! - Convergence detection during saturation (comparing iteration-over-iteration)
+//! - Plan cache priority scoring
+//! - Monitoring and diagnostics
 //!
-//! # Why post-extraction, not per-enode?
+//! # Relationship to `HybridCostFn`
 //!
-//! The e-graph's `CostFunction` operates on individual language nodes
-//! (`RelLang`) and only has access to a child's aggregate cost (`f64`),
-//! not its full structural features. Neural prediction requires the
-//! complete subtree structure (table count, join depth, aggregate flags).
+//! `HybridCostFn` operates per-node inside the egg `CostFunction` trait,
+//! using compact 8-dim node features. `NeuralPlanScorer` operates on the
+//! complete extracted plan using the full 12-dim `QueryFeatures` vector.
+//! They complement each other: `HybridCostFn` guides extraction,
+//! `NeuralPlanScorer` evaluates the result.
 //!
-//! Post-extraction re-scoring solves this cleanly:
-//! 1. `egg::Extractor::find_best()` selects the cheapest plan via
-//!    `IntegratedCostFn` — fast and statistics-aware.
-//! 2. The plan is converted from `RecExpr` → `RelExpr` (already done in
-//!    the normal extraction path).
-//! 3. `NeuralPlanScorer::score()` extracts structural features and applies
-//!    the fast neural model to produce an adjusted scalar cost.
-//! 4. The score can drive monitoring, plan cache priority, or future
-//!    multi-candidate re-ranking.
-//!
-//! # Integration in `extract_best_with_neural`
+//! # Usage
 //!
 //! ```ignore
-//! let relexpr = extract_best(egraph, root, &stats, &hardware)?;
 //! let scorer = NeuralPlanScorer::from_file("model.json").unwrap_or_default();
 //! let (neural_cost, confidence) = scorer.score(&relexpr);
 //! tracing::debug!(neural_cost, confidence, "neural plan score");

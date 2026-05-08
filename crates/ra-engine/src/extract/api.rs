@@ -15,8 +15,6 @@ use crate::state::SystemFingerprint;
 use super::convert::rec_expr_to_rel_expr;
 use super::cost::RelCostFn;
 use super::hybrid_cost::HybridCostFn;
-use super::neural_cost::NeuralPlanScorer;
-use super::plan_variants::{generate_variants, select_best_by_neural};
 
 /// Extract the lowest-cost plan from the e-graph.
 ///
@@ -136,62 +134,6 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
     let (cost, best_expr) = extractor.find_best(root);
     tracing::debug!("Extracted plan with cardinality-aware cost: {}", cost);
     rec_expr_to_rel_expr(&best_expr)
-}
-
-/// Extract the best plan using multi-candidate neural re-ranking.
-///
-/// # Algorithm
-///
-/// 1. **E-graph extraction** — `IntegratedCostFn` selects the single best plan
-///    (identical to [`extract_best`]).
-///
-/// 2. **Variant generation** — up to 3 structural variants are created by
-///    [`generate_variants`] (original + join-swapped + join-order-reversed).
-///
-/// 3. **Neural selection** — each variant is scored by `scorer`.  When the
-///    model confidence exceeds [`MIN_CONFIDENCE_FOR_VARIANT_SELECTION`] (0.3),
-///    the variant with the lowest neural cost is returned.  Otherwise the
-///    original plan from step 1 is returned unchanged (safe fallback).
-///
-/// This upgrades the previous "monitoring only" approach: when the neural
-/// model has seen enough training data (≥1500 samples for 0.3 confidence),
-/// it actively influences plan selection by preferring cheaper alternatives.
-///
-/// # Errors
-///
-/// Returns an error if the extracted nodes cannot be converted back to
-/// a [`RelExpr`].
-pub fn extract_best_with_neural<S: BuildHasher>(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    root: Id,
-    table_stats: &HashMap<String, Statistics, S>,
-    hardware: &ra_hardware::HardwareProfile,
-    scorer: &NeuralPlanScorer,
-) -> Result<RelExpr, EGraphError> {
-    // Phase 1: standard e-graph extraction
-    let base_plan = extract_best(egraph, root, table_stats, hardware)?;
-
-    // Phase 2: generate structural variants
-    let candidates = generate_variants(&base_plan);
-    if candidates.len() <= 1 {
-        // No join variants generated; log and return base
-        let (neural_cost, confidence) = scorer.score(&base_plan);
-        tracing::debug!(neural_cost, confidence, "neural plan score (no variants)");
-        return Ok(base_plan);
-    }
-
-    // Phase 3: neural selection
-    let (best_idx, best_neural_cost) = select_best_by_neural(&candidates, scorer);
-    let best = &candidates[best_idx];
-
-    tracing::debug!(
-        source = best.source,
-        neural_cost = best_neural_cost,
-        n_variants = candidates.len(),
-        "neural plan selection"
-    );
-
-    Ok(best.plan.clone())
 }
 
 /// Extract the lowest-cost plan using the hybrid neural/traditional cost function.
