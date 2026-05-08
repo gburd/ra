@@ -1,0 +1,183 @@
+---
+id: apache-phoenix-guidepost-parallel-split
+name: "Apache Phoenix Guidepost-Based Parallel Task Splitting"
+category: database-specific/apache-phoenix
+databases: [apache-phoenix]
+execution_models: [row-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, apache-phoenix, guidepost, parallel, split, statistics, hbase]
+complexity: "O(n)"
+benefit_range: [0.2, 0.8]
+---
+
+# Apache Phoenix Guidepost-Based Parallel Task Splitting
+
+## Metadata
+- **Rule ID**: `apache-phoenix-guidepost-parallel-split`
+- **Category**: Database-specific / Apache Phoenix
+- **Source**: `phoenix-core/src/main/java/org/apache/phoenix/iterate/ParallelIteratorFactory.java`
+- **Complexity**: O(g) where g is number of guideposts
+- **Prerequisites**: Statistics collected (UPDATE STATISTICS); parallel execution enabled
+- **Alternatives**: Region-based splitting; uniform byte-range splitting
+
+## Description
+
+HBase tables are physically divided into regions, but regions vary dramatically
+in size (from empty to multiple GB) due to uneven data distribution and split
+timing. Naively parallelizing a Phoenix query by assigning one task per region
+leads to severe load imbalance — one task might process 10GB while another
+processes 100MB, making the query latency bound by the slowest task.
+
+Phoenix's guidepost mechanism collects byte-offset statistics at configurable
+intervals (default: every 100MB of stored data). These guideposts serve as
+split points for parallel query execution. Instead of one task per region,
+Phoenix divides each region into roughly equal-sized chunks using guideposts
+as boundaries. This ensures each parallel task processes approximately the
+same amount of data, achieving near-perfect load balancing.
+
+The optimization works in three steps. First, UPDATE STATISTICS scans the
+table and records row key values at regular byte intervals (guideposts).
+Second, at query time, the optimizer uses guideposts to divide the scan range
+into chunks of approximately equal byte size. Third, these chunks are assigned
+to the client's thread pool (or to server-side coprocessors) for parallel
+execution. The result is that a query scanning 10GB of data with 100MB
+guideposts creates ~100 parallel tasks regardless of how many HBase regions
+exist or how unevenly data is distributed.
+
+## Relational Algebra
+
+```latex
+% Before: region-based parallelism (unbalanced)
+\text{Scan}(T) \Rightarrow \bigcup_{r \in \text{regions}(T)} \text{Scan}(T, r)
+% Problem: |r_1| \gg |r_2| causes straggler effect
+
+% After: guidepost-based parallelism (balanced)
+\text{Scan}(T) \Rightarrow \bigcup_{i=1}^{G} \text{Scan}(T, [gp_{i-1}, gp_i))
+% Where gp_0 < gp_1 < ... < gp_G are guidepost keys
+% Each chunk has approximately equal byte size
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("apache-phoenix-guidepost-parallel-split";
+    "(scan ?table ?range)" =>
+    "(parallel-union
+        (split-by-guideposts ?table ?range (guideposts ?table)))"
+    if has_guideposts("?table")
+    if scan_range_exceeds_guidepost_width("?range", "?table")
+    if parallel_execution_enabled()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableDescriptor,
+    scan_range: &ScanRange,
+    config: &QueryConfig,
+) -> bool {
+    // Statistics must have been collected (guideposts exist)
+    let guideposts = table.guideposts();
+    !guideposts.is_empty()
+    // Scan range must span multiple guideposts (worth parallelizing)
+    && guideposts_in_range(guideposts, scan_range) >= 2
+    // Parallel execution must be enabled
+    && config.parallel_enabled()
+    // Client thread pool must have capacity
+    && config.available_threads() >= 2
+    // Not a point lookup (parallelism has no benefit for single-row fetch)
+    && !scan_range.is_point()
+}
+
+fn guideposts_in_range(
+    guideposts: &[GuidePost],
+    range: &ScanRange,
+) -> usize {
+    guideposts.iter()
+        .filter(|gp| range.contains(gp.key()))
+        .count()
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_guidepost_parallel(
+    total_bytes: u64,
+    guidepost_width: u64,
+    num_threads: u64,
+    per_byte_scan_cost: f64,
+    task_overhead: f64,
+) -> f64 {
+    let num_tasks = (total_bytes / guidepost_width).max(1);
+    let effective_parallelism = num_tasks.min(num_threads);
+
+    // Serial cost
+    let serial_cost = total_bytes as f64 * per_byte_scan_cost;
+
+    // Parallel cost: longest task determines latency
+    let max_task_bytes = guidepost_width; // tasks are balanced by guideposts
+    let parallel_cost = max_task_bytes as f64 * per_byte_scan_cost
+        + num_tasks as f64 * task_overhead / effective_parallelism as f64;
+
+    serial_cost - parallel_cost // savings from parallelism
+}
+```
+
+**Typical benefit**: 20-80% latency reduction proportional to available
+parallelism. With 100MB guideposts and 16 threads scanning a 10GB table,
+the query completes in ~1/16th the serial time (minus task scheduling overhead).
+The key advantage over region-based splitting is elimination of straggler effects.
+
+## Test Cases
+
+```sql
+-- Positive: Full table scan with guideposts for parallel execution
+UPDATE STATISTICS events;  -- Collects guideposts every 100MB
+
+SELECT COUNT(*), MIN(ts), MAX(ts) FROM events
+WHERE event_type = 'purchase';
+-- 50GB table with 500 guideposts -> 500 parallel tasks
+-- With 32 threads: ~16x speedup vs. serial scan
+-- Load balanced: each task processes ~100MB regardless of region sizes
+
+-- Positive: Range scan spanning multiple guideposts
+SELECT sensor_id, AVG(value) FROM metrics
+WHERE ts BETWEEN '2024-01-01' AND '2024-06-30'
+GROUP BY sensor_id;
+-- 6-month range covering ~200 guideposts
+-- Each guidepost chunk is an independent aggregation task
+-- Results merged with final aggregation step
+
+-- Positive: Salt-byte table with uneven regions
+CREATE TABLE salted (
+    salt TINYINT NOT NULL,
+    id BIGINT NOT NULL,
+    data VARCHAR
+    CONSTRAINT pk PRIMARY KEY (salt, id)
+) SALT_BUCKETS=16;
+-- Regions may split unevenly; guideposts ensure balanced parallel tasks
+-- regardless of per-salt-bucket data volume
+
+-- Negative: Point lookup (single row, no parallelism benefit)
+SELECT * FROM events WHERE tenant_id = 'acme' AND ts = TIMESTAMP '2024-03-15 10:30:00';
+-- Single row; task splitting overhead exceeds any parallel benefit
+
+-- Negative: No statistics collected
+-- (Skipping UPDATE STATISTICS means no guideposts available)
+SELECT * FROM events WHERE ts > '2024-01-01';
+-- Falls back to region-based splitting (potentially unbalanced)
+```
+
+## References
+
+- Apache Phoenix: `phoenix-core/src/main/java/org/apache/phoenix/iterate/ParallelIteratorFactory.java`
+- Apache Phoenix: `phoenix-core/src/main/java/org/apache/phoenix/schema/stats/GuidePostsInfo.java`
+- Apache Phoenix: `phoenix-core/src/main/java/org/apache/phoenix/compile/StatementContext.java`
+- Apache Phoenix documentation: "UPDATE STATISTICS and Parallel Execution"

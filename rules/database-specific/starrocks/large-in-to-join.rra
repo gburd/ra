@@ -1,0 +1,150 @@
+---
+id: starrocks-large-in-to-join
+name: "StarRocks Large IN-List to Join Conversion"
+category: database-specific/starrocks
+databases: [starrocks]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, starrocks, in-list, join, rewrite, semi-join]
+complexity: "O(n)"
+benefit_range: [0.1, 0.6]
+---
+
+# StarRocks Large IN-List to Join Conversion
+
+## Metadata
+- **Rule ID**: `starrocks-large-in-to-join`
+- **Category**: Database-specific / StarRocks
+- **Source**: `fe/fe-core/src/main/java/com/starrocks/sql/optimizer/rule/transformation/InPredicateToJoinRule.java`
+- **Complexity**: O(n) where n is rows in the scanned table
+- **Prerequisites**: IN-list exceeds configurable threshold (default: 1024 values)
+- **Alternatives**: Predicate evaluation per-row with hash set lookup
+
+## Description
+
+When a query contains a large IN-list predicate (e.g., `WHERE id IN (1, 2, ..., 5000)`),
+evaluating it as a filter requires building a hash set of all values and probing
+it for every row. For very large IN-lists (thousands of values), this approach
+has several drawbacks: the predicate serialization bloats query plans sent to
+backends, the hash set consumes memory on every scan node, and the approach
+cannot leverage join-level optimizations like runtime filters or colocate joins.
+
+StarRocks rewrites large IN-list predicates into semi-joins against an
+inline values table. The IN-list values become a small "virtual table" that is
+joined with the original table using a semi-join (returning only rows from the
+original table that have a match). This transformation enables the optimizer
+to apply standard join optimizations: hash partitioning of the values table,
+runtime filter generation (Bloom filter pushed to storage layer), and
+potential colocate execution if the scanned table's distribution matches.
+
+The threshold for conversion is configurable (default 1024 values). Below the
+threshold, a hash set IN-evaluation is cheaper because it avoids join operator
+overhead. Above the threshold, the join approach wins due to better
+parallelism and the ability to generate runtime filters that prune data at
+the storage layer rather than the execution layer.
+
+## Relational Algebra
+
+```latex
+% Before: large IN-list as filter predicate
+\sigma_{k \in \{v_1, v_2, ..., v_n\}}(R) \quad \text{where } n > 1024
+
+% After: semi-join against values table
+R \ltimes_{R.k = V.v} (\text{Values}(v_1, v_2, ..., v_n) \text{ AS } V(v))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("starrocks-large-in-to-join";
+    "(filter (in ?col ?value_list) ?input)" =>
+    "(semi-join (= ?col ?v) ?input (values-scan ?value_list ?v))"
+    if in_list_exceeds_threshold("?value_list", 1024)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicate: &InPredicate,
+    config: &OptimizerConfig,
+) -> bool {
+    // IN-list must exceed the threshold
+    predicate.values().len() > config.in_to_join_threshold()
+    // All values must be constants (not subqueries or correlated refs)
+    && predicate.values().iter().all(|v| v.is_constant())
+    // Column must not be nullable, or NULLs must be handled
+    // (IN with NULLs has three-valued logic that semi-join differs on)
+    && (!predicate.column().is_nullable()
+        || !predicate.values().iter().any(|v| v.is_null()))
+    // Not already part of a subquery unnesting
+    && !predicate.is_from_subquery_unnest()
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_in_to_join(
+    table_rows: u64,
+    in_list_size: u64,
+    selectivity: f64,
+    has_runtime_filter: bool,
+) -> f64 {
+    // Original IN-list cost: hash probe per row
+    let in_cost = table_rows as f64 * 5.0 + in_list_size as f64 * 2.0;
+
+    // Join cost: build hash table on values + probe
+    let build_cost = in_list_size as f64 * 30.0;
+    let probe_cost = if has_runtime_filter {
+        // Runtime filter prunes at storage; fewer rows reach join
+        table_rows as f64 * selectivity * 15.0
+    } else {
+        table_rows as f64 * 15.0
+    };
+    let join_cost = build_cost + probe_cost;
+
+    in_cost - join_cost // positive when IN-list approach is more expensive
+}
+```
+
+**Typical benefit**: 10-60% for IN-lists with 1000+ values, primarily from
+runtime filter generation that prunes data at the storage layer. The benefit
+increases with table size (more rows to filter) and decreases with IN-list
+selectivity (if most rows match, filtering saves nothing).
+
+## Test Cases
+
+```sql
+-- Positive: Large IN-list from application-generated query
+SELECT * FROM orders
+WHERE order_id IN (1, 2, 3, /* ... 5000 values ... */, 5000);
+-- Rewritten to semi-join against values(1..5000)
+-- Runtime filter on order_id pushed to storage layer
+
+-- Positive: Large IN-list with matching distribution key
+SELECT * FROM users
+WHERE user_id IN (/* 2000 user IDs from external system */);
+-- Semi-join can be colocated if users distributed by user_id
+-- and values are hash-distributed the same way
+
+-- Negative: Small IN-list below threshold
+SELECT * FROM orders WHERE status IN ('pending', 'shipped', 'delivered');
+-- Only 3 values; hash set probe is cheaper than join overhead
+
+-- Negative: IN-list with NULL values and nullable column
+SELECT * FROM orders WHERE customer_id IN (1, 2, NULL, 4);
+-- NULL handling differs between IN semantics and semi-join;
+-- requires careful null-aware transformation or is skipped
+```
+
+## References
+
+- StarRocks: `fe/fe-core/src/main/java/com/starrocks/sql/optimizer/rule/transformation/InPredicateToJoinRule.java`
+- StarRocks: `fe/fe-core/src/main/java/com/starrocks/sql/optimizer/rule/transformation/ScalarOperatorsReuse.java`
+- StarRocks Documentation: "Query Optimization - IN Predicate Rewriting"

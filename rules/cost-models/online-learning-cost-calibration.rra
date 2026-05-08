@@ -1,0 +1,209 @@
+---
+id: online-learning-cost-calibration
+name: Online Learning Cost Calibration
+category: cost-models
+databases: [postgresql, duckdb, clickhouse]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, online-learning, calibration, feedback, adaptive, sgd]
+complexity: O(n)
+benefit_range: [0.1, 0.7]
+---
+
+# Online Learning Cost Calibration
+
+## Description
+
+Execution feedback-driven model calibration uses online learning (streaming
+SGD) to continuously adjust cost model parameters based on observed
+execution times. After each query execution, the actual runtime is compared
+to the predicted cost, and model weights are updated to reduce the
+prediction error. This eliminates the need for periodic offline calibration
+and allows the cost model to track workload drift and hardware degradation
+automatically.
+
+The online learner maintains a set of operator-specific cost coefficients
+(e.g., per-row CPU cost, per-page I/O cost, hash bucket overhead) and
+updates them using the gradient of the squared prediction error. A
+bounded learning rate with decay prevents oscillation while still
+adapting to genuine distributional shifts. Catastrophic forgetting is
+mitigated through elastic weight consolidation, preserving calibration
+for infrequently-executed operator types.
+
+**When to apply**: In production systems where execution statistics are
+available (via instrumented query execution or EXPLAIN ANALYZE logging)
+and the workload or hardware characteristics evolve over time.
+
+## Relational Algebra
+
+```latex
+-- Predicted cost as linear combination of operator features:
+$$
+\hat{C}(Q) = \sum_{op \in Q} \vec{w}_{type(op)}^T \cdot \vec{x}_{op}
+$$
+
+-- Loss function:
+$$
+L(\vec{w}) = \frac{1}{2}(C_{actual}(Q) - \hat{C}(Q))^2
+$$
+
+-- Online SGD update:
+$$
+\vec{w}_{t+1} = \vec{w}_t - \eta_t \cdot \nabla L = \vec{w}_t + \eta_t \cdot (C_{actual} - \hat{C}) \cdot \vec{x}
+$$
+
+-- Learning rate decay:
+$$
+\eta_t = \frac{\eta_0}{1 + \lambda \cdot t}
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("online-learning-cost-calibration";
+    "(cost-params ?static_weights)" =>
+    "(calibrated-params ?static_weights ?online_weights)"
+    if online_learner_ready()
+    if calibration_samples_above(100)
+),
+```
+
+```rust
+struct OnlineCostCalibrator {
+    weights: HashMap<OperatorType, Vec<f64>>,
+    learning_rate: f64,
+    decay_lambda: f64,
+    step_count: u64,
+    ewc_importance: HashMap<OperatorType, Vec<f64>>,
+}
+
+impl OnlineCostCalibrator {
+    fn update(&mut self, query: &ExecutedQuery) {
+        let predicted = self.predict(query.plan());
+        let actual = query.actual_time_ms();
+        let error = actual - predicted;
+
+        let eta = self.learning_rate / (1.0 + self.decay_lambda * self.step_count as f64);
+        self.step_count += 1;
+
+        for op in query.plan().operators() {
+            let features = op.feature_vector();
+            let w = self.weights.entry(op.op_type()).or_default();
+            let ewc = self.ewc_importance.get(&op.op_type());
+
+            for (i, f) in features.iter().enumerate() {
+                if i >= w.len() { w.resize(i + 1, 0.0); }
+                let gradient = error * f;
+                // EWC regularization prevents catastrophic forgetting
+                let ewc_penalty = ewc.map_or(0.0, |imp| {
+                    imp.get(i).copied().unwrap_or(0.0) * w[i]
+                });
+                w[i] += eta * (gradient - 0.01 * ewc_penalty);
+            }
+        }
+    }
+
+    fn predict(&self, plan: &Plan) -> f64 {
+        plan.operators().map(|op| {
+            let features = op.feature_vector();
+            let w = self.weights.get(&op.op_type())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            features.iter().zip(w.iter())
+                .map(|(f, w)| f * w)
+                .sum::<f64>()
+        }).sum()
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    calibrator: &OnlineCostCalibrator,
+    min_samples: u64,
+    max_prediction_error: f64,
+) -> bool {
+    // Need sufficient training history
+    calibrator.step_count >= min_samples
+    // Prediction error should be trending downward
+    && calibrator.recent_mae() < max_prediction_error
+    // Weights must be numerically stable (no divergence)
+    && calibrator.weights_bounded(1e6)
+    // Not in cold-start phase
+    && calibrator.confidence() > 0.3
+}
+```
+
+**Restrictions:**
+- Cold start requires fallback to static calibration for first ~100 queries
+- Concurrent query execution complicates attribution of time to operators
+- Queries with high variance (e.g., lock waits) poison the gradient
+- Must filter outliers (>3 sigma) before updating weights
+- Parallel execution time is not sum of operator times (pipeline effect)
+
+## Cost Model
+
+```rust
+fn calibration_quality(
+    calibrator: &OnlineCostCalibrator,
+    test_queries: &[ExecutedQuery],
+) -> CalibrationMetrics {
+    let errors: Vec<f64> = test_queries.iter().map(|q| {
+        let predicted = calibrator.predict(q.plan());
+        let actual = q.actual_time_ms();
+        (predicted - actual).abs() / actual
+    }).collect();
+
+    CalibrationMetrics {
+        mae: errors.iter().sum::<f64>() / errors.len() as f64,
+        p95_error: percentile(&errors, 0.95),
+        plan_accuracy: plan_selection_accuracy(calibrator, test_queries),
+    }
+}
+```
+
+**Typical benefit**: 10-70% improvement in cost prediction accuracy over
+static calibration, with strongest gains in evolving workloads (data growth,
+schema changes, hardware aging).
+
+## Test Cases
+
+```sql
+-- Positive: table growth makes static calibration stale
+-- Table grew from 1M to 50M rows, statistics updated but cost params not
+SELECT * FROM transactions
+WHERE account_id = $1 AND ts > $2
+ORDER BY ts DESC LIMIT 10;
+-- Static model: underestimates I/O (tuned for 1M rows)
+-- Online model: learned higher per-page cost from recent executions
+-- Result: correctly prefers index scan over seq scan at new table size
+```
+
+```sql
+-- Positive: hardware degradation detected through feedback
+-- SSD read latency increased 3x due to wear (but still reports healthy)
+EXPLAIN ANALYZE SELECT * FROM products WHERE category = 'books';
+-- Online learner gradually increases random_page_cost equivalent
+-- After 200 observations: cost estimate matches actual within 15%
+```
+
+```sql
+-- Negative: highly variable query (lock contention)
+SELECT * FROM accounts WHERE id = $1 FOR UPDATE;
+-- Actual time: 1ms, 1ms, 500ms, 2ms, 1ms (lock wait spike)
+-- Outlier filtered: 500ms execution excluded from gradient update
+-- Learner maintains stable weight for lock-free execution cost
+```
+
+## References
+
+- Stillger et al., "LEO: DB2's LEarning Optimizer", VLDB 2001
+- Wu et al., "Towards a Learning Optimizer for Shared Clouds", VLDB 2019
+- Anagnostopoulos et al., "Learning to Optimize Join Queries", SIGMOD 2015
+- Dutt et al., "Plan Stitch: Harnessing the Best of Many Plans", VLDB 2019
+- Kirkpatrick et al., "Overcoming Catastrophic Forgetting in Neural Networks", PNAS 2017

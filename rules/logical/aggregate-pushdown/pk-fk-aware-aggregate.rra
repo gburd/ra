@@ -1,0 +1,212 @@
+---
+id: pk-fk-aware-aggregate
+name: PK/FK-Aware Aggregate Pushdown
+category: logical/aggregate-pushdown
+databases: [apache-doris, postgresql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [aggregate, pushdown, primary-key, foreign-key, join-elimination, logical]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# PK/FK-Aware Aggregate Pushdown
+
+## Description
+
+When an aggregation operates on the result of a join, and the join
+preserves key constraints (PK-FK relationship), the aggregate can often
+be pushed below the join to reduce intermediate result sizes. The key
+insight is that a PK-FK join does not duplicate rows from the FK side:
+each FK-side row matches exactly zero or one PK-side row. This means
+aggregations on FK-side columns can be computed before the join without
+changing the result, as long as the grouping key includes the FK column.
+
+This optimization is particularly impactful for star-schema queries
+where a large fact table (FK side) joins multiple small dimension tables
+(PK side) before aggregation. By pushing the aggregation below the
+dimension joins, the system reduces the input to each join from millions
+of fact rows to the much smaller number of groups, often achieving
+orders-of-magnitude speedup.
+
+**When to apply**: For queries with GROUP BY on columns from the FK side
+of a PK-FK join, where the aggregation functions operate on FK-side
+columns and the FK column is part of the grouping key (or functionally
+determines the grouping key).
+
+## Relational Algebra
+
+```latex
+-- Before: aggregate after join
+$$
+\gamma_{G, agg(a)}(R \bowtie_{R.fk = S.pk} S)
+$$
+
+-- After: aggregate pushed below join (when G includes R.fk)
+$$
+\gamma_{G, agg(a)}(R) \bowtie_{R.fk = S.pk} S
+$$
+
+-- Validity condition:
+$$
+\text{valid iff } fk \in G \text{ and } agg(a) \text{ references only } R
+$$
+
+-- Extended: aggregate on dimension columns via key propagation
+$$
+\gamma_{G \cup \{S.attr\}, agg(a)}(R \bowtie S) \equiv
+\pi_{G, agg\_a, S.attr}(\gamma_{G, agg(a)}(R) \bowtie S)
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("pk-fk-aware-aggregate";
+    "(aggregate ?group_by ?agg_funcs
+        (join ?fk_table ?pk_table ?join_cond))" =>
+    "(join
+        (aggregate ?group_by ?agg_funcs ?fk_table)
+        ?pk_table
+        ?join_cond)"
+    if is_pk_fk_join("?fk_table", "?pk_table", "?join_cond")
+    if group_by_includes_fk("?group_by", "?join_cond")
+    if agg_references_only("?agg_funcs", "?fk_table")
+),
+```
+
+```rust
+fn is_pk_fk_join(
+    fk_table: &RelExpr,
+    pk_table: &RelExpr,
+    join_cond: &Expr,
+) -> bool {
+    let (fk_col, pk_col) = extract_equi_join_columns(join_cond);
+    // FK column has a declared foreign key to PK table
+    let fk_constraint = fk_table.schema()
+        .foreign_keys()
+        .find(|fk| fk.column() == fk_col && fk.references_table() == pk_table.name());
+    // PK column is the primary key (or has unique constraint)
+    let pk_unique = pk_table.schema()
+        .is_unique_key(&pk_col);
+
+    fk_constraint.is_some() && pk_unique
+}
+
+fn group_by_includes_fk(group_by: &[Column], join_cond: &Expr) -> bool {
+    let (fk_col, _) = extract_equi_join_columns(join_cond);
+    group_by.contains(&fk_col)
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    aggregate: &AggregateNode,
+    join: &JoinNode,
+    catalog: &Catalog,
+) -> bool {
+    // Must be an inner join or left join preserving FK side
+    join.join_type().is_inner_or_left()
+    // PK-FK relationship must be declared or inferred
+    && catalog.has_pk_fk_relationship(
+        join.fk_table(), join.pk_table(), join.condition()
+    )
+    // All aggregated columns must come from FK side
+    && aggregate.agg_columns().iter().all(|c| {
+        join.fk_table().schema().contains(c)
+    })
+    // Grouping key must include the FK join column
+    && aggregate.group_by().contains(&join.fk_column())
+    // No HAVING clause referencing PK-side columns
+    && aggregate.having().map_or(true, |h| {
+        !h.references_table(join.pk_table())
+    })
+}
+```
+
+**Restrictions:**
+- Requires declared or inferred PK-FK constraints
+- OUTER joins from PK side require additional NULL handling
+- DISTINCT aggregates may not be pushable (depends on key structure)
+- Multi-table joins require iterative application (one join at a time)
+- Aggregate functions must be decomposable (no MEDIAN, PERCENTILE)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    fact_rows: f64,
+    num_groups: f64,
+    dimension_rows: f64,
+    num_dimensions: usize,
+) -> f64 {
+    // Without pushdown: join produces fact_rows, then aggregate
+    let without_pushdown = fact_rows * num_dimensions as f64 + fact_rows;
+    // With pushdown: aggregate first (num_groups), then join smaller result
+    let with_pushdown = fact_rows + num_groups * num_dimensions as f64;
+    (without_pushdown - with_pushdown) / without_pushdown
+}
+```
+
+**Typical benefit**: 20-70% reduction in intermediate data volume for
+star-schema queries. Greatest when num_groups << fact_rows (high
+aggregation ratio).
+
+## Test Cases
+
+```sql
+-- Positive: star schema with aggregate on fact table
+-- orders(id PK, customer_id FK->customers, amount, order_date)
+-- customers(id PK, name, region)
+SELECT c.region, SUM(o.amount), COUNT(*)
+FROM orders o JOIN customers c ON o.customer_id = c.id
+GROUP BY c.region;
+-- Transformed to:
+-- SELECT c.region, pre.sum_amount, pre.cnt
+-- FROM (SELECT customer_id, SUM(amount), COUNT(*)
+--       FROM orders GROUP BY customer_id) pre
+-- JOIN customers c ON pre.customer_id = c.id
+-- GROUP BY c.region  -- second lightweight agg to collapse customer->region
+```
+
+```sql
+-- Positive: TPC-H Q1 variant with dimension join
+SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount))
+FROM lineitem l
+JOIN supplier s ON l.l_suppkey = s.s_suppkey
+JOIN nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY n.n_name;
+-- Push SUM below supplier join: group by l_suppkey first
+-- Then join with supplier -> nation (much smaller input to joins)
+```
+
+```sql
+-- Negative: aggregate on PK-side column (cannot push)
+SELECT c.region, AVG(c.credit_limit)
+FROM orders o JOIN customers c ON o.customer_id = c.id
+GROUP BY c.region;
+-- credit_limit is on PK side (customers), not FK side
+-- Pushdown would incorrectly weight customers by order count
+```
+
+```sql
+-- Negative: no PK-FK constraint (many-to-many join)
+SELECT t.tag_name, COUNT(*)
+FROM articles a JOIN article_tags at ON a.id = at.article_id
+JOIN tags t ON at.tag_id = t.id
+GROUP BY t.tag_name;
+-- article_tags is junction table: many-to-many, no FK guarantee
+-- Pushdown would produce incorrect counts
+```
+
+## References
+
+- Yan & Larson, "Eager Aggregation and Lazy Aggregation", VLDB 1995
+- Chaudhuri & Shim, "Including Group-By in Query Optimization", VLDB 1994
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", SIGMOD 2001
+- Apache Doris documentation: "Aggregate Pushdown Through Joins"
+- DuckDB: "Star Schema Benchmark Optimizations"

@@ -1,0 +1,192 @@
+---
+id: oceanbase-skyline-access-path-pruning
+name: "OceanBase Skyline Access Path Pruning"
+category: database-specific/oceanbase
+databases: [oceanbase]
+execution_models: [row-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oceanbase, skyline, access-path, pareto, index-selection]
+complexity: "O(n)"
+benefit_range: [0.1, 0.5]
+---
+
+# OceanBase Skyline Access Path Pruning
+
+## Metadata
+- **Rule ID**: `oceanbase-skyline-access-path-pruning`
+- **Category**: Database-specific / OceanBase
+- **Source**: `src/sql/optimizer/ob_skyline_prunning.h`
+- **Complexity**: O(n*m) where n is candidate paths, m is comparison dimensions
+- **Prerequisites**: Multiple candidate access paths (indexes) for a table scan
+- **Alternatives**: Cost-based enumeration of all index combinations
+
+## Description
+
+When a table has multiple indexes, the optimizer must choose which access path
+to use. Traditional cost-based selection evaluates the estimated cost of each
+path and picks the cheapest. However, cost estimation can be inaccurate
+(stale statistics, correlation assumptions, unknown parameter values). OceanBase
+uses skyline (Pareto-optimal) pruning to eliminate access paths that are
+provably dominated on all relevant dimensions before cost estimation begins.
+
+An access path A "dominates" path B if A is at least as good as B on every
+comparison dimension and strictly better on at least one. The comparison
+dimensions in OceanBase's implementation include: (1) whether the index covers
+all needed columns (covering vs. non-covering), (2) whether the index provides
+the required sort order, (3) whether the index matches query filter columns,
+and (4) whether a back-table lookup is needed. A dominated path can never be
+optimal regardless of the cost model's accuracy, so it is safely pruned.
+
+This is particularly valuable for OceanBase because its distributed storage
+layer means back-table lookups (from secondary index to primary table) cross
+partition boundaries and incur network I/O. An index that avoids back-table
+lookup dominates one that requires it, all else being equal. By pruning
+dominated paths early, the optimizer reduces the search space for the
+subsequent cost-based phase, improving both optimization time and robustness
+against estimation errors.
+
+## Relational Algebra
+
+```latex
+% Access path selection for table T with indexes I_1, ..., I_k
+% Skyline operator prunes dominated paths
+
+\text{Candidates} = \{I_1, I_2, ..., I_k, \text{TableScan}\}
+\text{Skyline}(\text{Candidates}, D) = \{I \in \text{Candidates} \mid
+    \nexists J \in \text{Candidates}: J \succ_D I\}
+
+% Dominance on dimensions D = (covering, ordering, filter_match, no_lookup)
+J \succ_D I \iff \forall d \in D: J_d \geq I_d \wedge \exists d: J_d > I_d
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oceanbase-skyline-access-path-pruning";
+    "(scan ?table (index-candidates ?idx1 ?idx2 ?rest))" =>
+    "(scan ?table (index-candidates ?idx1 ?rest))"
+    if dominates("?idx1", "?idx2")
+),
+
+// Dominance check across multiple dimensions
+rw!("oceanbase-skyline-covering-dominance";
+    "(index-choice ?idx_covering ?idx_noncovering)" =>
+    "(index-choice ?idx_covering)"
+    if is_covering_index("?idx_covering")
+    if not_covering_index("?idx_noncovering")
+    if same_filter_columns("?idx_covering", "?idx_noncovering")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableDescriptor,
+    query_columns: &[Column],
+    filter_columns: &[Column],
+    order_columns: &[Column],
+) -> bool {
+    // Must have multiple candidate access paths
+    let candidates = table.available_indexes();
+    candidates.len() >= 2
+    // At least one dominance relationship must exist
+    && candidates.iter().any(|a|
+        candidates.iter().any(|b|
+            a != b && dominates(a, b, query_columns, filter_columns, order_columns)
+        )
+    )
+}
+
+fn dominates(
+    a: &IndexDescriptor,
+    b: &IndexDescriptor,
+    query_cols: &[Column],
+    filter_cols: &[Column],
+    order_cols: &[Column],
+) -> bool {
+    let a_covering = a.covers(query_cols);
+    let b_covering = b.covers(query_cols);
+    let a_ordering = a.provides_order(order_cols);
+    let b_ordering = b.provides_order(order_cols);
+    let a_filter = a.matches_filter_prefix(filter_cols);
+    let b_filter = b.matches_filter_prefix(filter_cols);
+
+    // A dominates B: at least as good on all, strictly better on one
+    (a_covering >= b_covering)
+    && (a_ordering >= b_ordering)
+    && (a_filter >= b_filter)
+    && (a_covering > b_covering || a_ordering > b_ordering || a_filter > b_filter)
+}
+```
+
+## Cost Model
+
+```rust
+pub fn skyline_pruning_benefit(
+    total_candidates: usize,
+    pruned_candidates: usize,
+    cost_estimation_time_per_path_us: u64,
+) -> f64 {
+    // Pruning saves cost-estimation time for dominated paths
+    let saved_time = pruned_candidates as f64
+        * cost_estimation_time_per_path_us as f64;
+    // Also improves plan quality by avoiding cost-estimation errors
+    // on dominated paths (which could be incorrectly chosen)
+    let robustness_factor = 1.0 + (pruned_candidates as f64 / total_candidates as f64);
+    saved_time * robustness_factor
+}
+```
+
+**Typical benefit**: 10-50% improvement in plan quality and optimization time.
+Primary value is robustness: even if cost estimates are off by 2x, the optimizer
+never picks a dominated path. Optimization time scales with candidate count,
+so pruning from 8 to 3 candidates saves 60% of enumeration work.
+
+## Test Cases
+
+```sql
+-- Positive: Covering index dominates non-covering with same filter prefix
+CREATE TABLE orders (
+    id BIGINT PRIMARY KEY,
+    customer_id INT,
+    order_date DATE,
+    amount DECIMAL(10,2),
+    status VARCHAR(20),
+    INDEX idx_cust_date (customer_id, order_date),
+    INDEX idx_cust_date_amt (customer_id, order_date, amount)
+);
+
+SELECT customer_id, order_date, amount FROM orders
+WHERE customer_id = 100 AND order_date > '2024-01-01';
+-- idx_cust_date_amt dominates idx_cust_date:
+--   same filter prefix (customer_id, order_date)
+--   covering (includes amount) vs non-covering
+-- idx_cust_date is pruned from consideration
+
+-- Positive: Index with ordering dominates one without
+SELECT * FROM orders
+WHERE customer_id = 100
+ORDER BY order_date;
+-- idx_cust_date provides order, avoiding sort
+-- Any index on (customer_id) alone would need explicit sort -> dominated
+
+-- Negative: No dominance between orthogonal indexes
+SELECT * FROM orders
+WHERE customer_id = 100 AND status = 'pending'
+ORDER BY order_date;
+-- idx_cust_date: matches customer_id filter, provides order, no status
+-- idx_status: matches status filter, no order
+-- Neither dominates; both passed to cost-based phase
+```
+
+## References
+
+- OceanBase: `src/sql/optimizer/ob_skyline_prunning.h`
+- OceanBase: `src/sql/optimizer/ob_skyline_prunning.cpp`
+- Borzsonyi et al., "The Skyline Operator" (ICDE 2001)
+- OceanBase Technical Blog: "Access Path Selection in OceanBase Optimizer"

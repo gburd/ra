@@ -1,0 +1,142 @@
+---
+id: apache-doris-tablet-pruning
+name: "Apache Doris Tablet Pruning"
+category: database-specific/apache-doris
+databases: [apache-doris]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, apache-doris, tablet, pruning, partition, bucket]
+complexity: "O(n)"
+benefit_range: [0.3, 0.95]
+---
+
+# Apache Doris Tablet Pruning
+
+## Metadata
+- **Rule ID**: `apache-doris-tablet-pruning`
+- **Category**: Database-specific / Apache Doris
+- **Source**: `fe/fe-core/src/main/java/org/apache/doris/planner/OlapScanNode.java`
+- **Complexity**: O(n) where n is total number of tablets
+- **Prerequisites**: Hash/range partitioned table; filter on partition or bucket key
+- **Alternatives**: Full tablet scan across all partitions
+
+## Description
+
+Apache Doris stores data in a two-level hierarchy: partitions contain tablets,
+where each tablet is a physical shard of data distributed across backends.
+Within a partition, rows are assigned to tablets via hash bucketing on a
+designated column (typically a high-cardinality key). Tablet pruning eliminates
+irrelevant tablets from the scan plan before any I/O begins.
+
+Standard partition pruning eliminates entire partitions based on range or list
+predicates. Tablet pruning goes one level deeper: when the WHERE clause contains
+an equality predicate on the bucket key, Doris can compute the exact tablet hash
+and skip all other tablets within matching partitions. This is particularly
+effective for point lookups and narrow range queries on the distribution key.
+
+The optimization works because Doris uses a deterministic hash function
+(CRC32 or xxHash) to assign rows to tablets. Given a constant value for the
+bucket key, the frontend can compute hash(value) % num_buckets to identify the
+single tablet containing that row. This reduces the scan from N tablets to 1,
+where N is the bucket count (commonly 8-128).
+
+## Relational Algebra
+
+```latex
+% Before: scan all tablets in all matching partitions
+\sigma_{bucket\_key = c}(\text{Scan}(T, \text{partitions}))
+
+% After: scan only the computed tablet
+\sigma_{bucket\_key = c}(\text{Scan}(T, \text{partition}_i, \text{tablet}_{h(c) \bmod B}))
+
+\text{where } h \text{ is the bucket hash function, } B \text{ is bucket count}
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("apache-doris-tablet-pruning";
+    "(filter (= ?bucket_col ?const) (scan ?table ?partitions))" =>
+    "(filter (= ?bucket_col ?const) (scan ?table ?partitions (tablet-lookup ?table ?const)))"
+    if is_bucket_key("?bucket_col", "?table")
+    if is_constant("?const")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableDescriptor,
+    predicate: &Expr,
+    bucket_col: &Column,
+) -> bool {
+    // Table must use hash distribution
+    table.distribution_type() == DistributionType::Hash
+    // Predicate must be equality on the bucket key
+    && predicate.is_equality()
+    && table.bucket_columns().contains(bucket_col)
+    // Value must be a compile-time constant (not a subquery)
+    && predicate.rhs().is_constant()
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_tablet_pruning(
+    total_tablets: u64,
+    matching_tablets: u64,
+    rows_per_tablet: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let hash_cost = Cost::cpu(matching_tablets * 10); // CRC32 per constant
+    let scan_cost = Cost::io(
+        matching_tablets as f64 * rows_per_tablet as f64
+        * hardware.seq_read_cost()
+    );
+    hash_cost + scan_cost
+}
+```
+
+**Typical benefit**: 87-99% reduction for point queries on bucket key
+(e.g., 1/16 tablets scanned with 16 buckets). For range queries on the bucket
+key, benefit depends on the range width relative to the hash space.
+
+## Test Cases
+
+```sql
+-- Positive: Point lookup on bucket key prunes to single tablet
+CREATE TABLE orders (
+    order_id BIGINT,
+    user_id INT,
+    amount DECIMAL(10,2),
+    order_date DATE
+) DISTRIBUTED BY HASH(order_id) BUCKETS 16
+PARTITION BY RANGE(order_date) (
+    PARTITION p202401 VALUES LESS THAN ('2024-02-01'),
+    PARTITION p202402 VALUES LESS THAN ('2024-03-01')
+);
+
+SELECT * FROM orders WHERE order_id = 12345 AND order_date = '2024-01-15';
+-- Partition pruning: only p202401
+-- Tablet pruning: only tablet hash(12345) % 16 = single tablet
+
+-- Positive: IN-list on bucket key prunes to subset of tablets
+SELECT * FROM orders WHERE order_id IN (100, 200, 300);
+-- Scans at most 3 tablets (may be fewer if hash collisions)
+
+-- Negative: Filter not on bucket key, all tablets scanned
+SELECT * FROM orders WHERE amount > 1000.00;
+-- amount is not the bucket key; cannot compute target tablet
+```
+
+## References
+
+- Apache Doris: `fe/fe-core/src/main/java/org/apache/doris/planner/OlapScanNode.java`
+- Apache Doris: `fe/fe-core/src/main/java/org/apache/doris/planner/HashDistributionPruner.java`
+- Apache Doris documentation: "Data Distribution" design doc

@@ -1,0 +1,169 @@
+---
+id: feedback-driven-plan-correction
+name: Feedback-Driven Plan Correction
+category: database-specific/postgresql/extensions
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [postgresql, pg-plan-advsr, adaptive, feedback, cardinality, extensions]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Feedback-Driven Plan Correction
+
+## Description
+
+pg_plan_advsr-style iterative feedback uses actual execution statistics
+from EXPLAIN ANALYZE to correct persistent cardinality misestimates in
+the query planner. When a query is executed, the actual row counts at each
+plan node are compared against the optimizer's estimates. Significant
+deviations trigger hint injection or join-order overrides on subsequent
+executions of the same query template.
+
+The core insight is that cardinality estimation errors compound
+multiplicatively through join trees. A 10x underestimate at a leaf node
+can become a 1000x error at the root after three joins. By recording
+actual cardinalities and feeding them back as "corrected" statistics, the
+planner produces better plans on re-execution without modifying the
+underlying statistics infrastructure.
+
+**When to apply**: For repeatedly-executed parameterized queries where the
+planner consistently chooses suboptimal plans due to correlation,
+skew, or outdated statistics. Not suitable for ad-hoc one-shot queries.
+
+**Database version**: PostgreSQL 12+ (with pg_plan_advsr or pg_hint_plan)
+
+## Relational Algebra
+
+```latex
+-- Estimated cardinality (planner):
+$$
+\hat{n}(R \bowtie_\theta S) = |R| \cdot |S| \cdot sel(\theta)
+$$
+
+-- Actual cardinality (observed via EXPLAIN ANALYZE):
+$$
+n_{actual}(R \bowtie_\theta S)
+$$
+
+-- Correction factor for future planning:
+$$
+\alpha = \frac{n_{actual}}{\hat{n}}, \quad
+\hat{n}_{corrected} = \hat{n} \cdot \text{EMA}(\alpha, \lambda)
+$$
+
+-- EMA (Exponential Moving Average) with decay:
+$$
+\text{EMA}_t = \lambda \cdot \alpha_t + (1-\lambda) \cdot \text{EMA}_{t-1}
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("feedback-driven-plan-correction";
+    "(hash-join ?outer ?inner ?cond)" =>
+    "(nested-loop-join ?inner ?outer ?cond)"
+    if is_database("postgresql")
+    if cardinality_overestimated("?outer", 10.0)
+    if feedback_history_stable("?outer", 3)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query_fingerprint: &QueryFingerprint,
+    feedback_store: &FeedbackStore,
+    min_executions: usize,
+    deviation_threshold: f64,
+) -> bool {
+    let history = feedback_store.get(query_fingerprint);
+    // Need enough execution history to be confident
+    history.len() >= min_executions
+    // Deviation must be consistent across executions
+    && history.iter().all(|entry| {
+        entry.max_cardinality_ratio() > deviation_threshold
+    })
+    // Must not be a one-time anomaly (check variance)
+    && history.cardinality_ratio_cv() < 0.5
+}
+```
+
+**Restrictions:**
+- Requires multiple executions to build confidence (cold start problem)
+- Parameter-dependent queries may have varying optimal plans
+- Hint injection can conflict with other planner behaviors
+- Feedback staleness: data changes invalidate historical corrections
+- Does not handle queries with volatile functions or CTEs well
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    current_execution_ms: f64,
+    corrected_execution_ms: f64,
+    feedback_overhead_ms: f64,
+    execution_frequency: f64,
+) -> f64 {
+    let per_execution_saving =
+        current_execution_ms - corrected_execution_ms;
+    let amortized_overhead =
+        feedback_overhead_ms / execution_frequency;
+    (per_execution_saving - amortized_overhead)
+        / current_execution_ms
+}
+```
+
+**Typical benefit**: 10-60% execution time reduction for queries with
+persistent cardinality misestimates. Highest impact on star-schema
+joins with correlated predicates.
+
+## Test Cases
+
+```sql
+-- Positive: correlated columns cause systematic underestimate
+-- Planner estimates 100 rows, actual is 50000
+EXPLAIN ANALYZE
+SELECT * FROM orders o
+JOIN line_items li ON o.id = li.order_id
+WHERE o.region = 'US' AND li.category = 'electronics';
+-- After 5 executions: feedback system records consistent 500x error
+-- Corrected plan switches from NL-Join to Hash Join
+-- Execution time: 12s -> 200ms
+```
+
+```sql
+-- Negative: volatile query with varying cardinalities
+EXPLAIN ANALYZE
+SELECT * FROM events
+WHERE created_at > now() - interval '1 hour';
+-- Cardinality changes each execution (time-dependent)
+-- Feedback variance too high, correction not applied
+```
+
+```sql
+-- Positive: multi-join with compounding estimation errors
+EXPLAIN ANALYZE
+SELECT c.name, COUNT(*)
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+JOIN payments p ON o.id = p.order_id
+WHERE c.tier = 'premium' AND p.method = 'crypto'
+GROUP BY c.name;
+-- Planner: 10 rows (underestimates correlation)
+-- Actual: 85000 rows -> Sort spills to disk
+-- Corrected: Hash Aggregate with adequate work_mem
+```
+
+## References
+
+- pg_plan_advsr: https://github.com/ossc-db/pg_plan_advsr
+- Stillger et al., "LEO: DB2's LEarning Optimizer", VLDB 2001
+- Chaudhuri & Narasayya, "Self-Tuning Database Systems", VLDB 2007
+- Marcus et al., "Bao: Making Learned Query Optimization Practical", SIGMOD 2021
+- PostgreSQL: src/backend/optimizer/path/costsize.c (cardinality estimation)

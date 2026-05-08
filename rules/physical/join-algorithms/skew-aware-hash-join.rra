@@ -1,0 +1,212 @@
+---
+id: skew-aware-hash-join
+name: Skew-Aware Hash Join
+category: physical/join-algorithms
+databases: [starrocks, spark, presto, trino]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, hash-join, skew, distributed, partitioning, runtime-filter]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# Skew-Aware Hash Join
+
+## Description
+
+Standard hash-partitioned joins distribute build and probe tuples across
+workers by hashing the join key. When join key values follow a skewed
+distribution (e.g., Zipf), one or few partitions receive disproportionate
+data, creating a straggler worker that dominates total execution time.
+Skew-aware hash join detects heavy-hitter keys (either at planning time
+from statistics or at runtime via sampling) and processes them separately
+through broadcast or replication, while the remaining non-skewed keys
+proceed through standard hash partitioning.
+
+The detection phase identifies keys whose frequency exceeds a threshold
+(typically 1-5% of total rows). These keys are extracted into a "skew
+partition" that is broadcast to all workers, while the remaining data
+is hash-partitioned normally. This hybrid approach bounds the maximum
+partition size, ensuring no single worker handles more than O(N/P + S)
+rows, where N is total rows, P is parallelism, and S is the broadcast
+skew set size.
+
+**When to apply**: For equi-joins in distributed/parallel execution engines
+where join key statistics indicate skew (max_frequency / avg_frequency > 10)
+or where runtime detection identifies heavy hitters exceeding the partition
+size threshold.
+
+## Relational Algebra
+
+```latex
+-- Standard hash-partitioned join:
+$$
+R \bowtie_{hash(k)} S = \bigcup_{i=1}^{P} R_i \bowtie S_i
+$$
+
+-- Skew-aware decomposition:
+$$
+R_{skew} = \sigma_{k \in HH}(R), \quad R_{norm} = \sigma_{k \notin HH}(R)
+$$
+
+$$
+R \bowtie S = (R_{skew} \bowtie_{broadcast} S) \cup (R_{norm} \bowtie_{hash(k)} S_{norm})
+$$
+
+-- Heavy hitter set:
+$$
+HH = \{k : freq(k) > \theta \cdot |R| / NDV(k)\}
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("skew-aware-hash-join";
+    "(hash-join ?build ?probe ?key)" =>
+    "(union
+        (broadcast-join (filter-skew ?build ?key) ?probe ?key)
+        (hash-join (filter-non-skew ?build ?key)
+                   (filter-non-skew ?probe ?key) ?key))"
+    if is_distributed_engine()
+    if join_key_skewed("?build", "?key", 10.0)
+    if partition_count_above(4)
+),
+```
+
+```rust
+struct SkewDetector {
+    frequency_threshold: f64,  // fraction of total (default: 0.01)
+    sample_rate: f64,          // runtime sampling rate (default: 0.01)
+    min_skew_ratio: f64,       // max_freq/avg_freq threshold (default: 10.0)
+}
+
+impl SkewDetector {
+    fn detect_from_statistics(
+        &self,
+        mcv_list: &[(Value, f64)],
+        total_rows: u64,
+        ndv: u64,
+    ) -> Vec<Value> {
+        let avg_frequency = total_rows as f64 / ndv as f64;
+        mcv_list.iter()
+            .filter(|(_, freq)| {
+                *freq > self.frequency_threshold * total_rows as f64
+                    && *freq / avg_frequency > self.min_skew_ratio
+            })
+            .map(|(val, _)| val.clone())
+            .collect()
+    }
+
+    fn detect_at_runtime(
+        &self,
+        sample: &[Value],
+        total_rows_estimate: u64,
+    ) -> Vec<Value> {
+        let mut counts: HashMap<&Value, usize> = HashMap::new();
+        for val in sample {
+            *counts.entry(val).or_default() += 1;
+        }
+        let threshold = (self.frequency_threshold * sample.len() as f64) as usize;
+        counts.into_iter()
+            .filter(|(_, count)| *count > threshold)
+            .map(|(val, _)| val.clone())
+            .collect()
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    build_stats: &ColumnStatistics,
+    probe_stats: &ColumnStatistics,
+    parallelism: usize,
+    skew_ratio_threshold: f64,
+) -> bool {
+    let build_skew_ratio = build_stats.max_frequency()
+        / build_stats.avg_frequency();
+    let probe_skew_ratio = probe_stats.max_frequency()
+        / probe_stats.avg_frequency();
+    // At least one side must be skewed
+    (build_skew_ratio > skew_ratio_threshold
+        || probe_skew_ratio > skew_ratio_threshold)
+    // Must have enough parallelism to benefit from splitting
+    && parallelism >= 4
+    // Skew set must be small enough to broadcast efficiently
+    && build_stats.heavy_hitter_count(skew_ratio_threshold)
+        < parallelism * 10
+}
+```
+
+**Restrictions:**
+- Broadcast of skew partition adds network overhead (must be small)
+- Runtime detection adds latency for initial sample collection
+- Non-equi joins cannot use this technique (hash partitioning required)
+- Multi-key joins: skew must be detected on the composite key
+- Statistics-based detection may miss runtime-only skew (parameter binding)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    parallelism: f64,
+    skew_fraction: f64,
+    skew_partition_max_rows: f64,
+) -> f64 {
+    // Without skew handling: straggler dominates
+    let straggler_time = skew_partition_max_rows;
+    // With skew handling: broadcast cost + balanced partition
+    let broadcast_cost = skew_fraction * total_rows;
+    let balanced_partition = (1.0 - skew_fraction) * total_rows / parallelism;
+    let skew_aware_time = broadcast_cost.max(balanced_partition);
+
+    (straggler_time - skew_aware_time) / straggler_time
+}
+```
+
+**Typical benefit**: 20-80% wall-clock reduction for joins on skewed keys.
+Maximum benefit when a single key accounts for >30% of rows and parallelism
+is high (>16 workers).
+
+## Test Cases
+
+```sql
+-- Positive: popular product dominates order_items join
+-- product_id=1 has 40% of all order_items (mega-seller)
+SELECT p.name, COUNT(*)
+FROM products p JOIN order_items oi ON p.id = oi.product_id
+GROUP BY p.name;
+-- Without skew handling: 1 worker gets 40% of data, 8x slower
+-- With skew handling: product_id=1 broadcast, rest hash-partitioned
+-- Speedup: 45s -> 8s on 16-worker cluster
+```
+
+```sql
+-- Positive: NULL key skew in outer join
+SELECT c.name, o.total
+FROM customers c LEFT JOIN orders o ON c.id = o.customer_id;
+-- 30% of orders have NULL customer_id (anonymous)
+-- NULL keys all hash to same partition -> straggler
+-- Skew-aware: NULL keys broadcast, non-NULL hash-partitioned
+```
+
+```sql
+-- Negative: uniform key distribution, no skew
+SELECT * FROM lineitem l JOIN part p ON l.l_partkey = p.p_partkey;
+-- NDV=200000, max_frequency/avg_frequency = 1.3
+-- Skew ratio below threshold, standard hash join optimal
+-- Broadcast overhead would exceed skew benefit
+```
+
+## References
+
+- DeWitt et al., "Practical Skew Handling in Parallel Joins", VLDB 1992
+- Xu et al., "Handling Data Skew in Parallel Joins in Shared-Nothing Systems", SIGMOD 2008
+- Bruno et al., "Handling Data Skew in MapReduce", VLDB 2010
+- StarRocks documentation: "Skew Join Optimization"
+- Spark AQE: "Optimizing Skew Joins" (Adaptive Query Execution)

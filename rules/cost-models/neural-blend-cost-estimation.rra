@@ -1,0 +1,175 @@
+---
+id: neural-blend-cost-estimation
+name: Neural/Traditional Cost Blending
+category: cost-models
+databases: [postgresql, duckdb, clickhouse]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, neural, machine-learning, confidence, blending, adaptive]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Neural/Traditional Cost Blending
+
+## Description
+
+This rule implements confidence-gated blending between a neural cost model
+and a traditional analytical cost model. The neural model provides learned
+cost predictions trained on historical execution data, while the traditional
+model uses calibrated formulas based on operator semantics and statistics.
+A confidence score alpha determines the interpolation weight, allowing
+graceful fallback to the traditional model when the neural model encounters
+out-of-distribution query patterns.
+
+The confidence gate prevents catastrophic neural model failures from
+propagating to plan selection. When the neural model has seen many similar
+queries (high training density in the feature neighborhood), alpha approaches
+1.0 and the neural prediction dominates. For novel query shapes or
+unseen table sizes, alpha decays toward 0.0, falling back to the
+well-understood traditional model. This ensures the system is never worse
+than the baseline optimizer.
+
+**When to apply**: In hybrid optimizer configurations where both a trained
+neural model and a traditional cost model are available. The blending
+provides robustness guarantees that pure neural approaches lack.
+
+## Relational Algebra
+
+```latex
+-- Traditional cost:
+$$
+C_{trad}(P) = \sum_{op \in P} cost_{analytical}(op, stats)
+$$
+
+-- Neural cost:
+$$
+C_{neural}(P) = f_\theta(features(P))
+$$
+
+-- Confidence-gated blend:
+$$
+\alpha = 1 - e^{-n_{similar} / \tau}
+$$
+
+$$
+C_{blend}(P) = \alpha \cdot C_{neural}(P) + (1 - \alpha) \cdot C_{trad}(P)
+$$
+
+-- Where $n_{similar}$ is training sample count in feature neighborhood
+-- and $\tau$ is a temperature controlling confidence ramp-up speed
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("neural-blend-cost-estimation";
+    "(cost-estimate ?plan ?traditional)" =>
+    "(blended-cost ?plan ?traditional ?neural ?alpha)"
+    if neural_model_available()
+    if confidence_above_threshold("?plan", 0.05)
+),
+```
+
+```rust
+struct NeuralBlendCostModel {
+    neural: FastCostModel,
+    traditional: AnalyticalCostModel,
+    tau: f64,             // confidence temperature (default: 5000)
+    min_alpha: f64,       // floor for neural weight (default: 0.0)
+    max_alpha: f64,       // ceiling for neural weight (default: 0.95)
+}
+
+impl NeuralBlendCostModel {
+    fn estimate(&self, plan: &RelExpr, stats: &Statistics) -> f64 {
+        let features = plan.extract_features(stats);
+        let c_neural = self.neural.predict_cpu_ms(&features);
+        let c_trad = self.traditional.estimate(plan, stats);
+
+        let n_similar = self.neural.neighborhood_count(&features);
+        let raw_alpha = 1.0 - (-n_similar as f64 / self.tau).exp();
+        let alpha = raw_alpha.clamp(self.min_alpha, self.max_alpha);
+
+        alpha * c_neural as f64 + (1.0 - alpha) * c_trad
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    neural_model: &FastCostModel,
+    plan_features: &[f32],
+    min_training_samples: usize,
+) -> bool {
+    // Model must be trained (not freshly initialized)
+    neural_model.is_trained()
+    // Feature vector must be valid (no NaN/Inf)
+    && plan_features.iter().all(|f| f.is_finite())
+    // At least some neighborhood density
+    && neural_model.neighborhood_count(plan_features)
+        >= min_training_samples
+}
+```
+
+**Restrictions:**
+- Neural model must be periodically retrained as data distribution shifts
+- Feature extraction must be deterministic for consistent cost comparison
+- Blending adds ~100ns overhead per cost estimate (two model evaluations)
+- Alpha calibration (tau) is workload-dependent and needs tuning
+- Cannot guarantee monotonicity of blended costs across plan alternatives
+
+## Cost Model
+
+```rust
+fn blending_quality(
+    neural_mae: f64,
+    traditional_mae: f64,
+    blend_mae: f64,
+    plan_selection_accuracy: f64,
+) -> f64 {
+    // Blend should be at least as good as the better component
+    let best_component = neural_mae.min(traditional_mae);
+    let improvement = (best_component - blend_mae) / best_component;
+    // Weight by plan selection accuracy (what actually matters)
+    improvement * plan_selection_accuracy
+}
+```
+
+**Typical benefit**: 10-60% improvement in plan selection accuracy over
+either model alone. Largest gains on mixed workloads with both familiar
+and novel query patterns.
+
+## Test Cases
+
+```sql
+-- Positive: familiar query pattern, neural model confident
+-- n_similar = 15000, alpha = 0.95
+EXPLAIN SELECT COUNT(*) FROM orders
+WHERE customer_id = 42 AND status = 'shipped';
+-- Neural cost: 2.3ms (accurate, trained on many similar)
+-- Traditional cost: 8.1ms (overestimates due to correlation)
+-- Blended cost: 2.3 * 0.95 + 8.1 * 0.05 = 2.59ms
+```
+
+```sql
+-- Negative: novel query shape, neural model uncertain
+-- n_similar = 12, alpha = 0.002
+EXPLAIN SELECT DISTINCT ON (region)
+  region, MAX(amount) OVER (PARTITION BY region)
+FROM orders CROSS JOIN LATERAL generate_series(1, 100);
+-- Neural cost: 0.01ms (wildly wrong, never seen this pattern)
+-- Traditional cost: 450ms (reasonable analytical estimate)
+-- Blended cost: 0.01 * 0.002 + 450 * 0.998 = 449.1ms (safe fallback)
+```
+
+## References
+
+- Marcus et al., "Neo: A Learned Query Optimizer", VLDB 2019
+- Marcus et al., "Bao: Making Learned Query Optimization Practical", SIGMOD 2021
+- Sun & Li, "An End-to-End Learning-based Cost Estimator", VLDB 2019
+- Hilprecht et al., "DeepDB: Learn from Data, not from Queries!", VLDB 2020
+- Zhu et al., "FLAT: Fast, Lightweight and Accurate Method for Cardinality Estimation", VLDB 2021

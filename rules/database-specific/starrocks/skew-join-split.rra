@@ -1,0 +1,166 @@
+---
+id: starrocks-skew-join-split
+name: "StarRocks Skew-Aware Join Splitting"
+category: database-specific/starrocks
+databases: [starrocks]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, starrocks, skew, join, split, load-balance, hotspot]
+complexity: "O(n)"
+benefit_range: [0.2, 0.7]
+---
+
+# StarRocks Skew-Aware Join Splitting
+
+## Metadata
+- **Rule ID**: `starrocks-skew-join-split`
+- **Category**: Database-specific / StarRocks
+- **Source**: `fe/fe-core/src/main/java/com/starrocks/sql/optimizer/rule/transformation/SkewJoinOptimizeRule.java`
+- **Complexity**: O(n) where n is rows in the skewed input
+- **Prerequisites**: Detected data skew on join key; statistics available
+- **Alternatives**: Standard hash join (suffers from hotspot); broadcast join
+
+## Description
+
+Data skew is a common performance killer in distributed joins: when a small
+number of join key values account for a disproportionate share of rows, the
+hash partitioning concentrates those rows on a single node, creating a
+bottleneck. StarRocks detects skew through column statistics (most common
+values and their frequencies) and applies a split-join strategy for skewed
+values.
+
+The optimizer identifies "hot" join key values — those whose frequency
+exceeds a configurable threshold (e.g., >5% of total rows). For these values,
+it splits the join into two branches: one that handles hot values via
+broadcast (or random redistribution with salt), and one that handles the
+remaining values via standard hash partitioning. The results are combined
+with UNION ALL.
+
+The hot-value branch works by appending a random salt column to break the
+concentration: rows with the hot key value are distributed randomly across
+all nodes, and the corresponding dimension rows are broadcast to all nodes.
+This converts the O(N) single-node bottleneck into O(N/P) parallel work
+across P nodes. The cold-value branch proceeds with standard hash join,
+which remains balanced because the skewed values have been removed.
+
+## Relational Algebra
+
+```latex
+% Before: skewed hash join (hot value v dominates one partition)
+R \bowtie_{R.k = S.k} S
+
+% After: split into hot and cold paths
+\text{let } R_{hot} = \sigma_{k \in \{v_1,...,v_m\}}(R)
+\text{let } R_{cold} = \sigma_{k \notin \{v_1,...,v_m\}}(R)
+
+(R_{hot} \bowtie_{\text{broadcast}} S) \cup (R_{cold} \bowtie_{\text{hash}} S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("starrocks-skew-join-split";
+    "(hash-join ?cond (exchange hash(?k) ?left) (exchange hash(?k) ?right))" =>
+    "(union-all
+        (hash-join ?cond
+            (exchange random (filter (in ?k ?hot_values) ?left))
+            (exchange broadcast (filter (in ?k ?hot_values) ?right)))
+        (hash-join ?cond
+            (exchange hash(?k) (filter (not-in ?k ?hot_values) ?left))
+            (exchange hash(?k) (filter (not-in ?k ?hot_values) ?right))))"
+    if has_skewed_join_key("?left", "?k")
+    if skew_ratio_exceeds_threshold("?left", "?k", 0.05)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join: &JoinNode,
+    stats: &ColumnStatistics,
+    config: &OptimizerConfig,
+) -> bool {
+    // Statistics must be available for the join key
+    let join_key = join.left_join_key();
+    let col_stats = stats.get(join_key);
+
+    col_stats.is_some()
+    // Must have MCV (most common values) information
+    && col_stats.unwrap().mcv_list().is_some()
+    // At least one value exceeds the skew threshold
+    && col_stats.unwrap().mcv_list().unwrap()
+        .iter()
+        .any(|(_, freq)| *freq > config.skew_threshold())
+    // Join must be equi-join (skew split only works for equality)
+    && join.is_equi_join()
+    // Benefit must exceed the cost of extra filter + union
+    && estimated_skew_benefit(join, col_stats.unwrap()) > 0.0
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_skew_join_split(
+    total_rows: u64,
+    hot_rows: u64,
+    cold_rows: u64,
+    num_nodes: u64,
+    dim_rows: u64,
+) -> f64 {
+    // Original cost: dominated by hotspot node processing hot_rows alone
+    let original_latency = hot_rows as f64 * 30.0; // single node bottleneck
+
+    // Split cost: hot path parallel + cold path balanced
+    let hot_broadcast_cost = dim_rows as f64 * num_nodes as f64 * 0.5;
+    let hot_join_cost = (hot_rows as f64 / num_nodes as f64) * 30.0;
+    let cold_join_cost = (cold_rows as f64 / num_nodes as f64) * 30.0;
+    let split_latency = hot_broadcast_cost
+        + f64::max(hot_join_cost, cold_join_cost);
+
+    original_latency - split_latency
+}
+```
+
+**Typical benefit**: 20-70% when a small number of values (1-10) contain >20%
+of all rows. Extreme skew (one value = 50%+ of rows) yields the highest
+benefit. No benefit when data is uniformly distributed.
+
+## Test Cases
+
+```sql
+-- Positive: NULL-heavy foreign key causes extreme skew
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- If 30% of orders have customer_id = NULL (anonymous orders),
+-- hash(NULL) sends 30% of data to one node.
+-- Skew split: broadcast customers to all nodes for NULL rows,
+-- hash-join the rest normally.
+
+-- Positive: Popular product dominates join key
+SELECT oi.*, p.name
+FROM order_items oi JOIN products p ON oi.product_id = p.id;
+-- If product_id=42 ("basic widget") appears in 15% of order_items,
+-- that partition becomes the bottleneck.
+-- Split: random-distribute hot product rows, hash-join the rest.
+
+-- Negative: Uniform distribution, no skew detected
+SELECT a.*, b.info
+FROM table_a a JOIN table_b b ON a.id = b.id;
+-- MCV analysis shows no value exceeds 0.1% frequency; standard hash join
+
+-- Negative: Broadcast join already planned (small dimension)
+SELECT f.*, d.name FROM fact f JOIN tiny_dim d ON f.dim_id = d.id;
+-- Dimension is small enough to broadcast; skew is irrelevant
+```
+
+## References
+
+- StarRocks: `fe/fe-core/src/main/java/com/starrocks/sql/optimizer/rule/transformation/SkewJoinOptimizeRule.java`
+- StarRocks: `fe/fe-core/src/main/java/com/starrocks/sql/optimizer/statistics/ColumnStatistic.java`
+- DeWitt et al., "Practical Skew Handling in Parallel Joins" (VLDB 1992)

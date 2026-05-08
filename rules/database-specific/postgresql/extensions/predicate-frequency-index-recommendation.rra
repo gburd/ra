@@ -1,0 +1,172 @@
+---
+id: predicate-frequency-index-recommendation
+name: Predicate Frequency Index Recommendation
+category: database-specific/postgresql/extensions
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [postgresql, pg-qualstats, index-recommendation, workload-analysis, extensions]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# Predicate Frequency Index Recommendation
+
+## Description
+
+pg_qualstats-style predicate tracking instruments the executor to record
+which WHERE clause predicates are evaluated, how often, and their observed
+selectivities. By accumulating this workload profile over time, the system
+identifies high-frequency column combinations that would benefit from
+composite indexes but lack them.
+
+Unlike static analysis of query text, this approach captures runtime
+predicate behavior including prepared statement parameter distributions,
+dynamic SQL patterns, and ORM-generated queries. The frequency-weighted
+benefit calculation prioritizes indexes that serve the most impactful
+subset of the total workload, respecting a budget constraint on total
+index count and storage.
+
+**When to apply**: During workload analysis phases to identify missing
+composite indexes. Particularly effective for OLTP workloads with
+predictable access patterns where the DBA has not manually tuned indexes.
+
+**Database version**: PostgreSQL 10+ (with pg_qualstats extension)
+
+## Relational Algebra
+
+```latex
+-- Predicate observation model:
+$$
+W = \{(q_i, P_i, f_i, s_i)\} \text{ where } P_i = \text{predicates}, f_i = \text{frequency}, s_i = \text{selectivity}
+$$
+
+-- Candidate index benefit:
+$$
+B(I_{cols}) = \sum_{q_i \in W} f_i \cdot \mathbb{1}[cols \subseteq P_i] \cdot (C_{seq}(q_i) - C_{idx}(q_i, I_{cols}))
+$$
+
+-- Index selection under budget:
+$$
+\max \sum_j B(I_j) \quad \text{s.t.} \quad \sum_j size(I_j) \leq S_{budget}
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("predicate-frequency-index-recommendation";
+    "(seq-scan ?table ?pred)" =>
+    "(recommended-index-scan ?table ?pred)"
+    if is_database("postgresql")
+    if predicate_frequency_exceeds("?table", "?pred", 100)
+    if no_covering_index_exists("?table", "?pred")
+    if selectivity_below("?pred", 0.1)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableRef,
+    predicate_columns: &[Column],
+    workload_stats: &QualStats,
+    min_frequency: u64,
+    max_existing_indexes: usize,
+) -> bool {
+    let freq = workload_stats.predicate_frequency(
+        table, predicate_columns
+    );
+    let existing = table.index_count();
+    // High-frequency predicate pattern
+    freq >= min_frequency
+    // No existing index covers these columns
+    && !table.has_covering_index(predicate_columns)
+    // Table not already over-indexed (write amplification)
+    && existing < max_existing_indexes
+    // Predicate is selective enough to benefit from index
+    && workload_stats.avg_selectivity(table, predicate_columns) < 0.15
+}
+```
+
+**Restrictions:**
+- Requires representative workload sampling period (hours to days)
+- Write-heavy tables may not benefit despite selective reads
+- Column ordering in composite index affects usability
+- Cannot detect beneficial partial indexes automatically
+- ORM patterns may produce many similar but distinct predicates
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    predicate_frequency: u64,
+    avg_selectivity: f64,
+    table_pages: f64,
+    estimated_index_pages: f64,
+    write_ratio: f64,
+) -> f64 {
+    // Read benefit: sequential scan savings per query
+    let read_savings_per_query =
+        table_pages - (estimated_index_pages + avg_selectivity * table_pages);
+    let total_read_benefit =
+        read_savings_per_query * predicate_frequency as f64;
+
+    // Write cost: additional index maintenance
+    let write_penalty = estimated_index_pages * 0.3 * write_ratio;
+
+    (total_read_benefit - write_penalty) / (table_pages * predicate_frequency as f64)
+}
+```
+
+**Typical benefit**: 20-80% query time reduction for workloads with
+identifiable hot predicate patterns. Best results on read-heavy OLTP
+with 10+ repeated query templates.
+
+## Test Cases
+
+```sql
+-- Positive: high-frequency two-column predicate without index
+-- pg_qualstats shows (customer_id, status) evaluated 50000 times/hour
+SELECT * FROM orders
+WHERE customer_id = $1 AND status = 'pending';
+-- Recommendation: CREATE INDEX ON orders(customer_id, status)
+-- Expected speedup: SeqScan(200ms) -> IndexScan(0.5ms)
+```
+
+```sql
+-- Negative: low selectivity predicate (index not beneficial)
+-- pg_qualstats shows (is_active) with selectivity 0.85
+SELECT * FROM users WHERE is_active = true;
+-- No index recommended: 85% of table matches, SeqScan optimal
+```
+
+```sql
+-- Positive: three-column composite from correlated predicates
+-- pg_qualstats shows frequent combination of ship_date, region, priority
+SELECT * FROM lineitem
+WHERE l_shipdate > $1
+  AND l_region = $2
+  AND l_priority = 'HIGH';
+-- Recommendation: CREATE INDEX ON lineitem(l_region, l_priority, l_shipdate)
+-- Column order: equality predicates first, range predicate last
+```
+
+```sql
+-- Negative: write-heavy table where index overhead exceeds read benefit
+-- Table has 90% write, 10% read ratio
+INSERT INTO event_log(ts, type, data) VALUES (now(), $1, $2);
+SELECT * FROM event_log WHERE type = $1 AND ts > $2;
+-- Despite selective predicate, write amplification makes index net-negative
+```
+
+## References
+
+- pg_qualstats: https://powa.readthedocs.io/en/latest/components/pg_qualstats.html
+- PoWA (PostgreSQL Workload Analyzer): https://powa.readthedocs.io/
+- Chaudhuri & Narasayya, "An Efficient Cost-Driven Index Selection Tool", VLDB 1997
+- Bruno & Chaudhuri, "Automatic Physical Database Tuning", SIGMOD 2005
+- Schlosser et al., "Efficient Scalable Multi-Attribute Index Selection", VLDB 2019

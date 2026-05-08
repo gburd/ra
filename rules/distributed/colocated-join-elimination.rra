@@ -1,0 +1,213 @@
+---
+id: colocated-join-elimination
+name: Colocated Join Shuffle Elimination
+category: distributed
+databases: [starrocks, teradata, citus, cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, colocation, shuffle, partition, join, data-movement]
+complexity: O(1)
+benefit_range: [0.3, 0.9]
+---
+
+# Colocated Join Shuffle Elimination
+
+## Description
+
+In distributed databases, equi-joins normally require data shuffling
+(redistribution) so that matching rows from both tables are colocated on
+the same node. When two tables are already hash-distributed on their join
+key (colocated), the shuffle can be eliminated entirely, converting a
+distributed join into a set of independent local joins executed in
+parallel on each node without any network data movement.
+
+Colocation occurs when both tables use the same distribution key (or a
+prefix thereof), the same number of hash buckets, and are mapped to the
+same set of nodes with the same bucket-to-node assignment. The optimizer
+must verify these structural properties through catalog metadata. This
+optimization is the single largest performance win in distributed
+query processing, often reducing join latency by 10-100x by eliminating
+network transfer of the larger table.
+
+**When to apply**: For equi-joins in distributed databases where both
+tables share distribution key, bucket count, and node mapping. Also
+applies transitively: if A is colocated with B and B with C, then
+A-B-C joins are all local.
+
+## Relational Algebra
+
+```latex
+-- Standard distributed join (requires shuffle):
+$$
+R \bowtie_k S = \text{gather}(\text{shuffle}_k(R) \bowtie \text{shuffle}_k(S))
+$$
+
+-- Colocated join (no shuffle):
+$$
+R \bowtie_k S = \text{gather}(\text{local\_join}(R_i, S_i)) \quad \forall i \in [1, N]
+$$
+
+-- Colocation predicate:
+$$
+\text{colocated}(R, S, k) \iff dist\_key(R) = k \land dist\_key(S) = k \land buckets(R) = buckets(S)
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("colocated-join-elimination";
+    "(shuffle-join (shuffle ?left ?key) (shuffle ?right ?key) ?cond)" =>
+    "(local-join ?left ?right ?cond)"
+    if tables_colocated("?left", "?right", "?key")
+),
+```
+
+```rust
+struct ColocationInfo {
+    distribution_key: Vec<Column>,
+    bucket_count: u32,
+    bucket_to_node: Vec<NodeId>,
+    colocate_group: Option<String>,
+}
+
+fn tables_colocated(
+    left: &DistributionInfo,
+    right: &DistributionInfo,
+    join_key: &[Column],
+) -> bool {
+    // Distribution keys must be prefix of or equal to join key
+    let left_dist = left.distribution_key();
+    let right_dist = right.distribution_key();
+
+    // Keys must match in position and type
+    left_dist == right_dist
+    // Bucket count must be identical
+    && left.bucket_count() == right.bucket_count()
+    // Bucket-to-node mapping must be identical
+    && left.bucket_to_node() == right.bucket_to_node()
+    // Join key must use the distribution columns
+    && join_key.iter().zip(left_dist.iter()).all(|(jk, dk)| jk == dk)
+    // Hash functions must be the same
+    && left.hash_function() == right.hash_function()
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left_table: &DistributedTable,
+    right_table: &DistributedTable,
+    join_condition: &JoinCondition,
+) -> bool {
+    // Must be an equi-join
+    join_condition.is_equi_join()
+    // Both tables must be hash-distributed (not replicated/random)
+    && left_table.distribution().is_hash()
+    && right_table.distribution().is_hash()
+    // Distribution keys must match join keys
+    && distribution_matches_join(
+        left_table.distribution_key(),
+        right_table.distribution_key(),
+        join_condition.equi_columns(),
+    )
+    // Bucket counts must match
+    && left_table.bucket_count() == right_table.bucket_count()
+    // No rebalancing in progress (topology stable)
+    && !left_table.is_rebalancing()
+    && !right_table.is_rebalancing()
+}
+```
+
+**Restrictions:**
+- Only works for equi-joins on the exact distribution key columns
+- Bucket count differences force one side to reshuffle
+- Range-partitioned tables require different colocation semantics
+- Adding/removing nodes invalidates colocation (rebalancing period)
+- Expression-based distribution (e.g., HASH(a+b)) must match exactly
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    row_size_bytes: f64,
+    network_bandwidth_mbps: f64,
+    num_nodes: f64,
+) -> f64 {
+    // Shuffle cost: both sides redistributed across network
+    let shuffle_bytes = (left_rows + right_rows) * row_size_bytes;
+    let shuffle_time_ms = shuffle_bytes / (network_bandwidth_mbps * 1e6 / 8.0) * 1000.0;
+    // Serialization/deserialization overhead
+    let serde_time_ms = (left_rows + right_rows) * 0.001; // 1us per row
+
+    // Local join has zero network cost
+    let elimination_savings = shuffle_time_ms + serde_time_ms;
+    let local_join_time = (left_rows + right_rows) / num_nodes * 0.0001;
+
+    elimination_savings / (elimination_savings + local_join_time)
+}
+```
+
+**Typical benefit**: 30-90% reduction in join execution time. The benefit
+scales with data volume and inversely with network bandwidth. For
+multi-TB joins on 10Gbps networks, elimination saves minutes of shuffle time.
+
+## Test Cases
+
+```sql
+-- Positive: orders and line_items colocated on order_id
+-- Both tables: DISTRIBUTED BY HASH(order_id) BUCKETS 32
+SELECT o.order_date, SUM(li.amount)
+FROM orders o
+JOIN line_items li ON o.id = li.order_id
+GROUP BY o.order_date;
+-- Shuffle eliminated: each node joins its local partition
+-- Network transfer: 0 bytes (vs 50GB without colocation)
+-- Execution time: 2s (vs 45s with shuffle)
+```
+
+```sql
+-- Positive: transitive colocation in star schema
+-- fact_sales DISTRIBUTED BY HASH(store_id) BUCKETS 64
+-- dim_stores DISTRIBUTED BY HASH(id) BUCKETS 64
+-- inventory DISTRIBUTED BY HASH(store_id) BUCKETS 64
+SELECT s.name, SUM(f.revenue), SUM(i.quantity)
+FROM fact_sales f
+JOIN dim_stores s ON f.store_id = s.id
+JOIN inventory i ON f.store_id = i.store_id
+GROUP BY s.name;
+-- All three joins are colocated: zero shuffles in entire plan
+```
+
+```sql
+-- Negative: different bucket counts prevent colocation
+-- users: DISTRIBUTED BY HASH(id) BUCKETS 32
+-- events: DISTRIBUTED BY HASH(user_id) BUCKETS 64
+SELECT u.name, COUNT(e.id)
+FROM users u JOIN events e ON u.id = e.user_id
+GROUP BY u.name;
+-- Bucket mismatch: events must be reshuffled to 32 buckets
+-- Cannot eliminate shuffle despite same distribution key
+```
+
+```sql
+-- Negative: join key differs from distribution key
+-- orders: DISTRIBUTED BY HASH(order_id)
+-- customers: DISTRIBUTED BY HASH(customer_id)
+SELECT * FROM orders o JOIN customers c ON o.region = c.region;
+-- Join on region, but distributed by different keys
+-- Full shuffle required on both sides
+```
+
+## References
+
+- DeWitt & Gray, "Parallel Database Systems: The Future of High Performance Database Systems", CACM 1992
+- StarRocks documentation: "Colocate Join"
+- CockroachDB: "Table Localities and Zone Configurations"
+- Citus documentation: "Distributed Query Planning"
+- Teradata: "Table Colocation and Primary Index Design"

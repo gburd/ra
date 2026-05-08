@@ -1,0 +1,171 @@
+---
+id: teradata-amp-partial-groupby
+name: "Teradata AMP-Level Partial Aggregation"
+category: database-specific/teradata
+databases: [teradata]
+execution_models: [row-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, teradata, amp, partial-aggregate, redistribution, two-phase]
+complexity: "O(n)"
+benefit_range: [0.2, 0.7]
+---
+
+# Teradata AMP-Level Partial Aggregation
+
+## Metadata
+- **Rule ID**: `teradata-amp-partial-groupby`
+- **Category**: Database-specific / Teradata
+- **Source**: Teradata Optimizer (proprietary), documented in Teradata performance manuals
+- **Complexity**: O(n) where n is rows per AMP
+- **Prerequisites**: GROUP BY key differs from table's primary index (distribution key)
+- **Alternatives**: Full redistribution before aggregation; aggregation on single AMP
+
+## Description
+
+In Teradata's shared-nothing architecture, each AMP (Access Module Processor)
+owns a fixed partition of data determined by the table's Primary Index hash.
+When a GROUP BY query groups on a column that differs from the Primary Index,
+data must be redistributed to colocate rows with the same group key on the
+same AMP. Naively, this means shipping all N rows across the interconnect.
+
+AMP-level partial aggregation reduces network traffic by performing a local
+pre-aggregation on each AMP before redistribution. Each AMP computes partial
+aggregates (partial SUM, COUNT, etc.) for whatever group keys happen to be
+locally present. Only these partial aggregates — which are typically much
+fewer than the raw rows — are then redistributed by the group key hash. A
+final aggregation step combines the partial results into the complete answer.
+
+This two-phase approach is beneficial when the aggregation has a significant
+reduction ratio (many input rows collapse into fewer groups). The network
+savings equal (original_rows - local_groups) * row_size. For aggregations
+with low cardinality (e.g., GROUP BY region with 50 regions on 100 AMPs),
+each AMP sends at most 50 partial rows instead of potentially millions of
+raw rows. The technique is less effective when cardinality approaches the
+number of input rows (e.g., GROUP BY unique_id).
+
+## Relational Algebra
+
+```latex
+% Before: redistribute all rows, then aggregate
+\gamma_{g, \text{SUM}(x)}(\text{Exchange}_{\text{hash}(g)}(\text{Scan}(T)))
+
+% After: local partial aggregate, redistribute partials, final aggregate
+\gamma_{g, \text{SUM}(partial\_sum)}(
+    \text{Exchange}_{\text{hash}(g)}(
+        \gamma_{g, \text{SUM}(x) \text{ AS } partial\_sum}^{\text{local}}(\text{Scan}(T))
+    )
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("teradata-amp-partial-groupby";
+    "(agg ?group ?funcs (exchange hash(?group) (scan ?table)))" =>
+    "(agg-final ?group ?funcs
+        (exchange hash(?group)
+            (agg-partial ?group ?funcs (scan ?table))))"
+    if group_key_differs_from_distribution("?group", "?table")
+    if aggregates_are_decomposable("?funcs")
+    if reduction_ratio_sufficient("?group", "?table", 0.5)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    aggregate: &AggregateNode,
+    table: &TableDescriptor,
+    stats: &Statistics,
+) -> bool {
+    // GROUP BY key must differ from Primary Index (otherwise already local)
+    let group_cols = aggregate.group_by_cols();
+    let pi_cols = table.primary_index_columns();
+    group_cols != pi_cols
+    // All aggregate functions must be decomposable (have partial/final forms)
+    && aggregate.agg_functions().iter().all(|f| f.is_decomposable())
+    // Reduction ratio must be sufficient to offset partial agg overhead
+    // (estimated_groups / input_rows < threshold)
+    && stats.estimated_ndv(group_cols) <
+        (stats.row_count(table) as f64 * 0.5) as u64
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_amp_partial_groupby(
+    rows_per_amp: u64,
+    local_groups_per_amp: u64,
+    num_amps: u64,
+    row_bytes: u64,
+    hardware: &HardwareModel,
+) -> f64 {
+    // Without partial: redistribute all rows
+    let full_network = rows_per_amp as f64 * num_amps as f64
+        * row_bytes as f64 / hardware.network_bandwidth() as f64;
+
+    // With partial: local agg + redistribute partials
+    let local_agg_cost = rows_per_amp as f64 * 20.0; // hash aggregate
+    let partial_network = local_groups_per_amp as f64 * num_amps as f64
+        * row_bytes as f64 / hardware.network_bandwidth() as f64;
+    let final_agg_cost = local_groups_per_amp as f64 * num_amps as f64 * 10.0;
+
+    let savings = full_network - (local_agg_cost + partial_network + final_agg_cost);
+    savings
+}
+```
+
+**Typical benefit**: 20-70% network reduction. For a table with 100M rows
+across 100 AMPs grouped into 1000 groups, each AMP processes 1M rows locally
+and produces at most 1000 partial groups. Network traffic drops from 1M rows
+per AMP to 1000 rows per AMP (1000x reduction).
+
+## Test Cases
+
+```sql
+-- Positive: Low-cardinality GROUP BY on non-PI column
+CREATE TABLE sales (
+    sale_id INTEGER,       -- Primary Index
+    region VARCHAR(50),
+    product_id INTEGER,
+    amount DECIMAL(10,2)
+) PRIMARY INDEX (sale_id);
+
+SELECT region, SUM(amount), COUNT(*)
+FROM sales
+GROUP BY region;
+-- PI is sale_id but GROUP BY is region (50 values).
+-- Each AMP pre-aggregates into <=50 partial rows before redistribution.
+-- 100M rows / 100 AMPs = 1M rows/AMP -> max 50 partial rows/AMP shipped.
+
+-- Positive: Date-based aggregation on transaction table
+SELECT EXTRACT(MONTH FROM txn_date), SUM(amount), AVG(amount)
+FROM transactions   -- PI on txn_id
+GROUP BY EXTRACT(MONTH FROM txn_date);
+-- 12 groups; massive reduction from millions of rows per AMP to 12 partials
+
+-- Negative: GROUP BY matches Primary Index (already local)
+SELECT sale_id, MAX(amount)
+FROM sales
+GROUP BY sale_id;
+-- sale_id IS the Primary Index; each group is already on one AMP, no redistrib
+
+-- Negative: High-cardinality GROUP BY (no reduction)
+SELECT customer_id, SUM(amount)
+FROM sales
+GROUP BY customer_id;
+-- If customer_id has NDV close to row count, partial agg produces
+-- nearly as many groups as input rows; overhead exceeds savings
+```
+
+## References
+
+- Teradata Database Design Manual: "Partial Group-By Optimization"
+- Teradata EXPLAIN output: "partial group-by step" / "final group-by step"
+- Shatdal & Naughton, "Adaptive Parallel Aggregation Algorithms" (SIGMOD 1995)

@@ -1,0 +1,185 @@
+---
+id: system-fingerprint-aware-costing
+name: SystemFingerprint-Driven Cost Adjustment
+category: cost-models
+databases: [postgresql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, hardware, fingerprint, utilization, adaptive, system-aware]
+complexity: O(1)
+benefit_range: [0.1, 0.5]
+---
+
+# SystemFingerprint-Driven Cost Adjustment
+
+## Description
+
+Traditional cost models use static hardware parameters (disk IOPS, memory
+bandwidth, CPU speed) calibrated at setup time. SystemFingerprint-driven
+costing captures real-time hardware utilization metrics and adjusts cost
+estimates dynamically. When the system is under heavy I/O load, random
+read costs increase; when memory pressure is high, hash join spill
+probability increases; when CPU is saturated, computation-heavy plans
+become relatively more expensive.
+
+The SystemFingerprint is a compact vector summarizing current hardware
+state: CPU utilization, memory pressure, I/O queue depth, network
+bandwidth saturation, and cache hit ratios. This fingerprint modulates
+the base cost parameters through learned adjustment factors, enabling
+the optimizer to make load-aware plan decisions that account for resource
+contention from concurrent workloads.
+
+**When to apply**: In multi-tenant or mixed-workload environments where
+hardware utilization varies significantly over time and static cost
+parameters lead to suboptimal plans during peak load periods.
+
+## Relational Algebra
+
+```latex
+-- Static cost model:
+$$
+C_{static}(op) = w_{io} \cdot IO(op) + w_{cpu} \cdot CPU(op) + w_{mem} \cdot MEM(op)
+$$
+
+-- SystemFingerprint vector:
+$$
+\vec{F} = (u_{cpu}, u_{mem}, u_{io}, d_{queue}, h_{cache})
+$$
+
+-- Adjusted cost with fingerprint modulation:
+$$
+C_{adj}(op) = C_{static}(op) \cdot \prod_i (1 + \beta_i \cdot F_i)
+$$
+
+-- Where $\beta_i$ are learned sensitivity coefficients per resource
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("system-fingerprint-aware-costing";
+    "(cost ?plan ?static_cost)" =>
+    "(adjusted-cost ?plan ?static_cost ?fingerprint)"
+    if system_fingerprint_available()
+    if utilization_deviation_significant(0.2)
+),
+```
+
+```rust
+struct SystemFingerprint {
+    cpu_utilization: f32,      // 0.0 - 1.0
+    memory_pressure: f32,      // 0.0 - 1.0 (ratio of used/available)
+    io_queue_depth: f32,       // normalized 0.0 - 1.0
+    disk_bandwidth_util: f32,  // 0.0 - 1.0
+    cache_hit_ratio: f32,      // 0.0 - 1.0
+}
+
+struct FingerprintCostAdjuster {
+    beta_cpu: f32,           // CPU sensitivity (default: 1.5)
+    beta_mem: f32,           // Memory sensitivity (default: 2.0)
+    beta_io: f32,            // I/O sensitivity (default: 3.0)
+    beta_cache: f32,         // Cache sensitivity (default: -0.5)
+    baseline: SystemFingerprint,
+}
+
+impl FingerprintCostAdjuster {
+    fn adjust_cost(&self, base_cost: f64, op: &Operator, fp: &SystemFingerprint) -> f64 {
+        let io_factor = 1.0 + self.beta_io as f64
+            * (fp.io_queue_depth - self.baseline.io_queue_depth) as f64;
+        let cpu_factor = 1.0 + self.beta_cpu as f64
+            * (fp.cpu_utilization - self.baseline.cpu_utilization) as f64;
+        let mem_factor = match op {
+            Operator::HashJoin { .. } | Operator::HashAggregate { .. } =>
+                1.0 + self.beta_mem as f64
+                    * (fp.memory_pressure - self.baseline.memory_pressure) as f64,
+            _ => 1.0,
+        };
+
+        let combined = io_factor.max(0.5) * cpu_factor.max(0.5) * mem_factor.max(0.5);
+        base_cost * combined
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    fingerprint: &SystemFingerprint,
+    baseline: &SystemFingerprint,
+    deviation_threshold: f32,
+) -> bool {
+    let deviation = (fingerprint.cpu_utilization - baseline.cpu_utilization).abs()
+        + (fingerprint.io_queue_depth - baseline.io_queue_depth).abs()
+        + (fingerprint.memory_pressure - baseline.memory_pressure).abs();
+    // Only adjust when system state differs meaningfully from calibration baseline
+    deviation > deviation_threshold
+    // Fingerprint must be recent (not stale)
+    && fingerprint.age_ms() < 5000
+}
+```
+
+**Restrictions:**
+- Fingerprint collection adds ~1ms overhead per planning cycle
+- Rapid oscillations in utilization can cause plan instability (damping needed)
+- Multi-socket NUMA systems need per-socket fingerprints
+- Container environments may report host-level rather than container metrics
+- Baseline must be recalibrated when hardware changes
+
+## Cost Model
+
+```rust
+fn adjustment_quality(
+    actual_runtime_ms: f64,
+    static_estimate_ms: f64,
+    adjusted_estimate_ms: f64,
+) -> f64 {
+    let static_error = (actual_runtime_ms - static_estimate_ms).abs();
+    let adjusted_error = (actual_runtime_ms - adjusted_estimate_ms).abs();
+    (static_error - adjusted_error) / static_error
+}
+```
+
+**Typical benefit**: 10-50% improvement in plan selection during high-load
+periods. Particularly impactful for OLTP workloads sharing resources with
+OLAP batch processing (mixed workload environments).
+
+## Test Cases
+
+```sql
+-- Positive: I/O saturated system, prefer CPU-intensive plan
+-- Fingerprint: io_queue_depth=0.9, cpu_utilization=0.2
+EXPLAIN SELECT * FROM orders o JOIN customers c ON o.cid = c.id
+WHERE c.region = 'US';
+-- Static: prefers Hash Join (I/O for build + probe)
+-- Adjusted: prefers Merge Join (CPU for sort, less I/O)
+-- I/O factor inflates Hash Join cost by 3.7x
+```
+
+```sql
+-- Positive: memory pressure high, avoid hash operations
+-- Fingerprint: memory_pressure=0.85
+EXPLAIN SELECT department, COUNT(*) FROM employees
+GROUP BY department;
+-- Static: Hash Aggregate (work_mem sufficient)
+-- Adjusted: Sort + Group Aggregate (avoids hash table allocation)
+-- Memory factor inflates Hash Aggregate spill risk
+```
+
+```sql
+-- Negative: system idle, no adjustment needed
+-- Fingerprint: all metrics near baseline
+EXPLAIN SELECT * FROM products WHERE category_id = 5;
+-- Static cost = Adjusted cost (no modulation applied)
+-- Deviation below threshold, fingerprint adjustment skipped
+```
+
+## References
+
+- Pavlo et al., "Self-Driving Database Management Systems", CIDR 2017
+- Ma et al., "Query-Based Workload Forecasting for Self-Driving DBMSs", SIGMOD 2018
+- Van Aken et al., "Automatic Database Management System Tuning Through Large-scale Machine Learning", SIGMOD 2017
+- Lim et al., "Database Gyroscope: Avoiding Regress in Autonomous DBMSs", VLDB 2022
+- Tan et al., "iBTune: Individualized Buffer Tuning via Deep Reinforcement Learning", VLDB 2019

@@ -1,0 +1,191 @@
+---
+id: teradata-star-join-optimization
+name: "Teradata Star Schema Join with Bloom Filters"
+category: database-specific/teradata
+databases: [teradata]
+execution_models: [row-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, teradata, star-join, bloom-filter, data-warehouse, star-schema]
+complexity: "O(n)"
+benefit_range: [0.3, 0.9]
+---
+
+# Teradata Star Schema Join with Bloom Filters
+
+## Metadata
+- **Rule ID**: `teradata-star-join-optimization`
+- **Category**: Database-specific / Teradata
+- **Source**: Teradata Optimizer (proprietary), documented in Teradata SQL manuals
+- **Complexity**: O(n) where n is fact table rows
+- **Prerequisites**: Star schema structure; dimension filters reduce join cardinality
+- **Alternatives**: Nested loop with dimension-first access; standard hash join
+
+## Description
+
+Teradata's star join optimization is a sophisticated technique for star-schema
+queries where multiple dimension tables are joined to a large fact table with
+restrictive filters on the dimensions. Instead of the traditional approach of
+joining dimensions to the fact table sequentially (building intermediate results
+that may be large), Teradata applies dimension filters first to generate Bloom
+filters (bit vectors), then uses these Bloom filters to pre-screen fact table
+rows before the actual join.
+
+The process works in three phases. First, Teradata scans each filtered dimension
+table and builds a compact Bloom filter on the join key values that survive the
+dimension predicates. Second, it scans the fact table and applies all dimension
+Bloom filters simultaneously to eliminate rows that cannot possibly match any
+dimension — this is extremely cache-friendly as Bloom filters are small (a few
+KB). Third, only the surviving fact rows (often <5% of the original) participate
+in the actual hash joins with dimension tables.
+
+This is particularly effective for Teradata's architecture because fact tables
+are hash-distributed across AMPs (Access Module Processors). The Bloom filters
+are broadcast to all AMPs (small network cost), enabling local filtering without
+redistributing the massive fact table. The technique converts what would be
+multiple large redistributions into a single fact-table pass with lightweight
+bit-vector probes.
+
+## Relational Algebra
+
+```latex
+% Before: standard star join (sequential dimension joins)
+\sigma_{d1.region='US'}(D_1) \bowtie_{fk_1} (\sigma_{d2.year=2024}(D_2) \bowtie_{fk_2} F)
+
+% After: Bloom filter star join
+\text{let } bf_1 = \text{BloomFilter}(\pi_{pk}(\sigma_{region='US'}(D_1)))
+\text{let } bf_2 = \text{BloomFilter}(\pi_{pk}(\sigma_{year=2024}(D_2)))
+
+% Phase 1: pre-filter fact with Bloom filters
+F' = \sigma_{fk_1 \in bf_1 \wedge fk_2 \in bf_2}(F)
+
+% Phase 2: actual joins on much smaller F'
+\sigma_{d1.region='US'}(D_1) \bowtie_{fk_1} (\sigma_{d2.year=2024}(D_2) \bowtie_{fk_2} F')
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("teradata-star-join-optimization";
+    "(join ?c1 ?dim1
+        (join ?c2 ?dim2 ?fact))" =>
+    "(join ?c1 ?dim1
+        (join ?c2 ?dim2
+            (bloom-filter-probe ?fact
+                (bloom-filter-build ?dim1 ?c1)
+                (bloom-filter-build ?dim2 ?c2))))"
+    if is_star_schema("?fact", "?dim1", "?dim2")
+    if has_restrictive_filter("?dim1")
+    if has_restrictive_filter("?dim2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    fact_table: &TableDescriptor,
+    dimensions: &[DimensionJoin],
+    stats: &Statistics,
+) -> bool {
+    // Must have star schema structure (fact + multiple dimensions)
+    dimensions.len() >= 2
+    // At least 2 dimensions must have selective filters
+    && dimensions.iter()
+        .filter(|d| d.filter_selectivity() < 0.3)
+        .count() >= 2
+    // Fact table must be significantly larger than dimensions
+    && fact_table.row_count() > 10 * dimensions.iter()
+        .map(|d| d.table().row_count())
+        .max()
+        .unwrap_or(0)
+    // Combined Bloom filter selectivity should eliminate >50% of fact rows
+    && dimensions.iter()
+        .map(|d| d.filter_selectivity())
+        .product::<f64>() < 0.5
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_star_join_bloom(
+    fact_rows: u64,
+    dimensions: &[(u64, f64)], // (dim_rows, filter_selectivity)
+    hardware: &HardwareModel,
+) -> Cost {
+    // Bloom filter build cost (small — dimensions are small after filter)
+    let build_cost: f64 = dimensions.iter()
+        .map(|(rows, sel)| (*rows as f64 * sel * 20.0))
+        .sum();
+
+    // Bloom filter probe cost (all fact rows, but cache-friendly)
+    let probe_cost = fact_rows as f64 * dimensions.len() as f64 * 3.0;
+
+    // Surviving rows after bloom filter
+    let combined_selectivity: f64 = dimensions.iter()
+        .map(|(_, sel)| sel)
+        .product();
+    let surviving_rows = (fact_rows as f64 * combined_selectivity) as u64;
+
+    // Actual join cost on reduced fact table
+    let join_cost = surviving_rows as f64 * dimensions.len() as f64 * 30.0;
+
+    Cost::cpu((build_cost + probe_cost + join_cost) as u64)
+}
+```
+
+**Typical benefit**: 30-90% for typical star schema queries where dimension
+filters are selective. A query filtering to one region and one year out of
+50 regions and 10 years has combined selectivity 1/(50*10) = 0.2%, meaning
+99.8% of fact rows are eliminated by Bloom filters before the expensive join.
+
+## Test Cases
+
+```sql
+-- Positive: Classic star schema with selective dimension filters
+SELECT d.product_name, t.quarter, g.region,
+       SUM(f.revenue), COUNT(*)
+FROM fact_sales f
+JOIN dim_product d ON f.product_key = d.product_key
+JOIN dim_time t ON f.time_key = t.time_key
+JOIN dim_geography g ON f.geo_key = g.geo_key
+WHERE d.category = 'Electronics'
+  AND t.year = 2024
+  AND g.country = 'United States';
+-- Bloom filters built for each dimension post-filter,
+-- applied to fact_sales before any join execution
+
+-- Positive: Two-dimension star join with high fact-table ratio
+SELECT d.name, SUM(f.amount)
+FROM transactions f
+JOIN dim_merchant d ON f.merchant_id = d.id
+JOIN dim_date dt ON f.txn_date = dt.date_key
+WHERE d.mcc_code = '5411' AND dt.is_holiday = true
+GROUP BY d.name;
+-- Merchant filter (1 MCC out of 400+) and holiday filter (5% of days)
+-- combine to eliminate 99%+ of transactions via Bloom
+
+-- Negative: No dimension filters (Bloom filters would pass everything)
+SELECT d.product_name, SUM(f.revenue)
+FROM fact_sales f
+JOIN dim_product d ON f.product_key = d.product_key
+GROUP BY d.product_name;
+-- Without WHERE on dimension, Bloom filter = all 1s, no pruning benefit
+
+-- Negative: Single dimension join (not a star join pattern)
+SELECT * FROM fact_sales f
+JOIN dim_time t ON f.time_key = t.time_key
+WHERE t.year = 2024;
+-- Only one dimension; standard hash join with runtime filter suffices
+```
+
+## References
+
+- Teradata Database Design Manual: "Star Join Optimization"
+- Teradata EXPLAIN output: "star join step" indicator
+- Kemper & Moerkotte, "Query Optimization in Relational Database Systems" (star join chapter)
+- Bloom, "Space/Time Trade-offs in Hash Coding with Allowable Errors" (1970)

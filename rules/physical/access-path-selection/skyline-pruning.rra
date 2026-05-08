@@ -1,0 +1,217 @@
+---
+id: skyline-pruning
+name: Skyline Operator Pruning
+category: physical/access-path-selection
+databases: [oceanbase, postgresql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [access-path, skyline, pareto, dominance, pruning, plan-enumeration]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Skyline Operator Pruning
+
+## Description
+
+During access path selection, the optimizer evaluates multiple candidate
+plans that differ in cost dimensions: total I/O cost, CPU cost, startup
+cost, memory consumption, and produced sort order (interesting orders).
+Skyline pruning eliminates dominated plans early in the enumeration
+process. A plan P1 dominates P2 if P1 is at least as good as P2 in every
+dimension and strictly better in at least one. Dominated plans can never
+be optimal regardless of how costs are weighted at higher levels, so they
+are safely discarded.
+
+The key insight is that multi-dimensional optimality cannot be reduced to
+a single scalar cost without losing information needed by parent operators.
+A plan that is more expensive overall but produces a sorted output may be
+optimal when followed by a merge join or ORDER BY. Skyline pruning
+preserves exactly the Pareto-optimal set of plans, ensuring no useful
+trade-off is lost while dramatically reducing the search space (often by
+80-95% of candidates).
+
+**When to apply**: During physical plan enumeration when multiple access
+paths or operator implementations exist for a subexpression and the
+optimization dimensions include non-scalar properties (sort order,
+distribution, partitioning). Particularly effective in bottom-up
+optimizers (System R style) with many interesting physical properties.
+
+## Relational Algebra
+
+```latex
+-- Plan space for a subexpression:
+$$
+\mathcal{P} = \{P_1, P_2, \ldots, P_m\}
+$$
+
+-- Dominance relation:
+$$
+P_i \prec P_j \iff \forall d: cost_d(P_i) \leq cost_d(P_j) \land \exists d: cost_d(P_i) < cost_d(P_j)
+$$
+
+-- Skyline (Pareto frontier):
+$$
+Sky(\mathcal{P}) = \{P \in \mathcal{P} : \nexists P' \in \mathcal{P}, P' \prec P\}
+$$
+
+-- Properties: $|Sky(\mathcal{P})| \leq |\mathcal{P}|$, typically $|Sky| = O(\log^{d-1} m)$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("skyline-pruning";
+    "(plan-set ?candidates)" =>
+    "(skyline-filtered ?candidates)"
+    if plan_set_size_above("?candidates", 3)
+    if has_multiple_cost_dimensions()
+),
+```
+
+```rust
+struct PlanCandidate {
+    plan: PhysicalPlan,
+    total_cost: f64,
+    startup_cost: f64,
+    memory_cost: f64,
+    sort_order: Option<SortOrder>,
+    distribution: Option<Distribution>,
+}
+
+fn skyline_filter(candidates: &[PlanCandidate]) -> Vec<&PlanCandidate> {
+    let mut skyline: Vec<&PlanCandidate> = Vec::new();
+
+    for candidate in candidates {
+        let dominated = skyline.iter().any(|s| dominates(s, candidate));
+        if dominated {
+            continue;
+        }
+        // Remove any existing skyline members dominated by new candidate
+        skyline.retain(|s| !dominates(candidate, s));
+        skyline.push(candidate);
+    }
+    skyline
+}
+
+fn dominates(a: &PlanCandidate, b: &PlanCandidate) -> bool {
+    let mut at_least_as_good = true;
+    let mut strictly_better = false;
+
+    // Cost dimension: lower is better
+    if a.total_cost > b.total_cost { at_least_as_good = false; }
+    if a.total_cost < b.total_cost { strictly_better = true; }
+
+    if a.startup_cost > b.startup_cost { at_least_as_good = false; }
+    if a.startup_cost < b.startup_cost { strictly_better = true; }
+
+    if a.memory_cost > b.memory_cost { at_least_as_good = false; }
+    if a.memory_cost < b.memory_cost { strictly_better = true; }
+
+    // Sort order dimension: producing useful order is "better"
+    match (&a.sort_order, &b.sort_order) {
+        (Some(_), None) => { strictly_better = true; }
+        (None, Some(_)) => { at_least_as_good = false; }
+        (Some(a_ord), Some(b_ord)) if a_ord != b_ord => {
+            at_least_as_good = false; // Incomparable orders
+        }
+        _ => {}
+    }
+
+    at_least_as_good && strictly_better
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    candidates: &[PlanCandidate],
+    num_dimensions: usize,
+    parent_requires_order: bool,
+) -> bool {
+    // Need enough candidates to benefit from pruning
+    candidates.len() > 2
+    // Multiple dimensions make dominance non-trivial
+    && num_dimensions >= 2
+    // If parent requires specific order, must preserve those candidates
+    && (!parent_requires_order
+        || candidates.iter().any(|c| c.sort_order.is_some()))
+}
+```
+
+**Restrictions:**
+- Skyline size grows with dimensionality (curse of dimensionality)
+- With >5 dimensions, most plans are Pareto-optimal (pruning less effective)
+- Non-comparable properties (different sort orders) prevent dominance
+- Must re-evaluate skyline when new candidates are generated
+- In top-down optimizers, pruning interacts with memoization
+
+## Cost Model
+
+```rust
+fn pruning_effectiveness(
+    total_candidates: usize,
+    skyline_size: usize,
+    enumeration_cost_per_plan: f64,
+) -> f64 {
+    let plans_pruned = total_candidates - skyline_size;
+    let savings = plans_pruned as f64 * enumeration_cost_per_plan;
+    let overhead = total_candidates as f64 * 0.001; // dominance check cost
+    (savings - overhead) / (total_candidates as f64 * enumeration_cost_per_plan)
+}
+```
+
+**Typical benefit**: 10-60% reduction in optimization time through early
+plan elimination. For TPC-H queries with 4+ join tables, skyline pruning
+reduces candidate plans from thousands to dozens at each join level.
+
+## Test Cases
+
+```sql
+-- Positive: index scan vs seq scan with sort order trade-off
+-- Candidates for: SELECT * FROM orders WHERE region='US' ORDER BY date
+-- P1: SeqScan + Sort (cost=1000, startup=900, no initial order)
+-- P2: IndexScan on (region, date) (cost=1200, startup=50, ordered by date)
+-- P3: IndexScan on (region) + Sort (cost=1100, startup=800, no initial order)
+-- Skyline: {P1, P2} (P3 dominated by P1 in all dimensions)
+-- P2 survives despite higher cost because it provides sort order
+```
+
+```sql
+-- Positive: multiple join implementations
+-- Candidates for: orders JOIN customers
+-- P1: Hash Join (cost=500, startup=200, memory=256MB, unordered)
+-- P2: Merge Join (cost=800, startup=50, memory=1MB, ordered by cust_id)
+-- P3: NL Join (cost=5000, startup=0, memory=0, preserves outer order)
+-- P4: Hash Join variant (cost=600, startup=250, memory=128MB, unordered)
+-- Skyline: {P1, P2, P3} (P4 dominated by P1: worse cost, worse startup)
+```
+
+```sql
+-- Negative: single cost dimension (scalar comparison sufficient)
+EXPLAIN SELECT COUNT(*) FROM events WHERE ts > '2024-01-01';
+-- Only total_cost matters (no ORDER BY, no parent requiring order)
+-- Skyline = cheapest plan (degenerate case, no multi-dimensional benefit)
+-- Standard cost comparison sufficient
+```
+
+```sql
+-- Positive: OceanBase distributed plan pruning
+-- Candidates for distributed join:
+-- P1: Shuffle both sides (cost=2000, network=high, any distribution)
+-- P2: Broadcast small table (cost=1500, network=medium, colocated output)
+-- P3: Local join (cost=500, network=zero, requires colocation)
+-- If tables not colocated: P3 infeasible, Skyline={P2} (dominates P1)
+-- If tables colocated: Skyline={P3} (dominates both)
+```
+
+## References
+
+- Borzsonyi et al., "The Skyline Operator", ICDE 2001
+- Neumann & Moerkotte, "A Combined Framework for Grouping and Order Optimization", VLDB 2004
+- Selinger et al., "Access Path Selection in a Relational DBMS", SIGMOD 1979 (interesting orders)
+- OceanBase: "Plan Enumeration and Skyline Pruning" (internal documentation)
+- Oracle: "Cost-Based Optimizer: Plan Directives and Skyline Analysis"

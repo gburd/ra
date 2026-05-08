@@ -1,0 +1,195 @@
+---
+id: firebird-optimize-for-first-rows
+name: "Firebird First-Rows Optimization Goal"
+category: database-specific/firebird
+databases: [firebird]
+execution_models: [row-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, firebird, first-rows, all-rows, optimization-goal, interactive]
+complexity: "O(n)"
+benefit_range: [0.1, 0.7]
+---
+
+# Firebird First-Rows Optimization Goal
+
+## Metadata
+- **Rule ID**: `firebird-optimize-for-first-rows`
+- **Category**: Database-specific / Firebird
+- **Source**: `src/jrd/optimizer/Optimizer.cpp` (OPT_FIRST_ROWS flag)
+- **Complexity**: O(1) for plan selection change
+- **Prerequisites**: Query has FIRST/ROWS clause or optimizer hint
+- **Alternatives**: All-rows optimization (minimize total work)
+
+## Description
+
+Firebird's optimizer supports two distinct optimization goals: "all-rows"
+(minimize total query execution time) and "first-rows" (minimize time to
+return the first result rows). These goals lead to fundamentally different
+plan choices because operations that minimize total work often have high
+startup cost, while operations that minimize latency to first row trade
+total efficiency for pipeline-friendly execution.
+
+In first-rows mode, the optimizer prefers nested-loop joins over hash joins
+(no build phase required — first row returned immediately), index scans over
+full table scans (even if the index scan's total cost is higher, it produces
+rows incrementally), and merge joins with pre-sorted inputs over hash joins.
+The key insight is that a hash join must fully materialize the build side before
+producing any output, adding seconds of startup latency, while a nested-loop
+join can produce the first row after reading just one row from each side.
+
+Firebird activates first-rows mode when a query includes FIRST N or ROWS N
+clauses, or when the application sets the optimizer mode via API. This is
+critical for interactive applications (paging through results), cursors that
+fetch only a few rows, and EXISTS subqueries that need only one match.
+The optimization fundamentally changes the cost model from minimizing
+sum(row_processing_cost) to minimizing startup_cost + N * per_row_cost.
+
+## Relational Algebra
+
+```latex
+% All-rows goal: minimize total cost
+\text{cost}_{\text{all}}(P) = \text{startup}(P) + |P| \times \text{per\_row}(P)
+
+% First-rows goal: minimize time to first N rows
+\text{cost}_{\text{first}}(P, N) = \text{startup}(P) + N \times \text{per\_row}(P)
+
+% Example: Hash Join vs Nested Loop
+\text{cost}_{\text{all}}(\text{HashJoin}) < \text{cost}_{\text{all}}(\text{NLJ})
+\text{but}
+\text{cost}_{\text{first}}(\text{NLJ}, 10) < \text{cost}_{\text{first}}(\text{HashJoin}, 10)
+
+% Because: startup(HashJoin) = |build| \times h \gg startup(NLJ) = 0
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("firebird-first-rows-prefer-nlj";
+    "(hash-join ?cond ?build ?probe)" =>
+    "(nested-loop-join ?cond ?probe ?build)"
+    if optimization_goal_is_first_rows()
+    if has_index_on_inner("?build", "?cond")
+    if first_n_is_small()
+),
+
+rw!("firebird-first-rows-prefer-index-scan";
+    "(sort ?order (full-scan ?table))" =>
+    "(index-scan ?table ?order)"
+    if optimization_goal_is_first_rows()
+    if index_provides_order("?table", "?order")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query: &QueryPlan,
+    fetch_limit: Option<u64>,
+    context: &OptimizerContext,
+) -> bool {
+    // First-rows mode must be active
+    let first_rows_mode = fetch_limit.is_some()
+        || context.optimizer_mode() == OptimizerMode::FirstRows;
+
+    first_rows_mode
+    // Limit must be small relative to total result set
+    && fetch_limit.map_or(true, |n| {
+        let estimated_total = query.estimated_rows();
+        n < estimated_total / 10 // first 10% or less
+    })
+    // Query must have an operator where plan choice affects startup latency
+    && (query.has_join() || query.has_sort())
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_first_rows(
+    operator: &PhysicalOperator,
+    rows_needed: u64,
+) -> f64 {
+    match operator {
+        PhysicalOperator::HashJoin { build_rows, .. } => {
+            // High startup: must hash entire build side first
+            let startup = build_rows as f64 * 30.0;
+            let per_row = 15.0;
+            startup + rows_needed as f64 * per_row
+        }
+        PhysicalOperator::NestedLoopJoin { .. } => {
+            // Near-zero startup: first row immediate (with index)
+            let startup = 100.0; // index open
+            let per_row = 50.0; // index probe per outer row
+            startup + rows_needed as f64 * per_row
+        }
+        PhysicalOperator::Sort { input_rows, .. } => {
+            // Full sort before first output row
+            let startup = *input_rows as f64 * (*input_rows as f64).log2() * 5.0;
+            let per_row = 1.0;
+            startup + rows_needed as f64 * per_row
+        }
+        PhysicalOperator::IndexScan { .. } => {
+            // Streaming: no startup beyond index traversal
+            let startup = 50.0;
+            let per_row = 20.0; // B-tree descent per row
+            startup + rows_needed as f64 * per_row
+        }
+        _ => f64::MAX,
+    }
+}
+```
+
+**Typical benefit**: 10-70% latency reduction for first-N-rows queries.
+A query fetching 10 rows from a million-row join result can return in
+milliseconds with NLJ+index instead of seconds waiting for hash table build.
+The benefit increases as N decreases relative to total result cardinality.
+
+## Test Cases
+
+```sql
+-- Positive: FIRST N clause activates first-rows optimization
+SELECT FIRST 20 o.order_id, c.name, o.amount
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+ORDER BY o.order_date DESC;
+-- First-rows mode: use index on orders.order_date DESC (no sort)
+-- + nested-loop join with index on customers.id (no hash build)
+-- First 20 rows returned without processing entire orders table
+
+-- Positive: EXISTS subquery needs only one matching row
+SELECT * FROM products p
+WHERE EXISTS (
+    SELECT 1 FROM order_items oi WHERE oi.product_id = p.id
+);
+-- First-rows for inner query: NLJ with index stops at first match
+-- Much faster than hash join that builds full hash table
+
+-- Positive: Cursor with ROWS clause for paging
+SELECT * FROM events
+ORDER BY created_at DESC
+ROWS 1 TO 25;
+-- Index scan on created_at provides ordered results without full sort
+-- Only 25 index entries traversed, not the entire table
+
+-- Negative: Aggregate query (must see all rows regardless)
+SELECT customer_id, SUM(amount) FROM orders GROUP BY customer_id;
+-- No FIRST/ROWS limit; all rows must be processed for correct aggregates
+-- All-rows mode (hash aggregate) is optimal
+
+-- Negative: FIRST N where N is close to total rows
+SELECT FIRST 900000 * FROM orders;  -- table has 1M rows
+-- Fetching 90% of table; first-rows overhead (per-row cost of NLJ) not worth it
+-- Hash join / full scan more efficient for most of the result set
+```
+
+## References
+
+- Firebird: `src/jrd/optimizer/Optimizer.cpp` (OPT_FIRST_ROWS optimization goal)
+- Firebird: `src/jrd/optimizer/InnerJoin.cpp` (join method selection)
+- Firebird Documentation: "Optimizer and Plan" section
+- Antoshenkov et al., "Query Processing and Optimization in Oracle Rdb" (VLDB Journal, 1996) — first-rows concept

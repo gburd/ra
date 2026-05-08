@@ -1,0 +1,165 @@
+---
+id: oceanbase-dynamic-sampling-optimization
+name: "OceanBase Dynamic Sampling Optimization"
+category: database-specific/oceanbase
+databases: [oceanbase]
+execution_models: [row-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oceanbase, dynamic-sampling, cardinality, statistics, adaptive]
+complexity: "O(n)"
+benefit_range: [0.1, 0.6]
+---
+
+# OceanBase Dynamic Sampling Optimization
+
+## Metadata
+- **Rule ID**: `oceanbase-dynamic-sampling-optimization`
+- **Category**: Database-specific / OceanBase
+- **Source**: `src/sql/optimizer/ob_dynamic_sampling.h`
+- **Complexity**: O(s) where s is the sample size (typically 4096-65536 rows)
+- **Prerequisites**: Stale or missing statistics; complex predicates
+- **Alternatives**: Histogram-based estimation; default selectivity constants
+
+## Description
+
+Traditional query optimization relies on pre-collected statistics (histograms,
+NDV, null fractions) to estimate cardinality. These statistics become stale
+between collection cycles and cannot capture correlations between columns or
+the selectivity of complex expressions (UDFs, LIKE patterns, computed columns).
+OceanBase's dynamic sampling executes lightweight probe queries at optimization
+time to obtain fresh cardinality estimates.
+
+When the optimizer detects that available statistics are insufficient — either
+because they are stale (modification count exceeds threshold), missing entirely,
+or the predicate involves expressions too complex for histogram-based
+estimation — it issues a small SELECT COUNT(*) query with the actual WHERE
+clause against a random sample of the table. The sample size is configurable
+(levels 1-10, mapping to increasing sample block counts), balancing accuracy
+against optimization latency.
+
+The key benefit is cardinality estimation for correlated predicates. Standard
+independence assumptions (P(A AND B) = P(A) * P(B)) fail when columns are
+correlated (e.g., city and zip_code). Dynamic sampling evaluates the combined
+predicate against real data, capturing correlations that histogram-based
+estimation misses entirely. This prevents catastrophic plan choices like nested
+loop joins when a hash join is needed (or vice versa) due to order-of-magnitude
+cardinality errors.
+
+## Relational Algebra
+
+```latex
+% Standard cardinality estimation (may be inaccurate)
+|\sigma_p(R)| \approx |R| \times \text{sel}(p) \quad \text{(from histograms)}
+
+% Dynamic sampling: execute probe query for actual selectivity
+|\sigma_p(R)| \approx |R| \times \frac{|\sigma_p(\text{Sample}(R, s))|}{s}
+
+% Where Sample(R, s) is a random sample of s blocks from R
+% Confidence interval: \pm \frac{1}{\sqrt{s}} \text{ at 95\%}
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Dynamic sampling is a meta-optimization: it improves cost estimates
+// rather than transforming the plan directly. It affects rule applicability.
+rw!("oceanbase-dynamic-sampling-trigger";
+    "(filter ?pred (scan ?table))" =>
+    "(filter ?pred (scan ?table (dynamic-sample ?pred ?table ?level)))"
+    if statistics_insufficient("?table", "?pred")
+    if optimization_time_budget_allows("?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableDescriptor,
+    predicate: &Expr,
+    stats: &Statistics,
+    config: &OptimizerConfig,
+) -> bool {
+    // Dynamic sampling must be enabled (level > 0)
+    config.dynamic_sampling_level() > 0
+    // Statistics must be insufficient for accurate estimation
+    && (stats.is_stale(table)
+        || predicate.has_complex_expression()
+        || predicate.has_correlated_columns(stats)
+        || stats.confidence(table) < 0.7)
+    // Table must be large enough that sampling is cheaper than full scan
+    && table.row_count() > 10000
+    // Sampling overhead must be within optimization time budget
+    && estimated_sample_time(table, config.dynamic_sampling_level())
+        < config.max_optimization_time_ms() * 0.2
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_dynamic_sampling(
+    table_rows: u64,
+    sample_blocks: u64,
+    block_size: u64,
+    plan_quality_improvement: f64, // estimated from statistics confidence
+) -> f64 {
+    // Cost: time to execute the probe query
+    let sample_rows = sample_blocks * (block_size / 100); // est rows/block
+    let probe_cost_ms = sample_rows as f64 * 0.001; // ~1us per row
+
+    // Benefit: improved plan quality avoids bad join/scan choices
+    // A 10x cardinality error can cause 100x runtime difference
+    let expected_runtime_savings = plan_quality_improvement * 1000.0;
+
+    expected_runtime_savings - probe_cost_ms
+}
+```
+
+**Typical benefit**: 10-60% runtime improvement for queries with correlated
+predicates or stale statistics. The optimization time overhead is typically
+5-50ms (sampling 4K-64K rows), which pays for itself if it prevents a
+suboptimal join strategy on a query that runs for seconds.
+
+## Test Cases
+
+```sql
+-- Positive: Correlated columns defeat independence assumption
+SELECT * FROM customers
+WHERE city = 'San Francisco' AND zip_code LIKE '941%';
+-- Independence: sel(city) * sel(zip) might estimate 0.01% * 1% = 0.0001%
+-- Reality: city and zip are correlated; actual selectivity is ~0.01%
+-- Dynamic sampling captures the true combined selectivity
+
+-- Positive: Complex expression with no histogram
+SELECT * FROM logs
+WHERE JSON_EXTRACT(payload, '$.error_code') = '500'
+  AND created_at > NOW() - INTERVAL 1 HOUR;
+-- No histogram for JSON_EXTRACT expression; default 10% selectivity assumed
+-- Dynamic sampling reveals actual selectivity is 0.1% (specific error code)
+
+-- Positive: Stale statistics after bulk load
+-- Table had 1M rows when stats were collected; now has 50M after ETL
+SELECT COUNT(*) FROM events WHERE event_type = 'purchase';
+-- Stale row count leads to wrong join strategy; sampling gets fresh estimate
+
+-- Negative: Fresh statistics with simple equality predicate
+SELECT * FROM users WHERE id = 12345;
+-- Primary key lookup; histogram gives exact selectivity (1 row)
+-- Dynamic sampling adds overhead with no benefit
+
+-- Negative: Very small table
+SELECT * FROM config_settings WHERE key = 'timeout';
+-- Table has 50 rows; sampling overhead exceeds any plan improvement
+```
+
+## References
+
+- OceanBase: `src/sql/optimizer/ob_dynamic_sampling.h`
+- OceanBase: `src/sql/optimizer/ob_dynamic_sampling.cpp`
+- Oracle Database: "Dynamic Sampling" (OceanBase's approach inspired by Oracle)
+- Stillger et al., "LEO - DB2's LEarning Optimizer" (VLDB 2001)

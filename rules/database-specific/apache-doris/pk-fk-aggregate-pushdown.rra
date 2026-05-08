@@ -1,0 +1,159 @@
+---
+id: apache-doris-pk-fk-aggregate-pushdown
+name: "Apache Doris PK/FK-Aware Aggregate Pushdown"
+category: database-specific/apache-doris
+databases: [apache-doris]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, apache-doris, aggregate, pushdown, pk-fk, join, nereids]
+complexity: "O(n)"
+benefit_range: [0.2, 0.7]
+---
+
+# Apache Doris PK/FK-Aware Aggregate Pushdown
+
+## Metadata
+- **Rule ID**: `apache-doris-pk-fk-aggregate-pushdown`
+- **Category**: Database-specific / Apache Doris
+- **Source**: `fe/fe-core/src/main/java/org/apache/doris/nereids/rules/rewrite/PushDownAggThroughJoinOnPkFk.java`
+- **Complexity**: O(n) where n is rows in the fact table
+- **Prerequisites**: Declared or inferred PK/FK relationship; aggregate on FK side
+- **Alternatives**: Aggregate after full join materialization
+
+## Description
+
+When an aggregate groups by a foreign key column and joins to the referenced
+primary key table, Doris's Nereids optimizer can push the aggregation below
+the join. This is safe because the PK/FK relationship guarantees that each
+fact row matches at most one dimension row — the join cannot multiply
+cardinality. Aggregating before the join processes fewer rows through the
+join operator.
+
+The key insight is that PK/FK constraints provide a functional dependency
+guarantee: for every value of FK in the fact table, there exists exactly one
+matching PK row in the dimension table. This means GROUP BY fk_col produces
+the same groups whether computed before or after the join. The aggregate can
+be pushed to the FK (fact) side, reducing the input to the join from N fact
+rows to G groups (where G <= N, often G << N).
+
+Doris infers PK/FK relationships from unique key constraints and foreign key
+declarations. The Nereids optimizer validates that the join condition is an
+equi-join on the PK/FK pair and that all GROUP BY columns come from the FK
+side before applying the transformation.
+
+## Relational Algebra
+
+```latex
+% Before: aggregate after join
+\gamma_{fk, \text{SUM}(amount)}(R \bowtie_{R.fk = S.pk} S)
+
+% After: push aggregate below join
+(\gamma_{fk, \text{SUM}(amount)}(R)) \bowtie_{fk = S.pk} S
+
+% Valid when: S.pk is primary key, R.fk references S.pk,
+% and all GROUP BY columns are from R
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("apache-doris-pk-fk-aggregate-pushdown";
+    "(agg ?group_cols ?agg_funcs (join ?join_cond ?fact ?dim))" =>
+    "(join ?join_cond (agg ?group_cols ?agg_funcs ?fact) ?dim)"
+    if is_pk_fk_join("?join_cond", "?fact", "?dim")
+    if group_cols_from_fk_side("?group_cols", "?fact")
+    if agg_cols_from_fk_side("?agg_funcs", "?fact")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join: &JoinNode,
+    aggregate: &AggregateNode,
+    schema: &SchemaInfo,
+) -> bool {
+    // Join must be inner equi-join on PK/FK pair
+    let join_cols = join.equi_join_columns();
+    let (fk_col, pk_col) = (join_cols.left(), join_cols.right());
+
+    schema.is_primary_key(pk_col)
+    && schema.is_foreign_key(fk_col, pk_col)
+    // All GROUP BY columns from fact (FK) side
+    && aggregate.group_by_cols().iter().all(|c| join.left_schema().contains(c))
+    // All aggregate input columns from fact side
+    && aggregate.agg_input_cols().iter().all(|c| join.left_schema().contains(c))
+    // No aggregate references dimension columns
+    && aggregate.agg_input_cols().iter().all(|c| !join.right_schema().contains(c))
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_pk_fk_agg_pushdown(
+    fact_rows: u64,
+    groups: u64,
+    dim_rows: u64,
+    join_cost_per_row: f64,
+) -> f64 {
+    let before = fact_rows as f64 * join_cost_per_row
+        + fact_rows as f64; // aggregate after join
+    let after = fact_rows as f64 // aggregate before join
+        + groups as f64 * join_cost_per_row; // join on fewer rows
+    before - after
+}
+```
+
+**Typical benefit**: 20-70% when the aggregation significantly reduces
+cardinality. Greatest impact when GROUP BY has high reduction ratio
+(few groups relative to fact table rows) and the dimension table is large
+enough that join cost is non-trivial.
+
+## Test Cases
+
+```sql
+-- Positive: SUM on fact table grouped by FK
+CREATE TABLE orders (
+    order_id BIGINT,
+    customer_id INT,  -- FK to customers.id
+    amount DECIMAL(10,2)
+) UNIQUE KEY (order_id)
+DISTRIBUTED BY HASH(order_id) BUCKETS 16;
+
+CREATE TABLE customers (
+    id INT,  -- PK
+    name VARCHAR(100),
+    region VARCHAR(50)
+) UNIQUE KEY (id)
+DISTRIBUTED BY HASH(id) BUCKETS 4;
+
+SELECT c.region, SUM(o.amount)
+FROM orders o JOIN customers c ON o.customer_id = c.id
+GROUP BY c.region;
+-- Pushes SUM(amount) grouped by customer_id below the join,
+-- then re-aggregates by region after join
+
+-- Positive: COUNT on fact side only
+SELECT o.customer_id, COUNT(*), SUM(o.amount)
+FROM orders o JOIN customers c ON o.customer_id = c.id
+GROUP BY o.customer_id;
+-- Safe to push: GROUP BY and aggregates only reference fact table
+
+-- Negative: Aggregate references dimension column
+SELECT c.region, AVG(o.amount), MAX(c.name)
+FROM orders o JOIN customers c ON o.customer_id = c.id
+GROUP BY c.region;
+-- MAX(c.name) references dimension table; cannot push aggregate below join
+```
+
+## References
+
+- Apache Doris Nereids: `fe/fe-core/src/main/java/org/apache/doris/nereids/rules/rewrite/PushDownAggThroughJoinOnPkFk.java`
+- Apache Doris Nereids: `fe/fe-core/src/main/java/org/apache/doris/nereids/rules/rewrite/InferPkFkRelationship.java`
+- Yan & Larson, "Eager Aggregation and Lazy Aggregation" (VLDB 1995)

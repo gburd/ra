@@ -1,0 +1,185 @@
+---
+id: exasol-auto-small-table-replication
+name: "Exasol Automatic Small Table Replication"
+category: database-specific/exasol
+databases: [exasol]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, exasol, replication, small-table, broadcast, join, dimension]
+complexity: "O(n)"
+benefit_range: [0.2, 0.7]
+---
+
+# Exasol Automatic Small Table Replication
+
+## Metadata
+- **Rule ID**: `exasol-auto-small-table-replication`
+- **Category**: Database-specific / Exasol
+- **Source**: Exasol Query Optimizer (proprietary), documented in Exasol manuals
+- **Complexity**: O(1) for the replication decision; O(n) for data placement
+- **Prerequisites**: Table size below replication threshold
+- **Alternatives**: Hash distribution with shuffle joins; manual REPLICATE keyword
+
+## Description
+
+Exasol's optimizer automatically identifies "small" tables (those below a
+configurable size threshold, typically a few hundred MB) and replicates them
+across all cluster nodes. This means every node holds a complete copy of these
+tables. When a join involves a replicated table, no network communication is
+needed — each node joins its local partition of the large table against the
+locally-available complete copy of the small table.
+
+Unlike other systems that require explicit REPLICATE or BROADCAST hints, Exasol
+makes this decision transparently based on table size, update frequency, and
+join patterns. The optimizer considers: (1) current table size vs. available
+memory per node, (2) how frequently the table is updated (high-update tables
+are expensive to keep replicated), and (3) whether the table participates
+primarily as a dimension in star-schema joins.
+
+The optimization is particularly effective for the data warehouse pattern where
+small dimension tables (products, regions, date dimensions — typically 1K-1M
+rows) are repeatedly joined with large fact tables (billions of rows). By
+replicating dimensions, every join between a distributed fact table and a
+dimension table becomes local, eliminating the dominant network cost. Exasol's
+in-memory columnar storage makes replication feasible: a 100K-row dimension
+table might consume only 5-20MB per node.
+
+## Relational Algebra
+
+```latex
+% Before: distributed join requires shuffle of one side
+R_{\text{dist}} \bowtie_{R.fk = S.pk} S_{\text{dist}}
+\Rightarrow \text{Exchange}_{\text{hash}(fk)}(R) \bowtie \text{Exchange}_{\text{hash}(pk)}(S)
+
+% After: small table replicated, join is purely local
+R_{\text{dist}} \bowtie_{R.fk = S.pk} S_{\text{replicated}}
+\Rightarrow \text{LocalJoin}(R_i, S) \text{ on each node } i
+% No Exchange operators needed
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("exasol-auto-small-table-replication";
+    "(join ?cond ?large (exchange ?dist ?small))" =>
+    "(join ?cond ?large (replicated-scan ?small))"
+    if is_small_table_for_replication("?small")
+    if replication_memory_available("?small")
+),
+
+rw!("exasol-eliminate-exchange-replicated";
+    "(exchange ?dist (replicated-scan ?table))" =>
+    "(replicated-scan ?table)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    small_table: &TableDescriptor,
+    cluster: &ClusterConfig,
+    memory: &MemoryBudget,
+) -> bool {
+    let table_size_bytes = small_table.size_bytes();
+    let num_nodes = cluster.node_count();
+
+    // Table must be below replication threshold
+    table_size_bytes < cluster.replication_threshold_bytes()
+    // Replication must fit in available memory per node
+    && table_size_bytes < memory.available_per_node() * 0.05 // max 5% of node RAM
+    // Table should not be heavily updated (replication sync cost)
+    && small_table.updates_per_second() < 100
+    // Total replicated data across all tables must be within budget
+    && memory.total_replicated_bytes() + table_size_bytes
+        < memory.replication_budget()
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_auto_replication(
+    small_table_rows: u64,
+    small_table_bytes: u64,
+    large_table_rows: u64,
+    num_nodes: u64,
+    hardware: &HardwareModel,
+) -> f64 {
+    // Without replication: shuffle small table to match large table distribution
+    let shuffle_cost = small_table_bytes as f64
+        * (num_nodes - 1) as f64 / num_nodes as f64
+        / hardware.network_bandwidth() as f64;
+
+    // With replication: zero join-time network cost
+    // (replication maintenance cost amortized across queries)
+    let replication_maintenance = small_table_bytes as f64
+        * num_nodes as f64 * 0.001; // amortized per query
+
+    shuffle_cost - replication_maintenance
+}
+```
+
+**Typical benefit**: 20-70% for star-schema workloads. Each dimension join
+saves a broadcast/shuffle operation. With 5 dimension tables joined to a fact
+table, the savings compound: 5 eliminated shuffles per query, across thousands
+of queries per day.
+
+## Test Cases
+
+```sql
+-- Positive: Small dimension table auto-replicated
+CREATE TABLE dim_region (
+    region_id INT PRIMARY KEY,
+    region_name VARCHAR(100),
+    country VARCHAR(50)
+);  -- 200 rows, ~10KB
+
+CREATE TABLE fact_sales (
+    sale_id BIGINT,
+    region_id INT,
+    amount DECIMAL(10,2),
+    sale_date DATE
+) DISTRIBUTE BY HASH(sale_id);  -- 500M rows
+
+SELECT r.region_name, SUM(f.amount)
+FROM fact_sales f JOIN dim_region r ON f.region_id = r.region_id
+GROUP BY r.region_name;
+-- dim_region auto-replicated to all nodes; join is purely local
+-- No shuffle of the 500M-row fact table needed
+
+-- Positive: Multiple small dimensions in star query
+SELECT d.date_str, p.product_name, r.region_name, SUM(f.amount)
+FROM fact_sales f
+JOIN dim_date d ON f.sale_date = d.date_key
+JOIN dim_product p ON f.product_id = p.product_id
+JOIN dim_region r ON f.region_id = r.region_id
+GROUP BY d.date_str, p.product_name, r.region_name;
+-- All three dimensions replicated; zero shuffles for three joins
+
+-- Negative: Large table exceeds replication threshold
+CREATE TABLE user_activity (
+    user_id BIGINT,
+    event_type VARCHAR(50),
+    payload TEXT
+);  -- 2B rows, 500GB
+-- Far too large to replicate; standard hash distribution used
+
+-- Negative: Frequently updated table (replication sync too expensive)
+CREATE TABLE inventory_live (
+    sku VARCHAR(50),
+    quantity INT,
+    last_updated TIMESTAMP
+);  -- 50K rows but updated 1000x/second
+-- High update rate makes replication maintenance prohibitively expensive
+```
+
+## References
+
+- Exasol Documentation: "Automatic Table Replication"
+- Exasol White Paper: "The Exasol In-Memory Analytic Database"
+- Exasol System Tables: `EXA_DBA_OBJECT_SIZES` (shows replicated vs. distributed)

@@ -1,0 +1,182 @@
+---
+id: apache-phoenix-skip-scan-composite-key
+name: "Apache Phoenix Skip-Scan on Composite HBase Row Keys"
+category: database-specific/apache-phoenix
+databases: [apache-phoenix]
+execution_models: [row-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, apache-phoenix, skip-scan, hbase, composite-key, range-scan]
+complexity: "O(n)"
+benefit_range: [0.3, 0.9]
+---
+
+# Apache Phoenix Skip-Scan on Composite HBase Row Keys
+
+## Metadata
+- **Rule ID**: `apache-phoenix-skip-scan-composite-key`
+- **Category**: Database-specific / Apache Phoenix
+- **Source**: `phoenix-core/src/main/java/org/apache/phoenix/iterate/SkipScanFilter.java`
+- **Complexity**: O(k) where k is matching key ranges (not total rows)
+- **Prerequisites**: Composite primary key; predicate on non-leading key parts
+- **Alternatives**: Full table scan; range scan with post-filter
+
+## Description
+
+HBase (Phoenix's storage layer) stores data sorted by row key. When Phoenix
+defines a table with a composite primary key (e.g., tenant_id, timestamp,
+event_type), the row key is the concatenation of these columns. A standard
+range scan can efficiently filter on a leading prefix (e.g., tenant_id = X),
+but filtering on a non-leading column (e.g., event_type = Y across all
+tenants) would normally require a full table scan.
+
+Phoenix's skip-scan optimization enables efficient access to non-leading key
+columns by computing the exact set of row key ranges that could match the
+predicate and skipping over irrelevant ranges. Rather than scanning all rows
+and post-filtering, the scan "skips" from one matching range to the next using
+HBase's seek capability. For a composite key (A, B, C) with a predicate on C,
+the skip-scan seeks to each possible (A_i, B_j, C_match) combination.
+
+The key advantage over a full scan is that HBase's seek operation is O(log N)
+in the region's store files (using block indexes), compared to O(N) for
+sequential iteration. When the predicate on non-leading columns is selective,
+the skip-scan visits only a tiny fraction of the key space. This is analogous
+to a "loose index scan" in traditional databases but adapted for HBase's
+sorted byte-array key model.
+
+## Relational Algebra
+
+```latex
+% Standard range scan: only works for leading key prefix
+\sigma_{A = v_a}(\text{RangeScan}(T, [v_a, v_a]))
+
+% Skip-scan: works for non-leading key columns
+\sigma_{C \in \{c_1, c_2\}}(T) \Rightarrow
+\text{SkipScan}(T, \{[*, *, c_1], [*, *, c_2]\})
+
+% With leading prefix constraint:
+\sigma_{A = v_a \wedge C \in \{c_1, c_2\}}(T) \Rightarrow
+\text{SkipScan}(T, \{[v_a, *, c_1], [v_a, *, c_2]\})
+
+% Each range entry causes a seek, skipping non-matching rows
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("apache-phoenix-skip-scan-composite-key";
+    "(filter ?pred (range-scan ?table ?leading_range))" =>
+    "(skip-scan ?table (compute-skip-ranges ?table ?pred ?leading_range))"
+    if has_composite_primary_key("?table")
+    if predicate_on_non_leading_key("?pred", "?table")
+    if skip_scan_selective_enough("?pred", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableDescriptor,
+    predicate: &Expr,
+) -> bool {
+    // Table must have composite primary key (2+ columns)
+    let pk_columns = table.primary_key_columns();
+    pk_columns.len() >= 2
+    // Predicate must reference a non-leading PK column with a point/IN predicate
+    && predicate.referenced_columns().iter().any(|col| {
+        let pos = pk_columns.iter().position(|pk| pk == col);
+        pos.map_or(false, |p| p > 0) // non-leading position
+    })
+    // The non-leading predicate must be point or IN (not open range)
+    && predicate.is_point_or_in_list()
+    // Number of skip ranges must be manageable (not combinatorial explosion)
+    && compute_skip_range_count(table, predicate) < 10000
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_skip_scan(
+    total_rows: u64,
+    num_skip_ranges: u64,
+    avg_rows_per_range: u64,
+    seek_cost: f64,
+    scan_cost_per_row: f64,
+) -> f64 {
+    // Skip-scan cost: seek to each range + scan matching rows
+    let skip_cost = num_skip_ranges as f64 * seek_cost
+        + num_skip_ranges as f64 * avg_rows_per_range as f64 * scan_cost_per_row;
+
+    // Full scan cost: read all rows and post-filter
+    let full_cost = total_rows as f64 * scan_cost_per_row;
+
+    full_cost - skip_cost // savings
+}
+```
+
+**Typical benefit**: 30-90% for selective predicates on non-leading key
+columns. A table with 1B rows and a skip-scan that targets 1000 key ranges
+with ~100 rows each reads 100K rows instead of 1B (99.99% reduction).
+The benefit diminishes as the number of skip ranges approaches the total
+number of key prefix combinations.
+
+## Test Cases
+
+```sql
+-- Positive: IN-list on non-leading key column with leading prefix
+CREATE TABLE events (
+    tenant_id VARCHAR NOT NULL,
+    event_date DATE NOT NULL,
+    event_type VARCHAR NOT NULL,
+    payload VARCHAR
+    CONSTRAINT pk PRIMARY KEY (tenant_id, event_date, event_type)
+);
+
+SELECT * FROM events
+WHERE tenant_id = 'acme'
+  AND event_type IN ('login', 'purchase');
+-- Leading prefix: tenant_id='acme'
+-- Skip-scan on event_type: seeks to ('acme', *, 'login') and ('acme', *, 'purchase')
+-- Skips all other event_types without scanning them
+
+-- Positive: Skip-scan without leading prefix (across all tenants)
+SELECT * FROM events
+WHERE event_type = 'error'
+  AND event_date = '2024-03-15';
+-- No leading prefix on tenant_id; skip-scan seeks to
+-- (tenant_1, '2024-03-15', 'error'), (tenant_2, '2024-03-15', 'error'), ...
+-- If few tenants, still much faster than full scan
+
+-- Positive: Composite key with salt byte
+CREATE TABLE metrics (
+    salt TINYINT NOT NULL,  -- 0-15 for pre-splitting
+    sensor_id VARCHAR NOT NULL,
+    ts TIMESTAMP NOT NULL,
+    value DOUBLE
+    CONSTRAINT pk PRIMARY KEY (salt, sensor_id, ts)
+);
+
+SELECT * FROM metrics WHERE sensor_id = 'temp-001';
+-- Skip-scan over salt values: seeks to (0,'temp-001',*), (1,'temp-001',*), ...
+-- Only 16 seeks instead of full scan across all sensors
+
+-- Negative: Open range on non-leading column (too many seek points)
+SELECT * FROM events WHERE event_date > '2024-01-01';
+-- Open range cannot enumerate discrete seek points; falls back to full scan
+
+-- Negative: Predicate only on non-key column
+SELECT * FROM events WHERE payload LIKE '%error%';
+-- payload is not part of the primary key; skip-scan not applicable
+```
+
+## References
+
+- Apache Phoenix: `phoenix-core/src/main/java/org/apache/phoenix/iterate/SkipScanFilter.java`
+- Apache Phoenix: `phoenix-core/src/main/java/org/apache/phoenix/compile/ScanRanges.java`
+- Apache Phoenix documentation: "Skip Scan Optimization"
+- HBase: `Scan.setStartRow()` / `Scan.setStopRow()` — underlying seek mechanism

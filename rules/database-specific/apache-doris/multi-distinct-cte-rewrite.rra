@@ -1,0 +1,164 @@
+---
+id: apache-doris-multi-distinct-cte-rewrite
+name: "Apache Doris Multiple COUNT(DISTINCT) to CTE Rewriting"
+category: database-specific/apache-doris
+databases: [apache-doris]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, apache-doris, count-distinct, cte, rewrite, aggregation]
+complexity: "O(n)"
+benefit_range: [0.1, 0.6]
+---
+
+# Apache Doris Multiple COUNT(DISTINCT) to CTE Rewriting
+
+## Metadata
+- **Rule ID**: `apache-doris-multi-distinct-cte-rewrite`
+- **Category**: Database-specific / Apache Doris
+- **Source**: `fe/fe-core/src/main/java/org/apache/doris/nereids/rules/rewrite/CountDistinctRewrite.java`
+- **Complexity**: O(n) where n is input rows (multiple passes)
+- **Prerequisites**: Query with 2+ COUNT(DISTINCT x) on different columns
+- **Alternatives**: Single-pass multi-distinct via hash partitioning (higher memory)
+
+## Description
+
+Queries containing multiple COUNT(DISTINCT) expressions on different columns
+present a fundamental challenge for distributed aggregation: each distinct
+count requires its own deduplication set, and these sets cannot be partitioned
+the same way simultaneously. A naive approach either serializes to a single
+node (destroying parallelism) or uses expensive multi-column hash
+redistribution.
+
+Doris rewrites queries with multiple COUNT(DISTINCT) into a CTE (Common Table
+Expression) pattern where each distinct count becomes a separate aggregation
+subquery joined on the GROUP BY columns. Each subquery can be independently
+partitioned by its own distinct column, enabling parallel execution. The
+results are joined back together using the shared group key.
+
+This transformation trades a single complex aggregation for multiple simpler
+aggregations plus a final join. It is beneficial when the GROUP BY key has
+moderate cardinality (the join between sub-aggregations is small) and the
+distinct columns have high cardinality (deduplication is expensive). The
+approach avoids the memory pressure of maintaining multiple large hash sets
+simultaneously.
+
+## Relational Algebra
+
+```latex
+% Before: single aggregation with multiple COUNT(DISTINCT)
+\gamma_{g, \text{COUNT}(\text{DISTINCT } a), \text{COUNT}(\text{DISTINCT } b)}(R)
+
+% After: separate aggregations joined on group key
+\text{CTE } base = R
+
+(\gamma_{g, \text{COUNT}(\text{DISTINCT } a)}(base))
+\bowtie_{g}
+(\gamma_{g, \text{COUNT}(\text{DISTINCT } b)}(base))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("apache-doris-multi-distinct-cte-rewrite";
+    "(agg ?group (count-distinct ?col1) (count-distinct ?col2) ?input)" =>
+    "(join (= ?group ?group)
+        (agg ?group (count-distinct ?col1) (cte-ref ?input))
+        (agg ?group (count-distinct ?col2) (cte-ref ?input)))"
+    if has_multiple_distinct_counts("?col1", "?col2")
+    if cols_are_different("?col1", "?col2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    aggregate: &AggregateNode,
+) -> bool {
+    let distinct_counts: Vec<_> = aggregate.agg_functions()
+        .iter()
+        .filter(|f| f.is_count_distinct())
+        .collect();
+
+    // Need at least 2 COUNT(DISTINCT) on different columns
+    distinct_counts.len() >= 2
+    // Distinct columns must be different
+    && distinct_counts.iter()
+        .map(|f| f.distinct_column())
+        .collect::<HashSet<_>>()
+        .len() >= 2
+    // GROUP BY must be non-empty (otherwise join has no key)
+    && !aggregate.group_by_cols().is_empty()
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_multi_distinct_cte(
+    input_rows: u64,
+    group_count: u64,
+    num_distincts: u64,
+    distinct_ndvs: &[u64],
+) -> f64 {
+    // Original cost: single pass with multi-column hash sets
+    let original = input_rows as f64 * num_distincts as f64 * 2.0;
+
+    // CTE cost: N separate passes + final join on group key
+    let cte_scan_cost = input_rows as f64 * num_distincts as f64;
+    let join_cost = group_count as f64 * (num_distincts as f64 - 1.0) * 10.0;
+    let rewritten = cte_scan_cost + join_cost;
+
+    original - rewritten // positive = beneficial
+}
+```
+
+**Typical benefit**: 10-60% for queries with 2-4 COUNT(DISTINCT) over columns
+with high NDV. Less beneficial when GROUP BY produces many groups (join cost
+increases) or when the table is small enough to fit in a single node's memory.
+
+## Test Cases
+
+```sql
+-- Positive: Two COUNT(DISTINCT) on different high-NDV columns
+SELECT
+    region,
+    COUNT(DISTINCT user_id) AS unique_users,
+    COUNT(DISTINCT product_id) AS unique_products
+FROM sales
+GROUP BY region;
+-- Rewritten to:
+-- WITH base AS (SELECT region, user_id, product_id FROM sales)
+-- SELECT a.region, a.unique_users, b.unique_products
+-- FROM (SELECT region, COUNT(DISTINCT user_id) AS unique_users
+--       FROM base GROUP BY region) a
+-- JOIN (SELECT region, COUNT(DISTINCT product_id) AS unique_products
+--       FROM base GROUP BY region) b
+-- ON a.region = b.region;
+
+-- Positive: Three distinct counts benefit even more from parallel execution
+SELECT
+    date,
+    COUNT(DISTINCT session_id),
+    COUNT(DISTINCT user_id),
+    COUNT(DISTINCT ip_address)
+FROM events
+GROUP BY date;
+
+-- Negative: Single COUNT(DISTINCT) - no rewrite needed
+SELECT region, COUNT(DISTINCT user_id) FROM sales GROUP BY region;
+
+-- Negative: Same column in multiple distincts - no benefit from split
+SELECT region, COUNT(DISTINCT user_id), SUM(DISTINCT user_id)
+FROM sales GROUP BY region;
+```
+
+## References
+
+- Apache Doris Nereids: `fe/fe-core/src/main/java/org/apache/doris/nereids/rules/rewrite/CountDistinctRewrite.java`
+- Apache Doris Blog: "Multi-Distinct Optimization in Doris 2.0"
+- Larson, "Performing Grouping and Duplicate Elimination by Using Sorting vs. Hashing" (TODS 2002)

@@ -1,0 +1,153 @@
+---
+id: hypothetical-index-testing
+name: Hypothetical Index Testing
+category: database-specific/postgresql/extensions
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [postgresql, hypopg, index-advisor, what-if, cost-estimation, extensions]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# Hypothetical Index Testing
+
+## Description
+
+HypoPG-style what-if index analysis enables the query optimizer to evaluate
+candidate indexes without the overhead of physically creating them. By
+injecting virtual index entries into the planner's catalog view, the system
+can estimate the cost reduction an index would provide before committing
+storage and write-amplification resources to its materialization.
+
+This technique is essential for automated index recommendation pipelines.
+Real index creation on large tables can take minutes to hours, lock the
+table, and consume significant I/O. Hypothetical indexes allow the advisor
+to test thousands of candidate indexes in seconds by only modifying the
+statistics visible to the planner, without touching the physical storage.
+
+**When to apply**: During index recommendation analysis, workload replay,
+or plan exploration where candidate indexes need cost evaluation without
+materialization overhead. Particularly useful in development environments
+where the DDL impact of index creation is prohibitive.
+
+**Database version**: PostgreSQL 9.6+ (with HypoPG extension)
+
+## Relational Algebra
+
+```latex
+-- Standard plan without hypothetical index:
+$$
+Cost(Q) = \min_{P \in Plans(Q, I_{real})} C(P)
+$$
+
+-- Plan with hypothetical index added to catalog:
+$$
+Cost'(Q) = \min_{P \in Plans(Q, I_{real} \cup I_{hypo})} C(P)
+$$
+
+-- Benefit of hypothetical index:
+$$
+\Delta(I_{hypo}, Q) = Cost(Q) - Cost'(Q)
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("hypothetical-index-testing";
+    "(seq-scan ?table ?pred)" =>
+    "(index-scan ?table ?hypo_idx ?pred)"
+    if is_database("postgresql")
+    if hypothetical_index_covers("?hypo_idx", "?pred")
+    if hypo_index_cost_lower("?table", "?hypo_idx", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableRef,
+    candidate_index: &HypotheticalIndex,
+    predicate: &Expr,
+    catalog: &HypoCatalog,
+) -> bool {
+    // Index must be registered in hypothetical catalog
+    catalog.contains(candidate_index)
+    // Predicate columns must be a prefix of index key columns
+    && predicate.referenced_columns().iter().all(|c| {
+        candidate_index.key_columns().contains(c)
+    })
+    // Table must have statistics available for cost estimation
+    && table.has_statistics()
+}
+```
+
+**Restrictions:**
+- Hypothetical indexes do not validate storage feasibility (disk space)
+- Cost estimates rely on existing table statistics (run ANALYZE first)
+- Cannot model index build time or write-amplification impact
+- Partial indexes and expression indexes supported but less accurate
+- Multi-column indexes require column ordering to match access pattern
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    selectivity: f64,
+    heap_pages: f64,
+    hypo_index_pages: f64,
+    random_page_cost: f64,
+) -> f64 {
+    let seq_scan_cost = heap_pages + 0.01 * table_rows;
+    let idx_scan_cost = random_page_cost * hypo_index_pages
+        + random_page_cost * (selectivity * heap_pages)
+        + 0.005 * (selectivity * table_rows);
+    (seq_scan_cost - idx_scan_cost).max(0.0) / seq_scan_cost
+}
+```
+
+**Typical benefit**: 20-70% cost reduction identification for workloads
+with missing indexes. False-positive rate approximately 5-10% due to
+statistics staleness.
+
+## Test Cases
+
+```sql
+-- Positive: hypothetical index reduces cost for selective predicate
+SELECT hypopg_create_index('CREATE INDEX ON orders(customer_id)');
+EXPLAIN SELECT * FROM orders WHERE customer_id = 42;
+-- Should show Index Scan using hypothetical index
+-- Cost reduced from ~50000 (SeqScan) to ~8 (IndexScan)
+```
+
+```sql
+-- Negative: non-selective predicate, index not beneficial
+SELECT hypopg_create_index('CREATE INDEX ON orders(status)');
+EXPLAIN SELECT * FROM orders WHERE status = 'active';
+-- With 80% of rows being 'active', SeqScan still preferred
+-- Hypothetical index exists but planner correctly ignores it
+```
+
+```sql
+-- Positive: composite index for multi-column predicate
+SELECT hypopg_create_index(
+    'CREATE INDEX ON lineitem(l_shipdate, l_discount, l_quantity)'
+);
+EXPLAIN SELECT * FROM lineitem
+WHERE l_shipdate BETWEEN '1994-01-01' AND '1995-01-01'
+  AND l_discount BETWEEN 0.05 AND 0.07
+  AND l_quantity < 24;
+-- Index Scan with all three predicates as index conditions
+```
+
+## References
+
+- HypoPG: https://hypopg.readthedocs.io/ (PostgreSQL extension)
+- Chaudhuri & Narasayya, "AutoAdmin: What-If Index Analysis", SIGMOD 1998
+- PostgreSQL: src/backend/optimizer/path/indxpath.c
+- Schnaitter et al., "COLT: Continuous On-Line Tuning", SIGMOD 2006

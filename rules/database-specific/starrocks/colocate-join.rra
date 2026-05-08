@@ -1,0 +1,163 @@
+---
+id: starrocks-colocate-join
+name: "StarRocks Colocated Data Join"
+category: database-specific/starrocks
+databases: [starrocks]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, starrocks, colocate, join, shuffle-free, distribution]
+complexity: "O(n)"
+benefit_range: [0.3, 0.8]
+---
+
+# StarRocks Colocated Data Join
+
+## Metadata
+- **Rule ID**: `starrocks-colocate-join`
+- **Category**: Database-specific / StarRocks
+- **Source**: `fe/fe-core/src/main/java/com/starrocks/sql/optimizer/rule/transformation/JoinImplementationRule.java`
+- **Complexity**: O(n) where n is rows in the larger table
+- **Prerequisites**: Both tables in the same colocate group with matching distribution
+- **Alternatives**: Shuffle join (hash redistribute both sides) or broadcast join
+
+## Description
+
+StarRocks supports "colocate groups" — a mechanism where tables declared in
+the same group use identical hash distribution and tablet-to-backend mapping.
+When two tables share a colocate group and are joined on their distribution
+key, corresponding tablets are guaranteed to reside on the same backend node.
+This eliminates all network shuffle during the join, converting a distributed
+join into a series of independent local joins.
+
+The optimization works because StarRocks enforces that tables in a colocate
+group have the same number of buckets, use the same hash function, and
+maintain tablet affinity (tablet i of table A and tablet i of table B are
+always on the same backend). This is maintained through tablet scheduling
+and rebalancing — if a tablet migrates, its colocated partner migrates too.
+
+The performance impact is substantial for large equi-joins on the distribution
+key: network transfer of the entire build side (shuffle) or the smaller side
+(broadcast) is avoided completely. For star-schema workloads where the fact
+table and primary dimension tables are colocated on the join key, this
+eliminates the dominant cost of distributed query processing.
+
+## Relational Algebra
+
+```latex
+% Before: distributed join requires data movement
+R \bowtie_{R.k = S.k} S \Rightarrow
+\text{Exchange}_{\text{hash}(k)}(R) \bowtie \text{Exchange}_{\text{hash}(k)}(S)
+
+% After: colocate join is purely local (no exchange)
+R \bowtie_{R.k = S.k} S \Rightarrow
+\text{LocalJoin}(R_i, S_i) \text{ for each tablet } i
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("starrocks-colocate-join";
+    "(join (= ?lcol ?rcol) (exchange ?dist1 ?left) (exchange ?dist2 ?right))" =>
+    "(colocate-join (= ?lcol ?rcol) ?left ?right)"
+    if same_colocate_group("?left", "?right")
+    if is_distribution_key("?lcol", "?left")
+    if is_distribution_key("?rcol", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left_table: &TableDescriptor,
+    right_table: &TableDescriptor,
+    join_condition: &JoinCondition,
+) -> bool {
+    // Both tables must be in the same colocate group
+    let left_group = left_table.colocate_group();
+    let right_group = right_table.colocate_group();
+    left_group.is_some()
+    && left_group == right_group
+    // Join must be equi-join on the distribution columns
+    && join_condition.is_equi_join()
+    && join_condition.left_keys() == left_table.distribution_columns()
+    && join_condition.right_keys() == right_table.distribution_columns()
+    // Colocate group must be in stable state (no rebalancing)
+    && left_table.colocate_group_stable()
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_colocate_join(
+    left_rows: u64,
+    right_rows: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    // No network cost - purely local hash join
+    let build_cost = Cost::cpu(right_rows * 30);
+    let probe_cost = Cost::cpu(left_rows * 15);
+    // Compare with shuffle join cost
+    let shuffle_network = Cost::network(
+        (left_rows + right_rows) * hardware.avg_row_bytes()
+        / hardware.network_bandwidth()
+    );
+    // Savings = eliminated network cost
+    build_cost + probe_cost // colocate total (no network)
+}
+```
+
+**Typical benefit**: 30-80% over shuffle join for large tables. The benefit
+is purely from eliminated network I/O, which dominates for joins between
+tables with millions+ rows. Minimal benefit if tables are small enough for
+broadcast join.
+
+## Test Cases
+
+```sql
+-- Positive: Fact-dimension join on colocated distribution key
+CREATE TABLE orders (
+    order_id BIGINT,
+    user_id INT,
+    amount DECIMAL(10,2)
+) DISTRIBUTED BY HASH(user_id) BUCKETS 32
+PROPERTIES ("colocate_with" = "user_group");
+
+CREATE TABLE users (
+    id INT,
+    name VARCHAR(100)
+) DISTRIBUTED BY HASH(id) BUCKETS 32
+PROPERTIES ("colocate_with" = "user_group");
+
+SELECT u.name, SUM(o.amount)
+FROM orders o JOIN users u ON o.user_id = u.id
+GROUP BY u.name;
+-- Colocate join: no shuffle needed, each BE joins local tablets
+
+-- Positive: Multi-way colocate join
+SELECT o.order_id, u.name, p.product_name
+FROM orders o
+JOIN users u ON o.user_id = u.id
+JOIN user_preferences p ON o.user_id = p.user_id
+WHERE o.amount > 100;
+-- All three tables colocated on user_id; zero network for all joins
+
+-- Negative: Join on non-distribution column
+SELECT * FROM orders o JOIN users u ON o.order_id = u.id;
+-- order_id is not the distribution key for orders; cannot colocate
+
+-- Negative: Tables in different colocate groups
+SELECT * FROM orders o JOIN products p ON o.product_id = p.id;
+-- products in different colocate group; shuffle required
+```
+
+## References
+
+- StarRocks: `fe/fe-core/src/main/java/com/starrocks/sql/optimizer/rule/transformation/JoinImplementationRule.java`
+- StarRocks: `fe/fe-core/src/main/java/com/starrocks/catalog/ColocateTableIndex.java`
+- StarRocks Documentation: "Colocate Join" design and usage guide

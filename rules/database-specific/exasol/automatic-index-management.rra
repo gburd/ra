@@ -1,0 +1,167 @@
+---
+id: exasol-automatic-index-management
+name: "Exasol Automatic Index Management"
+category: database-specific/exasol
+databases: [exasol]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, exasol, auto-index, transparent, join-index, maintenance-free]
+complexity: "O(n)"
+benefit_range: [0.1, 0.5]
+---
+
+# Exasol Automatic Index Management
+
+## Metadata
+- **Rule ID**: `exasol-automatic-index-management`
+- **Category**: Database-specific / Exasol
+- **Source**: Exasol Query Optimizer (proprietary), documented in Exasol architecture papers
+- **Complexity**: O(n log n) for index creation; O(1) for index lookup decision
+- **Prerequisites**: Repeated query patterns on joinable/filterable columns
+- **Alternatives**: Manual CREATE INDEX; full table scans; explicit materialized views
+
+## Description
+
+Exasol has no CREATE INDEX statement. Instead, the database automatically
+creates, maintains, and destroys indexes based on observed query patterns.
+When the optimizer detects that a join or filter would benefit from an index
+structure, it transparently creates one in the background. When an index is no
+longer accessed (query patterns change) or when memory pressure increases,
+unused indexes are transparently dropped.
+
+The system maintains two types of automatic structures: (1) join indexes that
+accelerate hash joins by pre-building hash tables on frequently-joined columns,
+and (2) filter indexes that provide fast lookup for equality and range
+predicates on frequently-filtered columns. The creation decision is based on a
+cost/benefit analysis considering: how often the column appears in joins/filters,
+the estimated speedup from the index, and the memory cost of maintaining it.
+
+This approach eliminates the DBA burden of index tuning — a significant
+operational advantage in analytics environments where query patterns evolve
+rapidly. It also avoids the problem of obsolete indexes consuming resources:
+traditional systems accumulate indexes that were once useful but now only slow
+down writes and waste memory. Exasol's automatic lifecycle management ensures
+that only beneficial indexes exist at any given time.
+
+## Relational Algebra
+
+```latex
+% Without auto-index: hash join builds hash table from scratch each time
+R \bowtie_{R.k = S.k} S \Rightarrow
+\text{Build}(\text{HashTable}(S, k)) \rhd \text{Probe}(R)
+
+% With auto-index: pre-built persistent hash table reused across queries
+R \bowtie_{R.k = S.k} S \Rightarrow
+\text{Probe}(R, \text{AutoIndex}(S, k))
+% AutoIndex built once, amortized across N executions of similar queries
+
+% Filter auto-index:
+\sigma_{k = v}(R) \Rightarrow \text{IndexLookup}(\text{AutoIndex}(R, k), v)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("exasol-automatic-join-index";
+    "(hash-join ?cond (build-hash ?right) (probe ?left))" =>
+    "(index-join ?cond ?left (auto-index-probe ?right ?cond))"
+    if auto_index_exists_or_beneficial("?right", "?cond")
+    if join_frequency_above_threshold("?right", "?cond")
+),
+
+rw!("exasol-automatic-filter-index";
+    "(filter (= ?col ?val) (scan ?table))" =>
+    "(index-lookup (auto-index ?table ?col) ?val)"
+    if auto_index_exists_or_beneficial("?table", "?col")
+    if filter_frequency_above_threshold("?table", "?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    column: &Column,
+    table: &TableDescriptor,
+    workload: &WorkloadStatistics,
+    memory: &MemoryBudget,
+) -> bool {
+    // Column must appear frequently in joins or filters
+    let access_count = workload.column_access_count(table, column);
+    access_count > workload.index_creation_threshold()
+    // Index must provide net benefit (speedup > maintenance cost)
+    && estimated_speedup(table, column) > estimated_maintenance_cost(table, column)
+    // Memory must be available for the index
+    && memory.available() > estimated_index_size(table, column)
+    // Column should have sufficient selectivity for index to help
+    && table.ndv(column) > table.row_count() as f64 * 0.01
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_auto_index(
+    table_rows: u64,
+    index_build_cost: f64,
+    query_count_per_hour: u64,
+    speedup_per_query_ms: f64,
+    index_memory_bytes: u64,
+) -> f64 {
+    // Amortized build cost over expected query count before eviction
+    let expected_lifetime_queries = query_count_per_hour * 24; // ~1 day
+    let amortized_build = index_build_cost / expected_lifetime_queries as f64;
+
+    // Per-query savings
+    let savings_per_query = speedup_per_query_ms - amortized_build;
+
+    // Memory opportunity cost (could be used for caching data)
+    let memory_cost = index_memory_bytes as f64 * 0.0001; // per query
+
+    savings_per_query - memory_cost
+}
+```
+
+**Typical benefit**: 10-50% for repeated analytical queries. Join indexes
+eliminate hash table build time (significant for large build sides). Filter
+indexes provide O(1) vs. O(n) lookup for point queries. The benefit compounds
+with query frequency — an index that saves 100ms per query and is hit 1000
+times/hour saves 100 seconds of compute per hour.
+
+## Test Cases
+
+```sql
+-- Positive: Repeated join pattern triggers auto join-index creation
+-- Query executed 100+ times per hour:
+SELECT c.name, SUM(o.amount)
+FROM orders o JOIN customers c ON o.customer_id = c.id
+GROUP BY c.name;
+-- After several executions, Exasol creates a join index on customers.id
+-- Subsequent executions skip hash table build, directly probe pre-built index
+
+-- Positive: Repeated filter pattern triggers auto filter-index creation
+-- Dashboard query executed every 5 minutes:
+SELECT * FROM events WHERE session_id = ?;
+-- Auto-creates filter index on events.session_id after observing pattern
+-- Point lookup becomes O(1) instead of scanning all event rows
+
+-- Negative: One-off ad-hoc query (frequency below threshold)
+SELECT * FROM orders WHERE custom_field_7 = 'rare_value';
+-- Executed once; no auto-index created (not worth the memory)
+
+-- Negative: Low-selectivity column (index would not help)
+SELECT * FROM users WHERE is_active = true;
+-- 95% of users are active; index would not prune enough rows
+-- Full scan with filter is more efficient than index lookup
+```
+
+## References
+
+- Exasol Architecture White Paper: "Automatic Indexing in Exasol"
+- Exasol Documentation: "Performance Guide - Automatic Optimization"
+- Exasol System Tables: `EXA_STATISTICS.EXA_DBA_INDICES` (auto-index metadata)
+- Idreos et al., "Database Cracking" (CIDR 2007) — related adaptive indexing concept

@@ -1,0 +1,183 @@
+---
+id: apache-doris-nereids-cascades
+name: "Apache Doris Nereids Cascades Optimizer"
+category: database-specific/apache-doris
+databases: [apache-doris]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, apache-doris, nereids, cascades, optimizer-framework, memo, top-down]
+complexity: "O(n)"
+benefit_range: [0.1, 0.8]
+---
+
+# Apache Doris Nereids Cascades Optimizer
+
+## Metadata
+- **Rule ID**: `apache-doris-nereids-cascades`
+- **Category**: Database-specific / Apache Doris
+- **Source**: `fe/fe-core/src/main/java/org/apache/doris/nereids/CascadesContext.java`
+- **Complexity**: O(n) per group exploration with memoization
+- **Prerequisites**: Nereids optimizer enabled (default in Doris 2.0+)
+- **Alternatives**: Legacy rule-based optimizer
+
+## Description
+
+Doris's Nereids optimizer is a modern Cascades-framework implementation that
+replaced the legacy heuristic optimizer starting in version 2.0. Unlike the old
+optimizer which applied a fixed sequence of rewrite rules, Nereids explores
+the search space of logically equivalent plans using a memo structure (shared
+expression DAG) and selects the cheapest physical plan through top-down
+cost-based optimization.
+
+The Cascades framework organizes optimization into two interleaved phases:
+exploration (generating logically equivalent alternatives via transformation
+rules) and implementation (mapping logical operators to physical operators with
+specific algorithms and data distributions). The memo avoids redundant work by
+recognizing when two subexpressions produce equivalent results, grouping them
+into the same equivalence class. Property enforcement (sort order, data
+distribution) is handled through physical property requests propagated
+top-down from parent operators to children.
+
+The critical advantage for distributed query processing is that Nereids
+jointly optimizes the logical plan and the data distribution plan. Instead of
+choosing a join order first and then separately deciding data movement, the
+Cascades search considers shuffle/broadcast/colocate alternatives as part of
+the same search space. This enables discovering plans that are locally
+suboptimal for one join but globally optimal when considering network costs.
+
+## Relational Algebra
+
+```latex
+% The Cascades framework transforms logical algebra to physical algebra
+% by exploring equivalences within memo groups
+
+% Logical exploration: generate equivalent join orderings
+(A \bowtie B) \bowtie C \equiv A \bowtie (B \bowtie C)
+
+% Implementation: choose physical algorithm and distribution
+\text{HashJoin}_{\text{shuffle}(A.k)}(A, B) \text{ vs }
+\text{HashJoin}_{\text{broadcast}(B)}(A, B)
+
+% Property enforcement: insert distribution/sort operators
+\text{Enforce}_{[\text{hash}(k)]}(\text{Scan}(T))
+= \text{Exchange}_{\text{hash}(k)}(\text{Scan}(T))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Cascades exploration rules generate alternatives in the memo
+rw!("nereids-join-commute";
+    "(join ?cond ?left ?right)" =>
+    "(join (swap-sides ?cond) ?right ?left)"
+),
+
+rw!("nereids-join-associate";
+    "(join ?c1 (join ?c2 ?a ?b) ?c)" =>
+    "(join ?c2 ?a (join ?c1 ?b ?c))"
+    if join_condition_compatible("?c1", "?c2", "?a", "?b", "?c")
+),
+
+// Implementation rules map logical to physical with distribution
+rw!("nereids-hash-join-shuffle";
+    "(join (= ?lcol ?rcol) ?left ?right)" =>
+    "(hash-join (= ?lcol ?rcol)
+        (exchange hash(?lcol) ?left)
+        (exchange hash(?rcol) ?right))"
+),
+
+rw!("nereids-hash-join-broadcast";
+    "(join (= ?lcol ?rcol) ?left ?right)" =>
+    "(hash-join (= ?lcol ?rcol)
+        ?left
+        (exchange broadcast ?right))"
+    if is_small_table("?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query: &LogicalPlan,
+    context: &OptimizerContext,
+) -> bool {
+    // Nereids must be enabled (default in Doris 2.0+)
+    context.session_var("enable_nereids_planner") == "true"
+    // Query must be DQL (SELECT), not DDL/DML
+    && query.is_query()
+    // At least one join or aggregation (trivial plans skip Cascades)
+    && (query.contains_join() || query.contains_aggregation())
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cascades_cost_model(
+    plan: &PhysicalPlan,
+    stats: &Statistics,
+    hardware: &HardwareModel,
+) -> Cost {
+    match plan {
+        PhysicalPlan::HashJoin { left, right, .. } => {
+            let build_cost = Cost::cpu(right.row_count() * 30); // hash build
+            let probe_cost = Cost::cpu(left.row_count() * 15); // hash probe
+            let network = match plan.distribution() {
+                Distribution::Shuffle => Cost::network(
+                    (left.row_count() + right.row_count())
+                    * hardware.network_cost_per_row()
+                ),
+                Distribution::Broadcast => Cost::network(
+                    right.row_count() * hardware.num_nodes() as u64
+                    * hardware.network_cost_per_row()
+                ),
+                Distribution::Colocate => Cost::zero(),
+            };
+            build_cost + probe_cost + network
+        }
+        _ => Cost::default_for(plan),
+    }
+}
+```
+
+**Typical benefit**: 10-80% over the legacy optimizer, with greatest gains on
+multi-join queries (5+ tables) where join ordering and distribution strategy
+interact. Star-schema queries with mixed large/small tables particularly benefit
+from joint optimization of join order and broadcast decisions.
+
+## Test Cases
+
+```sql
+-- Positive: Multi-join query benefits from joint order+distribution optimization
+SELECT o.order_id, c.name, p.product_name, s.store_name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+JOIN products p ON o.product_id = p.id
+JOIN stores s ON o.store_id = s.id
+WHERE o.order_date > '2024-01-01';
+-- Nereids explores all join orderings and for each, considers
+-- shuffle vs broadcast for each join, finding global optimum
+
+-- Positive: Cascades finds colocate opportunity missed by heuristic
+SELECT a.user_id, COUNT(*)
+FROM activity a JOIN users u ON a.user_id = u.id
+GROUP BY a.user_id;
+-- If both tables distributed by user_id, Cascades identifies colocate join
+-- (zero shuffle) which the legacy optimizer might miss
+
+-- Negative: Trivial single-table scan (Cascades overhead not justified)
+SELECT * FROM small_config_table WHERE key = 'timeout';
+-- Direct scan without Cascades exploration
+```
+
+## References
+
+- Apache Doris: `fe/fe-core/src/main/java/org/apache/doris/nereids/CascadesContext.java`
+- Apache Doris: `fe/fe-core/src/main/java/org/apache/doris/nereids/memo/Memo.java`
+- Apache Doris RFC: "Nereids - Next Generation Query Optimizer"
+- Graefe, "The Cascades Framework for Query Optimization" (IEEE DE Bulletin, 1995)
