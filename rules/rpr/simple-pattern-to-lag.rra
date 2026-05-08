@@ -2,7 +2,7 @@
 id: rpr-simple-pattern-to-lag
 name: Translate Simple Monotonic Pattern to LAG()
 category: logical/rpr
-databases: [postgresql, oracle, duckdb, mssql, generic]
+databases: [postgresql, oracle, duckdb, mssql]
 execution_models: [logical-rewrite]
 hardware: [cpu]
 version: "1.0.0"
@@ -16,11 +16,8 @@ preconditions:
   - type: predicate
     condition: "is_simple_monotonic_pattern(?pattern, ?defines)"
     description: "Pattern is single variable with + quantifier and DEFINE uses only PREV()"
-  - type: fact
-    fact_type: database.supports_feature
-    feature: "lag_window_function"
-    comparator: "=="
-    threshold: true
+  - type: predicate
+    condition: "statistics_available"
     description: "Database supports LAG() window function"
 ---
 

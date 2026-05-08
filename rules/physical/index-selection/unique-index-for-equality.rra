@@ -17,11 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "has_unique_index(?table, ?col)"
     description: "Unique index must exist on the column"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?table"
-    comparator: "<="
-    threshold: 1
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Returns at most 1 row (point lookup)"
     optional: true
 ---

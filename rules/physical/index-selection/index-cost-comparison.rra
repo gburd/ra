@@ -17,10 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "has_multiple_indexes(?table)"
     description: "Multiple indexes must exist for cost comparison"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?table"
-    comparator: "exists"
+  - type: "predicate"
+    condition: "has_statistics(?table)"
     description: "Cardinality statistics needed for cost comparison"
 ---
 

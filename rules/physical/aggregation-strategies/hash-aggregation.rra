@@ -14,18 +14,12 @@ preconditions:
   - type: "pattern"
     must_match: "(aggregate ?input ?groups ?aggs)"
     description: "Aggregation suitable for hash-based strategy"
-  - type: "fact"
-    fact_type: "statistics.distinct_count"
-    table: "?input"
-    comparator: "<"
-    threshold: 1000000
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Group cardinality should fit in memory (<1M groups)"
     optional: true
-  - type: "fact"
-    fact_type: "hardware.memory"
-    comparator: ">="
-    threshold: 67108864
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Sufficient memory for hash table (>=64MB)"
 ---
 

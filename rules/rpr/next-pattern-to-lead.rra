@@ -2,7 +2,7 @@
 id: rpr-next-pattern-to-lead
 name: Translate NEXT-Based Pattern to LEAD()
 category: logical/rpr
-databases: [postgresql, oracle, duckdb, mssql, generic]
+databases: [postgresql, oracle, duckdb, mssql]
 execution_models: [logical-rewrite]
 hardware: [cpu]
 version: "1.0.0"

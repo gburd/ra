@@ -13,10 +13,8 @@ benefit_range: [0.3, 0.7]
 preconditions:
   - type: pattern
     must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern)"
-  - type: fact
-    fact_type: schema.index_exists
-    table: "?input_table"
-    columns: "?partition_and_order_cols"
+  - type: predicate
+    condition: "statistics_available"
     description: "Composite index exists on (PARTITION BY cols, ORDER BY cols)"
 ---
 

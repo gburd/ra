@@ -17,11 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "has_bitmap_index(?table, columns(?pred))"
     description: "Bitmap index must exist on predicate column"
-  - type: "fact"
-    fact_type: "statistics.distinct_count"
-    table: "?table"
-    comparator: "<"
-    threshold: 1000
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Column cardinality should be low for bitmap efficiency"
     optional: true
 ---

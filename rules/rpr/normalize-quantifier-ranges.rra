@@ -2,7 +2,7 @@
 id: rpr-normalize-quantifier-ranges
 name: Normalize Quantifier Ranges
 category: logical/rpr
-databases: [postgresql, oracle, duckdb, generic]
+databases: [postgresql, oracle, duckdb]
 execution_models: [logical-rewrite]
 hardware: [cpu]
 version: "1.0.0"

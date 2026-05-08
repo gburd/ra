@@ -19,10 +19,8 @@ preconditions:
   - type: "predicate"
     condition: "all_inner_joins(?inputs)"
     description: "All joins must be inner (outer joins break optimality principle)"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?inputs"
-    comparator: "exists"
+  - type: "predicate"
+    condition: "has_statistics(?inputs)"
     description: "Cardinality estimates required for cost-based decisions"
 ---
 

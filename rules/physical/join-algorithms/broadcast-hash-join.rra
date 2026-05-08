@@ -20,12 +20,8 @@ preconditions:
   - type: "predicate"
     condition: "is_distributed(?left) || is_distributed(?right)"
     description: "At least one input must be distributed"
-  - type: "fact"
-    fact_type: "statistics.size_bytes"
-    table: "smaller_input(?left, ?right)"
-    comparator: "<"
-    threshold: 1073741824
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Smaller input should fit in memory for broadcast (<1GB)"
 ---
 

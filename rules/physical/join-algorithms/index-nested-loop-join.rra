@@ -17,12 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "has_index(?right, ?rcol)"
     description: "Index must exist on the inner (right) table's join column"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?left"
-    comparator: "<"
-    threshold: 100000
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Outer table should be small for efficient index lookups"
 ---
 

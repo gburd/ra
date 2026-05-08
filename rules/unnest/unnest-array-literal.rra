@@ -2,7 +2,7 @@
 id: unnest-array-literal-constant-fold
 name: Unnest Array Literal to VALUES
 category: logical/unnest
-databases: [postgresql, duckdb, sqlite, mysql, oracle, mssql, generic]
+databases: [postgresql, duckdb, sqlite, mysql, oracle, mssql]
 execution_models: [logical-rewrite]
 hardware: [cpu]
 version: "1.0.0"

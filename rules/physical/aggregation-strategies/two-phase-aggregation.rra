@@ -17,12 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "all_decomposable(?aggs)"
     description: "All aggregate functions must be decomposable (SUM, COUNT, MIN, MAX)"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?input"
-    comparator: ">"
-    threshold: 100000
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Input large enough to benefit from two-phase approach"
 ---
 

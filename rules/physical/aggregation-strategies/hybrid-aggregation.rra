@@ -14,12 +14,8 @@ preconditions:
   - type: "pattern"
     must_match: "(aggregate ?input ?groups ?aggs)"
     description: "Aggregation combining hash and sort strategies"
-  - type: "fact"
-    fact_type: "statistics.distinct_count"
-    table: "?input"
-    comparator: ">"
-    threshold: 100000
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "High enough cardinality to benefit from hybrid approach"
 ---
 

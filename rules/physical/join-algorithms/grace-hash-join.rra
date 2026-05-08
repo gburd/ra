@@ -17,11 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "is_equijoin(= ?lcol ?rcol)"
     description: "Must be an equi-join"
-  - type: "fact"
-    fact_type: "statistics.size_bytes"
-    table: "smaller_input(?left, ?right)"
-    comparator: ">"
-    threshold: "available_memory()"
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Build input exceeds memory (triggers Grace partitioning)"
     optional: true
 ---

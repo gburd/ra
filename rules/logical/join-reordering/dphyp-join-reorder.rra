@@ -15,10 +15,8 @@ preconditions:
   - type: "predicate"
     condition: "count(?nodes) >= 3"
     description: "At least 3 relations needed for reordering"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?nodes"
-    comparator: "exists"
+  - type: "predicate"
+    condition: "has_statistics(?nodes)"
     description: "Cardinality estimates must be available for cost-based decisions"
 ---
 

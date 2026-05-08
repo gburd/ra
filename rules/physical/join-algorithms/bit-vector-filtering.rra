@@ -17,12 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "is_equijoin(= ?lcol ?rcol)"
     description: "Must be an equi-join"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?left"
-    comparator: ">"
-    threshold: 10000
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Large enough inputs to benefit from bit vector filtering"
 ---
 

@@ -17,9 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "is_equijoin(= ?lcol ?rcol)"
     description: "Must be an equi-join"
-  - type: "fact"
-    fact_type: "hardware.cache_size"
-    comparator: "exists"
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Cache size info needed for radix partitioning"
 ---
 

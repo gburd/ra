@@ -17,12 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "all_decomposable(?aggs)"
     description: "All aggregate functions must be decomposable"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?input"
-    comparator: ">"
-    threshold: 10000
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Input must be large enough to benefit from partial aggregation"
 ---
 

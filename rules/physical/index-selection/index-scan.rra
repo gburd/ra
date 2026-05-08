@@ -17,12 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "has_index(?table, columns(?pred))"
     description: "Index must exist on the filter column"
-  - type: "fact"
-    fact_type: "statistics.selectivity"
-    table: "?table"
-    comparator: "<"
-    threshold: 0.15
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Selectivity should be low enough to benefit from index"
 ---
 

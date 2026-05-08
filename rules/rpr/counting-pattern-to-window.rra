@@ -2,7 +2,7 @@
 id: rpr-counting-pattern-to-window-aggregate
 name: Translate Counting Pattern to Window Aggregate
 category: logical/rpr
-databases: [postgresql, oracle, duckdb, mssql, generic]
+databases: [postgresql, oracle, duckdb, mssql]
 execution_models: [logical-rewrite]
 hardware: [cpu]
 version: "1.0.0"

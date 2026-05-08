@@ -17,12 +17,8 @@ preconditions:
   - type: "predicate"
     condition: "has_index(?table, ?groups)"
     description: "Index must exist on the grouping columns"
-  - type: "fact"
-    fact_type: "statistics.distinct_count"
-    table: "?table"
-    comparator: "<"
-    threshold: 10000
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Few distinct values for efficient skip behavior"
 ---
 

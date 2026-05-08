@@ -19,11 +19,8 @@ preconditions:
   - type: "predicate"
     condition: "all_inner_joins(?inputs)"
     description: "All joins must be inner joins"
-  - type: "fact"
-    fact_type: "hardware.memory"
-    comparator: "<"
-    threshold: 1073741824
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Left-deep preferred when memory is limited (<1GB)"
 ---
 

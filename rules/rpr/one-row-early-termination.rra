@@ -2,7 +2,7 @@
 id: rpr-one-row-early-termination
 name: Early Termination for ONE ROW PER MATCH
 category: logical/rpr
-databases: [postgresql, oracle, duckdb, generic]
+databases: [postgresql, oracle, duckdb]
 execution_models: [logical-rewrite]
 hardware: [cpu]
 version: "1.0.0"

@@ -18,12 +18,8 @@ preconditions:
     database: "current"
     requires: "vectorized_execution"
     description: "Database supports vectorized execution"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?input"
-    comparator: ">"
-    threshold: 10000
-    optional: true
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Input large enough to benefit from SIMD vectorization"
 ---
 

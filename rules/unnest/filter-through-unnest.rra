@@ -2,7 +2,7 @@
 id: filter-through-unnest
 name: Push Filter Through Unnest
 category: logical/unnest
-databases: [postgresql, duckdb, generic]
+databases: [postgresql, duckdb]
 execution_models: [logical-rewrite]
 hardware: [cpu]
 version: "1.0.0"

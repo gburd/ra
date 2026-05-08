@@ -15,10 +15,8 @@ preconditions:
   - type: "predicate"
     condition: "count(?inputs) >= 3"
     description: "At least 3 inputs for bushy optimization"
-  - type: "fact"
-    fact_type: "statistics.cardinality"
-    table: "?inputs"
-    comparator: "exists"
+  - type: "predicate"
+    condition: "has_statistics(?inputs)"
     description: "Cardinality estimates needed for greedy pairing"
 ---
 

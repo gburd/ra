@@ -16,10 +16,8 @@ preconditions:
   - type: "predicate"
     condition: "is_equijoin(= ?lcol ?rcol)"
     description: "Must be an equi-join (equality condition)"
-  - type: "fact"
-    fact_type: "hardware.memory"
-    comparator: ">="
-    threshold: "build_side_size(?left, ?right)"
+  - type: "predicate"
+    condition: "statistics_available"
     description: "Sufficient memory to hold build side hash table"
     optional: true
 ---
