@@ -1,7 +1,7 @@
 # Neural Cost Model: Complete Pipeline Guide
 
-**Date**: May 5, 2026
-**Status**: Implementation Complete - Ready for Testing
+**Date**: May 5, 2026 (updated May 7, 2026)
+**Status**: Full-Pipeline Integration Complete — Deployment Phase Remaining
 
 ---
 
@@ -166,17 +166,26 @@ I/O Ops:    avg 12.1%
 
 ### 4. Model Architecture
 
-**SimpleCostModel**: 2-layer neural network
+Three model tiers are available:
 
+**SimpleCostModel** (baseline, Vec-based): 2-layer neural network, ~600ns inference
 ```
-Input (12 features)
-    ↓
-Dense Layer (12 × 32) + ReLU
-    ↓
-Dense Layer (32 × 16) + Softplus
-    ↓
-Output (16 cost dimensions)
+Input (12 features) → Dense(12×32) + ReLU → Dense(32×16) + Softplus → Output (16 dims)
 ```
+
+**FastCostModel** (production, Box-array layout): ~80ns inference, auto-vectorized
+```
+Input (12 features) → Dense(12×32) + ReLU → Dense(32×16) + Softplus → Output (16 dims)
+Heap-allocated fixed-size arrays: Box<[[f32; 32]; 12]>, cache-line aligned
+```
+
+**ProductionCostModel** (training, larger capacity): ~2μs inference, momentum SGD
+```
+Input (12 features) → Dense(12×64) + ReLU → Dense(64×16) + Softplus → Output (16 dims)
+Adaptive learning rate, L2 weight decay, gradient clipping
+```
+
+Distillation: `FastCostModel::from_production(&production_model)` extracts weights.
 
 **Parameters**: 944 floats (3.78 KB)
 - W1: 12 × 32 = 384
@@ -432,53 +441,71 @@ psql postgres://localhost/tpch_tiny -c "SELECT 1"
 - ✓ Model training functional
 - ✓ Integration test created
 
-### Phase 2: Scale Up (In Progress)
-- Collect 1,000+ samples with varied configs/sizes
-- Train for 50-100 epochs
-- Achieve < 10% average error
-- Validate on holdout test set
+### Phase 2: Scale Up ✅ COMPLETE
+- ✓ `ProductionCostModel` (12→64→16, momentum SGD, adaptive LR)
+- ✓ `FastCostModel` (12→32→16, Box arrays, ~80ns inference)
+- ✓ `OnlineLearner` (auto-batch at 64 samples, checkpoint at 3200)
+- ✓ `fast_model_snapshot()` distillation
 
-### Phase 3: Production Integration
-- Model serialization (save/load from binary)
-- Integrate with `Optimizer::optimize()`
-- Use predictions for cost-based extraction
-- Online learning in production
+### Phase 3: Production Integration ✅ COMPLETE
+- ✓ `HybridCostFn` — blends `IntegratedCostFn` + neural per-node prediction inside `egg::CostFunction`
+- ✓ `extract_best_hybrid()` — new extraction API using `HybridCostFn`
+- ✓ `NeuralRuleSelector` — learned rule group selection (26→10 linear model)
+- ✓ `NeuralConvergenceDetector` — early termination when neural scores plateau
+- ✓ `RuleStallingTracker` — adaptive rule group demotion during saturation
+- ✓ `SystemFingerprint` — 56-byte lock-free state vector (hardware, capabilities, statistics quality, workload character)
+- ✓ `ExecutionFeedback` + `FeedbackCollector` + `MapeTracker` — post-execution data collection
 
-### Phase 4: Advanced Features
-- Transformer architecture (if accuracy plateaus)
-- Table statistics integration
-- Hardware-specific tuning
-- Workload-specific models (OLTP vs OLAP)
+### Phase 4: Deployment (Remaining)
+- Background monitor thread (polls pg_stat_* catalogs → updates SystemFingerprint)
+- Wire `FeedbackCollector` into `planner_hook.rs` post-execution path
+- Model rollback safety (MAPE regression trigger)
+- Remove legacy `plan_variants.rs` + `extract_best_with_neural()` path
 
 ---
 
 ## Performance Targets
 
-| Metric | Current | Target (v0.3) | Target (v1.0) |
-|--------|---------|---------------|---------------|
-| **Samples** | 284 | 1,000+ | 10,000+ |
-| **CPU Error** | 5-15% | < 10% | < 5% |
-| **Memory Error** | 8-20% | < 15% | < 10% |
-| **I/O Error** | 12-25% | < 20% | < 15% |
-| **Inference** | 0.52 μs | < 1 μs | < 0.5 μs |
-| **Model Size** | 3.69 KB | < 10 KB | < 100 KB |
+| Metric | SimpleCostModel | FastCostModel | Target (v1.0) |
+|--------|-----------------|---------------|---------------|
+| **Inference** | ~600ns | ~80ns | < 100ns |
+| **Per-node (HybridCostFn)** | N/A | ~20ns | < 200ns |
+| **Model Size** | ~3.7 KB (Vec) | ~10 KB (Box) | < 100 KB |
+| **Full optimize (OLTP)** | N/A | < 5ms | < 5ms |
+| **Full optimize (OLAP)** | N/A | < 50ms | < 50ms |
 
 ---
 
 ## References
 
-**Implementation**:
-- `crates/ra-engine/src/cost_model/` - Neural model components
-- `crates/ra-bench/src/training_collector.rs` - Data collection
-- `crates/ra-bench/examples/train_model.rs` - Training loop
-- `scripts/test-neural-pipeline.sh` - Integration test
+**Cost Models**:
+- `crates/ra-engine/src/cost_model/fast_model.rs` — FastCostModel (~80ns, production inference)
+- `crates/ra-engine/src/cost_model/production_model.rs` — ProductionCostModel (training)
+- `crates/ra-engine/src/cost_model/online_learner.rs` — OnlineLearner (feedback → training loop)
+- `crates/ra-engine/src/cost_model/feedback.rs` — ExecutionFeedback, FeedbackCollector, MapeTracker
+- `crates/ra-engine/src/cost_model/feature_extractor.rs` — QueryFeatures extraction
+
+**Neural Pipeline**:
+- `crates/ra-engine/src/neural/rule_selector.rs` — NeuralRuleSelector (pre-saturation)
+- `crates/ra-engine/src/neural/saturation.rs` — Convergence + rule stalling (during saturation)
+- `crates/ra-engine/src/extract/hybrid_cost.rs` — HybridCostFn (extraction)
+- `crates/ra-engine/src/state/fingerprint.rs` — SystemFingerprint (reactive state)
+
+**Extraction API**:
+- `crates/ra-engine/src/extract/api.rs` — `extract_best_hybrid()`, `extract_best()`
+- `crates/ra-engine/src/cost.rs` — IntegratedCostFn (traditional costing)
+
+**Benchmark & Training**:
+- `crates/ra-bench/src/training_collector.rs` — Data collection from Postgres
+- `crates/ra-bench/examples/train_model.rs` — Offline training loop
+- `scripts/test-neural-pipeline.sh` — Integration test
 
 **Documentation**:
-- `docs/NEURAL_MODEL_RESULTS.md` - Initial measurements
-- `docs/TRAINING_DATA_COLLECTION.md` - Collection infrastructure
-- `docs/DATABASE_SETUP.md` - Database configuration
+- `docs/NEURAL_COST_MODEL.md` — Architecture and design decisions
+- `docs/NEURAL_MODEL_TRAINING_METHODOLOGY.md` — Training best practices
+- `docs/TRAINING_DATA_COLLECTION.md` — Collection infrastructure
 
 **Research**:
-- Marcus et al. (2019): Neo - End-to-end learned optimization
+- Marcus et al. (2019): Neo — End-to-end learned optimization
 - Woltmann et al. (2019): Learned cardinality estimation
 - Kipf et al. (2019): Deep reinforcement learning for query optimization

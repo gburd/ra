@@ -1,8 +1,7 @@
-# Neural Cost Model: Transformer-Based Query Optimization
+# Neural Cost Model: Learned Query Cost Estimation
 
-**Status**: Design Phase (Infrastructure Skeleton Implemented)
+**Status**: Full Pipeline Implemented (compact linear models, not transformer)
 **Target**: v0.3.0
-**Estimated Effort**: 4-6 weeks for full implementation
 
 ---
 
@@ -18,72 +17,69 @@ This **hybrid approach** combines:
 
 ---
 
-## Architecture
+## Architecture (Implemented)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ SQL Query + Time Budget                                     │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Lime Parser → Tokens                                        │
-│ SELECT * FROM users WHERE age > 30 [Budget: 1ms]           │
-│   ↓                                                          │
-│ [BUDGET_FAST, SELECT, STAR, FROM, IDENT(users), WHERE,     │
-│  IDENT(age), GT, INT(30)]                                   │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Token Embeddings (Learned, 128-dim)                        │
-│ BUDGET_FAST  → [0.9, -0.2, 0.4, ...]  # latency context    │
-│ SELECT       → [0.2, 0.8, -0.3, ...]                       │
-│ IDENT(users) → [0.5, 0.1, 0.7, ...]                        │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Transformer Layers (4 layers × 8 attention heads)          │
-│ - Self-attention across tokens                             │
-│ - Context-aware representations                             │
-│ - Position encoding                                         │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Multi-Head Cost Predictor (16 separate heads)              │
-│                                                             │
-│ ┌─────┬──────┬────┬────┬─────┬──────┬───────┬────────┐   │
-│ │ CPU │ Mem  │ I/O│ Net│ Lock│VACUUM│  WAL  │ Cache  │   │
-│ │Time │ Peak │ Ops│Bytes│Hold │Overhead│Gen  │Hit Ratio   │
-│ └──┬──┴───┬──┴──┬─┴──┬─┴───┬─┴────┬─┴────┬──┴────┬───┘   │
-│    ▼      ▼     ▼    ▼     ▼      ▼      ▼       ▼       │
-│  2.3ms  8.2MB 120ops 450KB 0.3ms  0.1  25KB      0.95     │
+│  FLOW 1: HOT PATH (per-query, latency-critical)            │
+│                                                              │
+│  SQL → Parse → RelExpr → extract_features() → QueryFeatures │
+│                              (12 dimensions)                 │
+│         ↓                                                    │
+│  SystemFingerprint (14 dims, ~10ns atomic read)             │
+│         ↓                                                    │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ NeuralRuleSelector (26→10 linear + sigmoid)         │    │
+│  │ Selects which rule groups to enable for this query  │    │
+│  │ Falls back to LazyRuleCompiler if untrained         │    │
+│  └────────────────────────┬────────────────────────────┘    │
+│         ↓                                                    │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ E-Graph Saturation (equality saturation with egg)   │    │
+│  │ + NeuralConvergenceDetector (early termination)     │    │
+│  │ + RuleStallingTracker (adaptive rule demotion)      │    │
+│  └────────────────────────┬────────────────────────────┘    │
+│         ↓                                                    │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ HybridCostFn (egg::CostFunction implementation)     │    │
+│  │                                                      │    │
+│  │ per_node_cost = α × neural + (1-α) × traditional   │    │
+│  │                                                      │    │
+│  │ α = blend_alpha (0.0 to 0.9, never fully neural)   │    │
+│  │ traditional = IntegratedCostFn (hardware + stats)    │    │
+│  │ neural = NodeCostWeights (8→1 linear, ~20ns/node)   │    │
+│  └────────────────────────┬────────────────────────────┘    │
+│         ↓                                                    │
+│  Optimized RelExpr → Execute                                │
+├─────────────────────────────────────────────────────────────┤
+│  FLOW 2: LEARNER (background, under load)                   │
+│                                                              │
+│  ExecutionFeedback { predicted_cost, actual_time_ms, ... }  │
+│         ↓                                                    │
+│  FeedbackCollector → MapeTracker (rolling accuracy)         │
+│         ↓                                                    │
+│  OnlineLearner.record() → ProductionCostModel.train_batch() │
+│         ↓ (every 3200 samples)                              │
+│  FastCostModel = distill(ProductionCostModel)               │
+│         ↓                                                    │
+│  Arc::swap(live_model, new_model)  ← zero-downtime update  │
+│         ↓                                                    │
+│  NeuralRuleSelector.train_batch(rule_labels)                │
 └─────────────────────────────────────────────────────────────┘
-                       │
-                       ▼ Predicted Cost Vector (16 dimensions)
-┌─────────────────────────────────────────────────────────────┐
-│ E-Graph Cost Model Integration                              │
-│ - Each e-class annotated with predicted costs              │
-│ - Extraction uses cost predictions                          │
-│ - Rewrite rules use cost differentials                      │
-│ - Budget-aware pruning (skip expensive rewrites if <1ms)   │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼ After Query Execution
-┌─────────────────────────────────────────────────────────────┐
-│ Online Learning Loop (Real-time backprop)                   │
-│                                                             │
-│ Actual:    [1.98ms, 6.1MB, 95ops, 410KB, 0.2ms, ...]     │
-│ Predicted: [2.3ms, 8.2MB, 120ops, 450KB, 0.3ms, ...]     │
-│      ↓                                                      │
-│ Loss = MSE(actual, predicted) per head                     │
-│      ↓                                                      │
-│ Backprop → Update weights → Save checkpoint                │
-│      ↓                                                      │
-│ Model improves with every query executed                    │
-└─────────────────────────────────────────────────────────────┘
+```
+
+### Model Hierarchy
+
+```
+ProductionCostModel (12→64→16, momentum SGD, ~2μs)
+    │
+    │ distill weights every 3200 samples
+    ▼
+FastCostModel (12→32→16, Box arrays, ~80ns)
+    │
+    │ used for whole-plan scoring + per-node prediction
+    ▼
+NodeCostWeights (8→1, inline in HybridCostFn, ~20ns/node)
 ```
 
 ---
@@ -164,154 +160,100 @@ Vocabulary mapping with:
 
 ---
 
-## Implementation Phases
+## Implementation Status
 
-### ✅ Phase 1: Infrastructure & Tokenization (DONE)
+> **Note**: The original design called for a full transformer architecture (4 layers,
+> 8 attention heads, token embeddings). This was replaced with compact linear models
+> that achieve sub-100ns inference — fast enough to run inside the egg cost function
+> on every node without exceeding the 5ms OLTP optimization budget.
 
-**Deliverables:**
-- [x] Model metadata defined (model.toml)
-- [x] Tokenizer vocabulary defined (tokenizer.json)
-- [x] Rust module structure (cost_model/)
-- [x] TimeBudget enum and special tokens
-- [x] CostVector struct (16 dimensions)
+### ✅ Phase 1: Infrastructure & Feature Extraction (DONE)
 
-**Files Created:**
-- `crates/ra-engine/cost_model/model.toml`
-- `crates/ra-engine/cost_model/tokenizer.json`
-- `crates/ra-engine/src/cost_model/mod.rs`
-- `crates/ra-engine/src/cost_model/tokenizer.rs`
+- [x] `CostVector` struct (16 cost dimensions)
+- [x] `QueryFeatures` (12-dim structural feature vector)
+- [x] `extract_features()` / `extract_features_with_stats()` in `feature_extractor.rs`
+- [x] `TimeBudget` enum and tokenizer vocabulary
 
-### ⏸️  Phase 2: Transformer Implementation (BLOCKED)
+### ✅ Phase 2: Neural Cost Models (DONE)
 
-**Requirements:**
-- Add burn dependencies:
-  ```toml
-  [dependencies]
-  burn = "0.15"  # Check latest stable version
-  burn-ndarray = "0.15"
-  safetensors = "0.4"
-  ```
+**Implemented** (no `burn` dependency — pure Rust, zero-alloc inference):
 
-**Implementation:**
-1. Define transformer architecture:
-   - `TokenEmbedding` layer (vocab_size → embed_dim)
-   - `PositionalEncoding` layer
-   - 4× `TransformerEncoderLayer` (self-attention + FFN)
-   - 16× `CostHead` (linear projection to cost dimension)
+| Model | Architecture | Inference | Purpose |
+|-------|-------------|-----------|---------|
+| `SimpleCostModel` | 12→32→16 (Vec) | ~600ns | Baseline, training experiments |
+| `FastCostModel` | 12→32→16 (Box arrays) | ~80ns | Production inline scoring |
+| `ProductionCostModel` | 12→64→16 (momentum SGD) | ~2μs | Offline training, distillation source |
 
-2. Create forward pass:
-   ```rust
-   pub fn forward(&self, token_ids: Tensor<B, 2>) -> CostVector<B> {
-       let embedded = self.embeddings.forward(token_ids);
-       let encoded = self.transformer.forward(embedded);
-       let pooled = encoded.mean_dim(1);
-       self.cost_heads.forward(pooled)
-   }
-   ```
+**Key files:**
+- `crates/ra-engine/src/cost_model/fast_model.rs`
+- `crates/ra-engine/src/cost_model/production_model.rs`
+- `crates/ra-engine/src/cost_model/simple_model.rs`
 
-3. Bootstrap initial model:
-   - Generate 10,000 synthetic TPC-H queries
-   - Use rule-based cost estimates as ground truth
-   - Train initial model offline
-   - Save to model.safetensors
+### ✅ Phase 3: Online Learning (DONE)
 
-**Files to Create:**
-- `crates/ra-engine/src/cost_model/transformer.rs`
-- `crates/ra-engine/src/cost_model/bootstrap.rs`
+- [x] `OnlineLearner` — accumulates execution feedback, auto-trains at batch boundaries (default: 64 samples)
+- [x] Checkpointing to JSON (every 3200 samples)
+- [x] `fast_model_snapshot()` — distills `ProductionCostModel` → `FastCostModel`
+- [x] Offline training mode for batch experiments
 
-**Estimated Time**: 1-2 weeks
+**Key file:** `crates/ra-engine/src/cost_model/online_learner.rs`
 
-### ⏸️  Phase 3: Online Learning (BLOCKED)
+### ✅ Phase 4: Full-Pipeline Neural Integration (DONE)
 
-**Implementation:**
-1. Experience replay buffer:
-   ```rust
-   pub struct Experience {
-       tokens: Vec<u32>,
-       predicted: CostVector,
-       actual: ActualCost,
-       timestamp: Instant,
-   }
-   ```
+Neural guidance at every stage of the optimization pipeline:
 
-2. Mini-batch updates (every 32 queries):
-   - Forward pass on batch
-   - Compute MSE loss per head
-   - Backprop and optimizer step
-   - Save checkpoint every 1000 queries
+| Stage | Component | Location |
+|-------|-----------|----------|
+| Pre-saturation | `NeuralRuleSelector` (26→10 linear, online logistic regression) | `neural/rule_selector.rs` |
+| During saturation | `NeuralConvergenceDetector` (epsilon/patience early termination) | `neural/saturation.rs` |
+| During saturation | `RuleStallingTracker` (adaptive rule group demotion) | `neural/saturation.rs` |
+| Extraction | `HybridCostFn` (blends `IntegratedCostFn` + per-node neural prediction) | `extract/hybrid_cost.rs` |
+| System state | `SystemFingerprint` (56-byte lock-free state vector, ~10ns reads) | `state/fingerprint.rs` |
+| Feedback | `ExecutionFeedback` + `FeedbackCollector` + `MapeTracker` | `cost_model/feedback.rs` |
 
-3. Integrate with optimizer:
-   - Record predictions during optimize()
-   - Collect actual costs from execution
-   - Async learning loop (non-blocking)
+**Key design decisions:**
+- Blend alpha never exceeds 0.9 — traditional cost always contributes ≥10%
+- Cold start safe: alpha = 0.0 until 500+ training samples accumulated
+- `NeuralRuleSelector` falls back to `LazyRuleCompiler` heuristics when untrained
+- Per-node neural cost: 8-dim features → 1 scalar (~20ns per node)
 
-**Files to Create:**
-- `crates/ra-engine/src/cost_model/learner.rs`
-- `crates/ra-engine/src/cost_model/experience.rs`
+### ⏸️  Phase 5: Background Monitor & Production Deployment
 
-**Estimated Time**: 1 week
-
-### ⏸️  Phase 4: E-Graph Integration (BLOCKED)
-
-**Implementation:**
-1. CostExtractor using model predictions:
-   ```rust
-   impl egg::CostFunction for CostExtractor<'_, B> {
-       fn cost(&mut self, enode: &RelExpr, costs: Vec<Self::Cost>) -> Self::Cost {
-           let tokens = self.tokenizer.from_expr(enode, self.budget);
-           let predicted = self.model.forward(&tokens);
-           combine_with_children(predicted, costs)
-       }
-   }
-   ```
-
-2. Hybrid rules + learned adjustments:
-   ```rust
-   fn estimated_benefit(&self, model: &CostTransformer, enode: &RelExpr) -> f64 {
-       let prior = self.rule_prior();  // Hand-coded
-       let adjustment = model.predict_rewrite_benefit(self, enode);
-       prior * adjustment  // Multiplicative combination
-   }
-   ```
-
-**Files to Modify:**
-- `crates/ra-engine/src/extract.rs`
-- `crates/ra-engine/src/rewrite.rs`
-- `crates/ra-engine/src/egraph/optimizer.rs`
-
-**Estimated Time**: 1 week
-
-### ⏸️  Phase 5: Production Deployment
-
-**Implementation:**
-1. Model versioning & A/B testing
-2. Monitoring (prediction latency, accuracy)
-3. Continuous improvement pipeline
-4. Documentation & tuning guide
-
-**Estimated Time**: 1 week
+**Remaining work:**
+1. Background monitor thread polling `pg_stat_*` catalogs to update `SystemFingerprint`
+2. Model versioning with automatic rollback (MAPE regression trigger)
+3. A/B testing infrastructure (10% of queries use previous model version)
+4. PostgreSQL extension integration (wire `FeedbackCollector` into `planner_hook.rs`)
 
 ---
 
-## Hyperparameter Trade-offs
+## Hyperparameter Summary (Actual Implementation)
 
-### Embedding Dimensionality
+| Parameter | FastCostModel | ProductionCostModel | NeuralRuleSelector |
+|-----------|---------------|--------------------|--------------------|
+| **Input dim** | 12 (QueryFeatures) | 12 (QueryFeatures) | 26 (12 features + 14 fingerprint) |
+| **Hidden dim** | 32 | 64 | N/A (single linear layer) |
+| **Output dim** | 16 (CostVector) | 16 (CostVector) | 10 (rule group scores) |
+| **Activation** | ReLU + Softplus | ReLU + Softplus | Sigmoid |
+| **Learning rate** | N/A (distilled) | 0.005 (adaptive) | 0.01 (fixed) |
+| **Inference** | ~80ns | ~2μs | ~200ns |
+| **Training** | N/A | Momentum SGD | Online logistic regression |
 
-| Dims | Model Size | Inference (CPU) | Inference (GPU) | Accuracy |
-|------|------------|-----------------|-----------------|----------|
-| 64 | ~0.5 MB | 0.2ms | 0.05ms | 85% |
-| **128** | **~2 MB** | **0.4ms** | **0.1ms** | **92%** ✓ |
-| 256 | ~8 MB | 0.8ms | 0.2ms | 95% |
-| 512 | ~30 MB | 1.5ms | 0.4ms | 97% |
+### Blend Alpha Computation
 
-**Recommendation**: **Start with 128 dimensions** (balanced profile). Provides fast inference, small model size, and good accuracy. Can scale up to 256 if accuracy matters more than latency.
+The neural model's influence is gated by three confidence factors:
 
-### Dynamic Adjustment
+```
+alpha = clamp(data_conf × state_stability × stats_quality, 0.0, 0.9)
 
-Model can learn optimal dimensionality per query class:
-- OLTP queries (simple, fast) → 64 dims
-- OLAP queries (complex, slow) → 256 dims
-- Use a learned router to select profile based on query tokens
+where:
+  data_conf      = 1 - exp(-samples_trained / 2000)  [0→1 sigmoid]
+  state_stability = 1 - max(io_saturation, memory_pressure)
+  stats_quality   = 1 - avg_staleness
+```
+
+This ensures: untrained model has zero influence, stressed system reduces neural weight,
+stale statistics reduce neural trust.
 
 ---
 
@@ -334,57 +276,46 @@ Model can learn optimal dimensionality per query class:
 
 ## Why This Approach Works
 
-| Aspect | Classical | Neo/Bao | **Our Hybrid** |
+| Aspect | Classical | Neo/Bao | **Ra Hybrid** |
 |--------|-----------|---------|----------------|
-| **Adaptability** | Fixed | Adapts | **Continuous learning** |
-| **Interpretability** | Transparent | Black box | **Token embeddings + TOML** |
-| **Cold start** | Works immediately | Needs training | **Bootstrap from rules** |
+| **Adaptability** | Fixed | Adapts | **Continuous online learning** |
+| **Interpretability** | Transparent | Black box | **Linear models + feature vectors** |
+| **Cold start** | Works immediately | Needs training | **Falls back to traditional costing** |
 | **Cost dimensions** | Single scalar | Single scalar | **16 dimensions** |
-| **Latency awareness** | None | None | **Budget tokens** |
-| **Storage** | KB of code | 100+ MB | **2-5 MB safetensors** |
-| **Hardware** | CPU-only | GPU required | **GPU-accelerated w/ CPU fallback** |
-| **Integration** | Deep in code | External service | **Embedded in e-graph** |
-| **Versioning** | Git code | Binary checkpoints | **Safetensors + TOML** |
+| **Inference latency** | ~50ns | ~1ms | **~80ns (FastCostModel)** |
+| **Storage** | KB of code | 100+ MB | **~10 KB (Box arrays)** |
+| **Hardware** | CPU-only | GPU required | **CPU-only, SIMD-friendly** |
+| **Integration** | Deep in code | External service | **Embedded in egg CostFunction** |
+| **Safety** | N/A | N/A | **Blend capped at 0.9, never fully neural** |
 
-**Key Innovations:**
-1. **Token-level embeddings** from Lime parser (not hand-crafted features)
-2. **Multi-head prediction** for separate cost dimensions
-3. **Latency budget tokens** provide optimization context
-4. **Online learning** updates model in real-time during production
-5. **Hybrid priors**: Rules provide initial estimates, learning refines them
-6. **E-graph native**: Cost prediction embedded in extraction algorithm
+**Key Design Decisions:**
+1. **Compact linear models** — not transformers. Sub-100ns inference enables per-node scoring inside the e-graph extraction loop.
+2. **Multi-dimensional prediction** — 16 separate cost dimensions (CPU, I/O, memory, locks, etc.)
+3. **Confidence-gated blending** — neural influence grows with training data volume but never fully replaces traditional costing
+4. **System-aware** — `SystemFingerprint` captures hardware utilization, extension capabilities, statistics quality, and workload character
+5. **Full-pipeline integration** — neural model guides rule selection, saturation convergence, AND extraction (not just post-hoc re-ranking)
+6. **Online learning** — execution feedback drives continuous model improvement without redeployment
 
 ---
 
 ## Next Steps
 
-To continue implementation:
+Remaining work to complete the neural pipeline:
 
-1. **Add dependencies** (check latest stable versions):
-   ```bash
-   cargo add burn@0.15 burn-ndarray@0.15 safetensors@0.4
-   ```
+1. **Background monitor thread** — Poll `pg_stat_bgwriter`, `pg_extension`,
+   `pg_class` catalogs to keep `SystemFingerprint` current (~1s hardware,
+   ~30s capabilities)
 
-2. **Implement transformer** (Phase 2):
-   - Define layer structs using burn primitives
-   - Implement forward pass
-   - Test with dummy data
+2. **Wire feedback into PostgreSQL extension** — Connect `FeedbackCollector`
+   to `planner_hook.rs` post-execution path; update `SystemFingerprint`
+   with rolling MAPE
 
-3. **Bootstrap model** (Phase 2):
-   - Generate synthetic TPC-H queries
-   - Compute rule-based cost estimates
-   - Train initial model offline
-   - Save to model.safetensors
+3. **Model safety** — Implement rollback trigger (if MAPE exceeds 2x
+   previous version over 100 queries, revert to previous `FastCostModel`)
 
-4. **Online learning** (Phase 3):
-   - Implement experience replay
-   - Add feedback collection
-   - Test mini-batch updates
-
-5. **Integration** (Phase 4):
-   - Wire up CostExtractor
-   - Test e-graph extraction with model
-   - Benchmark accuracy vs rules
+4. **Remove legacy variant re-ranking** — The `plan_variants.rs` +
+   `extract_best_with_neural()` path is superseded by `HybridCostFn`;
+   remove once integration tests confirm equivalent or better plan quality
 
 ---
 

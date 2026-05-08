@@ -97,11 +97,17 @@ Use `--features all` to build everything.
 
 **Compilation:** `ra-compiler` → `ra-core`, `ra-parser`. Builds rule indices and the registry.
 
-**Engine:** `ra-engine` → `ra-core`, `ra-parser`, `ra-hardware`, `ra-stats-advanced`, plus `egg` for e-graph equality saturation. Key files:
-- `egraph.rs` — e-graph construction, `RelLang` s-expression language definition, optimizer loop
-- `rewrite.rs` — rule registry, rewrite application
-- `extract.rs` — cost-based plan extraction
+**Engine:** `ra-engine` → `ra-core`, `ra-parser`, `ra-hardware`, `ra-stats-advanced`, plus `egg` for e-graph equality saturation. Key modules:
+- `egraph/` — e-graph construction (`mod.rs`: `RelLang` definition, `RelAnalysis`), optimizer loop (`optimizer.rs`), `RecExpr` conversion (`to_rec.rs`, `from_rec.rs`)
+- `rewrite.rs` — rule registry, rewrite application (200+ rules)
+- `extract/` — cost-based plan extraction (`api.rs`), hybrid neural/traditional cost function (`hybrid_cost.rs`), neural plan scoring (`neural_cost.rs`), plan variant generation (`plan_variants.rs`)
+- `cost.rs` — `IntegratedCostFn` (hardware + statistics + staleness-aware egg cost function)
+- `cost_model/` — neural cost models: `FastCostModel` (<100ns, 12→32→16), `ProductionCostModel` (12→64→16, momentum SGD), `OnlineLearner` (execution feedback → training), `feedback.rs` (execution feedback collection + MAPE tracking)
+- `neural/` — full-pipeline neural guidance: `NeuralRuleSelector` (learned rule group selection, 26→10 linear model), `NeuralConvergenceDetector` (early termination), `RuleStallingTracker` (adaptive rule demotion)
+- `state/` — reactive system state: `SystemFingerprint` (56-byte lock-free state vector), `AtomicFingerprint`, `FingerprintReader`
 - `analysis.rs` — per-e-class property tracking (tables, cardinality)
+- `rule_advisor.rs` — 3-stage rule filtering (context → query-shape → learned ranking)
+- `lazy_rules.rs` — on-demand rule compilation by category
 
 **CLI:** `ra-cli` — command-line interface. Depends on `ra-adapters` (DuckDB, MySQL, Stoolap connectors) and `ra-metadata` (database metadata factory).
 
