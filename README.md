@@ -10,22 +10,25 @@ maintainable, formally verified framework.
 
 ## Features
 
-- **1,327+ Transformation Rules** in 5 categories: logical, hardware
+- **1,350+ Transformation Rules** in 5 categories: logical, hardware
   (GPU/FPGA/SIMD), distributed, multi-model, and physical
 - **Literate Programming** -- Each rule is a documented `.rra` file
   with formal algebra, implementation, preconditions, cost model,
   and test cases
 - **Equality Saturation** -- Uses the `egg` library for e-graph-based
   optimization that explores all equivalent plans simultaneously
+- **Neural-Guided Optimization** -- Full-pipeline neural integration:
+  learned rule selection, adaptive saturation convergence, hybrid
+  neural/traditional cost extraction, and online learning from
+  execution feedback
 - **Three-Tier Rule Tracking** -- Inspect which rules applied, which
   were evaluated but didn't match, and which are available in the
   system for debugging and optimization analysis
 - **Index Access Method Abstraction** -- Database-agnostic index
   capability discovery that automatically detects and uses GIN, RUM,
   GiST, BRIN, and custom index types without hardcoding
-- **PostgreSQL Metadata Cache** -- Automatic relcache invalidation
-  tracking that refreshes cached table statistics when schema changes
-  occur (ALTER TABLE, CREATE INDEX, ANALYZE)
+- **PostgreSQL Extension** -- Native `ra_pg_extension` that hooks
+  into PostgreSQL's planner for transparent query optimization
 - **Progressive Re-Optimization** -- Mid-execution plan switching
   when runtime statistics diverge from estimates (RFC 0052)
 - **Rule Complexity Prioritization** -- Intelligent rule ordering by
@@ -33,9 +36,6 @@ maintainable, formally verified framework.
   queries (RFC 0058)
 - **Plan Cache** -- 37x OLTP speedup with template-based plan caching
   (97.5% hit rate across 5 templates)
-- **Streaming Statistics** -- Lock-free ring buffer pipeline with
-  adaptive cost model and monitoring adapters (OpenTelemetry,
-  Prometheus, StatsD)
 - **Hardware-Aware Optimization** -- Cost models for GPU, FPGA, SIMD,
   and NUMA-aware operator placement
 - **Distributed Query Planning** -- Broadcast, shuffle, co-located,
@@ -44,16 +44,6 @@ maintainable, formally verified framework.
   queries, and time-series operations
 - **SQL Dialect Translation** -- Translate SQL between 20+ dialects
   including PostgreSQL, MySQL, SQLite, DuckDB, MSSQL, and Oracle
-- **PostgreSQL Extension** -- Native `ra_pg_extension` that hooks
-  into PostgreSQL's planner for transparent query optimization
-- **Isolation Testing** -- Cross-database transaction isolation
-  verification using PostgreSQL's `.spec` format
-- **ML Cardinality Estimation** -- Neural network models trained on
-  execution feedback
-- **Adaptive Execution** -- Runtime reoptimization and mid-query plan
-  switching
-- **Multiple Backends** -- JIT compilation (Cranelift) and bytecode
-  interpretation
 - **Formal Verification** -- TLA+ specifications proving termination,
   cost monotonicity, and semantic equivalence
 - **Resource Budgets** -- Constrain optimizer time, memory, and
@@ -62,10 +52,6 @@ maintainable, formally verified framework.
 - **Plan Diff Visualization** -- Colorized structural diffs between
   original and optimized plans in four formats (colored, plain,
   side-by-side, compact)
-- **Distributed Query Optimization** -- Network-aware cost modeling,
-  broadcast/shuffle/co-located distribution strategies, two-phase and
-  three-phase distributed aggregation, and federated query planning
-  across multiple databases
 
 ## Quick Start
 
@@ -73,43 +59,62 @@ maintainable, formally verified framework.
 
 ```bash
 nix develop
-cargo build --release
-cargo test --all-features
+cargo build
+cargo test
 ```
 
 ### Without Nix
 
-Requirements: Rust 1.88+ with cargo
+Requirements: Rust 1.88+, clang (for lime-sys build)
 
 ```bash
-cargo build --release
-cargo test --all-features
+git submodule update --init
+cargo build
+cargo test
+```
+
+### Library Usage
+
+The core optimizer is available as a Rust library. A plain `cargo build`
+builds only the default workspace members (the library layer):
+
+```rust
+use ra_parser::sql_to_relexpr::sql_to_relexpr;
+use ra_engine::Optimizer;
+
+let expr = sql_to_relexpr("SELECT * FROM users WHERE age > 30")?;
+let optimized = Optimizer::new().optimize(&expr)?;
 ```
 
 ### CLI Usage
 
+Build and run the interactive CLI (pulls in database adapters):
+
 ```bash
+# Build the CLI
+cargo build -p ra-cli
+
 # Optimize a query
-cargo run --bin ra-cli -- optimize "SELECT * FROM t1 WHERE x > 10"
+cargo run -p ra-cli -- optimize "SELECT * FROM t1 WHERE x > 10"
 
-# Explain optimization steps
-cargo run --bin ra-cli -- explain "SELECT c.name FROM customers c JOIN orders o ON c.id = o.cid WHERE o.amount > 1000"
-
-# Translate between SQL dialects
-cargo run --bin ra-cli -- translate --from postgres --to mysql \
-  "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
+# Show the relational algebra plan
+cargo run -p ra-cli -- explain "SELECT c.name FROM customers c JOIN orders o ON c.id = o.cid WHERE o.amount > 1000"
 
 # View a colorized plan diff
-cargo run --bin ra-cli -- optimize "SELECT * FROM t1 WHERE x > 10" --diff colored
+cargo run -p ra-cli -- optimize "SELECT * FROM t1 WHERE x > 10" --diff colored
 
 # Optimize with a resource budget
-cargo run --bin ra-cli -- optimize "SELECT * FROM orders JOIN customers ON orders.cid = customers.id" --resource-budget interactive
+cargo run -p ra-cli -- optimize "SELECT * FROM orders JOIN customers ON orders.cid = customers.id" --resource-budget interactive
+
+# Translate between SQL dialects
+cargo run -p ra-cli -- translate --from postgres --to mysql \
+  "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
 
 # List available rules
-cargo run --bin ra-cli -- list
+cargo run -p ra-cli -- list
 
 # Validate .rra rule files
-cargo run --bin ra-cli -- validate rules/
+cargo run -p ra-cli -- validate rules/
 
 # Run benchmarks
 cargo bench --package ra-engine
@@ -128,54 +133,66 @@ Run the interactive web explorer locally:
 
 # Docker Compose (better for development)
 ./scripts/docker-compose-up.sh
-
-# Deploy to Fly.io cloud
-./scripts/deploy-fly.sh
 ```
 
-Then open http://localhost:8000 for local, or https://ra-explorer.fly.dev for cloud.
+Then open http://localhost:8000 for local.
 
-See [Deployment Guide](docs/deployment.md) for full details on Docker, Kubernetes, cloud providers, and production deployment.
+See [Deployment Guide](docs/deployment.md) for full details on Docker, Kubernetes, and cloud deployment.
 
 ## Project Structure
 
 ```
 ra/
-|---- crates/                  # Rust crates (31 crates)
-|   |---- ra-core/             # Core types: RelExpr, Expr, Cost, Rule
-|   |---- ra-parser/           # .rra literate format + SQL parser
-|   |---- ra-compiler/         # Rule compilation and indexing
-|   |---- ra-engine/           # Optimization engine (egg + differential)
-|   |---- ra-cache-api/         # Plan cache API
-|   |---- ra-cache-impl/       # Plan cache implementation
-|   |---- ra-stats-advanced/   # Streaming statistics + monitoring adapters
-|   |---- ra-codegen/          # Code generation (Cranelift, WASM, bytecode)
-|   |---- ra-hardware/         # GPU/FPGA/SIMD/NUMA + network cost models
-|   |---- ra-ml/               # ML cardinality estimation
-|   |---- ra-adaptive/         # Runtime reoptimization
-|   |---- ra-dialect/          # SQL dialect translation (20+ dialects)
-|   |---- ra-pg-extension/     # PostgreSQL planner extension (pgrx)
-|   |---- ra-pg-advisor/       # PostgreSQL query advisor daemon
-|   |---- ra-pg-monitor/       # PostgreSQL monitoring and health checks
-|   |---- ra-isolation/        # Cross-database isolation testing
-|   |---- ra-synthesis/        # Natural language to SQL
-|   |---- ra-discovery/        # Automatic rule mining from logs
-|   |---- ra-multimodel/       # Graph, document, time-series rules
-|   `---- ra-cli/              # Command-line interface
-|---- rules/                   # 1,327+ rule definitions (.rra files)
-|   |---- logical/             # Predicate pushdown, join reordering, ...
-|   |---- physical/            # Join algorithms, index selection, ...
-|   |---- hardware/            # GPU, FPGA, SIMD, NUMA, data placement
-|   |---- distributed/         # Exchange, broadcast join, partition pruning
-|   |---- multi-model/         # Graph, document, time-series
-|   `---- database-specific/   # Engine-specific optimizations
-|---- benchmarks/              # JOB and TPC-H benchmark suites
-|---- web/                     # Web explorer frontend (Preact)
-|---- tla/                     # TLA+ formal specifications
-|---- rfcs/                    # Design documents and proposals
-|---- docs/                    # Documentation (VitePress)
-`---- tests/                   # Integration and property tests
+├── crates/                    # Rust workspace (22 crates)
+│   ├── ra-core/               # Core types: RelExpr, Expr, Cost, Rule, Statistics
+│   ├── ra-parser/             # SQL → RelExpr (Lime LALR grammar + sql_to_relexpr)
+│   ├── ra-compiler/           # .rra rule file compilation and indexing
+│   ├── ra-engine/             # Optimization engine (egg e-graph + neural pipeline)
+│   ├── ra-hardware/           # Hardware detection + cost calibration (CPU/GPU/FPGA)
+│   ├── ra-stats-advanced/     # Streaming statistics, staleness tracking, monitoring
+│   ├── ra-dialect/            # SQL dialect translation (20+ dialects)
+│   ├── ra-cache-api/          # Plan cache trait definitions
+│   ├── ra-cache-impl/         # Plan cache LRU/LFU/adaptive implementations
+│   ├── ra-sql-parser/         # Custom sqlparser fork (SQL parsing frontend)
+│   ├── ra-ml/                 # ML cardinality estimation
+│   ├── ra-adaptive/           # Runtime reoptimization
+│   ├── ra-metadata/           # Database metadata factory
+│   ├── ra-adapters/           # Database connectors (DuckDB, MySQL, Stoolap)
+│   ├── ra-cli/                # Command-line interface
+│   ├── ra-bench/              # Benchmark harness (JOB, TPC-H, TPROC-C)
+│   ├── ra-grammar-fuzzer/     # Grammar-based SQL fuzzer
+│   ├── ra-test-utils/         # Shared test utilities
+│   ├── ra-quel-parser/        # QUEL language parser (experimental)
+│   ├── ra-pg-extension/       # PostgreSQL planner extension (pgrx, excluded)
+│   ├── lime-sys/              # C library: Lime parser generator
+│   └── lime-rs/               # Rust bindings for lime-sys
+├── rules/                     # 1,350+ rule definitions (.rra files)
+│   ├── logical/               # Predicate pushdown, join reordering, ...
+│   ├── physical/              # Join algorithms, index selection, ...
+│   ├── hardware/              # GPU, FPGA, SIMD, NUMA, data placement
+│   ├── distributed/           # Exchange, broadcast join, partition pruning
+│   └── multi-model/           # Graph, document, time-series
+├── benchmarks/                # Benchmark suites and results
+├── web/                       # Web explorer frontend (Preact)
+├── tla/                       # TLA+ formal specifications
+├── rfcs/                      # Design documents and proposals
+├── docs/                      # Documentation (VitePress)
+├── scripts/                   # Shell utilities (docker, benchmarks, TLA+)
+└── tests/                     # Integration and property tests
 ```
+
+## Workspace Layers
+
+The workspace is organized into three layers controlled by Cargo features:
+
+| Layer | Build command | What's included |
+|-------|--------------|-----------------|
+| **Core** (default) | `cargo build` | Parser, engine, hardware, statistics, dialect — the library |
+| **CLI** | `cargo build -p ra-cli` | Core + database adapters + metadata + CLI binary |
+| **All** | `cargo build -p ra --features all` | Everything including experimental ML and fuzzer |
+
+The PostgreSQL extension (`ra-pg-extension`) is excluded from the workspace and
+requires `pg_config` + PostgreSQL headers. Build it separately with `cargo pgrx`.
 
 ## Rule Format
 
@@ -223,35 +240,28 @@ sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
 - [Architecture](docs/architecture.md) -- Detailed component design
 - [Benchmarks](docs/benchmarks.md) -- JOB and TPC-H benchmark results
 - [PostgreSQL Extension](docs/postgresql-extension.md) -- Native PostgreSQL integration
-- [Contributing](docs/CONTRIBUTING.md) -- Development standards and contribution guide
+- [Contributing](CONTRIBUTING.md) -- Development standards and contribution guide
 - [Rule Authoring Guide](docs/guides/rule-authoring.md) -- How to write `.rra` files
 - [API Reference](docs/api-reference.md) -- Library API documentation
 - [Cost Models](docs/guides/cost-models.md) -- Cost estimation framework
 - [Hardware Acceleration](docs/features/hardware-acceleration.md) -- GPU/FPGA/SIMD rules
-- [Execution Models](docs/features/execution-models.md) -- Volcano, vectorized, push-based, differential, column-at-a-time
 - [Dialect Translation](docs/guides/dialect-translation.md) -- SQL cross-database translation
-- [Isolation Testing](docs/features/isolation-testing.md) -- Transaction isolation verification
-- [Formal Verification](docs/features/formal-verification.md) -- TLA+ specifications and verification approach
-- [TLA+ Specifications](tla/README.md) -- Mathematical proofs of correctness properties
-- [Resource Budgets](docs/features/resource-budgets.md) -- Predefined profiles, custom limits, and overflow strategies
-- [Plan Visualization](docs/features/plan-visualization.md) -- Colorized plan diffs and output formats
-- [Distributed Query Optimization](docs/features/distributed-optimization.md) -- Network costs, distribution strategies, aggregation, federated queries
-- [Network Modeling](docs/features/network-modeling.md) -- Network topology and transfer cost estimation
-
-### Examples
-
-- [Simple Optimization](docs/examples/simple-optimization.md) -- Predicate pushdown walkthrough
-- [Hardware-Aware Optimization](docs/examples/hardware-aware-optimization.md) -- CPU vs GPU operator placement
-- [Distributed Join Strategies](docs/examples/distributed-join-strategies.md) -- Broadcast, shuffle, co-located joins
+- [Formal Verification](docs/features/formal-verification.md) -- TLA+ specifications
+- [Resource Budgets](docs/features/resource-budgets.md) -- Predefined profiles and overflow strategies
+- [Plan Visualization](docs/features/plan-visualization.md) -- Colorized plan diffs
+- [Distributed Optimization](docs/features/distributed-optimization.md) -- Network costs and distribution strategies
 
 ## Development
 
 ```bash
-# Build all crates
+# Build core library (default members)
 cargo build
 
+# Build CLI
+cargo build -p ra-cli
+
 # Run all tests
-cargo test --all-features
+cargo test
 
 # Run linter (zero warnings required)
 cargo clippy --all-targets --all-features -- -D warnings
@@ -260,10 +270,10 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt
 
 # Run benchmarks
-cargo bench
+cargo bench --package ra-engine
 
 # Validate all rules
-cargo run --bin ra-cli -- validate rules/
+cargo run -p ra-cli -- validate rules/
 
 # Run TLA+ formal verification
 ./scripts/run-tla.sh

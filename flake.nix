@@ -148,23 +148,10 @@
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
         };
 
-        packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "ra-cli";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-
-          nativeBuildInputs = with pkgs; [
-            pkg-config
-          ];
-
-          buildInputs = with pkgs; [
-            openssl
-          ] ++ lib.optionals stdenv.isDarwin [
-            darwin.apple_sdk.frameworks.Security
-            darwin.apple_sdk.frameworks.SystemConfiguration
-          ];
-        };
+        # NOTE: nix build is not currently supported because lime-sys
+        # requires a git submodule (crates/lime-sys/lime) that Nix flakes
+        # cannot fetch.  Use `nix develop` + `cargo build` instead.
+        # packages.default = ...;
 
         apps = {
           # Serve documentation locally
