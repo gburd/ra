@@ -10,7 +10,7 @@ maintainable, formally verified framework.
 
 ## Features
 
-- **1,350+ Transformation Rules** in 5 categories: logical, hardware
+- **1,387 Transformation Rules** in 5 categories: logical, hardware
   (GPU/FPGA/SIMD), distributed, multi-model, and physical
 - **Literate Programming** -- Each rule is a documented `.rra` file
   with formal algebra, implementation, preconditions, cost model,
@@ -88,40 +88,58 @@ let optimized = Optimizer::new().optimize(&expr)?;
 
 ### CLI Usage
 
-Build and run the interactive CLI (pulls in database adapters):
+Build and run the interactive CLI:
 
 ```bash
-# Build the CLI
 cargo build -p ra-cli
+```
 
-# Optimize a query
-cargo run -p ra-cli -- optimize "SELECT * FROM t1 WHERE x > 10"
+The CLI commands are organized into logical groups:
 
-# Show the relational algebra plan
-cargo run -p ra-cli -- explain "SELECT c.name FROM customers c JOIN orders o ON c.id = o.cid WHERE o.amount > 1000"
+**Query analysis** — Parse, optimize, compare, and translate SQL:
+```bash
+ra-cli explain  'SELECT ...'              # Show relational algebra plan tree
+ra-cli optimize 'SELECT ...'              # Optimize with rewrite rules
+ra-cli optimize 'SELECT ...' --diff colored  # Show before/after diff
+ra-cli optimize 'SELECT ...' --trace      # Trace which rules fired
+ra-cli compare  'SELECT ...' --db postgres://...  # Compare vs native EXPLAIN
+ra-cli translate --from postgres --to mysql 'SELECT ...'
+ra-cli format   'SELECT ...'              # Pretty-print SQL
+```
 
-# View a colorized plan diff
-cargo run -p ra-cli -- optimize "SELECT * FROM t1 WHERE x > 10" --diff colored
+**Rule management** — Inspect, validate, and test the 1,387 optimization rules:
+```bash
+ra-cli list                     # List all rules (filterable by --category, --tag)
+ra-cli show <rule-id>           # Show detailed rule metadata
+ra-cli validate rules/          # Validate .rra file syntax
+ra-cli test rules/              # Run embedded test cases
+ra-cli stats                    # Rule collection statistics
+```
 
-# Optimize with a resource budget
-cargo run -p ra-cli -- optimize "SELECT * FROM orders JOIN customers ON orders.cid = customers.id" --resource-budget interactive
+**Database integration** — Connect to live databases:
+```bash
+ra-cli gather-metadata --db postgres://...  # Export schema/stats to JSON
+ra-cli monitor --db postgres://...          # Schema analysis + tuning advice
+ra-cli proxy --db postgres://...            # Transparent optimizer proxy
+ra-cli benchmark --db postgres://...        # Compare Ra vs native optimizer
+```
 
-# Translate between SQL dialects
-cargo run -p ra-cli -- translate --from postgres --to mysql \
-  "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
+**ML and neural model** — Manage the learned cost model:
+```bash
+ra-cli ml train --input data.json           # Train from execution feedback
+ra-cli ml stats                             # Model accuracy metrics
+ra-cli ml export                            # Export model for inspection
+```
 
-# List available rules
-cargo run -p ra-cli -- list
-
-# Validate .rra rule files
-cargo run -p ra-cli -- validate rules/
-
-# Run benchmarks
-cargo bench --package ra-engine
+**Shell completions** — Enable tab-completion:
+```bash
+ra-cli completions bash > ~/.local/share/bash-completion/completions/ra-cli
+ra-cli completions zsh  > ~/.zfunc/_ra-cli
+ra-cli completions fish > ~/.config/fish/completions/ra-cli.fish
 ```
 
 See the [Getting Started guide](docs/getting-started.md) for a full
-walkthrough of all features.
+walkthrough, or `ra-cli <command> --help` for detailed usage of any command.
 
 ### Web Explorer
 
@@ -166,7 +184,7 @@ ra/
 │   ├── ra-pg-extension/       # PostgreSQL planner extension (pgrx, excluded)
 │   ├── lime-sys/              # C library: Lime parser generator
 │   └── lime-rs/               # Rust bindings for lime-sys
-├── rules/                     # 1,350+ rule definitions (.rra files)
+├── rules/                     # 1,387 rule definitions (.rra files)
 │   ├── logical/               # Predicate pushdown, join reordering, ...
 │   ├── physical/              # Join algorithms, index selection, ...
 │   ├── hardware/              # GPU, FPGA, SIMD, NUMA, data placement
@@ -235,21 +253,31 @@ sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
 
 ## Documentation
 
-- [Documentation Index](docs/README.md) -- Full documentation map
-- [Getting Started](docs/getting-started.md) -- Installation and all major features
-- [Architecture](docs/architecture.md) -- Detailed component design
-- [Benchmarks](docs/benchmarks.md) -- JOB and TPC-H benchmark results
-- [PostgreSQL Extension](docs/postgresql-extension.md) -- Native PostgreSQL integration
-- [Contributing](CONTRIBUTING.md) -- Development standards and contribution guide
-- [Rule Authoring Guide](docs/guides/rule-authoring.md) -- How to write `.rra` files
-- [API Reference](docs/api-reference.md) -- Library API documentation
-- [Cost Models](docs/guides/cost-models.md) -- Cost estimation framework
-- [Hardware Acceleration](docs/features/hardware-acceleration.md) -- GPU/FPGA/SIMD rules
-- [Dialect Translation](docs/guides/dialect-translation.md) -- SQL cross-database translation
-- [Formal Verification](docs/features/formal-verification.md) -- TLA+ specifications
-- [Resource Budgets](docs/features/resource-budgets.md) -- Predefined profiles and overflow strategies
+### For library users (embedding Ra in your project)
+
+- [API Reference](docs/api-reference.md) -- Programmatic usage (`Optimizer`, `RelExpr`, `Statistics`)
+- [Architecture](docs/architecture.md) -- Crate dependency graph and data flow
+- [Cost Models](docs/guides/cost-models.md) -- Cost estimation, calibration, neural blend
+- [Rule Authoring Guide](docs/guides/rule-authoring.md) -- Write custom `.rra` rules
+- [Hardware Acceleration](docs/features/hardware-acceleration.md) -- GPU/FPGA/SIMD cost models
+- [PostgreSQL Extension](docs/postgresql-extension.md) -- Native planner hook integration
+
+### For educators and learners (understanding query optimization)
+
+- [Getting Started](docs/getting-started.md) -- Installation and interactive walkthrough
 - [Plan Visualization](docs/features/plan-visualization.md) -- Colorized plan diffs
-- [Distributed Optimization](docs/features/distributed-optimization.md) -- Network costs and distribution strategies
+- [Resource Budgets](docs/features/resource-budgets.md) -- How optimizers manage time/memory tradeoffs
+- [Dialect Translation](docs/guides/dialect-translation.md) -- How SQL varies across databases
+- [Distributed Optimization](docs/features/distributed-optimization.md) -- Network-aware query planning
+- [Formal Verification](docs/features/formal-verification.md) -- Proving optimizer correctness with TLA+
+- [Benchmarks](docs/benchmarks.md) -- JOB and TPC-H performance results
+
+### Reference
+
+- [Documentation Index](docs/README.md) -- Full documentation map
+- [Contributing](CONTRIBUTING.md) -- Development standards and contribution guide
+- [Neural Cost Model](docs/NEURAL_COST_MODEL.md) -- Learned cost estimation architecture
+- [Neural Pipeline](docs/NEURAL_MODEL_PIPELINE.md) -- Training and deployment guide
 
 ## Development
 

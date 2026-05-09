@@ -1,10 +1,10 @@
 # RA Documentation
 
-**RA** is a state-of-the-art query optimizer built on relational algebra transformation rules, equality saturation, and differential dataflow. It transforms SQL queries into optimal execution plans using **1,350+ transformation rules** derived from decades of database research and production experience.
+**RA** is a state-of-the-art query optimizer built on relational algebra transformation rules, equality saturation, and differential dataflow. It transforms SQL queries into optimal execution plans using **1,387 transformation rules** derived from decades of database research and production experience.
 
 ## Key Features
 
-- **1,350+ Transformation Rules** - Comprehensive rule library covering logical, physical, hardware, distributed, and multi-model optimizations
+- **1,387 Transformation Rules** - Comprehensive rule library covering logical, physical, hardware, distributed, and multi-model optimizations
 - **20+ Database Dialects** - Seamless SQL translation between PostgreSQL, MySQL, Oracle, SQL Server, SQLite, DuckDB, and more
 - **Hardware-Aware Optimization** - Adaptive plans for CPU (SIMD), GPU, FPGA, and heterogeneous systems
 - **Cost-Based Optimization** - Calibratable cost models with cardinality estimation and statistics management
@@ -135,7 +135,7 @@ graph LR
     SQL["SQL Query"] --> Parser["Parser"]
     Parser --> RA["Relational<br/>Algebra"]
     RA --> EGraph["E-Graph<br/>(egg crate)"]
-    Rules["Transformation<br/>Rules (1,350+)"] --> EGraph
+    Rules["Transformation<br/>Rules (1,387)"] --> EGraph
     EGraph --> Extractor["Extractor<br/>(Cost-based)"]
     Extractor --> Plan["Optimized<br/>Plan"]
 

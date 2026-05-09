@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RA is a relational algebra query optimization system. It codifies 1,350+ database transformation rules (from PostgreSQL, MySQL, DuckDB, SQLite, etc.) into literate `.rra` files, then uses equality saturation (egg e-graphs) and differential dataflow to explore and extract optimal query plans.
+RA is a relational algebra query optimization system. It codifies 1,387 database transformation rules (from PostgreSQL, MySQL, DuckDB, SQLite, etc.) into literate `.rra` files, then uses equality saturation (egg e-graphs) and differential dataflow to explore and extract optimal query plans.
 
 ## Build & Test Commands
 
@@ -159,7 +159,7 @@ Use `anyhow`/`thiserror` for error handling; avoid `.unwrap()` and `.expect()` (
 ## Project Layout
 
 ```
-rules/           — 1,350+ .rra rule files (logical/, physical/, hardware/, distributed/, multi-model/)
+rules/           — 1,387 .rra rule files (logical/, physical/, hardware/, distributed/, multi-model/)
 crates/          — Rust crates organized into core/cli/experimental layers (see above)
 tests/           — workspace-level integration tests
 benchmarks/      — JOB and TPC-H benchmark suites
