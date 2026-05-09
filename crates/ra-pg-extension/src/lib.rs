@@ -10,9 +10,13 @@
 
 use pgrx::prelude::*;
 
+pub mod ab_testing;
 mod cost_mapper;
 mod extension_state;
+pub mod feedback_hook;
 mod metadata_cache;
+pub mod model_safety;
+pub mod monitor;
 mod pg_constants;
 mod plan_builder;
 mod plan_converter;
@@ -38,12 +42,19 @@ pub extern "C-unwind" fn _PG_init() {
 
     // Register configuration variables
     extension_state::register_gucs();
+    ab_testing::register_gucs();
+
+    // Initialize system fingerprint monitor for neural optimization
+    monitor::init();
 
     // Register relcache invalidation callback for metadata cache
     register_relcache_callback();
 
     // Hook into PostgreSQL planner
     planner_hook::register_hooks();
+
+    // Hook into executor end for feedback collection
+    feedback_hook::register_hooks();
 }
 
 /// Register callback for relcache invalidations.
@@ -240,6 +251,48 @@ fn hardware_profile() -> TableIterator<
         hw.simd_width as i32,
         hw.has_gpu,
     ))
+}
+
+// ---------------------------------------------------------------
+// A/B testing status function
+// ---------------------------------------------------------------
+
+/// Get current A/B test status as JSON.
+///
+/// SQL: `SELECT ra.ab_test_status();`
+///
+/// Returns JSON with: control_count, experiment_count, control_mean_ratio,
+/// experiment_mean_ratio, p_value, cohens_d, recommendation.
+#[pg_extern]
+fn ab_test_status() -> Result<pgrx::JsonB, String> {
+    let analysis = ab_testing::analyze();
+
+    let recommendation_str = match analysis.recommendation {
+        ab_testing::Recommendation::InsufficientData => "insufficient_data",
+        ab_testing::Recommendation::NoSignificantDifference => "no_significant_difference",
+        ab_testing::Recommendation::Promote => "promote",
+        ab_testing::Recommendation::Rollback => "rollback",
+    };
+
+    let json = serde_json::json!({
+        "control_count": analysis.control_count,
+        "experiment_count": analysis.experiment_count,
+        "control_mean_ratio": analysis.control_mean_ratio,
+        "experiment_mean_ratio": analysis.experiment_mean_ratio,
+        "p_value": analysis.p_value,
+        "cohens_d": analysis.cohens_d,
+        "recommendation": recommendation_str,
+    });
+
+    Ok(pgrx::JsonB(json))
+}
+
+/// Reset A/B test state (e.g., after model promotion).
+///
+/// SQL: `SELECT ra.ab_test_reset();`
+#[pg_extern]
+fn ab_test_reset() {
+    ab_testing::reset();
 }
 
 // Integration tests are in integration_tests.rs

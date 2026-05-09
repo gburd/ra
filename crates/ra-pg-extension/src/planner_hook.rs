@@ -145,6 +145,9 @@ unsafe fn ra_planner_hook_inner(
     cursor_options: i32,
     bound_params: *mut pg_sys::ParamListInfoData,
 ) -> *mut pg_sys::PlannedStmt {
+    // Refresh system fingerprint if intervals have elapsed.
+    crate::monitor::maybe_refresh();
+
     let sql = if query_string.is_null() {
         String::new()
     } else {
@@ -212,6 +215,33 @@ unsafe fn ra_planner_hook_inner(
                     );
                 }
 
+                // Register pending feedback for the executor end hook.
+                let query_id = (*parse).queryId;
+                if query_id != 0 {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+
+                    let mut hasher = DefaultHasher::new();
+                    sql.hash(&mut hasher);
+                    let query_fp = hasher.finish();
+
+                    let fp = crate::monitor::fingerprint_reader().read();
+
+                    crate::feedback_hook::register_pending(
+                        query_id,
+                        crate::feedback_hook::PendingFeedback {
+                            query_fingerprint: query_fp,
+                            plan_fingerprint: query_id,
+                            features: optimized.features,
+                            system_fingerprint: fp,
+                            predicted_cost: optimized.predicted_cost,
+                            rules_fired: Vec::new(),
+                            rules_enabled: 0,
+                            exec_start: std::time::Instant::now(),
+                        },
+                    );
+                }
+
                 return optimized.plan;
             }
 
@@ -270,6 +300,10 @@ unsafe fn ra_planner_hook_inner(
 struct OptimizedPlan {
     plan: *mut pg_sys::PlannedStmt,
     confidence: f64,
+    /// Features extracted from the optimized RelExpr (for feedback loop).
+    features: ra_engine::cost_model::QueryFeatures,
+    /// Predicted cost from the optimizer (in RA cost units).
+    predicted_cost: f64,
 }
 
 /// Attempt to optimize a query using RA.
@@ -320,7 +354,10 @@ unsafe fn try_optimize_query(
     )
     .clamp(0.0, 1.0);
 
-    // Step 4: Convert optimized RelExpr -> PostgreSQL PlannedStmt.
+    // Step 4: Extract features for the feedback loop.
+    let features = ra_engine::cost_model::extract_features(&optimized_expr);
+
+    // Step 5: Convert optimized RelExpr -> PostgreSQL PlannedStmt.
     let planned_stmt = match plan_converter::convert_to_planned_stmt(
         &optimized_expr,
         parse,
@@ -334,6 +371,8 @@ unsafe fn try_optimize_query(
     Ok(Some(OptimizedPlan {
         plan: planned_stmt,
         confidence,
+        features,
+        predicted_cost: optimized_cost,
     }))
 }
 

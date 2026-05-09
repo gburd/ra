@@ -1,0 +1,307 @@
+//! Executor end hook: captures execution feedback for the neural cost model.
+//!
+//! Implements the feedback loop between plan execution and model training:
+//!
+//! ```text
+//! planner_hook (planning phase)
+//!     → stores PendingFeedback in PENDING_QUERIES
+//!
+//! executor_end_hook (execution phase)
+//!     → reads actual timing/buffers from instrumentation
+//!     → constructs ExecutionFeedback
+//!     → pushes to FeedbackCollector
+//!     → triggers OnlineLearner training when batch is full
+//! ```
+//!
+//! The executor hook overhead is <1us per query: a hash lookup, counter
+//! reads, and a push to a pre-allocated ring buffer.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Instant;
+
+use once_cell::sync::Lazy;
+use pgrx::prelude::*;
+
+use ra_engine::cost_model::{
+    ActualCost, ExecutionFeedback, FeedbackCollector, OnlineLearner,
+    OnlineLearnerConfig, QueryFeatures,
+};
+use ra_engine::state::SystemFingerprint;
+
+/// Batch size threshold: trigger OnlineLearner training after this many
+/// samples accumulate in the FeedbackCollector.
+const TRAINING_BATCH_THRESHOLD: usize = 64;
+
+/// After this many total samples, distill a new FastCostModel snapshot.
+const FAST_MODEL_DISTILL_INTERVAL: u64 = 3200;
+
+/// Per-query tracking data stored between planning and execution end.
+pub struct PendingFeedback {
+    /// Hash of the normalized query text.
+    pub query_fingerprint: u64,
+    /// Hash of the plan structure.
+    pub plan_fingerprint: u64,
+    /// Features extracted from the RelExpr at plan time.
+    pub features: QueryFeatures,
+    /// System fingerprint snapshot at plan time.
+    pub system_fingerprint: SystemFingerprint,
+    /// Cost predicted by the neural model at plan time.
+    pub predicted_cost: f64,
+    /// Which rule groups were fired during optimization.
+    pub rules_fired: Vec<u32>,
+    /// Total rule groups enabled for this query.
+    pub rules_enabled: u32,
+    /// Wall-clock time at start of execution (for fallback timing).
+    pub exec_start: Instant,
+}
+
+/// Pending feedback keyed by `queryId` (from `pg_sys::Query::queryId`).
+///
+/// Access is single-threaded (one backend process), but we use Mutex for
+/// safety with pgrx's panic-catch model.
+static PENDING_QUERIES: Lazy<Mutex<HashMap<u64, PendingFeedback>>> =
+    Lazy::new(|| Mutex::new(HashMap::with_capacity(16)));
+
+/// Global feedback collector and online learner.
+static FEEDBACK_STATE: Lazy<Mutex<FeedbackState>> =
+    Lazy::new(|| Mutex::new(FeedbackState::new()));
+
+struct FeedbackState {
+    collector: FeedbackCollector,
+    learner: OnlineLearner,
+    last_distill_count: u64,
+}
+
+impl FeedbackState {
+    fn new() -> Self {
+        Self {
+            collector: FeedbackCollector::new(),
+            learner: OnlineLearner::new(OnlineLearnerConfig::default()),
+            last_distill_count: 0,
+        }
+    }
+}
+
+/// Saved pointer to the previous ExecutorEnd hook.
+static mut PREV_EXECUTOR_END_HOOK: pg_sys::ExecutorEnd_hook_type = None;
+
+/// Register the executor end hook during extension initialization.
+pub fn register_hooks() {
+    unsafe {
+        PREV_EXECUTOR_END_HOOK = pg_sys::ExecutorEnd_hook;
+        pg_sys::ExecutorEnd_hook = Some(ra_executor_end_hook);
+    }
+}
+
+/// Store pending feedback for a query entering execution.
+///
+/// Called from `planner_hook` after successful RA optimization. The
+/// `query_id` should be the `pg_sys::Query::queryId` field.
+pub fn register_pending(query_id: u64, pending: PendingFeedback) {
+    if let Ok(mut map) = PENDING_QUERIES.lock() {
+        // Evict stale entries if map grows too large (leak prevention).
+        if map.len() > 256 {
+            // Remove oldest entries (queries that never reached executor end).
+            let keys: Vec<u64> = map.keys().copied().collect();
+            for key in keys.iter().take(128) {
+                map.remove(key);
+            }
+        }
+        map.insert(query_id, pending);
+    }
+}
+
+/// The executor end hook entry point.
+///
+/// # Safety
+///
+/// Called by PostgreSQL's executor infrastructure with a valid
+/// `QueryDesc` pointer.
+#[pg_guard]
+unsafe extern "C-unwind" fn ra_executor_end_hook(
+    query_desc: *mut pg_sys::QueryDesc,
+) {
+    // Capture feedback before calling the previous hook (which may free state).
+    if !query_desc.is_null() {
+        capture_feedback(query_desc);
+    }
+
+    // Chain to previous hook or standard executor end.
+    if let Some(prev) = PREV_EXECUTOR_END_HOOK {
+        prev(query_desc);
+    } else {
+        pg_sys::standard_ExecutorEnd(query_desc);
+    }
+}
+
+/// Extract execution metrics from the QueryDesc and feed to the collector.
+///
+/// # Safety
+///
+/// Caller must pass a valid `QueryDesc` pointer with initialized fields.
+unsafe fn capture_feedback(query_desc: *mut pg_sys::QueryDesc) {
+    // Get the queryId to look up pending feedback.
+    let planned_stmt = (*query_desc).plannedstmt;
+    if planned_stmt.is_null() {
+        return;
+    }
+    let query_id = (*planned_stmt).queryId;
+    if query_id == 0 {
+        return;
+    }
+
+    // Look up the pending feedback registered during planning.
+    let pending = {
+        let Ok(mut map) = PENDING_QUERIES.lock() else {
+            return;
+        };
+        map.remove(&query_id)
+    };
+
+    let Some(pending) = pending else {
+        return; // Not an RA-optimized query, skip.
+    };
+
+    // Extract actual execution metrics.
+    let (actual_time_ms, actual_rows, buffers_hit, buffers_read) =
+        extract_execution_metrics(query_desc, &pending);
+
+    let feedback = ExecutionFeedback {
+        query_fingerprint: pending.query_fingerprint,
+        plan_fingerprint: pending.plan_fingerprint,
+        features: pending.features.clone(),
+        system_fingerprint: pending.system_fingerprint,
+        predicted_cost: pending.predicted_cost,
+        actual_time_ms,
+        actual_rows,
+        buffers_hit,
+        buffers_read,
+        rules_fired: pending.rules_fired,
+        rules_enabled: pending.rules_enabled,
+    };
+
+    // Feed to the collector and potentially trigger training.
+    if let Ok(mut state) = FEEDBACK_STATE.lock() {
+        state.collector.record(feedback.clone());
+
+        // Train when batch threshold is reached.
+        if state.collector.buffered_count() >= TRAINING_BATCH_THRESHOLD {
+            let batch = state.collector.drain();
+            for sample in &batch {
+                let actual = ActualCost {
+                    cpu_time_ms: sample.actual_time_ms as f32,
+                    memory_peak_mb: 0.0,
+                    memory_avg_mb: 0.0,
+                    io_storage_ops: sample.buffers_read,
+                    io_storage_bytes: sample.buffers_read * 8192,
+                    io_network_ops: 0,
+                    io_network_bytes: 0,
+                    locks_acquired: 0,
+                    lock_hold_time_ms: 0.0,
+                    lock_contention_score: 0.0,
+                    vacuum_overhead: 0.0,
+                    wal_generation_bytes: 0,
+                    replication_lag_ms: 0.0,
+                    cache_hit_ratio: if sample.buffers_hit + sample.buffers_read > 0
+                    {
+                        sample.buffers_hit as f32
+                            / (sample.buffers_hit + sample.buffers_read) as f32
+                    } else {
+                        1.0
+                    },
+                    page_faults: 0,
+                    context_switches: 0,
+                };
+                state.learner.record(sample.features.clone(), actual);
+            }
+
+            // Update fingerprint with current model accuracy.
+            let total = state.collector.total_processed();
+            let mape = state.collector.current_mape();
+            update_fingerprint_model_stats(total, mape);
+
+            // Distill FastCostModel periodically.
+            if total - state.last_distill_count >= FAST_MODEL_DISTILL_INTERVAL {
+                let _fast_model = state.learner.fast_model_snapshot();
+                state.last_distill_count = total;
+                tracing::info!(
+                    total_samples = total,
+                    "distilled new FastCostModel snapshot"
+                );
+            }
+        }
+    }
+}
+
+/// Extract timing, row counts, and buffer stats from the executor state.
+///
+/// # Safety
+///
+/// Caller must pass a valid `QueryDesc` pointer.
+unsafe fn extract_execution_metrics(
+    query_desc: *mut pg_sys::QueryDesc,
+    pending: &PendingFeedback,
+) -> (f64, u64, u64, u64) {
+    let plan_state = (*query_desc).planstate;
+
+    if plan_state.is_null() || (*plan_state).instrument.is_null() {
+        // No instrumentation: fall back to wall-clock timing.
+        let elapsed = pending.exec_start.elapsed();
+        return (elapsed.as_secs_f64() * 1000.0, 0, 0, 0);
+    }
+
+    let instrument = &*(*plan_state).instrument;
+
+    // Total execution time in ms (from PostgreSQL's Instrumentation struct).
+    let total_time_ms = instrument.total * 1000.0;
+
+    // Total rows produced by the top-level plan node.
+    let actual_rows = instrument.ntuples as u64;
+
+    // Buffer usage from the plan state.
+    let buffers_hit = instrument.bufusage.shared_blks_hit as u64;
+    let buffers_read = instrument.bufusage.shared_blks_read as u64;
+
+    (total_time_ms, actual_rows, buffers_hit, buffers_read)
+}
+
+/// Update the SystemFingerprint with latest model training stats.
+fn update_fingerprint_model_stats(total_samples: u64, mape: f32) {
+    let reader = crate::monitor::fingerprint_reader();
+    let mut fp = reader.read();
+    fp.model_samples_trained = total_samples.min(u32::MAX as u64) as u32;
+    fp.model_recent_mape = mape;
+    reader.update(fp);
+}
+
+/// Get current collector statistics for diagnostics.
+pub fn collector_stats() -> (u64, usize, f32) {
+    if let Ok(state) = FEEDBACK_STATE.lock() {
+        (
+            state.collector.total_processed(),
+            state.collector.buffered_count(),
+            state.collector.current_mape(),
+        )
+    } else {
+        (0, 0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn training_thresholds_are_consistent() {
+        assert!(TRAINING_BATCH_THRESHOLD > 0);
+        assert!(FAST_MODEL_DISTILL_INTERVAL > TRAINING_BATCH_THRESHOLD as u64);
+    }
+
+    #[test]
+    fn feedback_state_initializes() {
+        let state = FeedbackState::new();
+        assert_eq!(state.collector.total_processed(), 0);
+        assert_eq!(state.last_distill_count, 0);
+    }
+}
