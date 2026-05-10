@@ -179,9 +179,9 @@ pub use egraph::{
 pub use executors::{
     LateralJoinExecutor, MultiUnnestExecutor, TableFunctionExecutor, UnnestExecutor,
 };
-pub use cost_model::fast_model::FastCostModel;
+pub use cost_model::BitNetCostModel;
 pub use extract::{
-    extract_best, extract_best_hybrid, extract_best_with_staleness, rec_expr_to_rel_expr,
+    extract_best, extract_best_bitnet, extract_best_with_staleness, rec_expr_to_rel_expr,
     HybridCostFn, RelCostFn,
 };
 #[cfg(feature = "ml")]

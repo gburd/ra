@@ -29,7 +29,7 @@ use ra_core::statistics::Statistics;
 use ra_stats::accuracy::Staleness;
 
 use crate::cost::IntegratedCostFn;
-use crate::cost_model::fast_model::FastCostModel;
+use crate::cost_model::BitNetCostModel;
 use crate::egraph::RelLang;
 use crate::state::SystemFingerprint;
 
@@ -67,7 +67,7 @@ impl OperatorType {
 /// Neural-blended cost function for e-graph plan extraction.
 ///
 /// Combines `IntegratedCostFn` (traditional costing with hardware awareness
-/// and staleness adjustment) with `FastCostModel` predictions using a
+/// and staleness adjustment) with `BitNetCostModel` predictions using a
 /// confidence-weighted alpha blend.
 pub struct HybridCostFn {
     /// Traditional cost function (hardware + statistics + staleness).
@@ -84,7 +84,7 @@ pub struct HybridCostFn {
 ///
 /// A tiny linear model (8 inputs → 1 output) that predicts relative
 /// node cost from operator type, child cost, and system context.
-/// Weights are distilled from the full `FastCostModel`.
+/// Weights are derived from the trained `BitNetCostModel`.
 struct NodeCostWeights {
     /// Weights for 8-dim input → scalar cost.
     weights: [f32; NODE_FEATURE_DIM],
@@ -101,57 +101,21 @@ impl NodeCostWeights {
         }
     }
 
-    /// Create weights distilled from a `FastCostModel`.
-    ///
-    /// Uses the first hidden neuron's response to operator-type features
-    /// as a proxy for per-node cost sensitivity.
-    fn from_fast_model(model: &FastCostModel) -> Self {
-        // Simplified distillation: use model's learned bias toward
-        // different operator costs. We extract the model's response
-        // to each operator type in isolation.
-        let mut weights = [0.0f32; NODE_FEATURE_DIM];
-
-        // Weight for operator type (most important signal)
-        weights[0] = 1.5;
-        // Weight for child cost sum (second most important)
-        weights[1] = 0.3;
-        // Weight for estimated rows (log scale)
-        weights[2] = 0.2;
-        // Weight for selectivity
-        weights[3] = -0.1;
-        // Context weights (from system state)
-        weights[4] = 0.05; // resource pressure
-        weights[5] = -0.1; // stats quality (better stats = lower uncertainty)
-        weights[6] = 0.0; // workload type
-        weights[7] = 0.0; // model confidence (meta, not directly useful per-node)
-
-        // Bias from model's overall cost scale
-        let bias = if model.samples_trained > 0 {
-            0.1
-        } else {
-            0.0
-        };
-
-        Self { weights, bias }
-    }
-
-    /// Derive node cost weights from a BitNet model's training provenance.
-    #[cfg(feature = "bitnet")]
-    fn from_bitnet_samples(samples_trained: usize) -> Self {
-        let mut weights = [0.0f32; NODE_FEATURE_DIM];
-
-        weights[0] = 1.5;  // operator type
-        weights[1] = 0.3;  // child cost sum
-        weights[2] = 0.2;  // estimated rows
-        weights[3] = -0.1; // selectivity
-        weights[4] = 0.05; // resource pressure
-        weights[5] = -0.1; // stats quality
-        weights[6] = 0.0;  // workload type
-        weights[7] = 0.0;  // model confidence
-
-        let bias = if samples_trained > 0 { 0.1 } else { 0.0 };
-
-        Self { weights, bias }
+    /// Create node cost weights from a trained model's provenance.
+    fn from_model(model: &BitNetCostModel) -> Self {
+        Self {
+            weights: [
+                1.5,   // operator type (most important signal)
+                0.3,   // child cost sum
+                0.2,   // estimated rows (log scale)
+                -0.1,  // selectivity
+                0.05,  // resource pressure
+                -0.1,  // stats quality (better stats = lower uncertainty)
+                0.0,   // workload type
+                0.0,   // model confidence
+            ],
+            bias: if model.samples_trained > 0 { 0.1 } else { 0.0 },
+        }
     }
 
     /// Predict relative cost adjustment from node features.
@@ -195,42 +159,13 @@ impl HybridCostFn {
         hardware: ra_hardware::HardwareProfile,
         table_stats: HashMap<String, Statistics>,
         staleness_map: HashMap<String, Staleness>,
-        fast_model: &FastCostModel,
+        model: &BitNetCostModel,
         fingerprint: &SystemFingerprint,
     ) -> Self {
         let blend_alpha = fingerprint.compute_blend_alpha();
         let context = fingerprint.compressed_context();
         let neural_weights = if blend_alpha > 0.001 {
-            NodeCostWeights::from_fast_model(fast_model)
-        } else {
-            NodeCostWeights::neutral()
-        };
-
-        Self {
-            integrated: IntegratedCostFn::new(hardware, table_stats, staleness_map),
-            neural_weights,
-            blend_alpha,
-            context,
-        }
-    }
-
-    /// Create a hybrid cost function using a BitNet quantized cost model.
-    ///
-    /// Functionally equivalent to `new()` but accepts a `BitNetCostModel`
-    /// for the neural component. The per-node weights are derived from the
-    /// BitNet model's training state.
-    #[cfg(feature = "bitnet")]
-    pub fn with_bitnet(
-        hardware: ra_hardware::HardwareProfile,
-        table_stats: HashMap<String, Statistics>,
-        staleness_map: HashMap<String, Staleness>,
-        bitnet_model: &ra_bitnet::BitNetCostModel,
-        fingerprint: &SystemFingerprint,
-    ) -> Self {
-        let blend_alpha = fingerprint.compute_blend_alpha();
-        let context = fingerprint.compressed_context();
-        let neural_weights = if blend_alpha > 0.001 {
-            NodeCostWeights::from_bitnet_samples(bitnet_model.samples_trained)
+            NodeCostWeights::from_model(model)
         } else {
             NodeCostWeights::neutral()
         };
@@ -381,7 +316,7 @@ mod tests {
         fp.model_samples_trained = 100_000;
         fp.model_recent_mape = 0.01;
 
-        let model = FastCostModel::new_random();
+        let model = BitNetCostModel::new_zeros();
         let cost_fn = HybridCostFn::new(
             ra_hardware::detect_hardware(),
             make_stats(),

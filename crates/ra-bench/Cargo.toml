@@ -22,8 +22,6 @@ default = []
 live-comparison = ["dep:postgres", "ra-grammar-fuzzer/reference-comparison"]
 # Enable EXPLAIN ANALYZE (requires real data).
 execute = ["live-comparison"]
-# Enable BitNet 1.58-bit post-training quantization.
-bitnet = ["ra-engine/bitnet", "dep:ra-bitnet"]
 
 [dependencies]
 ra-core      = { workspace = true }
@@ -44,8 +42,6 @@ chrono       = { workspace = true }
 
 # Optional live-comparison dependency
 postgres = { workspace = true, optional = true }
-# Optional BitNet quantization
-ra-bitnet = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

@@ -9,7 +9,7 @@ use ra_core::algebra::{RelExpr, WindowExpr};
 use ra_core::expr::Expr;
 use ra_core::statistics::Statistics;
 
-use super::simple_model::QueryFeatures;
+use super::QueryFeatures;
 
 /// Extract query features from a parsed RelExpr.
 ///

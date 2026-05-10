@@ -1,80 +1,88 @@
 //! Neural cost model for query optimization.
 //!
-//! This module implements a transformer-based cost prediction model that learns
-//! multi-dimensional costs (CPU, memory, I/O, network, locks) from query execution
-//! feedback. The model uses online learning to continuously improve predictions.
+//! Uses a BitNet 1.58-bit quantized model (ternary weights) for sub-100ns
+//! cost prediction. Training uses QAT with Straight-Through Estimator
+//! directly in ternary space.
 //!
 //! # Architecture
 //!
 //! ```text
-//! SQL Query → Lime Tokens → Token Embeddings → Transformer → Cost Heads
-//!                                                                 ↓
-//!                                                    CPU, Memory, I/O, Network, Locks
+//! Query → Feature Extraction → BitNetCostModel → 16 Cost Dimensions
+//!                                                      ↓
+//!                                         CPU, Memory, I/O, Network, Locks
 //! ```
 //!
-//! # Usage
-//!
-//! ```ignore
-//! use ra_engine::cost_model::{CostModel, TimeBudget};
-//!
-//! let model = CostModel::load("cost_model/model.safetensors")?;
-//! let costs = model.predict(tokens, TimeBudget::Balanced)?;
-//! println!("Predicted CPU time: {:.2}ms", costs.cpu_ms);
-//! ```
-//!
-//! # Features
-//!
-//! - **Multi-dimensional costs**: 16 separate cost dimensions
-//! - **Latency-aware**: Budget tokens encode time constraints
-//! - **Online learning**: Updates from real query execution
-//! - **Hybrid approach**: Combines learned costs with rule priors
-//! - **GPU-accelerated**: WGPU backend for fast inference
-//! - **CPU fallback**: ndarray backend when GPU unavailable
-//!
-//! # Model Files
-//!
-//! - `model.safetensors`: Binary weights (~2-5 MB)
-//! - `model.toml`: Human-readable metadata
-//! - `tokenizer.json`: Vocabulary mapping
-//! - `training_log.jsonl`: Append-only execution history (optional)
-//!
-//! # Implementation Status
-//!
-//! **Phase 1 (In Progress)**: Infrastructure and design documentation
-//! - ✅ Model metadata defined (model.toml)
-//! - ✅ Tokenizer vocabulary defined (tokenizer.json)
-//! - ✅ Cost dimensions specified (16 dimensions)
-//! - ⏸️  Transformer implementation (requires burn crate)
-//! - ⏸️  Online learning loop (requires burn crate)
-//!
-//! To implement the full neural cost model, add burn dependencies:
-//! ```toml
-//! [dependencies]
-//! burn = "0.15"  # Check latest stable version
-//! burn-ndarray = "0.15"
-//! safetensors = "0.4"
-//! ```
+//! The model is trained via execution feedback: observed query costs are
+//! fed back to a `BitNetTrainer` which updates latent weights using STE.
 
 mod tokenizer;
-pub mod fast_model;
 pub mod feedback;
-pub mod online_learner;
-pub mod simple_model;
-pub mod production_model;
 mod feature_extractor;
-// mod transformer;
-// mod learner;
-// mod cost_extractor;
 
 pub use tokenizer::{Tokenizer, TimeBudget};
-pub use simple_model::{SimpleCostModel, QueryFeatures, ModelStats};
 pub use feature_extractor::{extract_features, extract_features_with_stats};
-pub use production_model::{ProductionCostModel, TrainingConfig, ProductionModelStats};
-pub use fast_model::FastCostModel;
-#[cfg(feature = "bitnet")]
-pub use ::ra_bitnet::BitNetCostModel;
 pub use feedback::{ExecutionFeedback, FeedbackCollector, MapeTracker};
-pub use online_learner::{OnlineLearner, OnlineLearnerConfig, OnlineLearnerStats};
+pub use ra_bitnet::{BitNetCostModel, BitNetTrainer, TrainerConfig};
+
+/// Query structural features for neural cost prediction.
+///
+/// 12-dimensional input vector extracted from a `RelExpr` plan tree.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QueryFeatures {
+    pub table_count: f32,
+    pub join_count: f32,
+    pub filter_count: f32,
+    pub aggregate_count: f32,
+    pub subquery_count: f32,
+    pub cte_count: f32,
+    pub window_function_count: f32,
+    pub order_by_count: f32,
+    pub group_by_count: f32,
+    pub distinct_flag: f32,
+    pub limit_present: f32,
+    pub max_join_cardinality: f32,
+}
+
+impl QueryFeatures {
+    /// Convert to fixed-size array for model input.
+    pub fn to_vec(&self) -> Vec<f32> {
+        vec![
+            self.table_count,
+            self.join_count,
+            self.filter_count,
+            self.aggregate_count,
+            self.subquery_count,
+            self.cte_count,
+            self.window_function_count,
+            self.order_by_count,
+            self.group_by_count,
+            self.distinct_flag,
+            self.limit_present,
+            self.max_join_cardinality,
+        ]
+    }
+
+    /// Convert to fixed-size array for BitNet model input.
+    pub fn as_array(&self) -> [f32; Self::FEATURE_DIM] {
+        [
+            self.table_count,
+            self.join_count,
+            self.filter_count,
+            self.aggregate_count,
+            self.subquery_count,
+            self.cte_count,
+            self.window_function_count,
+            self.order_by_count,
+            self.group_by_count,
+            self.distinct_flag,
+            self.limit_present,
+            self.max_join_cardinality,
+        ]
+    }
+
+    /// Number of features.
+    pub const FEATURE_DIM: usize = 12;
+}
 
 /// Multi-dimensional cost prediction.
 #[derive(Debug, Clone, PartialEq)]
@@ -122,7 +130,7 @@ impl Default for CostVector {
             vacuum_overhead: 0.0,
             wal_generation_bytes: 0,
             replication_lag_ms: 0.0,
-            cache_hit_ratio: 1.0,  // Assume good cache by default
+            cache_hit_ratio: 1.0,
             page_faults: 0,
             context_switches: 0,
         }
@@ -131,7 +139,7 @@ impl Default for CostVector {
 
 /// Actual observed costs from query execution.
 ///
-/// Used for online learning feedback loop.
+/// Used for training the neural cost model via execution feedback.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ActualCost {
     pub cpu_time_ms: f32,

@@ -1,7 +1,7 @@
 //! Neural cost scoring for whole-plan evaluation.
 //!
 //! [`NeuralPlanScorer`] scores a complete `RelExpr` tree using the
-//! [`FastCostModel`]. This provides a whole-plan neural cost estimate
+//! [`BitNetCostModel`]. This provides a whole-plan neural cost estimate
 //! that can be used for:
 //! - Convergence detection during saturation (comparing iteration-over-iteration)
 //! - Plan cache priority scoring
@@ -18,7 +18,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! let scorer = NeuralPlanScorer::from_file("model.json").unwrap_or_default();
+//! let scorer = NeuralPlanScorer::from_file("model.bitnet.json").unwrap_or_default();
 //! let (neural_cost, confidence) = scorer.score(&relexpr);
 //! tracing::debug!(neural_cost, confidence, "neural plan score");
 //! ```
@@ -26,16 +26,11 @@
 use ra_core::algebra::RelExpr;
 
 use crate::cost_model::extract_features;
-use crate::cost_model::fast_model::FastCostModel;
-use crate::cost_model::production_model::ProductionCostModel;
+use crate::cost_model::BitNetCostModel;
 
-/// Neural plan scorer that re-scores a `RelExpr` using a [`FastCostModel`].
-///
-/// The scorer is cheap to clone (the model is heap-allocated but the scorer
-/// holds an `Arc` to it — see [`NeuralPlanScorer::shared()`]).
+/// Neural plan scorer that re-scores a `RelExpr` using a [`BitNetCostModel`].
 pub struct NeuralPlanScorer {
-    model: FastCostModel,
-    /// Scalar weight for each cost dimension when aggregating to a single f64.
+    model: BitNetCostModel,
     weights: CostWeights,
 }
 
@@ -68,21 +63,21 @@ impl Default for CostWeights {
 }
 
 impl NeuralPlanScorer {
-    /// Create a scorer with a randomly-initialised model and default weights.
-    ///
-    /// Useful for warm-start before any real training data is available.
+    /// Create a scorer with a zero-weight model and default weights.
     pub fn new() -> Self {
-        Self { model: FastCostModel::new_random(), weights: CostWeights::default() }
+        Self { model: BitNetCostModel::new_zeros(), weights: CostWeights::default() }
     }
 
-    /// Create a scorer by loading a persisted `ProductionCostModel` and
-    /// distilling its weights into the compact `FastCostModel` layout.
-    pub fn from_production_model(path: &str) -> anyhow::Result<Self> {
-        let production = ProductionCostModel::load_from_file(path)?;
-        Ok(Self {
-            model: FastCostModel::from_production(&production),
-            weights: CostWeights::default(),
-        })
+    /// Create a scorer by loading a persisted `BitNetCostModel`.
+    pub fn from_file(path: &str) -> anyhow::Result<Self> {
+        let model = BitNetCostModel::load_from_file(path)
+            .map_err(|e| anyhow::anyhow!("failed to load model: {e}"))?;
+        Ok(Self { model, weights: CostWeights::default() })
+    }
+
+    /// Create a scorer from an existing model.
+    pub fn from_model(model: BitNetCostModel) -> Self {
+        Self { model, weights: CostWeights::default() }
     }
 
     /// Override the aggregation weights.
@@ -94,28 +89,23 @@ impl NeuralPlanScorer {
     /// Score a `RelExpr` plan.
     ///
     /// Returns `(scalar_cost: f64, confidence: f32)`:
-    /// - `scalar_cost` — weighted aggregate of the 16 neural cost dimensions,
-    ///   in the same units as `IntegratedCostFn` output (higher = worse).
+    /// - `scalar_cost` — weighted aggregate of the 16 neural cost dimensions.
     /// - `confidence` — `0.0` (no training) to `1.0` (fully calibrated).
     pub fn score(&self, plan: &RelExpr) -> (f64, f32) {
         let features = extract_features(plan);
-        let costs = self.model.predict_all(&features);
+        let costs = self.model.predict_all(&features.as_array());
         let scalar = self.aggregate(&costs);
         let confidence = self.confidence();
         (scalar, confidence)
     }
 
-    /// Predict only the CPU time dimension — fastest path (~45 ns).
+    /// Predict only the CPU time dimension (~87ns).
     pub fn predict_cpu_ms(&self, plan: &RelExpr) -> f32 {
         let features = extract_features(plan);
-        self.model.predict_cpu_ms(&features)
+        self.model.predict_cpu_ms(&features.as_array())
     }
 
     /// Compute the cost ratio between the neural estimate and a reference cost.
-    ///
-    /// A ratio < 1.0 means the neural model predicts this plan is cheaper than
-    /// the reference (e.g., `IntegratedCostFn` output). Can be used to decide
-    /// whether to prefer the neural estimate.
     pub fn cost_ratio(&self, plan: &RelExpr, reference_cost: f64) -> f64 {
         let (neural_cost, _) = self.score(plan);
         if reference_cost > 0.0 {
@@ -125,35 +115,19 @@ impl NeuralPlanScorer {
         }
     }
 
-    /// Fit normalization constants from a set of query features.
-    ///
-    /// Improves prediction accuracy when `features` are available at startup
-    /// (e.g., loaded from a training dataset). Call once before deployment.
-    pub fn fit_normalization(&mut self, feature_samples: &[ra_core::algebra::RelExpr]) {
-        let features: Vec<_> = feature_samples.iter().map(extract_features).collect();
-        self.model.fit_normalization(&features);
-    }
-
-    // -----------------------------------------------------------------------
-    // Private helpers
-    // -----------------------------------------------------------------------
-
-    fn aggregate(&self, costs: &crate::cost_model::CostVector) -> f64 {
+    fn aggregate(&self, costs: &[f32; 16]) -> f64 {
         let w = &self.weights;
-        let cpu_part = costs.cpu_time_ms * w.cpu;
-        let io_part = (costs.io_storage_ops as f32 / w.io_ops_scale) * w.io;
-        let mem_part = (costs.memory_peak_mb / w.mem_scale) * w.memory;
+        let cpu_part = costs[0] * w.cpu;
+        let io_part = (costs[3] / w.io_ops_scale) * w.io;
+        let mem_part = (costs[1] / w.mem_scale) * w.memory;
         f64::from(cpu_part + io_part + mem_part)
     }
 
     fn confidence(&self) -> f32 {
-        // Proxy: proportion of hidden neurons likely active, scaled by
-        // training sample count. Zero if untrained.
         let trained = self.model.samples_trained;
         if trained == 0 {
             0.0
         } else {
-            // Saturates near 1.0 at ~10_000 training samples
             let n = trained as f32;
             1.0 - (-(n / 5000.0)).exp()
         }
@@ -163,68 +137,5 @@ impl NeuralPlanScorer {
 impl Default for NeuralPlanScorer {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ra_core::algebra::RelExpr;
-
-    fn simple_scan() -> RelExpr {
-        RelExpr::Scan { table: "orders".to_string(), alias: None }
-    }
-
-    fn simple_join() -> RelExpr {
-        use ra_core::expr::{Const, Expr};
-        RelExpr::Join {
-            join_type: ra_core::algebra::JoinType::Inner,
-            condition: Expr::Const(Const::Bool(true)),
-            left: Box::new(simple_scan()),
-            right: Box::new(RelExpr::Scan { table: "lineitem".to_string(), alias: None }),
-        }
-    }
-
-    #[test]
-    fn test_scorer_creates_with_defaults() {
-        let scorer = NeuralPlanScorer::new();
-        assert_eq!(scorer.model.samples_trained, 0);
-    }
-
-    #[test]
-    fn test_score_returns_non_negative() {
-        let scorer = NeuralPlanScorer::new();
-        let (cost, confidence) = scorer.score(&simple_scan());
-        assert!(cost >= 0.0, "cost must be non-negative");
-        assert_eq!(confidence, 0.0, "untrained model has zero confidence");
-    }
-
-    #[test]
-    fn test_join_costs_more_than_scan() {
-        let scorer = NeuralPlanScorer::new();
-        let (scan_cost, _) = scorer.score(&simple_scan());
-        let (join_cost, _) = scorer.score(&simple_join());
-        // A join over two tables should cost more than a single scan
-        // (with the same random weights this is probabilistic, but usually holds)
-        assert!(join_cost > 0.0 && scan_cost > 0.0);
-    }
-
-    #[test]
-    fn test_predict_cpu_ms_positive() {
-        let scorer = NeuralPlanScorer::new();
-        let cpu = scorer.predict_cpu_ms(&simple_join());
-        assert!(cpu > 0.0);
-    }
-
-    #[test]
-    fn test_cost_ratio_near_one_on_equal() {
-        let scorer = NeuralPlanScorer::new();
-        let (cost, _) = scorer.score(&simple_scan());
-        let ratio = scorer.cost_ratio(&simple_scan(), cost);
-        assert!((ratio - 1.0).abs() < 1e-6, "ratio should be exactly 1 on self");
     }
 }

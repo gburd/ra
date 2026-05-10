@@ -8,7 +8,7 @@ use ra_stats::accuracy::Staleness;
 
 use crate::analysis::RelAnalysis;
 use crate::cost::IntegratedCostFn;
-use crate::cost_model::fast_model::FastCostModel;
+use crate::cost_model::BitNetCostModel;
 use crate::egraph::{EGraphError, RelLang};
 use crate::state::SystemFingerprint;
 
@@ -183,61 +183,26 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
 /// # Errors
 ///
 /// Returns an error if the extracted nodes cannot be converted back to a [`RelExpr`].
-pub fn extract_best_hybrid<S: BuildHasher, S2: BuildHasher>(
-    egraph: &egg::EGraph<RelLang, RelAnalysis>,
-    root: Id,
-    table_stats: &HashMap<String, Statistics, S>,
-    staleness_map: &HashMap<String, Staleness, S2>,
-    hardware: &ra_hardware::HardwareProfile,
-    fast_model: &FastCostModel,
-    fingerprint: &SystemFingerprint,
-) -> Result<RelExpr, EGraphError> {
-    let cost_fn = HybridCostFn::new(
-        hardware.clone(),
-        table_stats
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect(),
-        staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-        fast_model,
-        fingerprint,
-    );
-
-    tracing::debug!(
-        blend_alpha = cost_fn.blend_alpha(),
-        "hybrid extraction with neural blend"
-    );
-
-    let extractor = egg::Extractor::new(egraph, cost_fn);
-    let (_, best_expr) = extractor.find_best(root);
-    rec_expr_to_rel_expr(&best_expr)
-}
-
-/// Extract the best plan using a `BitNetCostModel` for the neural component.
-///
-/// Same interface as [`extract_best_hybrid`] but uses the BitNet ternary model
-/// directly, bypassing the f32 `FastCostModel` entirely.
-#[cfg(feature = "bitnet")]
 pub fn extract_best_bitnet<S: BuildHasher, S2: BuildHasher>(
     egraph: &egg::EGraph<RelLang, RelAnalysis>,
     root: Id,
     table_stats: &HashMap<String, Statistics, S>,
     staleness_map: &HashMap<String, Staleness, S2>,
     hardware: &ra_hardware::HardwareProfile,
-    bitnet_model: &ra_bitnet::BitNetCostModel,
+    model: &BitNetCostModel,
     fingerprint: &SystemFingerprint,
 ) -> Result<RelExpr, EGraphError> {
-    let cost_fn = HybridCostFn::with_bitnet(
+    let cost_fn = HybridCostFn::new(
         hardware.clone(),
         table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-        bitnet_model,
+        model,
         fingerprint,
     );
 
     tracing::debug!(
         blend_alpha = cost_fn.blend_alpha(),
-        "bitnet hybrid extraction"
+        "hybrid extraction with neural blend"
     );
 
     let extractor = egg::Extractor::new(egraph, cost_fn);

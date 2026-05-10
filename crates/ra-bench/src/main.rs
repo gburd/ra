@@ -79,8 +79,8 @@ struct TrainArgs {
     #[arg(required = true)]
     input: PathBuf,
 
-    /// Model file to load (continue training) or create.
-    #[arg(long, default_value = "ra_cost_model.json")]
+    /// Model output path (BitNet format).
+    #[arg(long, default_value = "cost_model.bitnet.json")]
     model: PathBuf,
 
     /// Number of training epochs.
@@ -94,11 +94,6 @@ struct TrainArgs {
     /// Fraction of data to hold out for evaluation (0.0–1.0).
     #[arg(long, default_value_t = 0.1)]
     eval_split: f64,
-
-    /// Export a BitNet 1.58-bit quantized model alongside the f32 model.
-    /// Requires the `bitnet` feature.
-    #[arg(long)]
-    export_bitnet: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -426,8 +421,7 @@ fn run_collect_training(_args: CollectTrainingArgs) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn run_train(args: TrainArgs) -> Result<()> {
-    use ra_engine::cost_model::{OnlineLearner, OnlineLearnerConfig};
-    use ra_engine::cost_model::production_model::TrainingConfig;
+    use ra_engine::cost_model::{BitNetTrainer, TrainerConfig, BitNetCostModel};
     use crate::training_collector::TrainingCollector;
 
     println!("Loading training data from: {}", args.input.display());
@@ -442,100 +436,116 @@ fn run_train(args: TrainArgs) -> Result<()> {
     let (train_samples, eval_samples) = samples.split_at(split.min(samples.len()));
     println!("Train: {} | Eval: {}", train_samples.len(), eval_samples.len());
 
-    let training_config = TrainingConfig {
-        batch_size: args.batch_size,
+    // Initialize trainer (QAT with STE — trains directly in ternary space)
+    let mut trainer = BitNetTrainer::new(TrainerConfig {
+        lr: 0.005,
+        weight_decay: 0.001,
         ..Default::default()
-    };
-    let learner_config = OnlineLearnerConfig {
-        batch_size: args.batch_size,
-        training_config,
-        ..Default::default()
-    };
+    });
 
-    let mut learner = OnlineLearner::load_or_create(&args.model, learner_config);
-    println!("Model loaded from: {}", args.model.display());
-
-    let train_pairs: Vec<_> = train_samples
+    // Compute normalization from training features
+    let feature_arrays: Vec<[f32; 12]> = train_samples
         .iter()
-        .map(|s| (s.features.clone(), s.actual_cost.clone()))
+        .map(|s| s.features.as_array())
+        .collect();
+    let mean = compute_feature_mean(&feature_arrays);
+    let inv_std = compute_feature_inv_std(&feature_arrays, &mean);
+    trainer.set_normalization(mean, inv_std);
+
+    // Convert training data to (features, target) pairs
+    let train_pairs: Vec<([f32; 12], [f32; 16])> = train_samples
+        .iter()
+        .map(|s| {
+            let features = s.features.as_array();
+            let target = actual_cost_to_array(&s.actual_cost);
+            (features, target)
+        })
         .collect();
 
-    println!("\nTraining ({} epochs, batch size {}):", args.epochs, args.batch_size);
-    println!("{:>6}  {:>10}  {:>10}", "Epoch", "Train Loss", "LR");
-    println!("{:>6}  {:>10}  {:>10}", "-----", "----------", "----------");
+    println!("\nTraining ({} epochs, {} samples):", args.epochs, train_pairs.len());
+    println!("{:>6}  {:>12}", "Epoch", "Avg Loss");
+    println!("{:>6}  {:>12}", "-----", "--------");
 
-    let losses = learner.train_offline(&train_pairs, args.epochs);
-    for (i, loss) in losses.iter().enumerate() {
-        let lr = learner.stats().current_lr;
-        println!("{:>6}  {:>10.6}  {:>10.2e}", i + 1, loss, lr);
+    for epoch in 0..args.epochs {
+        trainer.reset_loss();
+        trainer.train_batch(&train_pairs);
+        let loss = trainer.avg_loss();
+        println!("{:>6}  {:>12.4}", epoch + 1, loss);
     }
+
+    // Export trained model
+    let model = trainer.to_model();
 
     // Evaluate on held-out set
     if !eval_samples.is_empty() {
         let mut total_err = 0.0f64;
         for s in eval_samples {
-            let (pred, _) = learner.predict(&s.features);
-            let err = ((pred.cpu_time_ms - s.actual_cost.cpu_time_ms) as f64).abs()
-                / (s.actual_cost.cpu_time_ms as f64 + 1.0);
+            let pred = model.predict_cpu_ms(&s.features.as_array());
+            let actual = s.actual_cost.cpu_time_ms;
+            let err = ((pred - actual) as f64).abs() / (actual as f64 + 1.0);
             total_err += err;
         }
         let mape = total_err / eval_samples.len() as f64 * 100.0;
         println!("\nEval MAPE (CPU): {:.2}%", mape);
     }
 
-    learner.checkpoint()?;
+    // Save model
+    let model_path = args.model.to_str().unwrap_or("cost_model.bitnet.json");
+    model.save_to_file(model_path)?;
     println!("\nModel saved to: {}", args.model.display());
-
-    let stats = learner.stats();
-    println!("Total samples trained: {}", stats.total_trained);
-    println!("Checkpoints written:   {}", stats.checkpoints_written);
-    println!("Final avg loss:        {:.6}", stats.current_avg_loss);
-
-    // Post-training BitNet quantization
-    export_bitnet_model(&learner, &args)?;
+    println!("  Steps trained: {}", trainer.steps());
+    println!("  Model size:    {} bytes", model.model_size_bytes());
 
     Ok(())
 }
 
-/// Export a BitNet 1.58-bit quantized model from the trained f32 weights.
-///
-/// When the `bitnet` feature is enabled and `--export-bitnet` is passed,
-/// quantizes the trained model using absmean ternary quantization and
-/// saves alongside the f32 model with a `.bitnet.json` suffix.
-#[allow(unused_variables)]
-fn export_bitnet_model(
-    learner: &ra_engine::cost_model::OnlineLearner,
-    args: &TrainArgs,
-) -> Result<()> {
-    if !args.export_bitnet {
-        return Ok(());
+fn compute_feature_mean(samples: &[[f32; 12]]) -> [f32; 12] {
+    let n = samples.len() as f32;
+    let mut mean = [0.0f32; 12];
+    for s in samples {
+        for (i, &x) in s.iter().enumerate() {
+            mean[i] += x / n;
+        }
     }
+    mean
+}
 
-    #[cfg(feature = "bitnet")]
-    {
-        let fast = learner.fast_model_snapshot();
-        let bitnet = fast.to_bitnet();
-
-        // Derive output path: model.json → model.bitnet.json
-        let bitnet_path = args.model.with_extension("bitnet.json");
-        bitnet.save_to_file(
-            bitnet_path.to_str().unwrap_or("cost_model.bitnet.json"),
-        )?;
-
-        println!("\nBitNet model exported to: {}", bitnet_path.display());
-        println!("  Packed size:     {} bytes", bitnet.model_size_bytes());
-        println!("  Samples trained: {}", bitnet.samples_trained);
+fn compute_feature_inv_std(samples: &[[f32; 12]], mean: &[f32; 12]) -> [f32; 12] {
+    let n = samples.len() as f32;
+    let mut var = [0.0f32; 12];
+    for s in samples {
+        for (i, &x) in s.iter().enumerate() {
+            let d = x - mean[i];
+            var[i] += d * d / n;
+        }
     }
-
-    #[cfg(not(feature = "bitnet"))]
-    {
-        eprintln!(
-            "warning: --export-bitnet requires the `bitnet` feature. \
-             Build with: cargo build -p ra-bench --features bitnet"
-        );
+    let mut inv_std = [1.0f32; 12];
+    for (i, &v) in var.iter().enumerate() {
+        let std = v.sqrt();
+        inv_std[i] = if std > 1e-6 { 1.0 / std } else { 1.0 };
     }
+    inv_std
+}
 
-    Ok(())
+fn actual_cost_to_array(cost: &ra_engine::cost_model::ActualCost) -> [f32; 16] {
+    [
+        cost.cpu_time_ms,
+        cost.memory_peak_mb,
+        cost.memory_avg_mb,
+        cost.io_storage_ops as f32,
+        cost.io_storage_bytes as f32,
+        cost.io_network_ops as f32,
+        cost.io_network_bytes as f32,
+        cost.locks_acquired as f32,
+        cost.lock_hold_time_ms,
+        cost.lock_contention_score,
+        cost.vacuum_overhead,
+        cost.wal_generation_bytes as f32,
+        cost.replication_lag_ms,
+        cost.cache_hit_ratio,
+        cost.page_faults as f32,
+        cost.context_switches as f32,
+    ]
 }
 
 // ---------------------------------------------------------------------------
