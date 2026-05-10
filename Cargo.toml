@@ -35,6 +35,7 @@ members = [
     "crates/ra-quel-parser",
     "crates/ra-grammar-fuzzer",
     "crates/ra-bench",
+    "crates/ra-sqltest",
 ]
 default-members = [
     # Core layer: cargo build builds only these by default

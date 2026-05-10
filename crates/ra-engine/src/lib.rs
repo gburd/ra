@@ -38,6 +38,7 @@
 
 pub mod adaptive_calibration;
 pub mod analysis;
+pub mod conditions;
 pub mod beam_search;
 pub mod cost_model;
 #[cfg(feature = "ml")]
@@ -106,6 +107,7 @@ pub mod shortcuts;
 pub(crate) mod sparsemap;
 pub mod state;
 pub mod stats_cache;
+pub mod subquery_decorrelation;
 // Phase 6: Timeline system (deferred)
 pub mod hybrid_search;
 pub mod oracle_json_duality;
@@ -266,7 +268,8 @@ pub use resource_budget::{
     ResourceCheckResult, ResourceTracker, ResourceUsageReport, RuleSelectionBehavior,
 };
 pub use rewrite::{
-    all_rules, all_rules_annotated, all_rules_unsorted, AnnotatedRuleGroup, RuleAnnotation,
+    all_rules, all_rules_annotated, all_rules_unsorted, generated_rules, AnnotatedRuleGroup,
+    RuleAnnotation,
 };
 pub use rule_advisor::{
     AdaptiveState, AdvisorStats, RuleAdvisor, RuleAdvisorConfig, RuleApplicability, RuleOutcome,

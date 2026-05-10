@@ -1,0 +1,41 @@
+# Subquery parse + optimize tests
+
+# IN subquery
+query T
+SELECT * FROM orders WHERE o_custkey IN (SELECT c_custkey FROM customer WHERE c_mktsegment = 'BUILDING')
+----
+ok
+
+# NOT IN subquery
+query T
+SELECT * FROM customer WHERE c_custkey NOT IN (SELECT o_custkey FROM orders)
+----
+ok
+
+# EXISTS subquery
+query T
+SELECT * FROM customer c WHERE EXISTS (SELECT 1 FROM orders o WHERE o.o_custkey = c.c_custkey)
+----
+ok
+
+# NOT EXISTS subquery
+query T
+SELECT * FROM customer c WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.o_custkey = c.c_custkey AND o.o_orderstatus = 'F')
+----
+ok
+
+# Scalar subquery in SELECT (not yet supported in e-graph)
+statement error
+SELECT c_name, (SELECT COUNT(*) FROM orders o WHERE o.o_custkey = c.c_custkey) as order_count FROM customer c
+
+# Subquery in FROM clause (derived table)
+query T
+SELECT * FROM (SELECT o_custkey, SUM(o_totalprice) as total FROM orders GROUP BY o_custkey) sub WHERE sub.total > 100000
+----
+ok
+
+# Correlated subquery with comparison
+query T
+SELECT * FROM orders o WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_custkey = o.o_custkey)
+----
+ok

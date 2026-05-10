@@ -38,6 +38,12 @@ pub fn extract_best<S: BuildHasher>(
         let (_, best_expr) = extractor.find_best(root);
         rec_expr_to_rel_expr(&best_expr)
     } else {
+        // Pre-resolve: scan the e-graph to build a mapping from
+        // canonical symbol Ids → row counts. This allows the cost
+        // function to access per-table statistics without needing
+        // the e-graph during extraction.
+        let id_row_counts = resolve_table_row_counts(egraph, table_stats);
+
         // Clone once to create owned HashMap (unavoidable)
         let stats: HashMap<String, Statistics> = table_stats
             .iter()
@@ -50,13 +56,37 @@ pub fn extract_best<S: BuildHasher>(
             .map(|k| (k.clone(), Staleness::Fresh))
             .collect();
 
-        // IntegratedCostFn::new wraps these in Arc internally, so subsequent
-        // clones of IntegratedCostFn are cheap (just Arc reference count increments)
-        let cost_fn = IntegratedCostFn::new(hardware.clone(), stats, staleness_map);
+        let cost_fn =
+            IntegratedCostFn::with_id_row_counts(hardware.clone(), stats, staleness_map, id_row_counts);
         let extractor = egg::Extractor::new(egraph, cost_fn);
         let (_, best_expr) = extractor.find_best(root);
         rec_expr_to_rel_expr(&best_expr)
     }
+}
+
+/// Pre-resolve table symbol IDs to row counts by scanning the e-graph.
+///
+/// For each e-class containing a `Symbol` node whose name matches a
+/// table in `table_stats`, records the canonical Id → row_count mapping.
+/// This is O(n) in the number of e-classes (typically small) and runs
+/// once before extraction.
+fn resolve_table_row_counts<S: BuildHasher>(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    table_stats: &HashMap<String, Statistics, S>,
+) -> HashMap<Id, f64> {
+    let mut id_row_counts = HashMap::new();
+    for class in egraph.classes() {
+        for node in &class.nodes {
+            if let RelLang::Symbol(s) = node {
+                let name = s.to_string();
+                if let Some(stats) = table_stats.get(&name) {
+                    let canonical = egraph.find(class.id);
+                    id_row_counts.insert(canonical, stats.row_count);
+                }
+            }
+        }
+    }
+    id_row_counts
 }
 
 /// Extract the lowest-cost plan using staleness-aware statistics.

@@ -25,7 +25,7 @@ pub struct CorpusEntry {
 /// Return the full query corpus as a slice of [`CorpusEntry`] values.
 #[must_use]
 pub fn all_queries() -> Vec<CorpusEntry> {
-    let mut out = Vec::with_capacity(160);
+    let mut out = Vec::with_capacity(260);
     out.extend_from_slice(SIMPLE_CRUD);
     out.extend_from_slice(ANALYTICS);
     out.extend_from_slice(MULTI_TABLE_JOINS);
@@ -33,6 +33,7 @@ pub fn all_queries() -> Vec<CorpusEntry> {
     out.extend_from_slice(SUBQUERIES);
     out.extend_from_slice(JSONB);
     out.extend_from_slice(TPCH);
+    out.extend_from_slice(TPCDS);
     out.extend_from_slice(EDGE_CASES);
     out
 }
@@ -823,6 +824,302 @@ static TPCH: &[CorpusEntry] = &[
 // Edge cases (15)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// TPC-DS (representative subset — 20 queries from the 99-query benchmark)
+// ---------------------------------------------------------------------------
+
+static TPCDS: &[CorpusEntry] = &[
+    // Q3: Total extended sales price per item brand
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT dt.d_year, item.i_brand_id, item.i_brand, SUM(ss_ext_sales_price) as sum_agg \
+              FROM date_dim dt, store_sales, item \
+              WHERE dt.d_date_sk = store_sales.ss_sold_date_sk \
+              AND store_sales.ss_item_sk = item.i_item_sk \
+              AND item.i_manufact_id = 128 \
+              AND dt.d_moy = 11 \
+              GROUP BY dt.d_year, item.i_brand_id, item.i_brand \
+              ORDER BY dt.d_year, sum_agg DESC, item.i_brand_id \
+              LIMIT 100" },
+    // Q6: Customers buying items with prices higher than average for their state
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT a.ca_state, COUNT(*) as cnt \
+              FROM customer_address a, customer c, store_sales s, date_dim d, item i \
+              WHERE a.ca_address_sk = c.c_current_addr_sk \
+              AND c.c_customer_sk = s.ss_customer_sk \
+              AND s.ss_sold_date_sk = d.d_date_sk \
+              AND s.ss_item_sk = i.i_item_sk \
+              AND d.d_month_seq BETWEEN 1200 AND 1211 \
+              AND i.i_current_price > 1.2 * (SELECT AVG(j.i_current_price) FROM item j \
+                  WHERE j.i_category = i.i_category) \
+              GROUP BY a.ca_state \
+              HAVING COUNT(*) >= 10 \
+              ORDER BY cnt LIMIT 100" },
+    // Q7: Average quantity/price/discount for promotional items
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT i_item_id, AVG(ss_quantity) as agg1, AVG(ss_list_price) as agg2, \
+              AVG(ss_coupon_amt) as agg3, AVG(ss_sales_price) as agg4 \
+              FROM store_sales, customer_demographics, date_dim, item, promotion \
+              WHERE ss_sold_date_sk = d_date_sk AND ss_item_sk = i_item_sk \
+              AND ss_cdemo_sk = cd_demo_sk AND ss_promo_sk = p_promo_sk \
+              AND cd_gender = 'M' AND cd_marital_status = 'S' \
+              AND cd_education_status = 'College' AND (p_channel_email = 'N' OR p_channel_event = 'N') \
+              AND d_year = 2000 \
+              GROUP BY i_item_id ORDER BY i_item_id LIMIT 100" },
+    // Q13: Store sales analysis with demographics
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT AVG(ss_quantity) as avg_qty, AVG(ss_ext_sales_price) as avg_sp, \
+              AVG(ss_ext_wholesale_cost) as avg_wc, SUM(ss_ext_wholesale_cost) as sum_wc \
+              FROM store_sales, store, customer_demographics, household_demographics, \
+              customer_address, date_dim \
+              WHERE s_store_sk = ss_store_sk AND ss_sold_date_sk = d_date_sk \
+              AND ss_cdemo_sk = cd_demo_sk AND ss_hdemo_sk = hd_demo_sk \
+              AND ss_addr_sk = ca_address_sk AND d_year = 2001 \
+              AND cd_marital_status = 'M' AND cd_education_status = 'Advanced Degree' \
+              AND hd_dep_count = 3" },
+    // Q19: Revenue by item manufacturer and brand
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT i_brand_id, i_brand, i_manufact_id, i_manufact, SUM(ss_ext_sales_price) as ext_price \
+              FROM date_dim, store_sales, item, customer, customer_address, store \
+              WHERE d_date_sk = ss_sold_date_sk AND ss_item_sk = i_item_sk \
+              AND ss_customer_sk = c_customer_sk AND c_current_addr_sk = ca_address_sk \
+              AND ss_store_sk = s_store_sk AND d_moy = 11 AND d_year = 1998 \
+              AND ca_gmt_offset = -5 AND s_gmt_offset = -5 \
+              GROUP BY i_brand_id, i_brand, i_manufact_id, i_manufact \
+              ORDER BY ext_price DESC, i_brand, i_brand_id, i_manufact_id, i_manufact \
+              LIMIT 100" },
+    // Q25: Quantity sold from store and catalog for specific items
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT i_item_id, i_item_desc, s_store_id, s_store_name, \
+              SUM(ss_net_profit) as store_sales_profit, \
+              SUM(sr_net_loss) as store_returns_loss, \
+              SUM(cs_net_profit) as catalog_sales_profit \
+              FROM store_sales, store_returns, catalog_sales, date_dim d1, date_dim d2, \
+              date_dim d3, store, item \
+              WHERE d1.d_moy = 4 AND d1.d_year = 2001 \
+              AND d1.d_date_sk = ss_sold_date_sk \
+              AND i_item_sk = ss_item_sk \
+              AND s_store_sk = ss_store_sk \
+              AND ss_customer_sk = sr_customer_sk AND ss_item_sk = sr_item_sk \
+              AND ss_ticket_number = sr_ticket_number \
+              AND sr_returned_date_sk = d2.d_date_sk \
+              AND d2.d_moy BETWEEN 4 AND 10 AND d2.d_year = 2001 \
+              AND sr_customer_sk = cs_bill_customer_sk AND sr_item_sk = cs_item_sk \
+              AND cs_sold_date_sk = d3.d_date_sk \
+              AND d3.d_moy BETWEEN 4 AND 10 AND d3.d_year = 2001 \
+              GROUP BY i_item_id, i_item_desc, s_store_id, s_store_name \
+              ORDER BY i_item_id, i_item_desc, s_store_id, s_store_name \
+              LIMIT 100" },
+    // Q34: Customers buying specific items more than 4 times
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT c_last_name, c_first_name, c_salutation, c_preferred_cust_flag, \
+              ss_ticket_number, cnt \
+              FROM (SELECT ss_ticket_number, ss_customer_sk, COUNT(*) as cnt \
+                    FROM store_sales, date_dim, store, household_demographics \
+                    WHERE store_sales.ss_sold_date_sk = date_dim.d_date_sk \
+                    AND store_sales.ss_store_sk = store.s_store_sk \
+                    AND store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk \
+                    AND (date_dim.d_dom BETWEEN 1 AND 3 OR date_dim.d_dom BETWEEN 25 AND 28) \
+                    AND (household_demographics.hd_buy_potential = '>10000' \
+                         OR household_demographics.hd_buy_potential = '5001-10000') \
+                    AND household_demographics.hd_vehicle_count > 0 \
+                    AND (CASE WHEN household_demographics.hd_vehicle_count > 0 \
+                         THEN household_demographics.hd_dep_count / household_demographics.hd_vehicle_count \
+                         ELSE NULL END) > 1.2 \
+                    AND date_dim.d_year IN (1999, 2000, 2001) \
+                    AND store.s_county IN ('Williamson County', 'Walker County') \
+                    GROUP BY ss_ticket_number, ss_customer_sk) dn, customer \
+              WHERE ss_customer_sk = c_customer_sk AND cnt BETWEEN 15 AND 20 \
+              ORDER BY c_last_name, c_first_name, c_salutation, c_preferred_cust_flag DESC" },
+    // Q42: Year-to-year comparison of quarterly sales
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT dt.d_year, item.i_category_id, item.i_category, SUM(ss_ext_sales_price) as s \
+              FROM date_dim dt, store_sales, item \
+              WHERE dt.d_date_sk = store_sales.ss_sold_date_sk \
+              AND store_sales.ss_item_sk = item.i_item_sk \
+              AND item.i_manager_id = 1 AND dt.d_moy = 11 AND dt.d_year = 2000 \
+              GROUP BY dt.d_year, item.i_category_id, item.i_category \
+              ORDER BY s DESC, dt.d_year, item.i_category_id, item.i_category \
+              LIMIT 100" },
+    // Q46: Per-customer store sales for specific counties
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT c_last_name, c_first_name, ca_city, bought_city, ss_ticket_number, \
+              amt, profit \
+              FROM (SELECT ss_ticket_number, ss_customer_sk, ca_city as bought_city, \
+                    SUM(ss_coupon_amt) as amt, SUM(ss_net_profit) as profit \
+                    FROM store_sales, date_dim, store, household_demographics, customer_address \
+                    WHERE store_sales.ss_sold_date_sk = date_dim.d_date_sk \
+                    AND store_sales.ss_store_sk = store.s_store_sk \
+                    AND store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk \
+                    AND store_sales.ss_addr_sk = customer_address.ca_address_sk \
+                    AND (household_demographics.hd_dep_count = 4 \
+                         OR household_demographics.hd_vehicle_count = 3) \
+                    AND date_dim.d_dow IN (6, 0) \
+                    AND date_dim.d_year IN (1999, 2000, 2001) \
+                    AND store.s_city IN ('Midway', 'Fairview', 'Fairview', 'Midway', 'Fairview') \
+                    GROUP BY ss_ticket_number, ss_customer_sk, ss_addr_sk, ca_city) dn, \
+              customer, customer_address current_addr \
+              WHERE ss_customer_sk = c_customer_sk \
+              AND customer.c_current_addr_sk = current_addr.ca_address_sk \
+              AND current_addr.ca_city <> bought_city \
+              ORDER BY c_last_name, c_first_name, ca_city, bought_city, ss_ticket_number \
+              LIMIT 100" },
+    // Q52: Revenue breakdown for specific departments
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT dt.d_year, item.i_brand_id, item.i_brand, SUM(ss_ext_sales_price) as ext_price \
+              FROM date_dim dt, store_sales, item \
+              WHERE dt.d_date_sk = store_sales.ss_sold_date_sk \
+              AND store_sales.ss_item_sk = item.i_item_sk \
+              AND item.i_manager_id = 1 AND dt.d_moy = 11 AND dt.d_year = 2000 \
+              GROUP BY dt.d_year, item.i_brand_id, item.i_brand \
+              ORDER BY dt.d_year, ext_price DESC, item.i_brand_id \
+              LIMIT 100" },
+    // Q55: Revenue by brand for specific months
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT i_brand_id, i_brand, SUM(ss_ext_sales_price) as ext_price \
+              FROM date_dim, store_sales, item \
+              WHERE d_date_sk = ss_sold_date_sk AND ss_item_sk = i_item_sk \
+              AND i_manager_id = 28 AND d_moy = 11 AND d_year = 1999 \
+              GROUP BY i_brand_id, i_brand \
+              ORDER BY ext_price DESC, i_brand_id LIMIT 100" },
+    // Q65: Stores with revenue above average
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT s_store_name, i_item_desc, sc.revenue, i_current_price, i_wholesale_cost, \
+              i_brand \
+              FROM store, item, \
+              (SELECT ss_store_sk, ss_item_sk, SUM(ss_sales_price) as revenue \
+               FROM store_sales, date_dim \
+               WHERE ss_sold_date_sk = d_date_sk AND d_month_seq BETWEEN 1176 AND 1187 \
+               GROUP BY ss_store_sk, ss_item_sk) sc \
+              WHERE ss_store_sk = s_store_sk AND ss_item_sk = i_item_sk \
+              AND sc.revenue <= 0.1 * \
+                  (SELECT AVG(revenue) FROM \
+                   (SELECT ss_store_sk, AVG(ss_sales_price) as revenue \
+                    FROM store_sales, date_dim \
+                    WHERE ss_sold_date_sk = d_date_sk AND d_month_seq BETWEEN 1176 AND 1187 \
+                    GROUP BY ss_store_sk) sa) \
+              ORDER BY s_store_name, i_item_desc LIMIT 100" },
+    // Q73: Customers who visited stores more than average
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT c_last_name, c_first_name, c_salutation, c_preferred_cust_flag, \
+              ss_ticket_number, cnt \
+              FROM (SELECT ss_ticket_number, ss_customer_sk, COUNT(*) as cnt \
+                    FROM store_sales, date_dim, store, household_demographics \
+                    WHERE store_sales.ss_sold_date_sk = date_dim.d_date_sk \
+                    AND store_sales.ss_store_sk = store.s_store_sk \
+                    AND store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk \
+                    AND (date_dim.d_dom BETWEEN 1 AND 3 OR date_dim.d_dom BETWEEN 25 AND 28) \
+                    AND (household_demographics.hd_buy_potential = '>10000' \
+                         OR household_demographics.hd_buy_potential = '5001-10000') \
+                    AND household_demographics.hd_vehicle_count > 0 \
+                    AND date_dim.d_year IN (1999, 2000, 2001) \
+                    AND store.s_county IN ('Williamson County') \
+                    GROUP BY ss_ticket_number, ss_customer_sk) dn, customer \
+              WHERE ss_customer_sk = c_customer_sk AND cnt BETWEEN 1 AND 5 \
+              ORDER BY cnt DESC" },
+    // Q79: Annual income of store customers
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT c_last_name, c_first_name, SUBSTRING(s_city FROM 1 FOR 30) as city, \
+              ss_ticket_number, amt, profit \
+              FROM (SELECT ss_ticket_number, ss_customer_sk, store.s_city, \
+                    SUM(ss_coupon_amt) as amt, SUM(ss_net_profit) as profit \
+                    FROM store_sales, date_dim, store, household_demographics \
+                    WHERE store_sales.ss_sold_date_sk = date_dim.d_date_sk \
+                    AND store_sales.ss_store_sk = store.s_store_sk \
+                    AND store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk \
+                    AND (household_demographics.hd_dep_count = 6 \
+                         OR household_demographics.hd_vehicle_count > 2) \
+                    AND date_dim.d_dow = 1 \
+                    AND date_dim.d_year IN (1999, 2000, 2001) \
+                    AND store.s_number_employees BETWEEN 200 AND 295 \
+                    GROUP BY ss_ticket_number, ss_customer_sk, ss_addr_sk, store.s_city) ms, \
+              customer \
+              WHERE ss_customer_sk = c_customer_sk \
+              ORDER BY c_last_name, c_first_name, city, profit LIMIT 100" },
+    // Q88: Store sales by hourly ranges
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT * FROM \
+              (SELECT COUNT(*) as h8_30_to_9 FROM store_sales, household_demographics, time_dim, store \
+               WHERE ss_sold_time_sk = time_dim.t_time_sk AND ss_hdemo_sk = household_demographics.hd_demo_sk \
+               AND ss_store_sk = s_store_sk AND time_dim.t_hour = 8 AND time_dim.t_minute >= 30 \
+               AND household_demographics.hd_dep_count = 4 AND store.s_store_name = 'ese') s1, \
+              (SELECT COUNT(*) as h9_to_9_30 FROM store_sales, household_demographics, time_dim, store \
+               WHERE ss_sold_time_sk = time_dim.t_time_sk AND ss_hdemo_sk = household_demographics.hd_demo_sk \
+               AND ss_store_sk = s_store_sk AND time_dim.t_hour = 9 AND time_dim.t_minute < 30 \
+               AND household_demographics.hd_dep_count = 4 AND store.s_store_name = 'ese') s2" },
+    // Q89: Revenue by items and categories
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT * FROM \
+              (SELECT i_category, i_class, i_brand, s_store_name, s_company_name, \
+               d_moy, SUM(ss_sales_price) as sum_sales, \
+               AVG(SUM(ss_sales_price)) OVER (PARTITION BY i_category, i_brand, s_store_name, s_company_name) as avg_monthly_sales \
+               FROM item, store_sales, date_dim, store \
+               WHERE ss_item_sk = i_item_sk AND ss_sold_date_sk = d_date_sk \
+               AND ss_store_sk = s_store_sk \
+               AND d_year IN (1999) AND i_category IN ('Books', 'Electronics', 'Sports') \
+               GROUP BY i_category, i_class, i_brand, s_store_name, s_company_name, d_moy) tmp1 \
+              WHERE CASE WHEN avg_monthly_sales <> 0 \
+                    THEN ABS(sum_sales - avg_monthly_sales) / avg_monthly_sales \
+                    ELSE NULL END > 0.1 \
+              ORDER BY sum_sales - avg_monthly_sales, s_store_name \
+              LIMIT 100" },
+    // Q96: Morning store sales count
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT COUNT(*) \
+              FROM store_sales, household_demographics, time_dim, store \
+              WHERE ss_sold_time_sk = time_dim.t_time_sk \
+              AND ss_hdemo_sk = household_demographics.hd_demo_sk \
+              AND ss_store_sk = s_store_sk \
+              AND time_dim.t_hour = 20 AND time_dim.t_minute >= 30 \
+              AND household_demographics.hd_dep_count = 7 \
+              AND store.s_store_name = 'ese' \
+              ORDER BY COUNT(*) LIMIT 100" },
+    // Q97: Distinct item-customer combinations
+    CorpusEntry { category: "tpcds",
+        sql: "WITH ssci AS (SELECT ss_customer_sk as customer_sk, ss_item_sk as item_sk \
+                            FROM store_sales, date_dim \
+                            WHERE ss_sold_date_sk = d_date_sk AND d_month_seq BETWEEN 1200 AND 1211 \
+                            GROUP BY ss_customer_sk, ss_item_sk), \
+              csci AS (SELECT cs_bill_customer_sk as customer_sk, cs_item_sk as item_sk \
+                       FROM catalog_sales, date_dim \
+                       WHERE cs_sold_date_sk = d_date_sk AND d_month_seq BETWEEN 1200 AND 1211 \
+                       GROUP BY cs_bill_customer_sk, cs_item_sk) \
+              SELECT SUM(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NULL THEN 1 ELSE 0 END) as store_only, \
+                     SUM(CASE WHEN ssci.customer_sk IS NULL AND csci.customer_sk IS NOT NULL THEN 1 ELSE 0 END) as catalog_only, \
+                     SUM(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NOT NULL THEN 1 ELSE 0 END) as store_and_catalog \
+              FROM ssci FULL OUTER JOIN csci ON ssci.customer_sk = csci.customer_sk AND ssci.item_sk = csci.item_sk \
+              LIMIT 100" },
+    // Q98: Revenue ranking by department
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT i_item_id, i_item_desc, i_category, i_class, i_current_price, \
+              SUM(ss_ext_sales_price) as itemrevenue, \
+              SUM(ss_ext_sales_price) * 100 / SUM(SUM(ss_ext_sales_price)) OVER (PARTITION BY i_class) as revenueratio \
+              FROM store_sales, item, date_dim \
+              WHERE ss_item_sk = i_item_sk AND i_category IN ('Sports', 'Books', 'Home') \
+              AND ss_sold_date_sk = d_date_sk AND d_date BETWEEN '1999-02-22' AND '1999-03-24' \
+              GROUP BY i_item_id, i_item_desc, i_category, i_class, i_current_price \
+              ORDER BY i_category, i_class, i_item_id, i_item_desc, revenueratio" },
+    // Q99: Late shipments by mode and warehouse
+    CorpusEntry { category: "tpcds",
+        sql: "SELECT SUBSTRING(w_warehouse_name FROM 1 FOR 20) as wname, sm_type, \
+              cc_name, \
+              SUM(CASE WHEN (cs_ship_date_sk - cs_sold_date_sk <= 30) THEN 1 ELSE 0 END) as d30, \
+              SUM(CASE WHEN (cs_ship_date_sk - cs_sold_date_sk > 30) AND (cs_ship_date_sk - cs_sold_date_sk <= 60) THEN 1 ELSE 0 END) as d31_60, \
+              SUM(CASE WHEN (cs_ship_date_sk - cs_sold_date_sk > 60) AND (cs_ship_date_sk - cs_sold_date_sk <= 90) THEN 1 ELSE 0 END) as d61_90, \
+              SUM(CASE WHEN (cs_ship_date_sk - cs_sold_date_sk > 90) AND (cs_ship_date_sk - cs_sold_date_sk <= 120) THEN 1 ELSE 0 END) as d91_120, \
+              SUM(CASE WHEN (cs_ship_date_sk - cs_sold_date_sk > 120) THEN 1 ELSE 0 END) as d120plus \
+              FROM catalog_sales, warehouse, ship_mode, call_center, date_dim \
+              WHERE d_month_seq BETWEEN 1200 AND 1211 AND cs_ship_date_sk = d_date_sk \
+              AND cs_warehouse_sk = w_warehouse_sk AND cs_ship_mode_sk = sm_ship_mode_sk \
+              AND cs_call_center_sk = cc_call_center_sk \
+              GROUP BY SUBSTRING(w_warehouse_name FROM 1 FOR 20), sm_type, cc_name \
+              ORDER BY SUBSTRING(w_warehouse_name FROM 1 FOR 20), sm_type, cc_name \
+              LIMIT 100" },
+];
+
+// ---------------------------------------------------------------------------
+// Edge cases
+// ---------------------------------------------------------------------------
+
 static EDGE_CASES: &[CorpusEntry] = &[
     CorpusEntry { category: "edge_cases",
         sql: "SELECT * FROM orders LIMIT 0" },
@@ -881,7 +1178,7 @@ mod tests {
             corpus.iter().map(|e| e.category).collect();
         for expected in &[
             "simple_crud", "analytics", "multi_table_joins",
-            "ctes", "subqueries", "jsonb", "tpch", "edge_cases",
+            "ctes", "subqueries", "jsonb", "tpch", "tpcds", "edge_cases",
         ] {
             assert!(
                 categories.contains(expected),

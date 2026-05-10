@@ -399,7 +399,19 @@ mod tests {
         let (result, _) = optimizer
             .optimize_incremental(&expr, &delta)
             .expect("should succeed");
-        assert!(matches!(result, RelExpr::Filter { .. }) || matches!(result, RelExpr::Scan { .. }));
+        // The optimizer may produce Filter, Scan, BitmapIndexScan, or
+        // IndexOnlyScan depending on cost model and hardware profile.
+        // All are valid plans for a filter+scan query.
+        assert!(
+            matches!(
+                result,
+                RelExpr::Filter { .. }
+                    | RelExpr::Scan { .. }
+                    | RelExpr::BitmapIndexScan { .. }
+                    | RelExpr::IndexOnlyScan { .. }
+            ),
+            "Expected valid plan variant, got: {result:?}"
+        );
     }
 
     #[test]

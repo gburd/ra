@@ -1,0 +1,54 @@
+# Join query parse + optimize tests
+
+# Inner joins
+query T
+SELECT * FROM orders o JOIN customer c ON o.o_custkey = c.c_custkey
+----
+ok
+
+query T
+SELECT o.o_orderkey, c.c_name FROM orders o INNER JOIN customer c ON o.o_custkey = c.c_custkey
+----
+ok
+
+# Multi-table joins
+query T
+SELECT l.l_orderkey, o.o_orderdate, c.c_name FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey JOIN customer c ON o.o_custkey = c.c_custkey
+----
+ok
+
+# Left outer join
+query T
+SELECT c.c_name, o.o_orderkey FROM customer c LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+----
+ok
+
+# Right outer join
+query T
+SELECT c.c_name, o.o_orderkey FROM orders o RIGHT JOIN customer c ON o.o_custkey = c.c_custkey
+----
+ok
+
+# Cross join
+query T
+SELECT * FROM nation, region
+----
+ok
+
+# Self join
+query T
+SELECT e1.name, e2.name FROM employees e1 JOIN employees e2 ON e1.manager_id = e2.id
+----
+ok
+
+# Join with filter
+query T
+SELECT * FROM orders o JOIN customer c ON o.o_custkey = c.c_custkey WHERE c.c_mktsegment = 'BUILDING' AND o.o_totalprice > 1000
+----
+ok
+
+# Join with aggregate
+query T
+SELECT c.c_name, COUNT(o.o_orderkey) FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey GROUP BY c.c_name
+----
+ok

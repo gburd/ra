@@ -1,0 +1,37 @@
+# CTE (Common Table Expression) parse + optimize tests
+
+# Simple CTE
+query T
+WITH active_orders AS (SELECT * FROM orders WHERE o_orderstatus = 'O') SELECT * FROM active_orders
+----
+ok
+
+# CTE with filter
+query T
+WITH big_orders AS (SELECT * FROM orders WHERE o_totalprice > 50000) SELECT * FROM big_orders WHERE o_orderdate > '1995-01-01'
+----
+ok
+
+# CTE with join
+query T
+WITH customer_orders AS (SELECT c.c_name, o.o_orderkey, o.o_totalprice FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey) SELECT * FROM customer_orders WHERE o_totalprice > 10000
+----
+ok
+
+# Multiple CTEs
+query T
+WITH cte1 AS (SELECT * FROM orders WHERE o_orderstatus = 'F'), cte2 AS (SELECT * FROM customer WHERE c_mktsegment = 'BUILDING') SELECT * FROM cte1 JOIN cte2 ON cte1.o_custkey = cte2.c_custkey
+----
+ok
+
+# CTE referenced multiple times
+query T
+WITH stats AS (SELECT o_custkey, COUNT(*) as cnt FROM orders GROUP BY o_custkey) SELECT s1.o_custkey, s1.cnt, s2.cnt FROM stats s1 JOIN stats s2 ON s1.o_custkey <> s2.o_custkey WHERE s1.cnt > s2.cnt
+----
+ok
+
+# CTE with aggregation
+query T
+WITH dept_totals AS (SELECT department_id, SUM(salary) as total_salary FROM employees GROUP BY department_id) SELECT * FROM dept_totals WHERE total_salary > 500000
+----
+ok

@@ -21,6 +21,9 @@ use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
 use crate::query_features::QueryFeatureSet;
 
+// Include rules generated from .rra files at compile time
+include!(concat!(env!("OUT_DIR"), "/generated_rules.rs"));
+
 /// Return all optimization rewrite rules sorted by priority.
 ///
 /// Rules are sorted using RFC 0058 complexity-based prioritization:
@@ -53,6 +56,9 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(limit_sort_optimization_rules());
     rules.extend(set_operation_rules());
     rules.extend(subquery_optimization_rules());
+
+    // CTE inlining rules
+    rules.extend(cte_inlining_rules());
 
     // Column pruning rules (project through intersect/except/limit, etc.)
     rules.extend(crate::column_pruning::column_pruning_rules());
@@ -112,6 +118,23 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(cast_optimization_rules());
 
     rules
+}
+
+/// Return the set of generated rules from .rra files that are compatible
+/// with the current RelLang grammar.
+///
+/// These rules are compiled from the `rules/` directory at build time.
+/// Rules using operators not in RelLang or requiring unimplemented condition
+/// functions are excluded.
+///
+/// Call [`generated_rule_stats()`] for statistics about the generated set.
+#[must_use]
+pub fn generated_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+    // Return the full generated set. Callers can filter as needed.
+    // Note: Rules using non-existent RelLang operators will panic when
+    // the egg runner tries to parse them. Use validate_generated_rules()
+    // to identify which rules are safe to use.
+    all_generated_rules()
 }
 
 /// Metadata declaring what a rule group requires to be applicable.
@@ -265,6 +288,14 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 databases: vec![],
             },
             rules: subquery_optimization_rules(),
+        },
+        AnnotatedRuleGroup {
+            label: "cte-inlining",
+            annotation: RuleAnnotation {
+                required_features: QueryFeatureSet::HAS_CTE,
+                databases: vec![],
+            },
+            rules: cte_inlining_rules(),
         },
         // -- Database-inspired universal rules --
         AnnotatedRuleGroup {
@@ -745,6 +776,51 @@ pub(crate) fn subquery_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>
 }
 
 // ---------------------------------------------------------------
+// CTE inlining rules
+// ---------------------------------------------------------------
+
+/// CTE inlining and simplification rules.
+///
+/// Inlines trivial CTEs where the body directly references the CTE
+/// by name. For `WITH x AS (def) SELECT * FROM x`, replaces the
+/// entire CTE+body with just the definition.
+pub(crate) fn cte_inlining_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+    vec![
+        // Inline CTE when the body is just a scan of the CTE name.
+        // WITH x AS (def) SELECT * FROM x  →  def
+        rewrite!("cte-inline-direct-scan";
+            "(cte ?name ?def (scan ?name))" => "?def"
+        ),
+        // Inline CTE when the body is a project over the CTE scan.
+        // WITH x AS (def) SELECT cols FROM x  →  project(cols, def)
+        rewrite!("cte-inline-project-scan";
+            "(cte ?name ?def (project ?cols (scan ?name)))" =>
+            "(project ?cols ?def)"
+        ),
+        // Inline CTE when the body is a filter over the CTE scan.
+        // WITH x AS (def) SELECT * FROM x WHERE pred  →  filter(pred, def)
+        rewrite!("cte-inline-filter-scan";
+            "(cte ?name ?def (filter ?pred (scan ?name)))" =>
+            "(filter ?pred ?def)"
+        ),
+        // Inline CTE when the body is filter+project over the CTE scan.
+        // WITH x AS (def) SELECT cols FROM x WHERE pred
+        //   → project(cols, filter(pred, def))
+        rewrite!("cte-inline-project-filter-scan";
+            "(cte ?name ?def (project ?cols (filter ?pred (scan ?name))))" =>
+            "(project ?cols (filter ?pred ?def))"
+        ),
+        // Constant comparison folding: (eq const-int const-int) for same
+        // values reduces to true, which then allows filter-true elimination.
+        // This handles patterns like WHERE 1 = (SELECT 1) after scalar
+        // subquery decorrelation produces a constant comparison.
+        rewrite!("fold-const-int-eq";
+            "(eq (const-int ?n) (const-int ?n))" => "(const-bool true)"
+        ),
+    ]
+}
+
+// ---------------------------------------------------------------
 // DuckDB-inspired rules
 // Sourced from: src/optimizer/ in the DuckDB repository
 // ---------------------------------------------------------------
@@ -1153,5 +1229,62 @@ mod tests {
         });
         let runner = run_optimization(&expr);
         assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn cte_inline_direct_scan() {
+        // WITH x AS (SELECT * FROM source) SELECT * FROM x
+        // Should inline to just: scan("source")
+        let cte = RelExpr::CTE {
+            name: "x".to_owned(),
+            definition: Box::new(RelExpr::scan("source")),
+            body: Box::new(RelExpr::scan("x")),
+        };
+        let rec = to_rec_expr(&cte).expect("conversion should succeed");
+        let rules = cte_inlining_rules();
+        let runner = Runner::default()
+            .with_expr(&rec)
+            .with_node_limit(10_000)
+            .with_iter_limit(5)
+            .run(&rules);
+
+        // After inlining, the e-graph should contain the "source" scan
+        // in the same e-class as the root (meaning they're equivalent).
+        let root = runner.roots[0];
+        let data = &runner.egraph[root].data;
+        assert!(
+            data.tables.contains("source"),
+            "CTE should be inlined to source scan, tables: {:?}",
+            data.tables
+        );
+    }
+
+    #[test]
+    fn cte_inline_with_filter() {
+        // WITH x AS (scan(source)) SELECT * FROM x WHERE pred
+        // Should inline to: filter(pred, scan(source))
+        let cte = RelExpr::CTE {
+            name: "x".to_owned(),
+            definition: Box::new(RelExpr::scan("source")),
+            body: Box::new(RelExpr::scan("x").filter(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("id"))),
+                right: Box::new(Expr::Const(Const::Int(1))),
+            })),
+        };
+        let rec = to_rec_expr(&cte).expect("conversion should succeed");
+        let rules = cte_inlining_rules();
+        let runner = Runner::default()
+            .with_expr(&rec)
+            .with_node_limit(10_000)
+            .with_iter_limit(5)
+            .run(&rules);
+
+        let root = runner.roots[0];
+        let data = &runner.egraph[root].data;
+        assert!(
+            data.tables.contains("source"),
+            "CTE with filter should inline to filtered source scan"
+        );
     }
 }

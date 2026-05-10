@@ -29,23 +29,44 @@ impl egg::CostFunction<RelLang> for RelCostFn {
     {
         let base_cost = match enode {
             RelLang::Scan([table_id]) => {
-                // Scan cost depends on storage bandwidth
-                // Higher bandwidth = lower cost
+                // Sequential scan: cost scales with table size but uses
+                // sequential I/O which is efficient. For small tables
+                // (which fit in a few pages), this is very cheap.
+                //
+                // Cost model: pages * seq_page_cost_factor
+                // Without per-table statistics in the basic cost function,
+                // we use a moderate base cost that doesn't over-penalize
+                // sequential access.
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
-                return costs(*table_id) + (100.0 * storage_factor);
+                return costs(*table_id) + (50.0 * storage_factor);
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
-                return costs(*table_id) + costs(*alias_id) + (100.0 * storage_factor);
+                return costs(*table_id) + costs(*alias_id) + (50.0 * storage_factor);
             }
             RelLang::IndexOnlyScan([table_id, _index_id, cols_id, pred_id]) => {
-                // Index-only scan: O(log n) -- much cheaper than full table scan.
-                // Models B-tree traversal to first/last key.
+                // Index-only scan: B-tree traversal + leaf page reads.
+                // Includes startup overhead (B-tree descent) that makes it
+                // less attractive for very small tables where a sequential
+                // scan reads fewer total pages.
+                //
+                // Cost model:
+                //   startup = B-tree depth (~3-4 levels) * random_page_cost
+                //   scan = selected_fraction * leaf_pages * seq_cost
+                //
+                // Net effect: index scan base cost is ~60% of seq scan when
+                // no selectivity info is available (conservative estimate).
+                // With the covering_index rule adding IndexOnlyScan to the
+                // e-graph, the cost function picks the winner based on
+                // whether the startup overhead is worth it.
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
+                let startup_cost = 4.0 * storage_factor; // B-tree descent
+                let scan_cost = 25.0 * storage_factor; // leaf page reads
                 return costs(*table_id)
                     + costs(*cols_id)
                     + costs(*pred_id)
-                    + (5.0 * storage_factor);
+                    + startup_cost
+                    + scan_cost;
             }
             RelLang::Filter(_) | RelLang::Project(_) => {
                 // Filter/project cost depends on SIMD width

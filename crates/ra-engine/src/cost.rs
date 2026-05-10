@@ -1175,9 +1175,20 @@ pub struct IntegratedCostFn {
     calibration: CalibratedCostModel,
     table_stats: std::sync::Arc<HashMap<String, Statistics>>,
     staleness_map: std::sync::Arc<HashMap<String, Staleness>>,
+    /// Average row count across all known tables (fallback for cost scaling
+    /// when per-table Id resolution is unavailable).
+    avg_row_count: f64,
+    /// Pre-resolved mapping from canonical e-graph symbol Ids to row counts.
+    /// Populated before extraction by scanning the e-graph for Symbol nodes
+    /// whose names match tables in `table_stats`.
+    id_row_counts: std::sync::Arc<HashMap<egg::Id, f64>>,
 }
 
 impl IntegratedCostFn {
+    /// Threshold below which all tables are considered "small".
+    /// For small tables, sequential scan is preferred over index scan.
+    const SMALL_TABLE_THRESHOLD: f64 = 1000.0;
+
     /// Create a new integrated cost function.
     #[must_use]
     pub fn new(
@@ -1186,12 +1197,38 @@ impl IntegratedCostFn {
         staleness_map: HashMap<String, Staleness>,
     ) -> Self {
         let calibration = CalibratedCostModel::from_profile(&hardware);
+        let avg_row_count = if table_stats.is_empty() {
+            DEFAULT_ROW_COUNT
+        } else {
+            let total: f64 = table_stats.values().map(|s| s.row_count).sum();
+            total / table_stats.len() as f64
+        };
         Self {
             hardware,
             calibration,
             table_stats: std::sync::Arc::new(table_stats),
             staleness_map: std::sync::Arc::new(staleness_map),
+            avg_row_count,
+            id_row_counts: std::sync::Arc::new(HashMap::new()),
         }
+    }
+
+    /// Create with pre-resolved Id → row count mapping.
+    ///
+    /// The `id_row_counts` map is built by scanning the e-graph before
+    /// extraction to resolve canonical Symbol Ids to their table row counts.
+    /// This allows the cost function to use per-table statistics during
+    /// extraction without needing e-graph access.
+    #[must_use]
+    pub fn with_id_row_counts(
+        hardware: HardwareProfile,
+        table_stats: HashMap<String, Statistics>,
+        staleness_map: HashMap<String, Staleness>,
+        id_row_counts: HashMap<egg::Id, f64>,
+    ) -> Self {
+        let mut base = Self::new(hardware, table_stats, staleness_map);
+        base.id_row_counts = std::sync::Arc::new(id_row_counts);
+        base
     }
 
     /// Create from an `IntegratedCostModel`, extracting necessary data.
@@ -1205,11 +1242,19 @@ impl IntegratedCostFn {
             staleness_map.insert(name.clone(), model.staleness(name));
         }
 
+        let avg_row_count = if table_stats.is_empty() {
+            DEFAULT_ROW_COUNT
+        } else {
+            let total: f64 = table_stats.values().map(|s| s.row_count).sum();
+            total / table_stats.len() as f64
+        };
         Self {
             hardware: model.hardware().clone(),
             calibration: model.calibration().clone(),
             table_stats: std::sync::Arc::new(table_stats),
             staleness_map: std::sync::Arc::new(staleness_map),
+            avg_row_count,
+            id_row_counts: std::sync::Arc::new(HashMap::new()),
         }
     }
 
@@ -1233,6 +1278,18 @@ impl IntegratedCostFn {
 
         base * factor
     }
+
+    /// Look up row count for a table by its e-graph symbol Id.
+    ///
+    /// Uses the pre-resolved `id_row_counts` mapping built before
+    /// extraction. Falls back to `avg_row_count` if the Id wasn't
+    /// resolved (e.g., for dynamically created e-classes).
+    fn row_count_for_id(&self, id: egg::Id) -> f64 {
+        self.id_row_counts
+            .get(&id)
+            .copied()
+            .unwrap_or(self.avg_row_count)
+    }
 }
 
 impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
@@ -1247,11 +1304,17 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
         let base_cost = match enode {
             RelLang::Scan([table_id]) => {
                 let child_cost = costs(*table_id);
-                let seq_cost = 100.0 * self.calibration.seq_page_cost();
+                // Use per-table row count if available (resolved from e-graph
+                // before extraction), otherwise fall back to average.
+                let row_count = self.row_count_for_id(*table_id);
+                let pages = (row_count * 100.0 / 8192.0).max(1.0);
+                let seq_cost = pages * self.calibration.seq_page_cost();
                 return child_cost + seq_cost;
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
-                let seq_cost = 100.0 * self.calibration.seq_page_cost();
+                let row_count = self.row_count_for_id(*table_id);
+                let pages = (row_count * 100.0 / 8192.0).max(1.0);
+                let seq_cost = pages * self.calibration.seq_page_cost();
                 return costs(*table_id) + costs(*alias_id) + seq_cost;
             }
             RelLang::Filter(_) | RelLang::Project(_) => {
@@ -1299,24 +1362,36 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 return 1.0;
             }
             RelLang::IndexOnlyScan([table_id, _, cols_id, pred_id]) => {
-                // Index-only scan: read from covering index, no heap access.
-                // This is 5-10x faster than regular scan + filter + project.
+                // Index-only scan: B-tree descent + leaf page reads.
                 //
-                // Cost model:
-                // - B-tree descent: log(pages) * rand_page_cost
-                // - Sequential index scan: pages * seq_page_cost * 0.1 (cache factor)
-                // - Filter evaluation: rows * tuple_cost * 0.001
+                // Cost model (statistics-aware, per-table row count):
+                //   startup = log2(pages) * rand_page_cost (B-tree descent)
+                //   leaf_scan = index_pages * seq_page_cost * 0.3 (cache locality)
                 //
-                // Using simplified cost: ~20% of equivalent full scan
+                // For small tables (< 1000 rows), the B-tree startup cost
+                // dominates and makes index scan more expensive than a simple
+                // sequential scan of a few pages.
                 let child_cost = costs(*table_id);
                 let col_cost = costs(*cols_id);
                 let pred_cost = costs(*pred_id);
 
-                // Index-only scan is typically 20-30% the cost of a full scan
-                // due to eliminated heap access and better cache locality
-                let index_scan_cost = 5.0 * self.calibration.seq_page_cost();
+                let row_count = self.row_count_for_id(*table_id);
+                let pages = (row_count * 100.0 / 8192.0).max(1.0);
 
-                return child_cost + col_cost + pred_cost + index_scan_cost;
+                // B-tree descent: ~3-4 levels for typical tables
+                let btree_depth = pages.log2().max(1.0);
+                let startup_cost = btree_depth * self.calibration.rand_page_cost();
+
+                // Leaf page scan (assume moderate selectivity ~10%)
+                let index_pages = (pages * 0.1).max(1.0);
+                let leaf_cost = index_pages * self.calibration.seq_page_cost() * 0.3;
+
+                // For small tables, the startup overhead exceeds seq scan
+                let small_table_penalty =
+                    if row_count < Self::SMALL_TABLE_THRESHOLD { 2.0 } else { 1.0 };
+
+                let total = (startup_cost + leaf_cost) * small_table_penalty;
+                return child_cost + col_cost + pred_cost + total;
             }
             _ => 0.1,
         };

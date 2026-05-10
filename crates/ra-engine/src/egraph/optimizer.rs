@@ -326,8 +326,20 @@ impl Optimizer {
         // This avoids repeated clones during cost extraction
         let stats_cache = crate::stats_cache::StatsCache::from_map(self.table_stats.clone());
 
+        // Pre-optimization: decorrelate subqueries before e-graph conversion.
+        // This transforms SubQuery expressions (IN, EXISTS, scalar) into
+        // equivalent join forms that the e-graph can represent.
+        let decorrelated;
+        let effective_expr = if crate::subquery_decorrelation::tree_contains_subquery(expr) {
+            debug!("Decorrelating subqueries before e-graph conversion");
+            decorrelated = crate::subquery_decorrelation::decorrelate(expr);
+            &decorrelated
+        } else {
+            expr
+        };
+
         let to_rec_start = Instant::now();
-        let rec_expr = to_rec_expr(expr)?;
+        let rec_expr = to_rec_expr(effective_expr)?;
         let to_rec_elapsed = to_rec_start.elapsed();
         debug!("to_rec_expr: {:?}", to_rec_elapsed);
 

@@ -1,0 +1,82 @@
+# Basic SQL parse + optimize tests
+
+# Simple scans
+query T
+SELECT * FROM orders
+----
+ok
+
+query T
+SELECT o_orderkey, o_totalprice FROM orders
+----
+ok
+
+query T
+SELECT * FROM orders WHERE o_orderstatus = 'O'
+----
+ok
+
+query T
+SELECT * FROM orders WHERE o_totalprice > 10000
+----
+ok
+
+# Projections
+query T
+SELECT c_custkey, c_name FROM customer
+----
+ok
+
+query T
+SELECT DISTINCT c_mktsegment FROM customer
+----
+ok
+
+# Filters with multiple predicates
+query T
+SELECT * FROM lineitem WHERE l_quantity > 20 AND l_discount < 0.05
+----
+ok
+
+query T
+SELECT * FROM orders WHERE o_orderstatus = 'F' OR o_totalprice > 50000
+----
+ok
+
+# ORDER BY
+query T
+SELECT * FROM customer ORDER BY c_name
+----
+ok
+
+query T
+SELECT * FROM orders ORDER BY o_orderdate DESC
+----
+ok
+
+# LIMIT
+query T
+SELECT * FROM orders LIMIT 10
+----
+ok
+
+query T
+SELECT * FROM lineitem ORDER BY l_shipdate LIMIT 100 OFFSET 50
+----
+ok
+
+# Aggregates
+query T
+SELECT COUNT(*) FROM orders
+----
+ok
+
+query T
+SELECT o_orderstatus, COUNT(*) FROM orders GROUP BY o_orderstatus
+----
+ok
+
+query T
+SELECT c_mktsegment, AVG(c_acctbal) FROM customer GROUP BY c_mktsegment HAVING AVG(c_acctbal) > 1000
+----
+ok
