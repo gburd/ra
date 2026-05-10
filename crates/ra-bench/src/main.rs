@@ -94,6 +94,11 @@ struct TrainArgs {
     /// Fraction of data to hold out for evaluation (0.0–1.0).
     #[arg(long, default_value_t = 0.1)]
     eval_split: f64,
+
+    /// Export a BitNet 1.58-bit quantized model alongside the f32 model.
+    /// Requires the `bitnet` feature.
+    #[arg(long)]
+    export_bitnet: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -485,6 +490,50 @@ fn run_train(args: TrainArgs) -> Result<()> {
     println!("Total samples trained: {}", stats.total_trained);
     println!("Checkpoints written:   {}", stats.checkpoints_written);
     println!("Final avg loss:        {:.6}", stats.current_avg_loss);
+
+    // Post-training BitNet quantization
+    export_bitnet_model(&learner, &args)?;
+
+    Ok(())
+}
+
+/// Export a BitNet 1.58-bit quantized model from the trained f32 weights.
+///
+/// When the `bitnet` feature is enabled and `--export-bitnet` is passed,
+/// quantizes the trained model using absmean ternary quantization and
+/// saves alongside the f32 model with a `.bitnet.json` suffix.
+#[allow(unused_variables)]
+fn export_bitnet_model(
+    learner: &ra_engine::cost_model::OnlineLearner,
+    args: &TrainArgs,
+) -> Result<()> {
+    if !args.export_bitnet {
+        return Ok(());
+    }
+
+    #[cfg(feature = "bitnet")]
+    {
+        let fast = learner.fast_model_snapshot();
+        let bitnet = fast.to_bitnet();
+
+        // Derive output path: model.json → model.bitnet.json
+        let bitnet_path = args.model.with_extension("bitnet.json");
+        bitnet.save_to_file(
+            bitnet_path.to_str().unwrap_or("cost_model.bitnet.json"),
+        )?;
+
+        println!("\nBitNet model exported to: {}", bitnet_path.display());
+        println!("  Packed size:     {} bytes", bitnet.model_size_bytes());
+        println!("  Samples trained: {}", bitnet.samples_trained);
+    }
+
+    #[cfg(not(feature = "bitnet"))]
+    {
+        eprintln!(
+            "warning: --export-bitnet requires the `bitnet` feature. \
+             Build with: cargo build -p ra-bench --features bitnet"
+        );
+    }
 
     Ok(())
 }
