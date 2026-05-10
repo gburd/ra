@@ -49,6 +49,8 @@ pub struct Optimizer {
     plan_cache: Option<Mutex<PlanCache>>,
     rule_advisor: Option<Mutex<crate::rule_advisor::RuleAdvisor>>,
     fast_cost_model: Option<Arc<FastCostModel>>,
+    #[cfg(feature = "bitnet")]
+    bitnet_model: Option<Arc<ra_bitnet::BitNetCostModel>>,
     fingerprint_reader: Option<FingerprintReader>,
 }
 
@@ -64,6 +66,8 @@ impl Optimizer {
             plan_cache: None,
             rule_advisor: None,
             fast_cost_model: None,
+            #[cfg(feature = "bitnet")]
+            bitnet_model: None,
             fingerprint_reader: None,
         }
     }
@@ -91,6 +95,8 @@ impl Optimizer {
             plan_cache,
             rule_advisor,
             fast_cost_model: None,
+            #[cfg(feature = "bitnet")]
+            bitnet_model: None,
             fingerprint_reader: None,
         }
     }
@@ -201,6 +207,20 @@ impl Optimizer {
         self
     }
 
+    /// Builder-style setter for the BitNet cost model.
+    ///
+    /// When set, `extract_with_hybrid_fallback` prefers the BitNet model
+    /// over the f32 `FastCostModel`.
+    #[cfg(feature = "bitnet")]
+    #[must_use]
+    pub fn with_bitnet_model(mut self, model: Arc<ra_bitnet::BitNetCostModel>) -> Self {
+        self.bitnet_model = Some(model);
+        if self.fingerprint_reader.is_none() {
+            self.fingerprint_reader = Some(FingerprintReader::new());
+        }
+        self
+    }
+
     /// Builder-style setter for the fingerprint reader.
     #[must_use]
     pub fn with_fingerprint_reader(mut self, reader: FingerprintReader) -> Self {
@@ -240,9 +260,44 @@ impl Optimizer {
         Ok(())
     }
 
+    /// Load a BitNet 1.58-bit quantized model directly.
+    ///
+    /// Prefers `RA_BITNET_MODEL_PATH` env var, then `models/cost_model.bitnet.json`.
+    /// When a BitNet model is loaded, it takes priority over the f32 model.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be parsed.
+    #[cfg(feature = "bitnet")]
+    pub fn load_bitnet_model(&mut self) -> Result<(), EGraphError> {
+        let path = std::env::var("RA_BITNET_MODEL_PATH")
+            .unwrap_or_else(|_| "models/cost_model.bitnet.json".to_string());
+        let path = std::path::Path::new(&path);
+        if !path.exists() {
+            tracing::debug!("No BitNet model at {}, falling back", path.display());
+            return Ok(());
+        }
+        let model = ra_bitnet::BitNetCostModel::load_from_file(
+            path.to_str().unwrap_or("models/cost_model.bitnet.json"),
+        )
+        .map_err(|e| EGraphError::ExtractionError(format!("bitnet model load failed: {e}")))?;
+        tracing::info!(
+            samples_trained = model.samples_trained,
+            "Loaded BitNet cost model from {}",
+            path.display()
+        );
+        self.bitnet_model = Some(Arc::new(model));
+        if self.fingerprint_reader.is_none() {
+            self.fingerprint_reader = Some(FingerprintReader::new());
+        }
+        Ok(())
+    }
+
     /// Extract the best plan using hybrid neural/traditional cost when available.
     ///
     /// Falls back to `extract_best` when no neural model is loaded.
+    /// When `bitnet` feature is active and a BitNet model is loaded, it
+    /// takes priority over the f32 `FastCostModel`.
     fn extract_with_hybrid_fallback<S: std::hash::BuildHasher>(
         &self,
         egraph: &egg::EGraph<RelLang, RelAnalysis>,
@@ -250,6 +305,20 @@ impl Optimizer {
         table_stats: &HashMap<String, ra_core::statistics::Statistics, S>,
         hardware: &ra_hardware::HardwareProfile,
     ) -> Result<RelExpr, EGraphError> {
+        // Prefer BitNet model when available (feature-gated)
+        #[cfg(feature = "bitnet")]
+        if let (Some(model), Some(reader)) = (&self.bitnet_model, &self.fingerprint_reader) {
+            let fingerprint = reader.read();
+            let staleness_map: HashMap<String, ra_stats::accuracy::Staleness> = table_stats
+                .keys()
+                .map(|k| (k.clone(), ra_stats::accuracy::Staleness::Fresh))
+                .collect();
+            return crate::extract::extract_best_bitnet(
+                egraph, root, table_stats, &staleness_map, hardware, model, &fingerprint,
+            );
+        }
+
+        // Fall back to f32 FastCostModel
         if let (Some(model), Some(reader)) = (&self.fast_cost_model, &self.fingerprint_reader) {
             let fingerprint = reader.read();
             let staleness_map: HashMap<String, ra_stats::accuracy::Staleness> = table_stats

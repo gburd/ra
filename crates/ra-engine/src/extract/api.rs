@@ -212,3 +212,35 @@ pub fn extract_best_hybrid<S: BuildHasher, S2: BuildHasher>(
     let (_, best_expr) = extractor.find_best(root);
     rec_expr_to_rel_expr(&best_expr)
 }
+
+/// Extract the best plan using a `BitNetCostModel` for the neural component.
+///
+/// Same interface as [`extract_best_hybrid`] but uses the BitNet ternary model
+/// directly, bypassing the f32 `FastCostModel` entirely.
+#[cfg(feature = "bitnet")]
+pub fn extract_best_bitnet<S: BuildHasher, S2: BuildHasher>(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    root: Id,
+    table_stats: &HashMap<String, Statistics, S>,
+    staleness_map: &HashMap<String, Staleness, S2>,
+    hardware: &ra_hardware::HardwareProfile,
+    bitnet_model: &ra_bitnet::BitNetCostModel,
+    fingerprint: &SystemFingerprint,
+) -> Result<RelExpr, EGraphError> {
+    let cost_fn = HybridCostFn::with_bitnet(
+        hardware.clone(),
+        table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        bitnet_model,
+        fingerprint,
+    );
+
+    tracing::debug!(
+        blend_alpha = cost_fn.blend_alpha(),
+        "bitnet hybrid extraction"
+    );
+
+    let extractor = egg::Extractor::new(egraph, cost_fn);
+    let (_, best_expr) = extractor.find_best(root);
+    rec_expr_to_rel_expr(&best_expr)
+}
