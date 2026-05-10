@@ -117,6 +117,21 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     // Type cast optimization rules
     rules.extend(cast_optimization_rules());
 
+    // Generated rules from .rra files (validated against RelLang, deduplicated by name).
+    // Hand-coded rules take priority; generated rules only added if their name is unique.
+    // We catch panics because some .rra rules may reference operators with wrong arity
+    // (valid operator name but incorrect number of children for the define_language! variant).
+    let hand_coded_names: std::collections::HashSet<&str> =
+        rules.iter().map(|r| r.name.as_str()).collect();
+    let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(all_generated_rules));
+    if let Ok(gen_rules) = generated {
+        for rule in gen_rules {
+            if !hand_coded_names.contains(rule.name.as_str()) {
+                rules.push(rule);
+            }
+        }
+    }
+
     rules
 }
 

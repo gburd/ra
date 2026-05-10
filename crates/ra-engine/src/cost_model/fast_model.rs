@@ -58,6 +58,14 @@ pub struct FastCostModel {
     pub samples_trained: usize,
 }
 
+impl std::fmt::Debug for FastCostModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FastCostModel")
+            .field("samples_trained", &self.samples_trained)
+            .finish_non_exhaustive()
+    }
+}
+
 impl FastCostModel {
     // -----------------------------------------------------------------------
     // Construction

@@ -215,6 +215,14 @@ pub struct AtomicFingerprint {
     ptr: AtomicPtr<SystemFingerprint>,
 }
 
+impl std::fmt::Debug for AtomicFingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AtomicFingerprint")
+            .field("current", &self.load())
+            .finish()
+    }
+}
+
 impl AtomicFingerprint {
     /// Create a new atomic fingerprint with default values.
     #[must_use]
@@ -287,7 +295,7 @@ unsafe impl Sync for AtomicFingerprint {}
 /// Ergonomic reader handle wrapping `Arc<AtomicFingerprint>`.
 ///
 /// Cheap to clone (Arc refcount increment) and pass into optimizer components.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FingerprintReader {
     inner: Arc<AtomicFingerprint>,
 }

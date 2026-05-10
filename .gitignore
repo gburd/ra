@@ -46,8 +46,10 @@ tla/states/
 # Benchmarks
 /benchmarks/target/
 
-# Training data (generated artifacts)
+# Training data (generated artifacts, not committed)
 training_data*.json
+models/training_data.json
+models/*.training.json
 
 # Temporary files
 *.tmp

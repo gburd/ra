@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use egg::{EGraph, Id, Rewrite, Runner};
@@ -8,13 +9,15 @@ use ra_stats::delta::DeltaSet;
 use tracing::warn;
 
 use crate::analysis::RelAnalysis;
-use crate::extract::extract_best;
+use crate::cost_model::fast_model::FastCostModel;
+use crate::extract::{extract_best, extract_best_hybrid};
 use crate::genetic_fingerprint::QueryFingerprint;
 use crate::plan_cache::{PlanCache, PlanCacheConfig, PlanCacheStats};
 use crate::resource_budget::{
     ConvergenceBehavior, OverflowStrategy, ResourceBudget, ResourceTracker,
 };
 use crate::rewrite::all_rules;
+use crate::state::FingerprintReader;
 
 use super::config::OptimizerConfig;
 use super::errors::EGraphError;
@@ -45,6 +48,8 @@ pub struct Optimizer {
     resource_budget: Option<ResourceBudget>,
     plan_cache: Option<Mutex<PlanCache>>,
     rule_advisor: Option<Mutex<crate::rule_advisor::RuleAdvisor>>,
+    fast_cost_model: Option<Arc<FastCostModel>>,
+    fingerprint_reader: Option<FingerprintReader>,
 }
 
 impl Optimizer {
@@ -58,6 +63,8 @@ impl Optimizer {
             resource_budget: None,
             plan_cache: None,
             rule_advisor: None,
+            fast_cost_model: None,
+            fingerprint_reader: None,
         }
     }
 
@@ -83,6 +90,8 @@ impl Optimizer {
             resource_budget: None,
             plan_cache,
             rule_advisor,
+            fast_cost_model: None,
+            fingerprint_reader: None,
         }
     }
 
@@ -183,6 +192,74 @@ impl Optimizer {
         stats: ra_core::statistics::Statistics,
     ) {
         self.table_stats.insert(table.into(), stats);
+    }
+
+    /// Builder-style setter for the fast neural cost model.
+    #[must_use]
+    pub fn with_fast_cost_model(mut self, model: Arc<FastCostModel>) -> Self {
+        self.fast_cost_model = Some(model);
+        self
+    }
+
+    /// Builder-style setter for the fingerprint reader.
+    #[must_use]
+    pub fn with_fingerprint_reader(mut self, reader: FingerprintReader) -> Self {
+        self.fingerprint_reader = Some(reader);
+        self
+    }
+
+    /// Load a neural cost model from a JSON file.
+    ///
+    /// The path can be overridden via the `RA_MODEL_PATH` environment variable.
+    /// If the file does not exist, no model is loaded and the optimizer falls
+    /// back to traditional costing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be parsed.
+    pub fn load_model(&mut self) -> Result<(), EGraphError> {
+        let path = std::env::var("RA_MODEL_PATH")
+            .unwrap_or_else(|_| "models/cost_model.json".to_string());
+        let path = Path::new(&path);
+        if !path.exists() {
+            tracing::debug!("No neural model at {}, using traditional costing", path.display());
+            return Ok(());
+        }
+        let production = crate::cost_model::production_model::ProductionCostModel::load_from_file(path)
+            .map_err(|e| EGraphError::ExtractionError(format!("model load failed: {e}")))?;
+        let fast = FastCostModel::from_production(&production);
+        tracing::info!(
+            samples_trained = fast.samples_trained,
+            "Loaded neural cost model from {}",
+            path.display()
+        );
+        self.fast_cost_model = Some(Arc::new(fast));
+        if self.fingerprint_reader.is_none() {
+            self.fingerprint_reader = Some(FingerprintReader::new());
+        }
+        Ok(())
+    }
+
+    /// Extract the best plan using hybrid neural/traditional cost when available.
+    ///
+    /// Falls back to `extract_best` when no neural model is loaded.
+    fn extract_with_hybrid_fallback<S: std::hash::BuildHasher>(
+        &self,
+        egraph: &egg::EGraph<RelLang, RelAnalysis>,
+        root: Id,
+        table_stats: &HashMap<String, ra_core::statistics::Statistics, S>,
+        hardware: &ra_hardware::HardwareProfile,
+    ) -> Result<RelExpr, EGraphError> {
+        if let (Some(model), Some(reader)) = (&self.fast_cost_model, &self.fingerprint_reader) {
+            let fingerprint = reader.read();
+            let staleness_map: HashMap<String, ra_stats::accuracy::Staleness> = table_stats
+                .keys()
+                .map(|k| (k.clone(), ra_stats::accuracy::Staleness::Fresh))
+                .collect();
+            extract_best_hybrid(egraph, root, table_stats, &staleness_map, hardware, model, &fingerprint)
+        } else {
+            extract_best(egraph, root, table_stats, hardware)
+        }
     }
 
     /// Optimize a relational expression using equality saturation.
@@ -604,7 +681,7 @@ impl Optimizer {
 
         let extract_start = Instant::now();
         let hardware = self.hardware_profile();
-        let result = extract_best(&egraph, root, stats_cache.as_map(), &hardware)?;
+        let result = self.extract_with_hybrid_fallback(&egraph, root, stats_cache.as_map(), &hardware)?;
         let extract_elapsed = extract_start.elapsed();
         debug!("extract_best: {:?}", extract_elapsed);
 
@@ -734,7 +811,7 @@ impl Optimizer {
 
         let root = runner.roots[0];
         let hardware = self.hardware_profile();
-        let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
+        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &self.table_stats, &hardware)?;
         Ok(result)
     }
 
@@ -759,7 +836,7 @@ impl Optimizer {
 
         let root = runner.roots[0];
         let hardware = self.hardware_profile();
-        let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
+        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &self.table_stats, &hardware)?;
         Ok((result, runner.egraph))
     }
 
@@ -820,7 +897,7 @@ impl Optimizer {
         );
 
         // Extract initial plan (the original, unoptimized)
-        if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
+        if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware) {
             best_plan = Some(plan);
             best_cost = estimate_plan_cost(&egraph, root, &hardware);
         }
@@ -865,7 +942,7 @@ impl Optimizer {
             });
 
             // Try to extract the best plan from the current e-graph
-            if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
+            if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware) {
                 let cost = estimate_plan_cost(&egraph, root, &hardware);
                 if cost < best_cost {
                     best_cost = cost;
@@ -996,7 +1073,7 @@ impl Optimizer {
         let initial_cost = estimate_plan_cost(&egraph, root, &hardware);
 
         // Extract initial plan (the original, unoptimized)
-        if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
+        if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware) {
             best_plan = Some(plan);
             best_cost = initial_cost;
         }
@@ -1034,7 +1111,7 @@ impl Optimizer {
 
                 // Extract plan before if verbose mode
                 let plan_before = if verbose {
-                    extract_best(&egraph, root, &self.table_stats, &hardware).ok()
+                    self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware).ok()
                 } else {
                     None
                 };
@@ -1063,7 +1140,7 @@ impl Optimizer {
                     };
 
                     // Try to extract better plan
-                    if let Ok(plan) = extract_best(&egraph, root, &self.table_stats, &hardware) {
+                    if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware) {
                         if cost_after < best_cost {
                             best_cost = cost_after;
                             best_plan = Some(plan.clone());
@@ -1205,7 +1282,7 @@ impl Optimizer {
             .run(&rules);
 
         let root = runner.roots[0];
-        let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
+        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &self.table_stats, &hardware)?;
 
         let elapsed = start.elapsed();
         let nodes_in_egraph = runner.egraph.total_number_of_nodes();

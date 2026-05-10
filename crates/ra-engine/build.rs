@@ -328,6 +328,200 @@ enum ExtractedRule {
     Commented(String),
 }
 
+/// All valid operators in RelLang with their expected arity.
+/// Arity of 0 means leaf (no children), None means variadic (Box<[Id]>).
+/// From egraph/lang.rs define_language! macro.
+const RELLANG_OPERATORS: &[(&str, Option<usize>)] = &[
+    // Relational operators
+    ("scan", Some(1)), ("scan-alias", Some(2)), ("filter", Some(2)),
+    ("project", Some(2)), ("join", Some(4)), ("aggregate", Some(3)),
+    ("sort", Some(2)), ("incremental-sort", Some(3)), ("limit", Some(3)),
+    ("union", Some(3)), ("intersect", Some(3)), ("except", Some(3)),
+    ("recursive-cte", Some(4)), ("cte", Some(3)), ("window", Some(2)),
+    ("distinct-rel", Some(1)), ("values", None), ("values-row", None),
+    // Metadata shortcut
+    ("metadata-lookup", Some(2)), ("row-count", Some(0)),
+    // Index operators
+    ("index-scan", Some(2)), ("index-only-scan", Some(4)), ("mv-scan", Some(4)),
+    // Bitmap operators
+    ("bitmap-index-scan", Some(3)), ("bitmap-and", None), ("bitmap-or", None),
+    ("bitmap-heap-scan", Some(3)),
+    // Window function expression
+    ("window-expr", Some(6)), ("window-fn", Some(1)), ("window-frame", Some(3)),
+    ("frame-rows", Some(0)), ("frame-range", Some(0)), ("frame-groups", Some(0)),
+    ("frame-unbounded-preceding", Some(0)), ("frame-preceding", Some(1)),
+    ("frame-current-row", Some(0)), ("frame-following", Some(1)),
+    ("frame-unbounded-following", Some(0)),
+    // Join types
+    ("inner", Some(0)), ("left-outer", Some(0)), ("right-outer", Some(0)),
+    ("full-outer", Some(0)), ("cross", Some(0)), ("semi", Some(0)), ("anti", Some(0)),
+    // Boolean flags
+    ("true", Some(0)), ("false", Some(0)),
+    // Scalar expressions
+    ("col", Some(1)), ("qcol", Some(2)), ("const-null", Some(0)),
+    ("const-bool", Some(1)), ("const-int", Some(1)), ("const-float", Some(1)),
+    ("const-str", Some(1)),
+    // Binary operators
+    ("add", Some(2)), ("sub", Some(2)), ("mul", Some(2)), ("div", Some(2)),
+    ("mod", Some(2)), ("eq", Some(2)), ("ne", Some(2)), ("lt", Some(2)),
+    ("le", Some(2)), ("gt", Some(2)), ("ge", Some(2)), ("and", Some(2)),
+    ("or", Some(2)), ("concat", Some(2)), ("json-access", Some(2)),
+    // Unary operators
+    ("not", Some(1)), ("is-null", Some(1)), ("is-not-null", Some(1)), ("neg", Some(1)),
+    // Function call
+    ("func", None),
+    // Aggregate functions
+    ("count", Some(1)), ("sum", Some(1)), ("avg", Some(1)),
+    ("min", Some(1)), ("max", Some(1)),
+    // Lists
+    ("list", None), ("nil", Some(0)),
+    // Projection column
+    ("proj-col", Some(1)), ("proj-alias", Some(2)),
+    // Sort keys
+    ("sort-key", Some(3)), ("asc", Some(0)), ("desc", Some(0)),
+    ("nulls-first", Some(0)), ("nulls-last", Some(0)),
+    // Aggregate expression
+    ("agg-expr", Some(3)), ("distinct", Some(0)), ("all", Some(0)),
+    // Vector search operators
+    ("vector-distance", Some(3)), ("vector-knn", Some(4)), ("vector-range-scan", Some(5)),
+    // Full-text search operators
+    ("fts-match", Some(4)), ("fts-rank", Some(3)), ("fts-index-scan", Some(3)),
+    ("fts-ranked-scan", Some(5)), ("fts-skip-list-and", Some(3)),
+    // Hybrid search operators
+    ("hybrid-score", Some(5)), ("hybrid-scan", Some(6)),
+    // Type casting
+    ("cast", Some(2)),
+];
+
+/// Normalize operator aliases to canonical RelLang forms.
+///
+/// - `union_all` / `union-all` → `union true` (union with ALL flag)
+fn normalize_pattern(pattern: &str) -> String {
+    let mut result = pattern.to_string();
+    // Normalize union_all and union-all to (union true ...)
+    result = result.replace("(union_all ", "(union true ");
+    result = result.replace("(union-all ", "(union true ");
+    result
+}
+
+/// Look up an operator in the whitelist. Returns None if not found.
+fn lookup_operator(name: &str) -> Option<Option<usize>> {
+    RELLANG_OPERATORS
+        .iter()
+        .find(|(op, _)| *op == name)
+        .map(|(_, arity)| *arity)
+}
+
+/// Check if a rewrite pattern string contains operators not in RelLang
+/// or operators used with incorrect arity.
+///
+/// Parses `(op_name child1 child2 ...)` tokens within string literals
+/// and validates against the RELLANG_OPERATORS whitelist.
+fn contains_unknown_operators(code: &str) -> bool {
+    // Extract operator usages from S-expression patterns in string literals.
+    // We parse each `(op_name ...)` to check both name and arity.
+    let chars: Vec<char> = code.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '"' {
+            i += 1;
+            // Parse inside this string literal
+            let sexp_start = i;
+            while i < chars.len() && chars[i] != '"' {
+                i += 1;
+            }
+            let sexp: String = chars[sexp_start..i].iter().collect();
+            if check_sexp_invalid(&sexp) {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Check a single S-expression string for invalid operators or arity mismatches.
+fn check_sexp_invalid(sexp: &str) -> bool {
+    let chars: Vec<char> = sexp.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '(' {
+            i += 1;
+            // Skip whitespace
+            while i < chars.len() && chars[i] == ' ' {
+                i += 1;
+            }
+            // Extract operator name
+            let start = i;
+            while i < chars.len() && chars[i] != ' ' && chars[i] != ')' {
+                i += 1;
+            }
+            if start < i {
+                let op_name: String = chars[start..i].iter().collect();
+                // Skip pattern variables and numeric literals
+                if op_name.starts_with('?') || op_name.parse::<f64>().is_ok() || op_name.is_empty() {
+                    continue;
+                }
+                match lookup_operator(&op_name) {
+                    None => return true, // Unknown operator
+                    Some(Some(expected_arity)) => {
+                        // Count children (top-level items before matching close paren)
+                        let child_count = count_children_at(chars.as_slice(), i);
+                        if child_count != expected_arity {
+                            return true; // Arity mismatch
+                        }
+                    }
+                    Some(None) => {} // Variadic, any arity is fine
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+/// Count the number of top-level children starting from position `pos`
+/// until the matching closing paren at depth 0.
+fn count_children_at(chars: &[char], start: usize) -> usize {
+    let mut count = 0;
+    let mut i = start;
+    let mut depth = 0;
+    let mut in_token = false;
+
+    while i < chars.len() {
+        match chars[i] {
+            ')' if depth == 0 => break,
+            '(' => {
+                if depth == 0 && !in_token {
+                    count += 1;
+                }
+                depth += 1;
+                in_token = false;
+            }
+            ')' => {
+                depth -= 1;
+                in_token = false;
+            }
+            ' ' | '\t' | '\n' | '\r' => {
+                in_token = false;
+            }
+            _ => {
+                if depth == 0 && !in_token {
+                    count += 1;
+                    in_token = true;
+                } else if depth == 0 {
+                    // still in token
+                } else {
+                    in_token = false;
+                }
+            }
+        }
+        i += 1;
+    }
+    count
+}
+
 /// Normalize a `rw!()` call to `rewrite!()` and clean up the code block.
 fn normalize_rewrite_code(block: &str) -> Vec<ExtractedRule> {
     let mut rewrites = Vec::new();
@@ -378,11 +572,25 @@ fn normalize_rewrite_code(block: &str) -> Vec<ExtractedRule> {
                         .collect::<Vec<_>>()
                         .join("\n        // ")
                 )));
-            } else if rewrite_str.contains("<=>") {
-                // Bidirectional rewrite — produces Vec<Rewrite>
-                rewrites.push(ExtractedRule::Bidirectional(rewrite_str));
             } else {
-                rewrites.push(ExtractedRule::Single(rewrite_str));
+                // Apply operator normalization (union-all → union true, etc.)
+                let normalized = normalize_pattern(&rewrite_str);
+
+                // Validate that all operators exist in RelLang
+                if contains_unknown_operators(&normalized) {
+                    rewrites.push(ExtractedRule::Commented(format!(
+                        "// TODO: contains operators not in RelLang\n        // {}",
+                        normalized
+                            .lines()
+                            .collect::<Vec<_>>()
+                            .join("\n        // ")
+                    )));
+                } else if normalized.contains("<=>") {
+                    // Bidirectional rewrite — produces Vec<Rewrite>
+                    rewrites.push(ExtractedRule::Bidirectional(normalized));
+                } else {
+                    rewrites.push(ExtractedRule::Single(normalized));
+                }
             }
             search_from = end_pos;
         } else {
