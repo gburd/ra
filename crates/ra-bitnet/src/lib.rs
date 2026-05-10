@@ -34,8 +34,11 @@
 //! auto-vectorize on ARM NEON and x86 AVX2.
 
 mod quantize;
+pub mod train;
 
 use serde::{Deserialize, Serialize};
+
+pub use train::{BitNetTrainer, TrainerConfig};
 
 /// Number of input features (same as `QueryFeatures::FEATURE_DIM`).
 pub const F: usize = 12;
