@@ -1,0 +1,226 @@
+# select5.slt - Window functions and CTEs
+# Tests: ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD,
+# FIRST_VALUE, LAST_VALUE, SUM/AVG/COUNT OVER, frame specs,
+# simple CTEs, multiple CTEs, nested CTEs, recursive CTE patterns
+
+# ROW_NUMBER window function
+query T
+SELECT o_orderkey, o_custkey, o_totalprice, ROW_NUMBER() OVER (ORDER BY o_totalprice DESC) AS rn FROM orders
+----
+ok
+
+# ROW_NUMBER with PARTITION BY
+query T
+SELECT o_orderkey, o_custkey, o_totalprice, ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rn FROM orders
+----
+ok
+
+# RANK window function
+query T
+SELECT o_orderkey, o_totalprice, RANK() OVER (ORDER BY o_totalprice DESC) AS rnk FROM orders
+----
+ok
+
+# DENSE_RANK window function
+query T
+SELECT o_orderkey, o_totalprice, DENSE_RANK() OVER (ORDER BY o_totalprice DESC) AS drnk FROM orders
+----
+ok
+
+# NTILE window function
+query T
+SELECT o_orderkey, o_totalprice, NTILE(4) OVER (ORDER BY o_totalprice) AS quartile FROM orders
+----
+ok
+
+# Multiple window functions in same query
+query T
+SELECT o_orderkey, o_custkey, o_totalprice, ROW_NUMBER() OVER (ORDER BY o_totalprice DESC) AS rn, RANK() OVER (ORDER BY o_totalprice DESC) AS rnk, DENSE_RANK() OVER (ORDER BY o_totalprice DESC) AS drnk FROM orders
+----
+ok
+
+# Window function with PARTITION BY and multiple ORDER BY
+query T
+SELECT l_orderkey, l_partkey, l_quantity, ROW_NUMBER() OVER (PARTITION BY l_orderkey ORDER BY l_quantity DESC, l_partkey ASC) AS item_rank FROM lineitem
+----
+ok
+
+# LAG window function
+query T
+SELECT o_orderkey, o_orderdate, o_totalprice, LAG(o_totalprice) OVER (ORDER BY o_orderdate) AS prev_price FROM orders
+----
+ok
+
+# LAG with offset and default
+query T
+SELECT o_orderkey, o_orderdate, o_totalprice, LAG(o_totalprice, 2, 0) OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS prev2_price FROM orders
+----
+ok
+
+# LEAD window function
+query T
+SELECT o_orderkey, o_orderdate, o_totalprice, LEAD(o_totalprice) OVER (ORDER BY o_orderdate) AS next_price FROM orders
+----
+ok
+
+# LEAD with offset
+query T
+SELECT o_orderkey, o_orderdate, LEAD(o_orderdate, 1) OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS next_order_date FROM orders
+----
+ok
+
+# SUM as window function (running total)
+query T
+SELECT o_orderkey, o_totalprice, SUM(o_totalprice) OVER (ORDER BY o_orderkey) AS running_total FROM orders
+----
+ok
+
+# SUM with PARTITION BY (running total within groups)
+query T
+SELECT o_orderkey, o_custkey, o_totalprice, SUM(o_totalprice) OVER (PARTITION BY o_custkey ORDER BY o_orderkey) AS cust_running_total FROM orders
+----
+ok
+
+# AVG as window function
+query T
+SELECT o_orderkey, o_totalprice, AVG(o_totalprice) OVER (ORDER BY o_orderkey ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING) AS moving_avg FROM orders
+----
+ok
+
+# COUNT as window function
+query T
+SELECT o_orderkey, o_custkey, COUNT(*) OVER (PARTITION BY o_custkey) AS orders_per_customer FROM orders
+----
+ok
+
+# MIN/MAX as window functions
+query T
+SELECT o_orderkey, o_totalprice, MIN(o_totalprice) OVER (PARTITION BY o_custkey) AS min_price, MAX(o_totalprice) OVER (PARTITION BY o_custkey) AS max_price FROM orders
+----
+ok
+
+# Window frame: ROWS BETWEEN
+query T
+SELECT o_orderkey, o_totalprice, SUM(o_totalprice) OVER (ORDER BY o_orderkey ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) AS sum_last_4 FROM orders
+----
+ok
+
+# Window frame: ROWS UNBOUNDED PRECEDING
+query T
+SELECT o_orderkey, o_totalprice, SUM(o_totalprice) OVER (ORDER BY o_orderkey ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_sum FROM orders
+----
+ok
+
+# Window frame: RANGE BETWEEN
+query T
+SELECT o_orderkey, o_totalprice, COUNT(*) OVER (ORDER BY o_totalprice RANGE BETWEEN 1000 PRECEDING AND 1000 FOLLOWING) AS similar_price_count FROM orders
+----
+ok
+
+# Window function with filter in WHERE
+query T
+SELECT * FROM (SELECT o_orderkey, o_custkey, o_totalprice, ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rn FROM orders) ranked WHERE rn = 1
+----
+ok
+
+# Window function in derived table with join
+query T
+SELECT c.c_name, r.o_orderkey, r.o_totalprice FROM customer c JOIN (SELECT o_orderkey, o_custkey, o_totalprice, ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rn FROM orders) r ON c.c_custkey = r.o_custkey WHERE r.rn <= 3
+----
+ok
+
+# Simple CTE
+query T
+WITH active_orders AS (SELECT * FROM orders WHERE o_orderstatus = 'O') SELECT * FROM active_orders
+----
+ok
+
+# CTE with aggregation
+query T
+WITH order_stats AS (SELECT o_custkey, COUNT(*) AS num_orders, SUM(o_totalprice) AS total_spent FROM orders GROUP BY o_custkey) SELECT * FROM order_stats WHERE num_orders > 5
+----
+ok
+
+# CTE used in a join
+query T
+WITH top_customers AS (SELECT o_custkey, SUM(o_totalprice) AS total FROM orders GROUP BY o_custkey ORDER BY total DESC LIMIT 100) SELECT c.c_name, tc.total FROM customer c JOIN top_customers tc ON c.c_custkey = tc.o_custkey
+----
+ok
+
+# Multiple CTEs
+query T
+WITH fulfilled AS (SELECT * FROM orders WHERE o_orderstatus = 'F'), open_orders AS (SELECT * FROM orders WHERE o_orderstatus = 'O') SELECT f.o_custkey, COUNT(f.o_orderkey) AS fulfilled_cnt, COUNT(oo.o_orderkey) AS open_cnt FROM fulfilled f JOIN open_orders oo ON f.o_custkey = oo.o_custkey GROUP BY f.o_custkey
+----
+ok
+
+# CTE referenced multiple times
+query T
+WITH cust_totals AS (SELECT o_custkey, SUM(o_totalprice) AS total FROM orders GROUP BY o_custkey) SELECT a.o_custkey, a.total, b.total AS other_total FROM cust_totals a JOIN cust_totals b ON a.o_custkey <> b.o_custkey WHERE a.total > b.total * 2
+----
+ok
+
+# CTE with window function
+query T
+WITH ranked_orders AS (SELECT o_orderkey, o_custkey, o_totalprice, RANK() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS price_rank FROM orders) SELECT * FROM ranked_orders WHERE price_rank <= 5
+----
+ok
+
+# Nested CTE (CTE referencing another CTE)
+query T
+WITH base AS (SELECT o_custkey, o_totalprice FROM orders WHERE o_orderstatus = 'F'), aggregated AS (SELECT o_custkey, SUM(o_totalprice) AS total, COUNT(*) AS cnt FROM base GROUP BY o_custkey) SELECT * FROM aggregated WHERE total > 200000 AND cnt > 3
+----
+ok
+
+# CTE with UNION
+query T
+WITH all_entities AS (SELECT c_custkey AS id, c_name AS name, 'customer' AS entity_type FROM customer UNION ALL SELECT s_suppkey AS id, s_name AS name, 'supplier' AS entity_type FROM supplier) SELECT entity_type, COUNT(*) AS cnt FROM all_entities GROUP BY entity_type
+----
+ok
+
+# CTE with complex join pattern
+query T
+WITH regional_customers AS (SELECT c.c_custkey, c.c_name, n.n_name AS nation FROM customer c JOIN nation n ON c.c_nationkey = n.n_nationkey JOIN region r ON n.n_regionkey = r.r_regionkey WHERE r.r_name = 'ASIA') SELECT rc.c_name, rc.nation, SUM(o.o_totalprice) AS total FROM regional_customers rc JOIN orders o ON rc.c_custkey = o.o_custkey GROUP BY rc.c_name, rc.nation ORDER BY total DESC LIMIT 20
+----
+ok
+
+# CTE with EXISTS subquery
+query T
+WITH active_suppliers AS (SELECT s.s_suppkey, s.s_name FROM supplier s WHERE EXISTS (SELECT 1 FROM lineitem l WHERE l.l_suppkey = s.s_suppkey AND l.l_shipdate > '1996-01-01')) SELECT * FROM active_suppliers ORDER BY s_name
+----
+ok
+
+# Multiple window functions with different partitions
+query T
+SELECT o_orderkey, o_custkey, o_totalprice, SUM(o_totalprice) OVER (PARTITION BY o_custkey) AS customer_total, AVG(o_totalprice) OVER () AS global_avg, o_totalprice - AVG(o_totalprice) OVER (PARTITION BY o_custkey) AS diff_from_cust_avg FROM orders
+----
+ok
+
+# FIRST_VALUE window function
+query T
+SELECT o_orderkey, o_custkey, o_orderdate, FIRST_VALUE(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate) AS first_order_date FROM orders
+----
+ok
+
+# LAST_VALUE window function with frame
+query T
+SELECT o_orderkey, o_custkey, o_orderdate, LAST_VALUE(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_order_date FROM orders
+----
+ok
+
+# Percent rank
+query T
+SELECT o_orderkey, o_totalprice, PERCENT_RANK() OVER (ORDER BY o_totalprice) AS pct_rank FROM orders
+----
+ok
+
+# CUME_DIST
+query T
+SELECT o_orderkey, o_totalprice, CUME_DIST() OVER (ORDER BY o_totalprice) AS cum_dist FROM orders
+----
+ok
+
+# Window function with CASE expression
+query T
+SELECT o_orderkey, o_totalprice, SUM(CASE WHEN o_orderstatus = 'F' THEN o_totalprice ELSE 0 END) OVER (PARTITION BY o_custkey) AS fulfilled_total FROM orders
+----
+ok

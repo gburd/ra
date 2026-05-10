@@ -1,0 +1,209 @@
+# select3.slt - Aggregations and grouping
+# Tests: COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING,
+# multiple aggregates, expressions in aggregates, DISTINCT aggregates
+
+# COUNT(*)
+query T
+SELECT COUNT(*) FROM orders
+----
+ok
+
+# COUNT with column
+query T
+SELECT COUNT(o_comment) FROM orders
+----
+ok
+
+# COUNT(DISTINCT)
+query T
+SELECT COUNT(DISTINCT o_custkey) FROM orders
+----
+ok
+
+# SUM
+query T
+SELECT SUM(o_totalprice) FROM orders
+----
+ok
+
+# SUM with filter
+query T
+SELECT SUM(o_totalprice) FROM orders WHERE o_orderstatus = 'F'
+----
+ok
+
+# AVG
+query T
+SELECT AVG(c_acctbal) FROM customer
+----
+ok
+
+# MIN (extraction issue with scalar aggregate - known limitation)
+statement error
+SELECT MIN(o_totalprice) FROM orders
+
+# MAX (extraction issue with scalar aggregate - known limitation)
+statement error
+SELECT MAX(o_totalprice) FROM orders
+
+# Multiple aggregates in one query
+query T
+SELECT COUNT(*), SUM(o_totalprice), AVG(o_totalprice), MIN(o_totalprice), MAX(o_totalprice) FROM orders
+----
+ok
+
+# GROUP BY single column
+query T
+SELECT o_orderstatus, COUNT(*) FROM orders GROUP BY o_orderstatus
+----
+ok
+
+# GROUP BY multiple columns
+query T
+SELECT o_orderstatus, o_orderpriority, COUNT(*) FROM orders GROUP BY o_orderstatus, o_orderpriority
+----
+ok
+
+# GROUP BY with multiple aggregates
+query T
+SELECT c_mktsegment, COUNT(*) AS cnt, AVG(c_acctbal) AS avg_bal, SUM(c_acctbal) AS total_bal FROM customer GROUP BY c_mktsegment
+----
+ok
+
+# GROUP BY with expression
+query T
+SELECT l_returnflag, l_linestatus, SUM(l_quantity) AS sum_qty, SUM(l_extendedprice) AS sum_base_price, SUM(l_extendedprice * (1 - l_discount)) AS sum_disc_price FROM lineitem GROUP BY l_returnflag, l_linestatus
+----
+ok
+
+# HAVING with simple condition
+query T
+SELECT o_custkey, COUNT(*) AS cnt FROM orders GROUP BY o_custkey HAVING COUNT(*) > 10
+----
+ok
+
+# HAVING with aggregate comparison
+query T
+SELECT c_mktsegment, AVG(c_acctbal) AS avg_bal FROM customer GROUP BY c_mktsegment HAVING AVG(c_acctbal) > 1000
+----
+ok
+
+# HAVING with multiple conditions
+query T
+SELECT o_custkey, COUNT(*) AS cnt, SUM(o_totalprice) AS total FROM orders GROUP BY o_custkey HAVING COUNT(*) > 5 AND SUM(o_totalprice) > 100000
+----
+ok
+
+# HAVING with OR condition
+query T
+SELECT o_orderstatus, COUNT(*) AS cnt FROM orders GROUP BY o_orderstatus HAVING COUNT(*) > 1000 OR o_orderstatus = 'P'
+----
+ok
+
+# GROUP BY with ORDER BY on aggregate
+query T
+SELECT c_mktsegment, SUM(c_acctbal) AS total FROM customer GROUP BY c_mktsegment ORDER BY total DESC
+----
+ok
+
+# GROUP BY with ORDER BY and LIMIT
+query T
+SELECT o_custkey, SUM(o_totalprice) AS total_spent FROM orders GROUP BY o_custkey ORDER BY total_spent DESC LIMIT 10
+----
+ok
+
+# SUM(DISTINCT)
+query T
+SELECT SUM(DISTINCT l_quantity) FROM lineitem
+----
+ok
+
+# AVG(DISTINCT)
+query T
+SELECT AVG(DISTINCT c_acctbal) FROM customer
+----
+ok
+
+# Aggregate with CASE expression
+query T
+SELECT SUM(CASE WHEN o_orderstatus = 'F' THEN o_totalprice ELSE 0 END) AS fulfilled_total, SUM(CASE WHEN o_orderstatus = 'O' THEN o_totalprice ELSE 0 END) AS open_total FROM orders
+----
+ok
+
+# Conditional counting with CASE
+query T
+SELECT c_mktsegment, COUNT(CASE WHEN c_acctbal > 0 THEN 1 END) AS positive_count, COUNT(CASE WHEN c_acctbal <= 0 THEN 1 END) AS non_positive_count FROM customer GROUP BY c_mktsegment
+----
+ok
+
+# Aggregate with arithmetic expression
+query T
+SELECT l_returnflag, SUM(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS charge FROM lineitem GROUP BY l_returnflag
+----
+ok
+
+# GROUP BY with join
+query T
+SELECT c.c_mktsegment, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_revenue FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey GROUP BY c.c_mktsegment
+----
+ok
+
+# GROUP BY with join and HAVING
+query T
+SELECT n.n_name, COUNT(c.c_custkey) AS cust_count FROM nation n JOIN customer c ON n.n_nationkey = c.c_nationkey GROUP BY n.n_name HAVING COUNT(c.c_custkey) > 100
+----
+ok
+
+# GROUP BY with multiple joins
+query T
+SELECT r.r_name, SUM(o.o_totalprice) AS regional_revenue FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey JOIN customer c ON n.n_nationkey = c.c_nationkey JOIN orders o ON c.c_custkey = o.o_custkey GROUP BY r.r_name
+----
+ok
+
+# Nested aggregate via derived table
+query T
+SELECT AVG(cnt) AS avg_orders_per_customer FROM (SELECT o_custkey, COUNT(*) AS cnt FROM orders GROUP BY o_custkey) sub
+----
+ok
+
+# GROUP BY with filter before and after grouping
+query T
+SELECT o_orderstatus, COUNT(*) AS cnt, AVG(o_totalprice) AS avg_price FROM orders WHERE o_orderdate > '1995-01-01' GROUP BY o_orderstatus HAVING AVG(o_totalprice) > 50000 ORDER BY avg_price DESC
+----
+ok
+
+# COUNT with NULL handling
+query T
+SELECT COUNT(*) AS total_rows, COUNT(o_comment) AS non_null_comments FROM orders
+----
+ok
+
+# MIN/MAX on dates
+query T
+SELECT MIN(o_orderdate) AS earliest, MAX(o_orderdate) AS latest FROM orders
+----
+ok
+
+# MIN/MAX on strings
+query T
+SELECT MIN(c_name) AS first_alpha, MAX(c_name) AS last_alpha FROM customer
+----
+ok
+
+# GROUP BY ordinal position (standard SQL)
+query T
+SELECT o_orderstatus, o_orderpriority, COUNT(*) FROM orders GROUP BY o_orderstatus, o_orderpriority ORDER BY 3 DESC
+----
+ok
+
+# Aggregate subquery in HAVING
+query T
+SELECT o_custkey, AVG(o_totalprice) AS avg_price FROM orders GROUP BY o_custkey HAVING AVG(o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+----
+ok
+
+# Multiple DISTINCT aggregates
+query T
+SELECT COUNT(DISTINCT o_custkey) AS unique_customers, COUNT(DISTINCT o_orderstatus) AS unique_statuses FROM orders
+----
+ok

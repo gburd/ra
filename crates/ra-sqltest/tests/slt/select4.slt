@@ -1,0 +1,205 @@
+# select4.slt - Joins and set operations
+# Tests: INNER JOIN, LEFT/RIGHT/FULL OUTER JOIN, CROSS JOIN,
+# self-join, multi-way joins, UNION, INTERSECT, EXCEPT
+
+# Basic INNER JOIN
+query T
+SELECT * FROM orders o INNER JOIN customer c ON o.o_custkey = c.c_custkey
+----
+ok
+
+# INNER JOIN with projection
+query T
+SELECT o.o_orderkey, o.o_totalprice, c.c_name FROM orders o JOIN customer c ON o.o_custkey = c.c_custkey
+----
+ok
+
+# INNER JOIN with filter on both tables
+query T
+SELECT * FROM orders o JOIN customer c ON o.o_custkey = c.c_custkey WHERE o.o_totalprice > 50000 AND c.c_mktsegment = 'BUILDING'
+----
+ok
+
+# LEFT OUTER JOIN
+query T
+SELECT c.c_name, o.o_orderkey FROM customer c LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+----
+ok
+
+# LEFT JOIN with IS NULL (find customers without orders)
+query T
+SELECT c.c_name FROM customer c LEFT JOIN orders o ON c.c_custkey = o.o_custkey WHERE o.o_orderkey IS NULL
+----
+ok
+
+# RIGHT OUTER JOIN
+query T
+SELECT o.o_orderkey, c.c_name FROM orders o RIGHT JOIN customer c ON o.o_custkey = c.c_custkey
+----
+ok
+
+# RIGHT JOIN with IS NULL
+query T
+SELECT c.c_name FROM orders o RIGHT JOIN customer c ON o.o_custkey = c.c_custkey WHERE o.o_orderkey IS NULL
+----
+ok
+
+# FULL OUTER JOIN
+query T
+SELECT c.c_name, o.o_orderkey FROM customer c FULL OUTER JOIN orders o ON c.c_custkey = o.o_custkey
+----
+ok
+
+# CROSS JOIN (explicit)
+query T
+SELECT * FROM nation CROSS JOIN region
+----
+ok
+
+# CROSS JOIN (implicit via comma)
+query T
+SELECT n.n_name, r.r_name FROM nation n, region r
+----
+ok
+
+# Self-join
+query T
+SELECT a.o_orderkey AS order1, b.o_orderkey AS order2 FROM orders a JOIN orders b ON a.o_custkey = b.o_custkey AND a.o_orderkey < b.o_orderkey
+----
+ok
+
+# Three-way join
+query T
+SELECT l.l_orderkey, o.o_orderdate, c.c_name FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey JOIN customer c ON o.o_custkey = c.c_custkey
+----
+ok
+
+# Four-way join
+query T
+SELECT c.c_name, o.o_orderdate, l.l_quantity, s.s_name FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey JOIN lineitem l ON o.o_orderkey = l.l_orderkey JOIN supplier s ON l.l_suppkey = s.s_suppkey
+----
+ok
+
+# Five-way join (TPC-H style)
+query T
+SELECT n.n_name, c.c_name, o.o_totalprice FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey JOIN customer c ON n.n_nationkey = c.c_nationkey JOIN orders o ON c.c_custkey = o.o_custkey JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE r.r_name = 'EUROPE'
+----
+ok
+
+# Join with aggregate
+query T
+SELECT c.c_name, COUNT(o.o_orderkey) AS num_orders, SUM(o.o_totalprice) AS total FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey GROUP BY c.c_name ORDER BY total DESC LIMIT 10
+----
+ok
+
+# Join with subquery as filter
+query T
+SELECT * FROM orders o JOIN customer c ON o.o_custkey = c.c_custkey WHERE c.c_nationkey IN (SELECT n_nationkey FROM nation WHERE n_regionkey = 1)
+----
+ok
+
+# Non-equi join
+query T
+SELECT a.o_orderkey, b.o_orderkey FROM orders a JOIN orders b ON a.o_totalprice > b.o_totalprice AND a.o_custkey = b.o_custkey
+----
+ok
+
+# Join with composite condition
+query T
+SELECT * FROM lineitem l JOIN part p ON l.l_partkey = p.p_partkey AND l.l_shipdate > '1995-01-01' WHERE p.p_type LIKE '%BRASS%'
+----
+ok
+
+# UNION (removes duplicates)
+query T
+SELECT o_custkey FROM orders WHERE o_orderstatus = 'F' UNION SELECT o_custkey FROM orders WHERE o_orderstatus = 'O'
+----
+ok
+
+# UNION ALL (keeps duplicates)
+query T
+SELECT o_custkey FROM orders WHERE o_totalprice > 100000 UNION ALL SELECT o_custkey FROM orders WHERE o_orderstatus = 'P'
+----
+ok
+
+# UNION with different column sources
+query T
+SELECT c_custkey AS id, c_name AS name FROM customer WHERE c_acctbal > 9000 UNION SELECT s_suppkey AS id, s_name AS name FROM supplier WHERE s_acctbal > 9000
+----
+ok
+
+# UNION with ORDER BY
+query T
+SELECT c_custkey AS id, 'customer' AS source FROM customer UNION ALL SELECT s_suppkey AS id, 'supplier' AS source FROM supplier ORDER BY id
+----
+ok
+
+# INTERSECT
+query T
+SELECT o_custkey FROM orders WHERE o_orderstatus = 'F' INTERSECT SELECT o_custkey FROM orders WHERE o_totalprice > 100000
+----
+ok
+
+# INTERSECT with different tables
+query T
+SELECT c_custkey FROM customer WHERE c_mktsegment = 'BUILDING' INTERSECT SELECT o_custkey FROM orders WHERE o_orderstatus = 'F'
+----
+ok
+
+# EXCEPT (set difference)
+query T
+SELECT c_custkey FROM customer EXCEPT SELECT o_custkey FROM orders
+----
+ok
+
+# EXCEPT with condition
+query T
+SELECT o_custkey FROM orders WHERE o_orderstatus = 'F' EXCEPT SELECT o_custkey FROM orders WHERE o_orderstatus = 'O'
+----
+ok
+
+# Multiple UNION operations
+query T
+SELECT c_custkey AS id FROM customer WHERE c_mktsegment = 'BUILDING' UNION SELECT o_custkey AS id FROM orders WHERE o_orderstatus = 'F' UNION SELECT o_custkey AS id FROM orders WHERE o_orderstatus = 'O'
+----
+ok
+
+# UNION with aggregates in each branch
+query T
+SELECT 'fulfilled' AS status, COUNT(*) AS cnt FROM orders WHERE o_orderstatus = 'F' UNION ALL SELECT 'open' AS status, COUNT(*) AS cnt FROM orders WHERE o_orderstatus = 'O' UNION ALL SELECT 'partial' AS status, COUNT(*) AS cnt FROM orders WHERE o_orderstatus = 'P'
+----
+ok
+
+# Join with UNION subquery
+query T
+SELECT c.c_name, combined.total FROM customer c JOIN (SELECT o_custkey, SUM(o_totalprice) AS total FROM orders WHERE o_orderstatus = 'F' GROUP BY o_custkey UNION ALL SELECT o_custkey, SUM(o_totalprice) AS total FROM orders WHERE o_orderstatus = 'O' GROUP BY o_custkey) combined ON c.c_custkey = combined.o_custkey
+----
+ok
+
+# Natural join (not supported by Ra parser)
+statement error
+SELECT * FROM nation NATURAL JOIN region
+
+# Left join with aggregate in subquery
+query T
+SELECT c.c_name, COALESCE(oc.order_count, 0) AS orders FROM customer c LEFT JOIN (SELECT o_custkey, COUNT(*) AS order_count FROM orders GROUP BY o_custkey) oc ON c.c_custkey = oc.o_custkey
+----
+ok
+
+# Multiple joins with mixed types
+query T
+SELECT c.c_name, o.o_orderkey, l.l_quantity FROM customer c LEFT JOIN orders o ON c.c_custkey = o.o_custkey INNER JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_quantity > 30
+----
+ok
+
+# EXCEPT ALL
+query T
+SELECT o_custkey FROM orders WHERE o_orderstatus = 'F' EXCEPT ALL SELECT o_custkey FROM orders WHERE o_orderstatus = 'O'
+----
+ok
+
+# INTERSECT ALL
+query T
+SELECT o_custkey FROM orders WHERE o_totalprice > 50000 INTERSECT ALL SELECT o_custkey FROM orders WHERE o_orderstatus = 'F'
+----
+ok

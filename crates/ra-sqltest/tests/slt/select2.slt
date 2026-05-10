@@ -1,0 +1,193 @@
+# select2.slt - Complex selects with subqueries
+# Tests: IN, NOT IN, EXISTS, NOT EXISTS, scalar subqueries,
+# derived tables, correlated subqueries, multi-level nesting
+
+# Simple IN subquery
+query T
+SELECT * FROM orders WHERE o_custkey IN (SELECT c_custkey FROM customer WHERE c_mktsegment = 'BUILDING')
+----
+ok
+
+# IN subquery with multiple conditions
+query T
+SELECT * FROM lineitem WHERE l_orderkey IN (SELECT o_orderkey FROM orders WHERE o_orderstatus = 'F' AND o_totalprice > 50000)
+----
+ok
+
+# NOT IN subquery
+query T
+SELECT * FROM customer WHERE c_custkey NOT IN (SELECT o_custkey FROM orders WHERE o_orderstatus = 'O')
+----
+ok
+
+# NOT IN with compound predicate in subquery
+query T
+SELECT * FROM orders WHERE o_custkey NOT IN (SELECT c_custkey FROM customer WHERE c_acctbal < 0 AND c_mktsegment = 'HOUSEHOLD')
+----
+ok
+
+# EXISTS subquery
+query T
+SELECT * FROM customer c WHERE EXISTS (SELECT 1 FROM orders o WHERE o.o_custkey = c.c_custkey)
+----
+ok
+
+# EXISTS with additional filter in subquery
+query T
+SELECT * FROM customer c WHERE EXISTS (SELECT 1 FROM orders o WHERE o.o_custkey = c.c_custkey AND o.o_totalprice > 100000)
+----
+ok
+
+# NOT EXISTS subquery
+query T
+SELECT * FROM customer c WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.o_custkey = c.c_custkey)
+----
+ok
+
+# NOT EXISTS with compound conditions
+query T
+SELECT * FROM supplier s WHERE NOT EXISTS (SELECT 1 FROM lineitem l WHERE l.l_suppkey = s.s_suppkey AND l.l_returnflag = 'R')
+----
+ok
+
+# Correlated subquery with comparison operator
+query T
+SELECT * FROM orders o WHERE o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_custkey = o.o_custkey)
+----
+ok
+
+# Correlated subquery with >= comparison
+query T
+SELECT * FROM lineitem l WHERE l.l_quantity >= (SELECT AVG(l2.l_quantity) FROM lineitem l2 WHERE l2.l_partkey = l.l_partkey)
+----
+ok
+
+# Derived table (subquery in FROM)
+query T
+SELECT * FROM (SELECT o_custkey, COUNT(*) AS order_count FROM orders GROUP BY o_custkey) AS cust_orders WHERE order_count > 5
+----
+ok
+
+# Derived table with join
+query T
+SELECT c.c_name, sub.total_spent FROM customer c JOIN (SELECT o_custkey, SUM(o_totalprice) AS total_spent FROM orders GROUP BY o_custkey) sub ON c.c_custkey = sub.o_custkey
+----
+ok
+
+# Multiple derived tables
+query T
+SELECT a.o_custkey, a.order_count, b.avg_price FROM (SELECT o_custkey, COUNT(*) AS order_count FROM orders GROUP BY o_custkey) a JOIN (SELECT o_custkey, AVG(o_totalprice) AS avg_price FROM orders GROUP BY o_custkey) b ON a.o_custkey = b.o_custkey
+----
+ok
+
+# Nested subquery in WHERE (two levels)
+query T
+SELECT * FROM customer WHERE c_custkey IN (SELECT o_custkey FROM orders WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem WHERE l_quantity > 40))
+----
+ok
+
+# Subquery in HAVING clause
+query T
+SELECT o_custkey, SUM(o_totalprice) AS total FROM orders GROUP BY o_custkey HAVING SUM(o_totalprice) > (SELECT AVG(o_totalprice) * 10 FROM orders)
+----
+ok
+
+# Subquery with aggregate comparison
+query T
+SELECT * FROM orders WHERE o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+----
+ok
+
+# EXISTS with join in subquery
+query T
+SELECT * FROM nation n WHERE EXISTS (SELECT 1 FROM customer c JOIN orders o ON c.c_custkey = o.o_custkey WHERE c.c_nationkey = n.n_nationkey AND o.o_totalprice > 200000)
+----
+ok
+
+# ANY/SOME quantified comparison (not supported by Ra parser)
+statement error
+SELECT * FROM orders WHERE o_totalprice > ANY (SELECT o_totalprice FROM orders WHERE o_orderstatus = 'F')
+
+# ALL quantified comparison (supported by parser)
+query T
+SELECT * FROM orders WHERE o_totalprice > ALL (SELECT o_totalprice FROM orders WHERE o_orderstatus = 'P')
+----
+ok
+
+# IN subquery with join
+query T
+SELECT * FROM customer WHERE c_custkey IN (SELECT o.o_custkey FROM orders o JOIN lineitem l ON o.o_orderkey = l.l_orderkey WHERE l.l_shipmode = 'AIR')
+----
+ok
+
+# Derived table with ORDER BY and LIMIT
+query T
+SELECT * FROM (SELECT o_custkey, o_totalprice FROM orders ORDER BY o_totalprice DESC LIMIT 100) AS top_orders WHERE o_totalprice > 50000
+----
+ok
+
+# Subquery in FROM with alias and filter
+query T
+SELECT high_value.custkey, high_value.total FROM (SELECT o_custkey AS custkey, SUM(o_totalprice) AS total FROM orders GROUP BY o_custkey HAVING SUM(o_totalprice) > 500000) AS high_value ORDER BY high_value.total DESC
+----
+ok
+
+# Correlated subquery in WHERE with multiple correlations
+query T
+SELECT * FROM lineitem l WHERE l.l_extendedprice > (SELECT AVG(l2.l_extendedprice) FROM lineitem l2 WHERE l2.l_partkey = l.l_partkey AND l2.l_suppkey = l.l_suppkey)
+----
+ok
+
+# Scalar subquery in SELECT clause (known limitation - should error)
+statement error
+SELECT c_name, (SELECT COUNT(*) FROM orders o WHERE o.o_custkey = c.c_custkey) AS order_count FROM customer c
+
+# Another scalar subquery in SELECT (should error)
+statement error
+SELECT o_orderkey, (SELECT c_name FROM customer c WHERE c.c_custkey = o.o_custkey) AS customer_name FROM orders o
+
+# Scalar subquery returning multiple expressions in SELECT (should error)
+statement error
+SELECT l_orderkey, (SELECT MAX(l2.l_quantity) FROM lineitem l2 WHERE l2.l_orderkey = l.l_orderkey) AS max_qty FROM lineitem l
+
+# Nested EXISTS within EXISTS
+query T
+SELECT * FROM region r WHERE EXISTS (SELECT 1 FROM nation n WHERE n.n_regionkey = r.r_regionkey AND EXISTS (SELECT 1 FROM customer c WHERE c.c_nationkey = n.n_nationkey AND c.c_acctbal > 9000))
+----
+ok
+
+# IN subquery with DISTINCT
+query T
+SELECT * FROM orders WHERE o_custkey IN (SELECT DISTINCT c_custkey FROM customer WHERE c_acctbal > 5000)
+----
+ok
+
+# Derived table with window function
+query T
+SELECT * FROM (SELECT o_custkey, o_totalprice, ROW_NUMBER() OVER (PARTITION BY o_custkey ORDER BY o_totalprice DESC) AS rn FROM orders) ranked WHERE rn <= 3
+----
+ok
+
+# Complex multi-level subquery
+query T
+SELECT * FROM customer c WHERE c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey IN (SELECT n_nationkey FROM nation WHERE n_regionkey = (SELECT r_regionkey FROM region WHERE r_name = 'EUROPE')))
+----
+ok
+
+# Subquery with GROUP BY in IN clause
+query T
+SELECT * FROM customer WHERE c_custkey IN (SELECT o_custkey FROM orders GROUP BY o_custkey HAVING COUNT(*) > 10)
+----
+ok
+
+# Anti-join pattern via NOT EXISTS
+query T
+SELECT * FROM part p WHERE NOT EXISTS (SELECT 1 FROM lineitem l WHERE l.l_partkey = p.p_partkey AND l.l_shipdate > '1995-01-01')
+----
+ok
+
+# Semi-join pattern via EXISTS with aggregate filter
+query T
+SELECT * FROM supplier s WHERE EXISTS (SELECT l_suppkey FROM lineitem WHERE l_suppkey = s.s_suppkey GROUP BY l_suppkey HAVING SUM(l_quantity) > 1000)
+----
+ok

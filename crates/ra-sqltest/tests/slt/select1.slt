@@ -1,0 +1,231 @@
+# select1.slt - Basic SELECT queries
+# Tests: simple projections, WHERE clauses, ORDER BY, LIMIT, DISTINCT,
+# expressions, CASE, BETWEEN, LIKE, IS NULL, type casts
+
+# Simple full table scan
+query T
+SELECT * FROM orders
+----
+ok
+
+# Projection with specific columns
+query T
+SELECT o_orderkey, o_custkey, o_totalprice FROM orders
+----
+ok
+
+# Single equality predicate
+query T
+SELECT * FROM customer WHERE c_custkey = 42
+----
+ok
+
+# String equality predicate
+query T
+SELECT * FROM orders WHERE o_orderstatus = 'F'
+----
+ok
+
+# Numeric comparison
+query T
+SELECT * FROM lineitem WHERE l_quantity > 25
+----
+ok
+
+# Less-than comparison
+query T
+SELECT * FROM lineitem WHERE l_extendedprice < 1000.00
+----
+ok
+
+# Compound AND predicate
+query T
+SELECT * FROM lineitem WHERE l_quantity > 20 AND l_discount < 0.05 AND l_shipmode = 'AIR'
+----
+ok
+
+# Compound OR predicate
+query T
+SELECT * FROM orders WHERE o_orderstatus = 'O' OR o_orderstatus = 'P'
+----
+ok
+
+# Mixed AND/OR with parentheses
+query T
+SELECT * FROM orders WHERE (o_orderstatus = 'F' OR o_orderstatus = 'O') AND o_totalprice > 10000
+----
+ok
+
+# BETWEEN predicate
+query T
+SELECT * FROM lineitem WHERE l_quantity BETWEEN 5 AND 30
+----
+ok
+
+# NOT BETWEEN
+query T
+SELECT * FROM orders WHERE o_totalprice NOT BETWEEN 1000 AND 5000
+----
+ok
+
+# IN list predicate
+query T
+SELECT * FROM orders WHERE o_orderstatus IN ('F', 'O', 'P')
+----
+ok
+
+# NOT IN list predicate
+query T
+SELECT * FROM customer WHERE c_mktsegment NOT IN ('BUILDING', 'AUTOMOBILE')
+----
+ok
+
+# LIKE predicate
+query T
+SELECT * FROM customer WHERE c_name LIKE 'Customer%'
+----
+ok
+
+# LIKE with underscore wildcard
+query T
+SELECT * FROM customer WHERE c_phone LIKE '1_-%'
+----
+ok
+
+# IS NULL predicate
+query T
+SELECT * FROM orders WHERE o_comment IS NULL
+----
+ok
+
+# IS NOT NULL predicate
+query T
+SELECT * FROM lineitem WHERE l_returnflag IS NOT NULL
+----
+ok
+
+# DISTINCT keyword
+query T
+SELECT DISTINCT o_orderstatus FROM orders
+----
+ok
+
+# DISTINCT with multiple columns
+query T
+SELECT DISTINCT o_orderstatus, o_orderpriority FROM orders
+----
+ok
+
+# Arithmetic expressions in SELECT
+query T
+SELECT l_extendedprice * (1 - l_discount) AS discounted_price FROM lineitem
+----
+ok
+
+# Complex arithmetic expression
+query T
+SELECT l_extendedprice * (1 - l_discount) * (1 + l_tax) AS total_charge FROM lineitem
+----
+ok
+
+# String concatenation-style expressions
+query T
+SELECT c_custkey, c_name, c_acctbal FROM customer WHERE c_acctbal > 0
+----
+ok
+
+# ORDER BY single column ascending
+query T
+SELECT * FROM customer ORDER BY c_name ASC
+----
+ok
+
+# ORDER BY single column descending
+query T
+SELECT * FROM orders ORDER BY o_totalprice DESC
+----
+ok
+
+# ORDER BY multiple columns
+query T
+SELECT * FROM orders ORDER BY o_orderstatus ASC, o_totalprice DESC
+----
+ok
+
+# LIMIT without ORDER BY
+query T
+SELECT * FROM lineitem LIMIT 50
+----
+ok
+
+# LIMIT with OFFSET
+query T
+SELECT * FROM orders ORDER BY o_orderkey LIMIT 20 OFFSET 100
+----
+ok
+
+# ORDER BY with LIMIT
+query T
+SELECT * FROM orders ORDER BY o_totalprice DESC LIMIT 10
+----
+ok
+
+# CASE expression (searched)
+query T
+SELECT o_orderkey, CASE WHEN o_totalprice > 100000 THEN 'high' WHEN o_totalprice > 10000 THEN 'medium' ELSE 'low' END AS price_tier FROM orders
+----
+ok
+
+# CASE expression (simple)
+query T
+SELECT o_orderkey, CASE o_orderstatus WHEN 'F' THEN 'fulfilled' WHEN 'O' THEN 'open' WHEN 'P' THEN 'partial' ELSE 'unknown' END AS status_label FROM orders
+----
+ok
+
+# COALESCE expression
+query T
+SELECT COALESCE(o_comment, 'no comment') FROM orders
+----
+ok
+
+# NULLIF expression
+query T
+SELECT NULLIF(o_orderstatus, 'P') FROM orders
+----
+ok
+
+# Negation in WHERE
+query T
+SELECT * FROM customer WHERE NOT c_mktsegment = 'BUILDING'
+----
+ok
+
+# Multiple negations
+query T
+SELECT * FROM orders WHERE NOT (o_orderstatus = 'F') AND NOT (o_totalprice < 1000)
+----
+ok
+
+# Column alias
+query T
+SELECT c_custkey AS id, c_name AS name, c_acctbal AS balance FROM customer
+----
+ok
+
+# Expression in ORDER BY
+query T
+SELECT l_orderkey, l_extendedprice * l_quantity AS total FROM lineitem ORDER BY l_extendedprice * l_quantity DESC
+----
+ok
+
+# Filter on expression result
+query T
+SELECT * FROM lineitem WHERE l_extendedprice * (1 - l_discount) > 50000
+----
+ok
+
+# Multiple table references without explicit join (implicit cross join)
+query T
+SELECT n_name, r_name FROM nation, region WHERE nation.n_regionkey = region.r_regionkey
+----
+ok
