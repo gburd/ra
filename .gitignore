@@ -67,6 +67,9 @@ models/*.training.json
 # External repositories (should not be committed as gitlinks)
 /django/
 
+# Research scratch space (separate repos, not part of Ra workspace)
+/_/
+
 # Memory/agent state directories
 .memelord/
 

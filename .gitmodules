@@ -1,3 +1,6 @@
 [submodule "lime"]
 	path = crates/lime-sys/lime
 	url = git@codeberg.org:gregburd/lime.git
+[submodule "vendor/bitnet-mlx-rs"]
+	path = vendor/bitnet-mlx-rs
+	url = https://github.com/gburd/bitnet-mlx.rs.git

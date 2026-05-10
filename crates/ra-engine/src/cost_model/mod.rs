@@ -71,6 +71,8 @@ pub use simple_model::{SimpleCostModel, QueryFeatures, ModelStats};
 pub use feature_extractor::{extract_features, extract_features_with_stats};
 pub use production_model::{ProductionCostModel, TrainingConfig, ProductionModelStats};
 pub use fast_model::FastCostModel;
+#[cfg(feature = "bitnet")]
+pub use ::ra_bitnet::BitNetCostModel;
 pub use feedback::{ExecutionFeedback, FeedbackCollector, MapeTracker};
 pub use online_learner::{OnlineLearner, OnlineLearnerConfig, OnlineLearnerStats};
 

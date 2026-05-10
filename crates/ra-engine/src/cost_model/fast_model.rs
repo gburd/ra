@@ -267,6 +267,37 @@ fn softplus(x: f32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// BitNet quantized backend (feature-gated)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// BitNet quantized backend (feature-gated)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "bitnet")]
+impl FastCostModel {
+    /// Quantize this model's f32 weights into BitNet 1.58-bit ternary format.
+    ///
+    /// Uses absmean quantization: α = mean(|W|), W_q = round_clip(W/α, -1, 1).
+    /// The resulting `BitNetCostModel` uses ternary matmul (add/subtract)
+    /// instead of floating-point multiplies for the weight×activation path.
+    ///
+    /// The output model provides the same prediction interface but operates
+    /// on packed ternary weights (~420 bytes vs ~3.2 KB for f32).
+    pub fn to_bitnet(&self) -> ra_bitnet::BitNetCostModel {
+        ra_bitnet::BitNetCostModel::from_f32_weights(
+            &*self.w1,
+            &*self.b1,
+            &*self.w2,
+            &*self.b2,
+            self.feature_mean,
+            self.feature_inv_std,
+            self.samples_trained,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

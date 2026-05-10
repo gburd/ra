@@ -14,6 +14,7 @@ streaming = ["timely", "differential-dataflow"]
 file-discovery = ["walkdir"]
 timeline = ["ra-stats/timeline"]
 ml = ["ra-ml"]
+bitnet = ["ra-bitnet"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -21,6 +22,7 @@ ra-core = { workspace = true }
 ra-hardware = { workspace = true }
 ra-metadata = { workspace = true, optional = true }
 ra-ml = { workspace = true, optional = true }
+ra-bitnet = { workspace = true, optional = true }
 ra-stats = { workspace = true }
 egg = { workspace = true }
 serde = { workspace = true }

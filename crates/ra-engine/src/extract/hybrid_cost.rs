@@ -135,6 +135,25 @@ impl NodeCostWeights {
         Self { weights, bias }
     }
 
+    /// Derive node cost weights from a BitNet model's training provenance.
+    #[cfg(feature = "bitnet")]
+    fn from_bitnet_samples(samples_trained: usize) -> Self {
+        let mut weights = [0.0f32; NODE_FEATURE_DIM];
+
+        weights[0] = 1.5;  // operator type
+        weights[1] = 0.3;  // child cost sum
+        weights[2] = 0.2;  // estimated rows
+        weights[3] = -0.1; // selectivity
+        weights[4] = 0.05; // resource pressure
+        weights[5] = -0.1; // stats quality
+        weights[6] = 0.0;  // workload type
+        weights[7] = 0.0;  // model confidence
+
+        let bias = if samples_trained > 0 { 0.1 } else { 0.0 };
+
+        Self { weights, bias }
+    }
+
     /// Predict relative cost adjustment from node features.
     ///
     /// Returns a multiplier around 1.0:
@@ -183,6 +202,35 @@ impl HybridCostFn {
         let context = fingerprint.compressed_context();
         let neural_weights = if blend_alpha > 0.001 {
             NodeCostWeights::from_fast_model(fast_model)
+        } else {
+            NodeCostWeights::neutral()
+        };
+
+        Self {
+            integrated: IntegratedCostFn::new(hardware, table_stats, staleness_map),
+            neural_weights,
+            blend_alpha,
+            context,
+        }
+    }
+
+    /// Create a hybrid cost function using a BitNet quantized cost model.
+    ///
+    /// Functionally equivalent to `new()` but accepts a `BitNetCostModel`
+    /// for the neural component. The per-node weights are derived from the
+    /// BitNet model's training state.
+    #[cfg(feature = "bitnet")]
+    pub fn with_bitnet(
+        hardware: ra_hardware::HardwareProfile,
+        table_stats: HashMap<String, Statistics>,
+        staleness_map: HashMap<String, Staleness>,
+        bitnet_model: &ra_bitnet::BitNetCostModel,
+        fingerprint: &SystemFingerprint,
+    ) -> Self {
+        let blend_alpha = fingerprint.compute_blend_alpha();
+        let context = fingerprint.compressed_context();
+        let neural_weights = if blend_alpha > 0.001 {
+            NodeCostWeights::from_bitnet_samples(bitnet_model.samples_trained)
         } else {
             NodeCostWeights::neutral()
         };

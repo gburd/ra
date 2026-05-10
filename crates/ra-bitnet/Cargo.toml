@@ -1,0 +1,27 @@
+[package]
+name = "ra-bitnet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "BitNet 1.58-bit quantized neural cost model for Ra"
+
+[features]
+default = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+rand = { workspace = true }
+
+[[bench]]
+name = "bitnet_cost"
+harness = false
+
+[lints]
+workspace = true
