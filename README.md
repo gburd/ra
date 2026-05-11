@@ -1,71 +1,232 @@
-# Relational Algebra Rule System
+# Ra
 
-> The definitive open-source repository of relational algebra transformation rules
+Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner_hook` extension. It converts SQL into a relational algebra tree, runs equality saturation (e-graph rewrite rules) to explore equivalent plan forms, then extracts the lowest-cost plan using a 420-byte BitNet 1.58-bit neural cost model trained online from execution feedback. A speculative router makes an O(1) prediction (~87ns) about each query's optimization difficulty and routes trivial cases (equi-join chains, single-table scans) directly to heuristic construction, reserving the full e-graph search for queries that actually benefit from it.
 
-A system for database query optimization built on literate programming,
-equality saturation, and differential dataflow. It codifies decades of
-database optimization knowledge from academic research and production
-systems (PostgreSQL, MySQL, DuckDB, SQLite, and more) into a single,
-maintainable, formally verified framework.
+## Architecture
 
-## Features
+```
+                         ┌──────────────────────┐
+                         │        SQL           │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+┌───────────────────────────────────────────────────────────────────┐
+│  LIME PARSER  (LALR grammar, codeberg.org/gregburd/lime)          │
+│  SQL → RelExpr (relational algebra tree)                          │
+└───────────────────────────────────┬───────────────────────────────┘
+                                    │
+                                    ▼
+┌───────────────────────────────────────────────────────────────────┐
+│  SPECULATIVE ROUTER  (~87ns BitNet forward pass)                  │
+│                                                                    │
+│  Extract OptimizationFeatures (16D) from RelExpr                  │
+│  Predict: difficulty, iterations_needed, improvement_potential     │
+│                                                                    │
+│  Route decision:                                                   │
+│    SKIP       → return unchanged (single-table, trivial)          │
+│    LEFT_DEEP  → heuristic join ordering (equi-join chains)        │
+│    EGRAPH_LOW → e-graph, 3 iterations, 5ms budget                 │
+│    EGRAPH_MED → e-graph, 8 iterations, 15ms budget                │
+│    EGRAPH_HI  → e-graph, 15 iterations, 50ms budget               │
+└──────────┬────────────────────┬───────────────────────────────────┘
+           │                    │
+     (fast paths)         (e-graph path)
+           │                    │
+           │                    ▼
+           │  ┌─────────────────────────────────────────────────────┐
+           │  │  E-GRAPH EQUALITY SATURATION (egg library)          │
+           │  │                                                      │
+           │  │  ~170 rewrite rules applied simultaneously:          │
+           │  │    • Predicate pushdown (filter through joins)       │
+           │  │    • Join reordering (commutativity, associativity)  │
+           │  │    • Projection pruning (remove unused columns)      │
+           │  │    • Expression simplification (constant folding)    │
+           │  │    • Aggregate optimization (push through joins)     │
+           │  │    • CTE inlining (small CTEs materialized inline)   │
+           │  │    • Semi-join reduction, redundant join elimination  │
+           │  │    • Functional dependency exploitation              │
+           │  │                                                      │
+           │  │  CONTINUATION GATE (every 2 iterations):             │
+           │  │    If cost improvement < 0.1% → stop early           │
+           │  │    If model predicts P(improve) < 30% → stop         │
+           │  └──────────────────────┬──────────────────────────────┘
+           │                         │
+           │                         ▼
+           │  ┌─────────────────────────────────────────────────────┐
+           │  │  COST EXTRACTION                                     │
+           │  │  BitNet cost model scores all equivalent plans       │
+           │  │  Extract lowest-cost plan from e-graph               │
+           │  └──────────────────────┬──────────────────────────────┘
+           │                         │
+           ▼                         ▼
+┌───────────────────────────────────────────────────────────────────┐
+│  OPTIMIZED RelExpr                                                 │
+│                                                                    │
+│  → Plan cache (template-based, 97.5% hit rate on OLTP)            │
+│  → Training coordinator (feeds back to BitNet model)               │
+│  → PostgreSQL PlannedStmt (via plan_builder)                       │
+└───────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │  PostgreSQL Executor  │
+                         └──────────────────────┘
+```
 
-- **1,387 Transformation Rules** in 5 categories: logical, hardware
-  (GPU/FPGA/SIMD), distributed, multi-model, and physical
-- **Literate Programming** -- Each rule is a documented `.rra` file
-  with formal algebra, implementation, preconditions, cost model,
-  and test cases
-- **Equality Saturation** -- Uses the `egg` library for e-graph-based
-  optimization that explores all equivalent plans simultaneously
-- **Neural-Guided Optimization** -- Full-pipeline neural integration:
-  learned rule selection, adaptive saturation convergence, hybrid
-  neural/traditional cost extraction, and online learning from
-  execution feedback
-- **Three-Tier Rule Tracking** -- Inspect which rules applied, which
-  were evaluated but didn't match, and which are available in the
-  system for debugging and optimization analysis
-- **Index Access Method Abstraction** -- Database-agnostic index
-  capability discovery that automatically detects and uses GIN, RUM,
-  GiST, BRIN, and custom index types without hardcoding
-- **PostgreSQL Extension** -- Native `ra_pg_extension` that hooks
-  into PostgreSQL's planner for transparent query optimization
-- **Progressive Re-Optimization** -- Mid-execution plan switching
-  when runtime statistics diverge from estimates (RFC 0052)
-- **Rule Complexity Prioritization** -- Intelligent rule ordering by
-  cost-to-benefit ratio for 20-27% faster optimization on complex
-  queries (RFC 0058)
-- **Plan Cache** -- 37x OLTP speedup with template-based plan caching
-  (97.5% hit rate across 5 templates)
-- **Hardware-Aware Optimization** -- Cost models for GPU, FPGA, SIMD,
-  and NUMA-aware operator placement
-- **Distributed Query Planning** -- Broadcast, shuffle, co-located,
-  and semi-join strategies with exchange operator management
-- **Multi-Model Support** -- Rules for graph traversal, document
-  queries, and time-series operations
-- **SQL Dialect Translation** -- Translate SQL between 20+ dialects
-  including PostgreSQL, MySQL, SQLite, DuckDB, MSSQL, and Oracle
-- **Formal Verification** -- TLA+ specifications proving termination,
-  cost monotonicity, and semantic equivalence
-- **Resource Budgets** -- Constrain optimizer time, memory, and
-  iterations with predefined profiles (interactive, standard, batch,
-  memory-constrained) and custom limits
-- **Plan Diff Visualization** -- Colorized structural diffs between
-  original and optimized plans in four formats (colored, plain,
-  side-by-side, compact)
+## Parser: Lime
+
+Ra uses [Lime](https://codeberg.org/gregburd/lime), an LALR(1) parser generator with conflict resolution strategies, GLR support, and a literate grammar format. The Lime grammar defines PostgreSQL-compatible SQL syntax and produces a `RelExpr` (relational algebra) tree directly during parsing — no intermediate AST.
+
+Lime is included as a git submodule at `crates/lime-sys/lime` and exposed to Rust through `lime-sys` (C FFI bindings) and `lime-rs` (safe Rust wrapper). The `ra-parser` crate combines Lime's generated parser with a `sql_to_relexpr` module that handles semantic analysis, type resolution, and expression lowering.
+
+## Neural Cost Model: BitNet 1.58-bit
+
+### Architecture
+
+```
+Input: [f32; 12]  QueryFeatures
+         │
+    ┌────┴────┐
+    │ Normalize│  x_norm = (x - μ) * σ⁻¹  (learned per-feature)
+    └────┬────┘
+         │
+    ┌────┴────────────────────────────────────┐
+    │ Layer 1:  12 → 32                        │
+    │ W₁: 384 ternary weights {-1, 0, +1}     │
+    │ h = ReLU(W₁ · x_norm · α₁ + b₁)        │
+    │ 96 bytes packed (2 bits per weight)       │
+    └────┬────────────────────────────────────┘
+         │
+    ┌────┴────────────────────────────────────┐
+    │ Layer 2:  32 → 16                        │
+    │ W₂: 512 ternary weights {-1, 0, +1}     │
+    │ y = softplus(W₂ · h · α₂ + b₂)          │
+    │ 128 bytes packed                          │
+    └────┬────────────────────────────────────┘
+         │
+Output: [f32; 16]  CostVector + routing signals
+```
+
+**Total model size: 420 bytes.** Inference: ~72ns (all 16 dims) or ~87ns (scalar CPU cost).
+
+### Quantization
+
+Each weight is ternary {-1, 0, +1}, encoded in 2 bits using the absmean method from "The Era of 1-bit LLMs" (Microsoft Research, 2024):
+
+```
+α = mean(|W|)
+W_q = round_clip(W / α, -1, 1)
+```
+
+At load time, ternary values are pre-multiplied by α into f32 arrays. Inference is standard FMA loops that auto-vectorize to NEON/AVX2 — the ternary nature only affects model size and training, not runtime.
+
+### Training: QAT with Straight-Through Estimator
+
+The `BitNetTrainer` maintains full-precision latent weights and quantizes on every forward pass. Gradients flow through quantization via STE (identity approximation). Adam optimizer with weight decay and gradient clipping.
+
+Training happens online: every e-graph optimization run produces an `OptimizationTrace` (features, per-iteration costs, termination reason, optimal stopping point). Traces are batched (64 samples) and fed to the trainer. The model snapshots every 256 steps and is immediately available to the speculative router.
+
+### Output Dimensions
+
+| Dims | Purpose |
+|------|---------|
+| 0-11 | Cost prediction (CPU, memory, I/O, locks, WAL, cache) |
+| 12 | Difficulty score (speculative router) |
+| 13 | Predicted iterations needed |
+| 14 | Expected improvement percentage |
+| 15 | Prediction confidence |
+
+## E-Graph Rule System
+
+The optimizer uses [egg](https://arxiv.org/abs/2004.03082) (e-graphs good) for equality saturation. Instead of applying transformations sequentially (potentially missing better orderings), the e-graph represents ALL equivalent plans simultaneously and extracts the cheapest.
+
+### Rule Categories (~170 rules active)
+
+| Category | Rules | Examples |
+|----------|-------|----------|
+| Predicate pushdown | 20+ | Filter through join, filter through project |
+| Join reordering | 15+ | Commutativity, associativity, left-deep conversion |
+| Projection pushdown | 10+ | Remove unused columns early |
+| Expression simplification | 25+ | Constant folding, boolean simplification, NULL propagation |
+| Aggregate optimization | 12+ | Push aggregates through joins, merge aggregates |
+| Join elimination | 8+ | Remove redundant joins, self-join elimination |
+| CTE optimization | 5+ | Inline small CTEs, fold constants |
+| Semi-join reduction | 6+ | Distinct elimination, filter merging |
+| Column pruning | 8+ | Project through set ops, limit, distinct |
+| Functional deps | 5+ | Eliminate redundant sorts/distincts using FDs |
+| DuckDB-inspired | 15+ | Filter combination, type-specific optimizations |
+| SQLite-inspired | 10+ | Index covering, OR-to-UNION transforms |
+| Runtime filters | 8+ | Bloom filter injection, min/max pruning |
+| Join transformations | 10+ | Outer-to-inner conversion, null-rejecting detection |
+
+### Rule Format (.rra)
+
+Rules are defined in literate `.rra` files with formal algebra, implementation, preconditions, cost model, and test cases:
+
+```
+rules/
+├── logical/           Predicate pushdown, join reordering, ...
+├── physical/          Join algorithms, index selection, ...
+├── hardware/          GPU, FPGA, SIMD, NUMA
+├── distributed/       Exchange, broadcast, partition pruning
+└── multi-model/       Graph, document, time-series
+```
+
+## Dataflow: Planning and Statistics
+
+### Planning Pipeline (inside PostgreSQL)
+
+```
+1. planner_hook intercepts Query node
+2. Lime parser: SQL text → RelExpr
+3. Subquery decorrelation: IN/EXISTS → SemiJoin/AntiJoin
+4. Speculative router: predict route from 16D features
+5. Route execution:
+   - SKIP: return RelExpr unchanged
+   - LEFT_DEEP: cardinality-ordered join tree construction
+   - EGRAPH: equality saturation with adaptive budget
+6. Plan builder: RelExpr → PostgreSQL PlannedStmt
+7. Return PlannedStmt to executor
+```
+
+### Statistics Flow
+
+```
+PostgreSQL catalogs (pg_statistic, pg_class)
+         │
+         ▼
+┌─────────────────────────────────┐
+│  Metadata Cache                  │
+│  - Invalidated via relcache CB  │
+│  - Row counts, column stats     │
+│  - Index availability            │
+└────────────┬────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────┐
+│  Optimizer                       │
+│  - Table stats → join ordering  │
+│  - Column NDV → selectivity     │
+│  - Index info → access paths    │
+└────────────┬────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────┐
+│  Execution Feedback              │
+│  (executor_end_hook)             │
+│  - Actual time, rows, buffers   │
+│  - Compared to predicted cost   │
+│  - Fed to FeedbackCollector      │
+│  - Updates MAPE tracker          │
+│  - Triggers model training       │
+└─────────────────────────────────┘
+```
+
+The feedback loop closes the gap between predicted and actual costs. The MAPE (Mean Absolute Percentage Error) tracker monitors prediction quality with exponential decay (β=0.99, ~100 sample half-life). When MAPE drops below a threshold, the model is considered reliable enough to influence routing decisions with high confidence.
 
 ## Quick Start
 
-### Using Nix (Recommended)
-
-```bash
-nix develop
-cargo build
-cargo test
-```
-
-### Without Nix
-
-Requirements: Rust 1.88+, clang (for lime-sys build)
+### Build
 
 ```bash
 git submodule update --init
@@ -73,283 +234,91 @@ cargo build
 cargo test
 ```
 
+Requirements: Rust 1.88+, clang (for lime-sys)
+
 ### Library Usage
 
-The core optimizer is available as a Rust library. A plain `cargo build`
-builds only the default workspace members (the library layer):
-
 ```rust
-use ra_parser::sql_to_relexpr::sql_to_relexpr;
+use ra_parser::sql_to_relexpr;
 use ra_engine::Optimizer;
 
 let expr = sql_to_relexpr("SELECT * FROM users WHERE age > 30")?;
 let optimized = Optimizer::new().optimize(&expr)?;
 ```
 
-### CLI Usage
+### PostgreSQL Extension
 
-Build and run the interactive CLI:
+```bash
+# Build and install (requires pg_config in PATH)
+cargo pgrx install --features pg18 --release
+
+# Enable in PostgreSQL
+CREATE EXTENSION pg_ra_planner;
+
+# Ra is now active for all queries. Disable per-session:
+SET ra_planner.enabled = off;
+```
+
+### CLI
 
 ```bash
 cargo build -p ra-cli
-```
 
-The CLI commands are organized into logical groups:
-
-**Query analysis** — Parse, optimize, compare, and translate SQL:
-```bash
-ra-cli explain  'SELECT ...'              # Show relational algebra plan tree
-ra-cli optimize 'SELECT ...'              # Optimize with rewrite rules
-ra-cli optimize 'SELECT ...' --diff colored  # Show before/after diff
-ra-cli optimize 'SELECT ...' --trace      # Trace which rules fired
-ra-cli compare  'SELECT ...' --db postgres://...  # Compare vs native EXPLAIN
+ra-cli explain  'SELECT ...'           # Show relational algebra tree
+ra-cli optimize 'SELECT ...'           # Optimize with rewrite rules
+ra-cli optimize 'SELECT ...' --diff    # Before/after diff
 ra-cli translate --from postgres --to mysql 'SELECT ...'
-ra-cli format   'SELECT ...'              # Pretty-print SQL
 ```
-
-**Rule management** — Inspect, validate, and test the 1,387 optimization rules:
-```bash
-ra-cli list                     # List all rules (filterable by --category, --tag)
-ra-cli show <rule-id>           # Show detailed rule metadata
-ra-cli validate rules/          # Validate .rra file syntax
-ra-cli test rules/              # Run embedded test cases
-ra-cli stats                    # Rule collection statistics
-```
-
-**Database integration** — Connect to live databases:
-```bash
-ra-cli gather-metadata --db postgres://...  # Export schema/stats to JSON
-ra-cli monitor --db postgres://...          # Schema analysis + tuning advice
-ra-cli proxy --db postgres://...            # Transparent optimizer proxy
-ra-cli benchmark --db postgres://...        # Compare Ra vs native optimizer
-```
-
-**ML and neural model** — Manage the learned cost model:
-```bash
-ra-cli ml train --input data.json           # Train from execution feedback
-ra-cli ml stats                             # Model accuracy metrics
-ra-cli ml export                            # Export model for inspection
-```
-
-**Shell completions** — Enable tab-completion:
-```bash
-ra-cli completions bash > ~/.local/share/bash-completion/completions/ra-cli
-ra-cli completions zsh  > ~/.zfunc/_ra-cli
-ra-cli completions fish > ~/.config/fish/completions/ra-cli.fish
-```
-
-See the [Getting Started guide](docs/getting-started.md) for a full
-walkthrough, or `ra-cli <command> --help` for detailed usage of any command.
-
-### Web Explorer
-
-Run the interactive web explorer locally:
-
-```bash
-# Docker (simplest)
-./scripts/docker-run.sh
-
-# Docker Compose (better for development)
-./scripts/docker-compose-up.sh
-```
-
-Then open http://localhost:8000 for local.
-
-See [Deployment Guide](docs/deployment.md) for full details on Docker, Kubernetes, and cloud deployment.
 
 ## Project Structure
 
 ```
 ra/
-├── crates/                    # Rust workspace (22 crates)
-│   ├── ra-core/               # Core types: RelExpr, Expr, Cost, Rule, Statistics
-│   ├── ra-parser/             # SQL → RelExpr (Lime LALR grammar + sql_to_relexpr)
-│   ├── ra-compiler/           # .rra rule file compilation and indexing
-│   ├── ra-engine/             # Optimization engine (egg e-graph + neural pipeline)
-│   ├── ra-hardware/           # Hardware detection + cost calibration (CPU/GPU/FPGA)
-│   ├── ra-stats-advanced/     # Streaming statistics, staleness tracking, monitoring
-│   ├── ra-dialect/            # SQL dialect translation (20+ dialects)
-│   ├── ra-cache-api/          # Plan cache trait definitions
-│   ├── ra-cache-impl/         # Plan cache LRU/LFU/adaptive implementations
-│   ├── ra-sql-parser/         # Custom sqlparser fork (SQL parsing frontend)
-│   ├── ra-ml/                 # ML cardinality estimation
-│   ├── ra-adaptive/           # Runtime reoptimization
-│   ├── ra-metadata/           # Database metadata factory
-│   ├── ra-adapters/           # Database connectors (DuckDB, MySQL, Stoolap)
+├── models/                    # Trained BitNet model (committed)
+│   └── cost_model.bitnet.json
+├── crates/
+│   ├── ra-core/               # Types: RelExpr, Expr, Cost, Statistics
+│   ├── ra-parser/             # SQL → RelExpr (Lime LALR + sql_to_relexpr)
+│   ├── ra-engine/             # Optimizer: e-graph, speculative router, training
+│   ├── ra-bitnet/             # BitNet 1.58-bit model: inference + QAT training
+│   ├── ra-hardware/           # Hardware detection, cost calibration
+│   ├── ra-pg-extension/       # PostgreSQL planner_hook extension (pgrx)
+│   ├── ra-bench/              # Benchmarks: TPC-H, JOB, comparison harness
 │   ├── ra-cli/                # Command-line interface
-│   ├── ra-bench/              # Benchmark harness (JOB, TPC-H, TPROC-C)
-│   ├── ra-grammar-fuzzer/     # Grammar-based SQL fuzzer
-│   ├── ra-test-utils/         # Shared test utilities
-│   ├── ra-quel-parser/        # QUEL language parser (experimental)
-│   ├── ra-pg-extension/       # PostgreSQL planner extension (pgrx, excluded)
-│   ├── lime-sys/              # C library: Lime parser generator
-│   └── lime-rs/               # Rust bindings for lime-sys
-├── rules/                     # 1,387 rule definitions (.rra files)
-│   ├── logical/               # Predicate pushdown, join reordering, ...
-│   ├── physical/              # Join algorithms, index selection, ...
-│   ├── hardware/              # GPU, FPGA, SIMD, NUMA, data placement
-│   ├── distributed/           # Exchange, broadcast join, partition pruning
-│   └── multi-model/           # Graph, document, time-series
+│   ├── ra-compiler/           # .rra rule file compilation
+│   ├── ra-dialect/            # SQL dialect translation (20+ dialects)
+│   ├── lime-sys/              # Lime parser generator (C, git submodule)
+│   └── lime-rs/               # Safe Rust bindings for Lime
+├── rules/                     # 1,387 optimization rules (.rra files)
 ├── benchmarks/                # Benchmark suites and results
-├── web/                       # Web explorer frontend (Preact)
 ├── tla/                       # TLA+ formal specifications
-├── rfcs/                      # Design documents and proposals
-├── docs/                      # Documentation (VitePress)
-├── scripts/                   # Shell utilities (docker, benchmarks, TLA+)
-└── tests/                     # Integration and property tests
+├── rfcs/                      # Design documents
+└── docs/                      # Documentation
 ```
 
-## Workspace Layers
+## Performance
 
-The workspace is organized into three layers controlled by Cargo features:
+End-to-end comparison: Ra extension inside PostgreSQL 18.3 vs native PG planner (TPC-H SF0.01, median of 3 runs):
 
-| Layer | Build command | What's included |
-|-------|--------------|-----------------|
-| **Core** (default) | `cargo build` | Parser, engine, hardware, statistics, dialect — the library |
-| **CLI** | `cargo build -p ra-cli` | Core + database adapters + metadata + CLI binary |
-| **All** | `cargo build -p ra --features all` | Everything including experimental ML and fuzzer |
+| Category | Ra Plan | PG Plan | Verdict |
+|----------|---------|---------|---------|
+| Simple queries (10) | 1.1-1.4ms | 1.0-1.4ms | Parity |
+| Join queries (15) | 1.2-3.5ms | 1.2-3.5ms | Parity |
 
-The PostgreSQL extension (`ra-pg-extension`) is excluded from the workspace and
-requires `pg_config` + PostgreSQL headers. Build it separately with `cargo pgrx`.
-
-## Rule Format
-
-Rules are written in `.rra` (Relational Rule Algebra) literate
-markdown format:
-
-```markdown
----
-id: filter-through-join
-name: Filter Pushdown Through Join
-category: logical/predicate-pushdown
-databases: [postgresql, mysql, duckdb]
----
-
-# Filter Pushdown Through Join
-
-## Description
-Pushes selection predicates through join operators when the predicate
-only references columns from one side of the join.
-
-## Relational Algebra
-sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
-  where attrs(p) is a subset of attrs(R)
-
-## Implementation
-[egg rewrite rules in Rust]
-
-## Preconditions
-[When the rule applies and when it does not]
-
-## Cost Model
-[Estimated benefit with selectivity analysis]
-
-## Test Cases
-[SQL examples: positive cases and negative cases]
-
-## References
-[Database source code links and academic papers]
-```
-
-## Documentation
-
-### For library users (embedding Ra in your project)
-
-- [API Reference](docs/api-reference.md) -- Programmatic usage (`Optimizer`, `RelExpr`, `Statistics`)
-- [Architecture](docs/architecture.md) -- Crate dependency graph and data flow
-- [Cost Models](docs/guides/cost-models.md) -- Cost estimation, calibration, neural blend
-- [Rule Authoring Guide](docs/guides/rule-authoring.md) -- Write custom `.rra` rules
-- [Hardware Acceleration](docs/features/hardware-acceleration.md) -- GPU/FPGA/SIMD cost models
-- [PostgreSQL Extension](docs/postgresql-extension.md) -- Native planner hook integration
-
-### For educators and learners (understanding query optimization)
-
-- [Getting Started](docs/getting-started.md) -- Installation and interactive walkthrough
-- [Plan Visualization](docs/features/plan-visualization.md) -- Colorized plan diffs
-- [Resource Budgets](docs/features/resource-budgets.md) -- How optimizers manage time/memory tradeoffs
-- [Dialect Translation](docs/guides/dialect-translation.md) -- How SQL varies across databases
-- [Distributed Optimization](docs/features/distributed-optimization.md) -- Network-aware query planning
-- [Formal Verification](docs/features/formal-verification.md) -- Proving optimizer correctness with TLA+
-- [Benchmarks](docs/benchmarks.md) -- JOB and TPC-H performance results
-
-### Reference
-
-- [Documentation Index](docs/README.md) -- Full documentation map
-- [Contributing](CONTRIBUTING.md) -- Development standards and contribution guide
-- [Neural Cost Model](docs/NEURAL_COST_MODEL.md) -- Learned cost estimation architecture
-- [Neural Pipeline](docs/NEURAL_MODEL_PIPELINE.md) -- Training and deployment guide
-
-## Development
-
-```bash
-# Build core library (default members)
-cargo build
-
-# Build CLI
-cargo build -p ra-cli
-
-# Run all tests
-cargo test
-
-# Run linter (zero warnings required)
-cargo clippy --all-targets --all-features -- -D warnings
-
-# Format code
-cargo fmt
-
-# Run benchmarks
-cargo bench --package ra-engine
-
-# Validate all rules
-cargo run -p ra-cli -- validate rules/
-
-# Run TLA+ formal verification
-./scripts/run-tla.sh
-
-# Generate API documentation
-cargo doc --no-deps --all-features --open
-```
-
-## Contributing
-
-Contributions are welcome in these areas:
-
-1. **Rule Extraction** -- Extract rules from database source code
-2. **Rule Writing** -- Document optimizations in `.rra` format
-3. **Testing** -- Add test cases and property-based tests
-4. **Verification** -- Write TLA+ specifications
-5. **Documentation** -- Improve guides and examples
-6. **Dialect Support** -- Add SQL dialect translations
-7. **Hardware Rules** -- Add rules for new accelerators
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-
-## License
-
-This project is licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
-
-## Acknowledgments
-
-This project builds on decades of database research and open-source
-contributions:
-
-- PostgreSQL optimizer team
-- DuckDB developers
-- Apache DataFusion community
-- SQLite project
-- egg (e-graphs good) library
-- Materialize / Differential Dataflow
-- Academic research: Selinger et al. (System R), Graefe (Volcano),
-  Neumann (HyPer), Boncz (MonetDB/X100), and many others
+Ra wins 15/25 queries, PG wins 9/25, 1 tie. Maximum planning time difference: 0.28ms. Execution times are identical (same PostgreSQL executor, equivalent plans).
 
 ## References
 
 - [egg: Fast and Extensible Equality Saturation](https://arxiv.org/abs/2004.03082)
-- [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow)
-- [The Volcano Optimizer Generator](https://dl.acm.org/doi/10.1109/69.273032)
-- [Access Path Selection in a Relational Database (System R)](https://dl.acm.org/doi/10.1145/582095.582099)
+- [The Era of 1-bit LLMs](https://arxiv.org/abs/2402.17764) (Microsoft Research, 2024)
+- [Lime Parser Generator](https://codeberg.org/gregburd/lime)
+- [Access Path Selection in System R](https://dl.acm.org/doi/10.1145/582095.582099) (Selinger et al.)
+- [The Volcano Optimizer Generator](https://dl.acm.org/doi/10.1109/69.273032) (Graefe)
+
+## License
+
+Licensed under either of:
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT License ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.
