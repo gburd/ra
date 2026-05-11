@@ -34,7 +34,7 @@ use super::tracking::{
     RuleTrackingResult,
 };
 
-/// Default iteration limit based on table count (replaces QueryComplexity).
+/// Default iteration limit based on table count (replaces `QueryComplexity`).
 fn default_iter_limit_for_tables(table_count: usize) -> usize {
     match table_count {
         0..=1 => 3,
@@ -45,7 +45,7 @@ fn default_iter_limit_for_tables(table_count: usize) -> usize {
     }
 }
 
-/// Default timeout based on table count (replaces QueryComplexity).
+/// Default timeout based on table count (replaces `QueryComplexity`).
 fn default_timeout_ms_for_tables(table_count: usize) -> u64 {
     match table_count {
         0..=1 => 50,
@@ -271,7 +271,7 @@ impl Optimizer {
 
     /// Enable speculative routing with the given cost model.
     ///
-    /// When enabled, the optimizer uses a BitNet forward pass (~87ns)
+    /// When enabled, the optimizer uses a `BitNet` forward pass (~87ns)
     /// to predict the optimal optimization strategy before running
     /// the e-graph. This can route simple queries (equi-join chains)
     /// directly to left-deep construction, bypassing e-graph entirely.
@@ -321,7 +321,7 @@ impl Optimizer {
         self.training_coordinator.as_ref()
     }
 
-    /// Load a BitNet cost model from a JSON file.
+    /// Load a `BitNet` cost model from a JSON file.
     ///
     /// The path can be overridden via the `RA_MODEL_PATH` environment variable.
     /// Falls back to `models/cost_model.bitnet.json`. If no model file exists,
@@ -504,7 +504,7 @@ impl Optimizer {
         Ok(result)
     }
 
-    /// Attempt Skip or LeftDeep fast routes. Returns `Some(plan)` if
+    /// Attempt Skip or `LeftDeep` fast routes. Returns `Some(plan)` if
     /// handled, `None` if we should continue to e-graph.
     fn try_fast_route(
         &self,
@@ -1345,8 +1345,8 @@ impl Optimizer {
                     );
                     break;
                 }
-                ConvergenceBehavior::Adaptive if iterations_done >= 2 => {
-                    if is_simple_query(table_count) {
+                ConvergenceBehavior::Adaptive if iterations_done >= 2
+                    && is_simple_query(table_count) => {
                         debug!(
                             "Adaptive convergence: simple query, \
                              stopping after {} iterations",
@@ -1354,7 +1354,6 @@ impl Optimizer {
                         );
                         break;
                     }
-                }
                 _ => {}
             }
 

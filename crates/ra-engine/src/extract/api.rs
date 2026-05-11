@@ -67,7 +67,7 @@ pub fn extract_best<S: BuildHasher>(
 /// Pre-resolve table symbol IDs to row counts by scanning the e-graph.
 ///
 /// For each e-class containing a `Symbol` node whose name matches a
-/// table in `table_stats`, records the canonical Id → row_count mapping.
+/// table in `table_stats`, records the canonical Id → `row_count` mapping.
 /// This is O(n) in the number of e-classes (typically small) and runs
 /// once before extraction.
 fn resolve_table_row_counts<S: BuildHasher>(
@@ -174,7 +174,7 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
 ///
 /// # Blend Behavior
 ///
-/// - When `fast_model` is untrained (0 samples), blend_alpha = 0.0 and this
+/// - When `fast_model` is untrained (0 samples), `blend_alpha` = 0.0 and this
 ///   produces identical results to `extract_best_with_staleness`.
 /// - As the model trains, alpha increases toward 0.9, blending neural predictions
 ///   with traditional cost estimates at every node in the e-graph.

@@ -136,10 +136,10 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 /// Return the set of generated rules from .rra files that are compatible
-/// with the current RelLang grammar.
+/// with the current `RelLang` grammar.
 ///
 /// These rules are compiled from the `rules/` directory at build time.
-/// Rules using operators not in RelLang or requiring unimplemented condition
+/// Rules using operators not in `RelLang` or requiring unimplemented condition
 /// functions are excluded.
 ///
 /// Call [`generated_rule_stats()`] for statistics about the generated set.

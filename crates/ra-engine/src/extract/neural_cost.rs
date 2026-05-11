@@ -64,6 +64,7 @@ impl Default for CostWeights {
 
 impl NeuralPlanScorer {
     /// Create a scorer with a zero-weight model and default weights.
+    #[must_use] 
     pub fn new() -> Self {
         Self { model: BitNetCostModel::new_zeros(), weights: CostWeights::default() }
     }
@@ -76,11 +77,13 @@ impl NeuralPlanScorer {
     }
 
     /// Create a scorer from an existing model.
+    #[must_use] 
     pub fn from_model(model: BitNetCostModel) -> Self {
         Self { model, weights: CostWeights::default() }
     }
 
     /// Override the aggregation weights.
+    #[must_use] 
     pub fn with_weights(mut self, weights: CostWeights) -> Self {
         self.weights = weights;
         self
@@ -91,6 +94,7 @@ impl NeuralPlanScorer {
     /// Returns `(scalar_cost: f64, confidence: f32)`:
     /// - `scalar_cost` — weighted aggregate of the 16 neural cost dimensions.
     /// - `confidence` — `0.0` (no training) to `1.0` (fully calibrated).
+    #[must_use] 
     pub fn score(&self, plan: &RelExpr) -> (f64, f32) {
         let features = extract_features(plan);
         let costs = self.model.predict_all(&features.as_array());
@@ -100,12 +104,14 @@ impl NeuralPlanScorer {
     }
 
     /// Predict only the CPU time dimension (~87ns).
+    #[must_use] 
     pub fn predict_cpu_ms(&self, plan: &RelExpr) -> f32 {
         let features = extract_features(plan);
         self.model.predict_cpu_ms(&features.as_array())
     }
 
     /// Compute the cost ratio between the neural estimate and a reference cost.
+    #[must_use] 
     pub fn cost_ratio(&self, plan: &RelExpr, reference_cost: f64) -> f64 {
         let (neural_cost, _) = self.score(plan);
         if reference_cost > 0.0 {

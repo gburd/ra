@@ -6,7 +6,7 @@
 //!
 //! Two termination signals:
 //! 1. **Cost stagnation**: If cost hasn't improved >0.1% in 2 checks, stop.
-//! 2. **Model-based**: BitNet predicts probability of meaningful improvement
+//! 2. **Model-based**: `BitNet` predicts probability of meaningful improvement
 //!    in the next N iterations; stop if probability < 0.3.
 
 use std::sync::Arc;
@@ -86,7 +86,7 @@ impl ContinuationGate {
         self.cost_history.push(current_cost);
 
         // Only check at intervals (and after at least 2 data points)
-        if iteration < self.check_interval || iteration % self.check_interval != 0 {
+        if iteration < self.check_interval || !iteration.is_multiple_of(self.check_interval) {
             return ContinuationDecision::Continue;
         }
 

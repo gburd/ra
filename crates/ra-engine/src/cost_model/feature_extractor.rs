@@ -1,4 +1,4 @@
-//! Feature extraction from RelExpr for cost model training.
+//! Feature extraction from `RelExpr` for cost model training.
 //!
 //! Walks a relational algebra tree and extracts numerical features
 //! used by the simple cost model for prediction.
@@ -31,10 +31,11 @@ pub struct StructuralCounts {
     pub has_group_by: bool,
 }
 
-/// Extract query features from a parsed RelExpr.
+/// Extract query features from a parsed `RelExpr`.
 ///
 /// This walks the entire expression tree and counts structural elements
 /// like joins, aggregates, filters, etc.
+#[must_use] 
 pub fn extract_features(expr: &RelExpr) -> QueryFeatures {
     let mut extractor = FeatureExtractor::new();
     extractor.visit(expr);
@@ -53,6 +54,7 @@ pub fn extract_features(expr: &RelExpr) -> QueryFeatures {
 ///   `log10(geometric_mean_rows × join_count_factor)` — a scale-aware estimate that
 ///   distinguishes a 3-table join over 1 M-row tables from one over 1 K-row tables.
 /// - Falls back to the structural heuristic when no matching stats are found.
+#[must_use] 
 pub fn extract_features_with_stats(
     expr: &RelExpr,
     table_stats: &HashMap<String, Statistics>,
@@ -89,7 +91,7 @@ pub fn extract_features_with_stats(
 
     // Scale by join count: each join multiplies cardinality, but real predicates
     // reduce it.  Use join_count as a mild amplifier (cap at ×3).
-    let join_factor = (1.0 + base.join_count as f64 * 0.5).min(3.0);
+    let join_factor = (1.0 + f64::from(base.join_count) * 0.5).min(3.0);
     let cardinality_estimate = (log_mean + join_factor.log10()).min(12.0).max(0.0);
 
     base.max_join_cardinality = cardinality_estimate as f32;
@@ -185,7 +187,14 @@ pub struct FeatureExtractor {
     non_equi_join_count: u32,
 }
 
+impl Default for FeatureExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FeatureExtractor {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             table_count: 0,
@@ -571,6 +580,7 @@ impl FeatureExtractor {
     }
 
     /// Return the raw structural counts for use by the speculative router.
+    #[must_use] 
     pub fn structural_counts(&self) -> StructuralCounts {
         StructuralCounts {
             table_count: self.table_count,
@@ -588,7 +598,7 @@ impl FeatureExtractor {
         }
     }
 
-    /// Convert accumulated counts into QueryFeatures.
+    /// Convert accumulated counts into `QueryFeatures`.
     fn into_features(self) -> QueryFeatures {
         QueryFeatures {
             table_count: self.table_count as f32,

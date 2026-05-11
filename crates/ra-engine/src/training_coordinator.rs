@@ -22,7 +22,7 @@ const TRAIN_BATCH_SIZE: usize = 64;
 const SNAPSHOT_INTERVAL: usize = 256;
 
 /// Training coordinator that collects optimization traces and
-/// trains the BitNet cost model online.
+/// trains the `BitNet` cost model online.
 pub struct TrainingCoordinator {
     trainer: BitNetTrainer,
     trace_buffer: Vec<OptimizationTrace>,
@@ -107,7 +107,7 @@ impl TrainingCoordinator {
         self.trainer.train_step(&features.as_array(), &target);
         self.total_train_steps += 1;
 
-        if self.total_train_steps % SNAPSHOT_INTERVAL == 0 {
+        if self.total_train_steps.is_multiple_of(SNAPSHOT_INTERVAL) {
             self.snapshot_model();
         }
     }
@@ -136,6 +136,18 @@ impl TrainingCoordinator {
             avg_loss: self.trainer.avg_loss(),
             model_samples_trained: self.trainer.steps(),
             buffer_pending: self.trace_buffer.len(),
+        }
+    }
+
+    /// Train directly on raw feature/target pairs (e.g., bootstrap samples).
+    ///
+    /// Each pair is `([f32; 12], [f32; 16])` matching the model's input/output
+    /// dimensions. Snapshots the model after training.
+    pub fn train_on_samples(&mut self, samples: &[([f32; 12], [f32; 16])]) {
+        if !samples.is_empty() {
+            self.trainer.train_batch(samples);
+            self.total_train_steps += samples.len();
+            self.snapshot_model();
         }
     }
 
@@ -168,7 +180,7 @@ impl TrainingCoordinator {
     /// Target: 16D cost vector where:
     ///   - dim 0: optimization time in ms
     ///   - dim 1: final plan cost (log scale)
-    ///   - dim 12: difficulty score (optimal_stop / iterations_run)
+    ///   - dim 12: difficulty score (`optimal_stop` / `iterations_run`)
     ///   - dim 13: normalized iterations needed
     ///   - dim 14: improvement percentage
     ///   - dim 15: confidence (1.0 for real data)
@@ -234,6 +246,7 @@ pub fn shared_coordinator_from_model(model: BitNetCostModel) -> SharedTrainingCo
 /// - Single tables are trivial (0ms optimization)
 /// - 2-7 table equi-joins need ~0.01ms (left-deep)
 /// - Complex queries with cross/theta joins need 5-200ms (e-graph)
+#[must_use] 
 pub fn bootstrap_model() -> BitNetCostModel {
     // Create model with explicit weights that survive ternary quantization.
     // Layer 1 (12→32): weights at ±0.5 with structure encoding known heuristics.
@@ -246,7 +259,7 @@ pub fn bootstrap_model() -> BitNetCostModel {
     // Encode known heuristic: table_count and join_count (dims 0,1)
     // drive cost predictions (output dim 0) and difficulty (dim 12).
     let mut seed: u64 = 12345;
-    for row in w1.iter_mut() {
+    for row in &mut w1 {
         for v in row.iter_mut() {
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             let u = (seed >> 33) as f32 / (u32::MAX >> 1) as f32;
@@ -259,7 +272,7 @@ pub fn bootstrap_model() -> BitNetCostModel {
     w1[9][1] = 0.9;  // cross_join_present → hidden[1]
     w1[8][2] = -0.7; // equi_join_fraction → hidden[2] (high equi = low difficulty)
 
-    for row in w2.iter_mut() {
+    for row in &mut w2 {
         for v in row.iter_mut() {
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             let u = (seed >> 33) as f32 / (u32::MAX >> 1) as f32;

@@ -59,7 +59,7 @@ fn visit_dir(dir: &Path, rules: &mut Vec<RuleInfo>) {
         return;
     };
     let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-    entries.sort_by_key(|e| e.path());
+    entries.sort_by_key(std::fs::DirEntry::path);
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
@@ -153,7 +153,7 @@ fn extract_yaml_list(yaml: &str, key: &str) -> Vec<String> {
     Vec::new()
 }
 
-/// Extract benefit_range from frontmatter.
+/// Extract `benefit_range` from frontmatter.
 fn extract_benefit_range(yaml: &str) -> Option<(f64, f64)> {
     for line in yaml.lines() {
         let trimmed = line.trim();
@@ -275,7 +275,7 @@ fn has_condition_or_applier(rewrite_str: &str) -> bool {
             if trimmed
                 .chars()
                 .next()
-                .map_or(false, |c| c.is_alphabetic() || c == '_')
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
                 && trimmed.contains('(')
             {
                 return true;
@@ -294,7 +294,7 @@ fn has_condition_or_applier(rewrite_str: &str) -> bool {
             if inner
                 .chars()
                 .next()
-                .map_or(false, |c| c.is_uppercase())
+                .is_some_and(char::is_uppercase)
             {
                 return true;
             }
@@ -307,7 +307,7 @@ fn has_condition_or_applier(rewrite_str: &str) -> bool {
                 if inner
                     .chars()
                     .next()
-                    .map_or(false, |c| c.is_uppercase())
+                    .is_some_and(char::is_uppercase)
                 {
                     return true;
                 }
@@ -328,9 +328,9 @@ enum ExtractedRule {
     Commented(String),
 }
 
-/// All valid operators in RelLang with their expected arity.
+/// All valid operators in `RelLang` with their expected arity.
 /// Arity of 0 means leaf (no children), None means variadic (Box<[Id]>).
-/// From egraph/lang.rs define_language! macro.
+/// From egraph/lang.rs `define_language`! macro.
 const RELLANG_OPERATORS: &[(&str, Option<usize>)] = &[
     // Relational operators
     ("scan", Some(1)), ("scan-alias", Some(2)), ("filter", Some(2)),
@@ -393,7 +393,7 @@ const RELLANG_OPERATORS: &[(&str, Option<usize>)] = &[
     ("cast", Some(2)),
 ];
 
-/// Normalize operator aliases to canonical RelLang forms.
+/// Normalize operator aliases to canonical `RelLang` forms.
 ///
 /// - `union_all` / `union-all` → `union true` (union with ALL flag)
 fn normalize_pattern(pattern: &str) -> String {
@@ -412,11 +412,11 @@ fn lookup_operator(name: &str) -> Option<Option<usize>> {
         .map(|(_, arity)| *arity)
 }
 
-/// Check if a rewrite pattern string contains operators not in RelLang
+/// Check if a rewrite pattern string contains operators not in `RelLang`
 /// or operators used with incorrect arity.
 ///
 /// Parses `(op_name child1 child2 ...)` tokens within string literals
-/// and validates against the RELLANG_OPERATORS whitelist.
+/// and validates against the `RELLANG_OPERATORS` whitelist.
 fn contains_unknown_operators(code: &str) -> bool {
     // Extract operator usages from S-expression patterns in string literals.
     // We parse each `(op_name ...)` to check both name and arity.
@@ -603,12 +603,10 @@ fn normalize_rewrite_code(block: &str) -> Vec<ExtractedRule> {
 }
 
 /// Category key derived from the .rra category field.
-/// e.g. "logical/predicate-pushdown" -> "logical_predicate_pushdown"
+/// e.g. "logical/predicate-pushdown" -> "`logical_predicate_pushdown`"
 fn category_to_fn_name(category: &str) -> String {
     category
-        .replace('/', "_")
-        .replace('-', "_")
-        .replace(' ', "_")
+        .replace(['/', '-', ' '], "_")
         .to_lowercase()
 }
 
@@ -659,8 +657,7 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
                     match rw {
                         ExtractedRule::Single(code) => {
                             single_rules.push(format!(
-                                "        {}\n        {},",
-                                rule_comment, code
+                                "        {rule_comment}\n        {code},"
                             ));
                             total_rules += 1;
                         }
@@ -673,8 +670,7 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
                         }
                         ExtractedRule::Commented(code) => {
                             comments.push(format!(
-                                "        {}\n        {}",
-                                rule_comment, code
+                                "        {rule_comment}\n        {code}"
                             ));
                             conditional_rules += 1;
                         }
@@ -684,8 +680,7 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
         }
 
         output.push_str(&format!(
-            "/// Generated rules for category: {}\n",
-            category
+            "/// Generated rules for category: {category}\n"
         ));
         output.push_str(&format!(
             "/// Source: {} .rra files\n",
@@ -693,8 +688,7 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
         ));
         output.push_str("#[allow(unused)]\n");
         output.push_str(&format!(
-            "pub(crate) fn {}() -> Vec<Rewrite<RelLang, RelAnalysis>> {{\n",
-            fn_name
+            "pub(crate) fn {fn_name}() -> Vec<Rewrite<RelLang, RelAnalysis>> {{\n"
         ));
 
         if bidir_rules_for_cat.is_empty() {
@@ -723,8 +717,7 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
             output.push_str("    ];\n");
             for (code, id) in &bidir_rules_for_cat {
                 output.push_str(&format!(
-                    "    // Bidirectional: {}\n    rules.extend({});\n",
-                    id, code
+                    "    // Bidirectional: {id}\n    rules.extend({code});\n"
                 ));
             }
             output.push_str("    rules\n");
@@ -736,18 +729,16 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
     // Generate master function that collects all categories
     output.push_str(&format!(
         "/// All generated rules from .rra files.\n\
-         /// Total: {} active rules, {} conditional (awaiting condition functions).\n\
+         /// Total: {total_rules} active rules, {conditional_rules} conditional (awaiting condition functions).\n\
          #[allow(unused)]\n\
          pub(crate) fn all_generated_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {{\n\
-         ",
-        total_rules, conditional_rules
+         "
     ));
     output.push_str(&format!(
-        "    let mut rules = Vec::with_capacity({});\n",
-        total_rules
+        "    let mut rules = Vec::with_capacity({total_rules});\n"
     ));
     for fn_name in &category_fns {
-        output.push_str(&format!("    rules.extend({}());\n", fn_name));
+        output.push_str(&format!("    rules.extend({fn_name}());\n"));
     }
     output.push_str("    rules\n}\n\n");
 

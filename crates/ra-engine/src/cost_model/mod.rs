@@ -1,6 +1,6 @@
 //! Neural cost model for query optimization.
 //!
-//! Uses a BitNet 1.58-bit quantized model (ternary weights) for sub-100ns
+//! Uses a `BitNet` 1.58-bit quantized model (ternary weights) for sub-100ns
 //! cost prediction. Training uses QAT with Straight-Through Estimator
 //! directly in ternary space.
 //!
@@ -47,6 +47,7 @@ pub struct QueryFeatures {
 
 impl QueryFeatures {
     /// Convert to fixed-size array for model input.
+    #[must_use] 
     pub fn to_vec(&self) -> Vec<f32> {
         vec![
             self.table_count,
@@ -64,7 +65,8 @@ impl QueryFeatures {
         ]
     }
 
-    /// Convert to fixed-size array for BitNet model input.
+    /// Convert to fixed-size array for `BitNet` model input.
+    #[must_use] 
     pub fn as_array(&self) -> [f32; Self::FEATURE_DIM] {
         [
             self.table_count,

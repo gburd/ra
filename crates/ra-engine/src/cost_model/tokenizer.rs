@@ -12,22 +12,19 @@ use serde::{Deserialize, Serialize};
 /// Encoded as special tokens to give the model context about how much time
 /// it has to explore the search space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum TimeBudget {
     /// < 1ms - Aggressive pruning, skip expensive rewrites
     UltraFast,
     /// 1-10ms - Moderate exploration
     Fast,
     /// 10-100ms - Standard optimization
+    #[default]
     Balanced,
     /// > 100ms - Full e-graph search
     Exhaustive,
 }
 
-impl Default for TimeBudget {
-    fn default() -> Self {
-        Self::Balanced
-    }
-}
 
 /// Tokenizer configuration loaded from tokenizer.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +61,7 @@ impl Tokenizer {
     }
 
     /// Encode a time budget as a special token.
+    #[must_use] 
     pub fn encode_budget(&self, budget: TimeBudget) -> u32 {
         match budget {
             TimeBudget::UltraFast => self.config.special_tokens.budget_ultra_fast,
@@ -77,6 +75,7 @@ impl Tokenizer {
     ///
     /// This is a simplified version that tokenizes based on keywords.
     /// In production, this would use the Lime parser's token stream.
+    #[must_use] 
     pub fn encode(&self, sql: &str, budget: TimeBudget) -> Vec<u32> {
         let mut tokens = Vec::new();
 
@@ -107,6 +106,7 @@ impl Tokenizer {
     }
 
     /// Get vocabulary size.
+    #[must_use] 
     pub fn vocab_size(&self) -> usize {
         self.config.vocab_size
     }

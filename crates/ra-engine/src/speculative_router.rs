@@ -1,10 +1,10 @@
-//! Speculative optimization routing using BitNet prediction.
+//! Speculative optimization routing using `BitNet` prediction.
 //!
 //! Uses a trained predictor that routes queries to the optimal optimization
 //! path (skip / left-deep / e-graph) and dynamically caps e-graph budgets.
 //!
-//! Inspired by Google's DFlash speculative decoding architecture: a
-//! lightweight model (~87ns BitNet forward pass) makes an O(1) prediction
+//! Inspired by Google's `DFlash` speculative decoding architecture: a
+//! lightweight model (~87ns `BitNet` forward pass) makes an O(1) prediction
 //! about the optimization strategy, then verification gates confirm
 //! whether continued computation is worthwhile.
 
@@ -193,6 +193,7 @@ impl OptimizationFeatures {
     }
 
     /// Update scale features with table statistics.
+    #[must_use] 
     pub fn with_table_stats(
         mut self,
         table_stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
@@ -220,7 +221,7 @@ impl OptimizationFeatures {
         if table_count > 0 {
             let avg_log_rows = total_rows_log / f64::from(table_count);
             // Scale by join count: each join multiplies (but predicates reduce)
-            let join_factor = (1.0 + self.join_count as f64 * 0.3).min(4.0);
+            let join_factor = (1.0 + f64::from(self.join_count) * 0.3).min(4.0);
             self.log_estimated_rows = (avg_log_rows * join_factor).min(12.0) as f32;
         }
 
@@ -228,7 +229,7 @@ impl OptimizationFeatures {
     }
 }
 
-/// The speculative router uses a dedicated BitNet head to predict
+/// The speculative router uses a dedicated `BitNet` head to predict
 /// the optimal optimization route in O(1) time.
 pub struct SpeculativeRouter {
     model: Arc<BitNetCostModel>,
@@ -249,7 +250,7 @@ impl SpeculativeRouter {
         Self { model }
     }
 
-    /// Predict route from optimization features using the BitNet model.
+    /// Predict route from optimization features using the `BitNet` model.
     ///
     /// Uses output dimensions 12-15 of the 16D prediction:
     /// - dim 12: difficulty score (0 = trivial, 1 = hard)
@@ -347,8 +348,7 @@ impl SpeculativeRouter {
         // Left-deep: equi-join chains with 2-7 tables and good density
         // This is the key insight from the plan — equi-join chains are
         // trivially solved by left-deep ordering in <1ms.
-        if table_count >= 2
-            && table_count <= 7
+        if (2..=7).contains(&table_count)
             && features.equi_join_fraction >= 0.8
             && features.cross_join_present < 0.5
             && features.subquery_count < 1.0
