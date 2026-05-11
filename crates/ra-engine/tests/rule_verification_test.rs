@@ -41,7 +41,12 @@ fn optimize(expr: &RelExpr) -> RelExpr {
         transaction_context: None,
         ..OptimizerConfig::default()
     });
-    opt.optimize(expr).expect("optimization should succeed")
+    // Use optimize_with_egraph to bypass trivial/left-deep fast paths,
+    // ensuring rewrite rules are exercised for rule verification.
+    let (result, _egraph) = opt
+        .optimize_with_egraph(expr)
+        .expect("optimization should succeed");
+    result
 }
 
 fn collect_tables(expr: &RelExpr) -> Vec<String> {

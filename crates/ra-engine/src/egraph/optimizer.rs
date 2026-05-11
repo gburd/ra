@@ -332,16 +332,9 @@ impl Optimizer {
 
         let total_start = Instant::now();
 
-        // Fast-path: single-table queries skip e-graph entirely.
-        // These queries have no joins, subqueries, CTEs, or window
-        // functions, so the optimal plan is trivially the input itself.
-        if Self::is_trivial_query(expr) {
-            debug!("Trivial query fast-path: skipping e-graph");
-            return Ok(expr.clone());
-        }
-
         // Plan cache fast path: check if we have a cached plan for
-        // a structurally equivalent query.
+        // a structurally equivalent query. Must happen BEFORE trivial
+        // fast-path so that all optimization paths can populate the cache.
         let fingerprint = if self.plan_cache.is_some() {
             let fp = QueryFingerprint::from_rel_expr(expr);
             if let Some(ref mutex) = self.plan_cache {
@@ -364,6 +357,15 @@ impl Optimizer {
         } else {
             None
         };
+
+        // Fast-path: single-table queries skip e-graph entirely.
+        // These queries have no joins, subqueries, CTEs, or window
+        // functions, so the optimal plan is trivially the input itself.
+        if Self::is_trivial_query(expr) {
+            debug!("Trivial query fast-path: skipping e-graph");
+            self.insert_into_cache(fingerprint.as_ref(), expr);
+            return Ok(expr.clone());
+        }
 
         // ─── SPECULATIVE ROUTING ───
         // Uses a BitNet forward pass (~87ns) or heuristic fallback to predict
