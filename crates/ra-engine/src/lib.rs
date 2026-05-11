@@ -90,7 +90,6 @@ pub mod plan_comparison;
 pub mod plan_stitch;
 pub mod precondition_eval;
 pub mod progressive_reopt;
-pub mod query_complexity;
 pub mod query_features;
 pub mod recursive;
 pub mod redundant_join;
@@ -261,7 +260,6 @@ pub use progressive_reopt::{
     ReoptDecision, ReoptError, ReoptResult, ReoptimizeFn, RuntimeStatistics, StitchPointKind,
     StitchPointMeta, StitchTransferKind,
 };
-pub use query_complexity::QueryComplexity;
 pub use speculative_router::{OptimizationFeatures, OptRoute, RoutePrediction, SpeculativeRouter};
 pub use continuation_gate::{ContinuationDecision, ContinuationGate};
 pub use training_coordinator::{

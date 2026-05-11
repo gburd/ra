@@ -176,7 +176,7 @@ fn collect_query_files(base_dir: &Path) -> HashMap<String, Vec<PathBuf>> {
 
 fn benchmark_query(
     optimizer: &Optimizer,
-    facts: &EmptyFactsProvider,
+    _facts: &EmptyFactsProvider,
     sql: &str,
     query_id: &str,
     category: &str,
@@ -212,25 +212,22 @@ fn benchmark_query(
         }
     };
 
-    // Optimize with Ra
+    // Optimize with Ra using bounded optimization for metric extraction
     let start = Instant::now();
-    let result = optimizer.optimize_with_facts(&relexpr, facts);
+    let result = optimizer.optimize_bounded(&relexpr);
     let elapsed = start.elapsed();
 
     metrics.plan_time_us = elapsed.as_micros() as u64;
 
     match result {
-        Ok(_optimized) => {
+        Ok(opt_result) => {
             metrics.optimizer_success = true;
-            // Note: Cost extraction requires additional instrumentation
-            metrics.plan_cost_estimate = 0.0;
-
-            // Extract e-graph statistics if available
-            // Note: This would require additional instrumentation in the optimizer
-            // For now, use placeholder values
-            metrics.egraph_nodes = 0;
-            metrics.egraph_classes = 0;
-            metrics.rules_applied = 0;
+            metrics.plan_cost_estimate = opt_result.cost;
+            metrics.egraph_nodes = opt_result.resource_usage.peak_egraph_nodes;
+            metrics.egraph_classes = 0; // Not exposed by ResourceUsageReport
+            metrics.rules_applied = opt_result.resource_usage.iterations_used;
+            metrics.memory_allocated_bytes =
+                opt_result.resource_usage.peak_memory_estimate;
         }
         Err(e) => {
             metrics.error_message = Some(format!("Optimization error: {e}"));

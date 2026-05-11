@@ -6,7 +6,6 @@ use egg::{EGraph, Id, Rewrite, Runner};
 use ra_core::algebra::RelExpr;
 #[cfg(feature = "timeline")]
 use ra_stats::delta::DeltaSet;
-use tracing::warn;
 
 use crate::analysis::RelAnalysis;
 use crate::continuation_gate::{ContinuationDecision, ContinuationGate};
@@ -35,6 +34,33 @@ use super::tracking::{
     RuleTrackingResult,
 };
 
+/// Default iteration limit based on table count (replaces QueryComplexity).
+fn default_iter_limit_for_tables(table_count: usize) -> usize {
+    match table_count {
+        0..=1 => 3,
+        2..=4 => 5,
+        5..=7 => 10,
+        8..=9 => 15,
+        _ => 20,
+    }
+}
+
+/// Default timeout based on table count (replaces QueryComplexity).
+fn default_timeout_ms_for_tables(table_count: usize) -> u64 {
+    match table_count {
+        0..=1 => 50,
+        2..=4 => 200,
+        5..=7 => 500,
+        8..=9 => 2000,
+        _ => 5000,
+    }
+}
+
+/// Whether a query is "simple" for convergence purposes.
+fn is_simple_query(table_count: usize) -> bool {
+    table_count <= 4
+}
+
 /// The main optimization engine.
 ///
 /// Converts a [`RelExpr`] into an e-graph, runs equality saturation
@@ -47,7 +73,7 @@ use super::tracking::{
 #[derive(Debug)]
 pub struct Optimizer {
     config: OptimizerConfig,
-    table_stats: HashMap<String, ra_core::statistics::Statistics>,
+    table_stats: Arc<HashMap<String, ra_core::statistics::Statistics>>,
     hardware_profile: Option<ra_hardware::HardwareProfile>,
     resource_budget: Option<ResourceBudget>,
     plan_cache: Option<Mutex<PlanCache>>,
@@ -58,13 +84,35 @@ pub struct Optimizer {
     training_coordinator: Option<SharedTrainingCoordinator>,
 }
 
+/// Result of running e-graph equality saturation.
+struct SaturationResult {
+    egraph: EGraph<RelLang, RelAnalysis>,
+    root: Id,
+    actual_iterations: usize,
+    termination_reason: &'static str,
+    runner_elapsed: std::time::Duration,
+    egraph_nodes: usize,
+    continuation_gate: Option<ContinuationGate>,
+    stats_cache: crate::stats_cache::StatsCache,
+}
+
+/// Mutable state carried through the saturation loop.
+struct LoopContext {
+    convergence_detector: crate::convergence::ConvergenceDetector,
+    cost_pruner: Option<crate::cost_pruning::CostPruner>,
+    beam_search_tracker: Option<crate::beam_search::BeamSearchTracker>,
+    hardware_cached: Option<ra_hardware::HardwareProfile>,
+    best_cost: f64,
+    cost_improvement_stalled: u32,
+}
+
 impl Optimizer {
     /// Create a new optimizer with default configuration.
     #[must_use]
     pub fn new() -> Self {
         Self {
             config: OptimizerConfig::default(),
-            table_stats: HashMap::new(),
+            table_stats: Arc::new(HashMap::new()),
             hardware_profile: None,
             resource_budget: None,
             plan_cache: None,
@@ -93,7 +141,7 @@ impl Optimizer {
         };
         Self {
             config,
-            table_stats: HashMap::new(),
+            table_stats: Arc::new(HashMap::new()),
             hardware_profile: None,
             resource_budget: None,
             plan_cache,
@@ -201,7 +249,7 @@ impl Optimizer {
         table: impl Into<String>,
         stats: ra_core::statistics::Statistics,
     ) {
-        self.table_stats.insert(table.into(), stats);
+        Arc::make_mut(&mut self.table_stats).insert(table.into(), stats);
     }
 
     /// Builder-style setter for the neural cost model.
@@ -361,16 +409,13 @@ impl Optimizer {
     ///
     /// Returns an error if the expression cannot be converted to
     /// the e-graph representation or if extraction fails.
-    #[expect(clippy::too_many_lines, reason = "core optimization pipeline")]
     pub fn optimize(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
         use std::time::Instant;
         use tracing::{debug, info};
 
         let total_start = Instant::now();
 
-        // Plan cache fast path: check if we have a cached plan for
-        // a structurally equivalent query. Must happen BEFORE trivial
-        // fast-path so that all optimization paths can populate the cache.
+        // 1. Plan cache lookup
         let fingerprint = if self.plan_cache.is_some() {
             let fp = QueryFingerprint::from_rel_expr(expr);
             if let Some(ref mutex) = self.plan_cache {
@@ -379,11 +424,8 @@ impl Optimizer {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(hit) = cache.lookup(&fp) {
                     info!(
-                        "Plan cache hit ({:?}, similarity={:.2}) \
-                         in {:?}",
-                        hit.match_type,
-                        hit.similarity,
-                        total_start.elapsed()
+                        "Plan cache hit ({:?}, similarity={:.2}) in {:?}",
+                        hit.match_type, hit.similarity, total_start.elapsed()
                     );
                     return Ok(hit.plan);
                 }
@@ -394,19 +436,15 @@ impl Optimizer {
             None
         };
 
-        // Fast-path: single-table queries skip e-graph entirely.
-        // These queries have no joins, subqueries, CTEs, or window
-        // functions, so the optimal plan is trivially the input itself.
+        // 2. Trivial fast-path
         if Self::is_trivial_query(expr) {
             debug!("Trivial query fast-path: skipping e-graph");
+            self.record_fast_path_trace(expr, "trivial_fast_path", 0.0);
             self.insert_into_cache(fingerprint.as_ref(), expr);
             return Ok(expr.clone());
         }
 
-        // ─── SPECULATIVE ROUTING ───
-        // Uses a BitNet forward pass (~87ns) or heuristic fallback to predict
-        // the optimal optimization route. Replaces the hard-coded left-deep
-        // eligibility check with a topology-aware prediction.
+        // 3. Speculative routing
         let opt_features = OptimizationFeatures::from_expr(expr)
             .with_table_stats(&self.table_stats);
 
@@ -416,13 +454,75 @@ impl Optimizer {
             SpeculativeRouter::heuristic_fallback(&opt_features)
         };
 
+        if let Some(result) =
+            self.try_fast_route(expr, &mut route_prediction, &fingerprint, total_start)?
+        {
+            return Ok(result);
+        }
+
+        // 4. Large join check
+        let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
+        if let Some(result) = self.try_large_join(expr, table_count, &fingerprint)? {
+            return Ok(result);
+        }
+
+        // 5. Calculate iteration/timeout limits
+        let (iter_limit, timeout_ms) =
+            self.compute_egraph_limits(&route_prediction, table_count);
+
+        info!(
+            "Starting e-graph optimization: {} tables, iter_limit={}, timeout={}ms",
+            table_count, iter_limit, timeout_ms
+        );
+
+        // 6. Run e-graph saturation
+        let sat = self.run_egraph_saturation(
+            expr, &opt_features, &route_prediction, iter_limit, timeout_ms, table_count,
+        )?;
+
+        // 7. Extract result
+        let extract_start = Instant::now();
+        let hardware = self.hardware_profile();
+        let result = self.extract_with_hybrid_fallback(
+            &sat.egraph, sat.root, sat.stats_cache.as_map(), &hardware,
+        )?;
+        debug!("extract_best: {:?}", extract_start.elapsed());
+
+        info!(
+            "Total optimization: {:?} (egraph={:?}, extract={:?})",
+            total_start.elapsed(), sat.runner_elapsed, extract_start.elapsed()
+        );
+
+        // 8. Training feedback
+        self.record_egraph_training_trace(
+            expr, sat.actual_iterations, sat.termination_reason,
+            sat.egraph_nodes, sat.runner_elapsed, sat.continuation_gate.as_ref(),
+        );
+
+        // 9. Cache + return
+        self.insert_into_cache(fingerprint.as_ref(), &result);
+        Ok(result)
+    }
+
+    /// Attempt Skip or LeftDeep fast routes. Returns `Some(plan)` if
+    /// handled, `None` if we should continue to e-graph.
+    fn try_fast_route(
+        &self,
+        expr: &RelExpr,
+        route_prediction: &mut crate::speculative_router::RoutePrediction,
+        fingerprint: &Option<QueryFingerprint>,
+        total_start: std::time::Instant,
+    ) -> Result<Option<RelExpr>, EGraphError> {
+        use tracing::{debug, info};
+
         match route_prediction.route {
             OptRoute::Skip => {
                 debug!(
                     "Speculative route: SKIP (conf={:.2})",
                     route_prediction.confidence
                 );
-                return Ok(expr.clone());
+                self.record_fast_path_trace(expr, "speculative_skip", 0.0);
+                return Ok(Some(expr.clone()));
             }
             OptRoute::LeftDeep => {
                 debug!(
@@ -430,25 +530,29 @@ impl Optimizer {
                     route_prediction.confidence
                 );
                 if crate::left_deep::can_use_left_deep(expr) {
-                    let cost_model: Arc<dyn ra_core::cost::CostModel> =
-                        Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
                     let stats_provider = Arc::new(TableStatsProvider {
-                        stats: self.table_stats.clone(),
+                        stats: Arc::clone(&self.table_stats),
                     });
-
                     let builder =
-                        crate::left_deep::LeftDeepBuilder::new(cost_model, stats_provider);
+                        crate::left_deep::LeftDeepBuilder::new(stats_provider);
                     match builder.build(expr) {
                         Ok(optimized) => {
                             info!(
                                 "Left-deep optimization completed in {:?}",
                                 total_start.elapsed()
                             );
+                            self.record_fast_path_trace(
+                                expr,
+                                "left_deep_success",
+                                total_start.elapsed().as_secs_f64() * 1000.0,
+                            );
                             self.insert_into_cache(fingerprint.as_ref(), &optimized);
-                            return Ok(optimized);
+                            return Ok(Some(optimized));
                         }
                         Err(e) => {
-                            debug!("Left-deep failed ({}), falling back to EGraphLow", e);
+                            debug!(
+                                "Left-deep failed ({}), falling back to EGraphLow", e
+                            );
                             route_prediction.route = OptRoute::EGraphLow;
                             route_prediction.confidence = 0.7;
                         }
@@ -460,7 +564,6 @@ impl Optimizer {
                 }
             }
             OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => {
-                // E-graph route — budget override applied below
                 debug!(
                     "Speculative route: {:?} (conf={:.2}, predicted_iters={})",
                     route_prediction.route,
@@ -469,54 +572,55 @@ impl Optimizer {
                 );
             }
         }
+        Ok(None)
+    }
 
-        // Check if we should use large join optimization
-        let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
-
-        if table_count >= self.config.large_join_threshold {
-            if let crate::large_join::LargeJoinStrategy::EGraph = &self.config.large_join_strategy {
-                // Continue with standard e-graph optimization
-            } else {
-                // Use large join optimizer
-                let cost_model: Arc<dyn ra_core::cost::CostModel> =
-                    Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
-                let stats_provider = Arc::new(TableStatsProvider {
-                    stats: self.table_stats.clone(),
-                });
-
-                let large_optimizer = crate::large_join::LargeJoinOptimizer::new(
-                    self.config.large_join_strategy.clone(),
-                    cost_model,
-                    stats_provider,
-                );
-
-                let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
-                if !joins.is_empty() {
-                    let result = large_optimizer
-                        .optimize(joins)
-                        .map_err(|e| EGraphError::ExtractionError(e.to_string()))?;
-                    self.insert_into_cache(fingerprint.as_ref(), &result);
-                    return Ok(result);
-                }
-            }
+    /// Attempt large-join optimization. Returns `Some(plan)` if the
+    /// large-join optimizer handled it, `None` otherwise.
+    fn try_large_join(
+        &self,
+        expr: &RelExpr,
+        table_count: usize,
+        fingerprint: &Option<QueryFingerprint>,
+    ) -> Result<Option<RelExpr>, EGraphError> {
+        if table_count < self.config.large_join_threshold {
+            return Ok(None);
+        }
+        if let crate::large_join::LargeJoinStrategy::EGraph =
+            &self.config.large_join_strategy
+        {
+            return Ok(None);
         }
 
-        // Calculate adaptive iteration limit based on query complexity
-        let complexity = if self.config.use_adaptive_limits {
-            crate::query_complexity::QueryComplexity::from_expr(expr)
-        } else {
-            // Fallback: classify by table count only
-            match table_count {
-                0..=1 => crate::query_complexity::QueryComplexity::Trivial,
-                2..=4 => crate::query_complexity::QueryComplexity::Simple,
-                5..=7 => crate::query_complexity::QueryComplexity::Medium,
-                8..=9 => crate::query_complexity::QueryComplexity::Complex,
-                _ => crate::query_complexity::QueryComplexity::VeryComplex,
-            }
-        };
+        let cost_model: Arc<dyn ra_core::cost::CostModel> =
+            Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
+        let stats_provider = Arc::new(TableStatsProvider {
+            stats: Arc::clone(&self.table_stats),
+        });
 
-        // Apply speculative route budget when confident, else fall back
-        // to adaptive complexity limits.
+        let large_optimizer = crate::large_join::LargeJoinOptimizer::new(
+            self.config.large_join_strategy.clone(),
+            cost_model,
+            stats_provider,
+        );
+
+        let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
+        if joins.is_empty() {
+            return Ok(None);
+        }
+        let result = large_optimizer
+            .optimize(joins)
+            .map_err(|e| EGraphError::ExtractionError(e.to_string()))?;
+        self.insert_into_cache(fingerprint.as_ref(), &result);
+        Ok(Some(result))
+    }
+
+    /// Compute iteration limit and timeout for e-graph saturation.
+    fn compute_egraph_limits(
+        &self,
+        route_prediction: &crate::speculative_router::RoutePrediction,
+        table_count: usize,
+    ) -> (usize, u64) {
         let base_iter_limit = match route_prediction.route {
             OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh
                 if route_prediction.confidence >= 0.5 =>
@@ -525,20 +629,18 @@ impl Optimizer {
             }
             _ => {
                 if self.config.use_adaptive_limits {
-                    complexity.default_iter_limit()
+                    default_iter_limit_for_tables(table_count)
                 } else {
                     self.config.iter_limit
                 }
             }
         };
 
-        // Cap iteration limit by the resource budget when set.
-        // This ensures the budget's max_iterations is respected
-        // even in the non-bounded optimize() path.
-        let iter_limit = match self.resource_budget.as_ref().and_then(|b| b.max_iterations) {
-            Some(budget_cap) => base_iter_limit.min(budget_cap),
-            None => base_iter_limit,
-        };
+        let iter_limit =
+            match self.resource_budget.as_ref().and_then(|b| b.max_iterations) {
+                Some(budget_cap) => base_iter_limit.min(budget_cap),
+                None => base_iter_limit,
+            };
 
         let timeout_ms = match route_prediction.route {
             OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh
@@ -548,100 +650,56 @@ impl Optimizer {
             }
             _ => {
                 if self.config.use_adaptive_limits {
-                    complexity.default_timeout_ms()
+                    default_timeout_ms_for_tables(table_count)
                 } else {
                     self.config.time_limit_secs * 1000
                 }
             }
         };
 
-        // Standard e-graph optimization with timing
-        info!(
-            "Starting e-graph optimization: {} tables, complexity={:?}, iter_limit={}, timeout={}ms",
-            table_count, complexity, iter_limit, timeout_ms
-        );
+        (iter_limit, timeout_ms)
+    }
 
-        // Convert table stats to Arc-wrapped cache for cheap sharing
-        // This avoids repeated clones during cost extraction
-        let stats_cache = crate::stats_cache::StatsCache::from_map(self.table_stats.clone());
+    /// Run the e-graph equality saturation loop.
+    fn run_egraph_saturation(
+        &self,
+        expr: &RelExpr,
+        opt_features: &OptimizationFeatures,
+        route_prediction: &crate::speculative_router::RoutePrediction,
+        iter_limit: usize,
+        timeout_ms: u64,
+        table_count: usize,
+    ) -> Result<SaturationResult, EGraphError> {
+        use std::time::Instant;
+        use tracing::debug;
 
-        // Pre-optimization: decorrelate subqueries before e-graph conversion.
-        // This transforms SubQuery expressions (IN, EXISTS, scalar) into
-        // equivalent join forms that the e-graph can represent.
+        let stats_cache =
+            crate::stats_cache::StatsCache::from_arc(Arc::clone(&self.table_stats));
+
+        // Pre-optimization: decorrelate subqueries
         let decorrelated;
-        let effective_expr = if crate::subquery_decorrelation::tree_contains_subquery(expr) {
-            debug!("Decorrelating subqueries before e-graph conversion");
-            decorrelated = crate::subquery_decorrelation::decorrelate(expr);
-            &decorrelated
-        } else {
-            expr
-        };
+        let effective_expr =
+            if crate::subquery_decorrelation::tree_contains_subquery(expr) {
+                debug!("Decorrelating subqueries before e-graph conversion");
+                decorrelated = crate::subquery_decorrelation::decorrelate(expr);
+                &decorrelated
+            } else {
+                expr
+            };
 
-        let to_rec_start = Instant::now();
         let rec_expr = to_rec_expr(effective_expr)?;
-        let to_rec_elapsed = to_rec_start.elapsed();
-        debug!("to_rec_expr: {:?}", to_rec_elapsed);
-
         let runner_start = Instant::now();
         let timeout = std::time::Duration::from_millis(timeout_ms);
-
         let rules = self.load_rules(expr);
 
-        // Create convergence detector tuned to the budget's behavior.
-        // When a resource budget is set, its ConvergenceBehavior controls
-        // how aggressively we detect convergence. Without a budget we
-        // fall back to the Adaptive defaults (window=3, growth=5%).
         let convergence_behavior = self
             .resource_budget
             .as_ref()
             .map_or(ConvergenceBehavior::Adaptive, |b| b.convergence);
-        let mut convergence_detector = crate::convergence::ConvergenceDetector::new(
-            convergence_behavior.window_size(),
-            convergence_behavior.min_growth_rate(),
-        );
 
-        // Create cost pruner (if enabled)
-        let mut cost_pruner = if self.config.use_cost_pruning {
-            Some(crate::cost_pruning::CostPruner::new(
-                self.config.cost_pruning_threshold,
-            ))
-        } else {
-            None
-        };
-
-        // Create beam search tracker (if enabled)
-        let mut beam_search_tracker = self
-            .config
-            .beam_search_config
-            .as_ref()
-            .map(|beam_config| crate::beam_search::BeamSearchTracker::new(beam_config.clone()));
-
-        // Build join graph (if enabled)
-        if self.config.use_join_graph_filtering {
-            let join_graph = crate::join_graph::JoinGraph::from_expr(expr);
-            let stats = join_graph.stats();
-            if stats.table_count > 2 {
-                debug!(
-                    "Join graph: {} tables, {} edges, density={:.2}, estimated reduction={:.1}%",
-                    stats.table_count,
-                    stats.edge_count,
-                    stats.density(),
-                    stats.estimated_reduction_factor() * 100.0
-                );
-            }
-        }
-
-        // Initialize e-graph with the expression
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
 
-        let mut termination_reason = "iteration_limit";
-        let mut actual_iterations = 0;
-        let mut best_cost = f64::INFINITY;
-        let mut cost_improvement_stalled = 0;
-
-        // Create continuation gate for speculative early stopping.
-        // Only active when the speculative router predicted an e-graph route.
         let mut continuation_gate = match route_prediction.route {
             OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => {
                 Some(ContinuationGate::new(
@@ -652,8 +710,131 @@ impl Optimizer {
             _ => None,
         };
 
-        // Cache hardware profile outside loop to avoid repeated clones
-        // Also needed for continuation gate cost extraction.
+        let (actual_iterations, termination_reason, egraph) =
+            self.run_saturation_loop(
+                egraph, root, &rules, iter_limit, timeout, runner_start,
+                convergence_behavior, table_count, expr,
+                &mut continuation_gate,
+            );
+
+        let runner_elapsed = runner_start.elapsed();
+        let egraph_nodes = egraph.total_size();
+
+        Ok(SaturationResult {
+            egraph,
+            root,
+            actual_iterations,
+            termination_reason,
+            runner_elapsed,
+            egraph_nodes,
+            continuation_gate,
+            stats_cache,
+        })
+    }
+
+    /// Core saturation iteration loop with all termination checks.
+    /// Core saturation iteration loop with all termination checks.
+    #[expect(clippy::too_many_arguments)]
+    fn run_saturation_loop(
+        &self,
+        mut egraph: EGraph<RelLang, RelAnalysis>,
+        root: Id,
+        rules: &[Rewrite<RelLang, RelAnalysis>],
+        iter_limit: usize,
+        timeout: std::time::Duration,
+        runner_start: std::time::Instant,
+        convergence_behavior: ConvergenceBehavior,
+        table_count: usize,
+        expr: &RelExpr,
+        continuation_gate: &mut Option<ContinuationGate>,
+    ) -> (usize, &'static str, EGraph<RelLang, RelAnalysis>) {
+        let mut ctx = self.build_loop_context(
+            expr, continuation_gate, convergence_behavior,
+        );
+
+        let mut termination_reason: &'static str = "iteration_limit";
+        let mut actual_iterations = 0;
+
+        for iteration in 0..iter_limit {
+            if runner_start.elapsed() >= timeout {
+                termination_reason = "timeout";
+                break;
+            }
+
+            let prev_classes = egraph.number_of_classes();
+
+            let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+                .with_egraph(egraph)
+                .with_node_limit(self.config.node_limit)
+                .with_iter_limit(1)
+                .with_time_limit(timeout.saturating_sub(runner_start.elapsed()))
+                .run(rules);
+
+            let stop_reason = runner.stop_reason.clone();
+            egraph = runner.egraph;
+            actual_iterations = iteration + 1;
+
+            if let Some(reason) = Self::check_iteration_termination(
+                &mut ctx, &egraph, root, iteration, actual_iterations,
+                prev_classes, continuation_gate, convergence_behavior,
+                table_count, stop_reason.as_ref(),
+            ) {
+                termination_reason = reason;
+                break;
+            }
+        }
+
+        Self::log_saturation_stats(
+            &ctx, runner_start, actual_iterations,
+            egraph.total_size(), egraph.number_of_classes(), termination_reason,
+        );
+
+        (actual_iterations, termination_reason, egraph)
+    }
+
+    /// Build the mutable context for the saturation loop.
+    fn build_loop_context(
+        &self,
+        expr: &RelExpr,
+        continuation_gate: &Option<ContinuationGate>,
+        convergence_behavior: ConvergenceBehavior,
+    ) -> LoopContext {
+        use tracing::debug;
+
+        let convergence_detector = crate::convergence::ConvergenceDetector::new(
+            convergence_behavior.window_size(),
+            convergence_behavior.min_growth_rate(),
+        );
+
+        let cost_pruner = if self.config.use_cost_pruning {
+            Some(crate::cost_pruning::CostPruner::new(
+                self.config.cost_pruning_threshold,
+            ))
+        } else {
+            None
+        };
+
+        let beam_search_tracker = self
+            .config
+            .beam_search_config
+            .as_ref()
+            .map(|cfg| crate::beam_search::BeamSearchTracker::new(cfg.clone()));
+
+        if self.config.use_join_graph_filtering {
+            let join_graph = crate::join_graph::JoinGraph::from_expr(expr);
+            let stats = join_graph.stats();
+            if stats.table_count > 2 {
+                debug!(
+                    "Join graph: {} tables, {} edges, density={:.2}, \
+                     estimated reduction={:.1}%",
+                    stats.table_count,
+                    stats.edge_count,
+                    stats.density(),
+                    stats.estimated_reduction_factor() * 100.0
+                );
+            }
+        }
+
         let hardware_cached = if cost_pruner.is_some()
             || beam_search_tracker.is_some()
             || continuation_gate.is_some()
@@ -663,200 +844,215 @@ impl Optimizer {
             None
         };
 
-        // Run iterations one at a time to enable convergence detection
-        for iteration in 0..iter_limit {
-            // Check timeout
-            if runner_start.elapsed() >= timeout {
-                termination_reason = "timeout";
-                break;
-            }
+        LoopContext {
+            convergence_detector,
+            cost_pruner,
+            beam_search_tracker,
+            hardware_cached,
+            best_cost: f64::INFINITY,
+            cost_improvement_stalled: 0,
+        }
+    }
 
-            let prev_classes = egraph.number_of_classes();
+    /// Check all termination conditions for a single iteration.
+    /// Returns `Some(reason)` if the loop should break.
+    /// Check all termination conditions for one iteration.
+    /// Returns `Some(reason)` if the loop should stop.
+    fn check_iteration_termination(
+        ctx: &mut LoopContext,
+        egraph: &EGraph<RelLang, RelAnalysis>,
+        root: Id,
+        iteration: usize,
+        actual_iterations: usize,
+        prev_classes: usize,
+        continuation_gate: &mut Option<ContinuationGate>,
+        convergence_behavior: ConvergenceBehavior,
+        table_count: usize,
+        stop_reason: Option<&egg::StopReason>,
+    ) -> Option<&'static str> {
+        use tracing::debug;
 
-            // Run one iteration
-            let runner: Runner<RelLang, RelAnalysis> = Runner::default()
-                .with_egraph(egraph)
-                .with_node_limit(self.config.node_limit)
-                .with_iter_limit(1)
-                .with_time_limit(timeout.saturating_sub(runner_start.elapsed()))
-                .run(&rules);
+        let curr_classes = egraph.number_of_classes();
+        let unions = if iteration > 0 {
+            prev_classes.saturating_sub(curr_classes)
+        } else {
+            curr_classes
+        };
+        ctx.convergence_detector.record(crate::convergence::IterationMetrics {
+            iteration,
+            unions,
+            total_nodes: egraph.total_size(),
+            total_classes: curr_classes,
+        });
 
-            egraph = runner.egraph;
-            actual_iterations = iteration + 1;
+        let current_cost = ctx.hardware_cached.as_ref().map(|hardware| {
+            let cost_fn = crate::extract::RelCostFn::new(hardware.clone());
+            let extractor = egg::Extractor::new(egraph, cost_fn);
+            extractor.find_best(root).0
+        });
 
-            // Calculate new equivalences found
-            let curr_nodes = egraph.total_size();
-            let curr_classes = egraph.number_of_classes();
-            let unions = if iteration > 0 {
-                // Approximate unions by change in classes
-                prev_classes.saturating_sub(curr_classes)
-            } else {
-                curr_classes // First iteration creates all initial classes
-            };
+        if let Some(reason) = Self::check_cost_trackers(
+            ctx, current_cost, root, iteration,
+        ) {
+            return Some(reason);
+        }
 
-            // Record metrics for convergence detection
-            convergence_detector.record(crate::convergence::IterationMetrics {
-                iteration,
-                unions,
-                total_nodes: curr_nodes,
-                total_classes: curr_classes,
-            });
+        if let Some(reason) = Self::check_continuation(
+            continuation_gate, current_cost, iteration, egraph.total_size(),
+        ) {
+            return Some(reason);
+        }
 
-            // Track cost improvement (if cost pruning or beam search enabled)
-            let current_cost = if let Some(ref hardware) = hardware_cached {
-                let cost_fn = crate::extract::RelCostFn::new(hardware.clone());
-                let extractor = egg::Extractor::new(&egraph, cost_fn);
-                let (cost, _) = extractor.find_best(root);
-                Some(cost)
-            } else {
-                None
-            };
+        if ctx.convergence_detector.should_terminate()
+            == crate::convergence::TerminationDecision::Converged
+        {
+            debug!(
+                "Early termination: converged at iteration {} (stats: {:?})",
+                iteration, ctx.convergence_detector.stats()
+            );
+            return Some("converged");
+        }
 
-            // Cost pruning
-            if let Some(pruner) = cost_pruner.as_mut() {
-                if let Some(cost) = current_cost {
-                    pruner.record_cost(root, cost);
+        if let Some(reason) = Self::check_convergence_policy(
+            convergence_behavior, actual_iterations, table_count,
+        ) {
+            return Some(reason);
+        }
 
-                    // Check if cost improved significantly
-                    let improvement_threshold = 0.01; // 1% improvement
-                    if cost < best_cost * (1.0 - improvement_threshold) {
-                        // Significant improvement
-                        best_cost = cost;
-                        cost_improvement_stalled = 0;
-                    } else {
-                        // No significant improvement
-                        cost_improvement_stalled += 1;
+        if stop_reason.is_some_and(|r| matches!(r, egg::StopReason::Saturated)) {
+            return Some("saturated");
+        }
 
-                        // Terminate if cost hasn't improved for 3 consecutive iterations
-                        if cost_improvement_stalled >= 3 {
-                            termination_reason = "cost_stagnant";
-                            debug!(
-                                "Early termination: cost stagnant for 3 iterations (best: {:.2})",
-                                best_cost
-                            );
-                            break;
-                        }
-                    }
-                }
-            }
+        None
+    }
 
-            // Beam search: record plan costs and prune
-            if let Some(tracker) = beam_search_tracker.as_mut() {
-                if let Some(cost) = current_cost {
-                    tracker.start_iteration(iteration);
-                    tracker.record_plan(root, cost);
-                    let pruned = tracker.prune();
+    /// Check cost pruning and beam search trackers.
+    fn check_cost_trackers(
+        ctx: &mut LoopContext,
+        current_cost: Option<f64>,
+        root: Id,
+        iteration: usize,
+    ) -> Option<&'static str> {
+        use tracing::debug;
 
-                    if pruned > 0 {
+        if let Some(pruner) = ctx.cost_pruner.as_mut() {
+            if let Some(cost) = current_cost {
+                pruner.record_cost(root, cost);
+                let threshold = 0.01;
+                if cost < ctx.best_cost * (1.0 - threshold) {
+                    ctx.best_cost = cost;
+                    ctx.cost_improvement_stalled = 0;
+                } else {
+                    ctx.cost_improvement_stalled += 1;
+                    if ctx.cost_improvement_stalled >= 3 {
                         debug!(
-                            "Beam search: pruned {} plans at iteration {} (kept top {})",
-                            pruned,
-                            iteration,
-                            tracker.stats().plans_kept
+                            "Early termination: cost stagnant for 3 \
+                             iterations (best: {:.2})",
+                            ctx.best_cost
                         );
+                        return Some("cost_stagnant");
                     }
-                }
-            }
-
-            // Continuation gate: speculative early stopping based on
-            // cost trajectory and model prediction.
-            if let Some(gate) = continuation_gate.as_mut() {
-                if let Some(cost) = current_cost {
-                    let decision =
-                        gate.should_continue(iteration, cost, egraph.total_size());
-                    match decision {
-                        ContinuationDecision::StopCostStagnant => {
-                            termination_reason = "speculative_cost_stagnant";
-                            debug!(
-                                "Continuation gate: cost stagnant at iteration {}",
-                                iteration
-                            );
-                            break;
-                        }
-                        ContinuationDecision::StopModelPrediction => {
-                            termination_reason = "speculative_model_stop";
-                            debug!(
-                                "Continuation gate: model predicts no improvement at iter {}",
-                                iteration
-                            );
-                            break;
-                        }
-                        ContinuationDecision::Continue => {}
-                    }
-                }
-            }
-
-            // Check for convergence (detector-based)
-            if convergence_detector.should_terminate()
-                == crate::convergence::TerminationDecision::Converged
-            {
-                termination_reason = "converged";
-                debug!(
-                    "Early termination: converged at iteration {} (stats: {:?})",
-                    iteration,
-                    convergence_detector.stats()
-                );
-                break;
-            }
-
-            // Convergence-behavior-aware early termination.
-            //
-            // The detector needs `window_size` data points before
-            // it can declare convergence. For Immediate and Adaptive
-            // modes we apply policy-level checks that don't depend
-            // on filling the full window:
-            //
-            //   Immediate  -- stop after 1 iteration (OLTP fast path)
-            //   Adaptive   -- stop after 2 iterations for simple
-            //                  queries (Trivial/Simple complexity)
-            //   Thorough / Complete -- rely on the detector above
-            match convergence_behavior {
-                ConvergenceBehavior::Immediate => {
-                    termination_reason = "convergence_immediate";
-                    debug!(
-                        "Immediate convergence: stopping after {} iteration(s)",
-                        actual_iterations,
-                    );
-                    break;
-                }
-                ConvergenceBehavior::Adaptive if actual_iterations >= 2 => {
-                    let is_simple = matches!(
-                        complexity,
-                        crate::query_complexity::QueryComplexity::Trivial
-                            | crate::query_complexity::QueryComplexity::Simple
-                    );
-                    if is_simple {
-                        termination_reason = "convergence_adaptive_simple";
-                        debug!(
-                            "Adaptive convergence: simple query, \
-                             stopping after {} iterations",
-                            actual_iterations,
-                        );
-                        break;
-                    }
-                }
-                _ => {}
-            }
-
-            // Check for egg saturation
-            if let Some(stop_reason) = runner.stop_reason.as_ref() {
-                if matches!(stop_reason, egg::StopReason::Saturated) {
-                    termination_reason = "saturated";
-                    break;
                 }
             }
         }
 
-        let runner_elapsed = runner_start.elapsed();
-        let egraph_nodes = egraph.total_size();
-        let egraph_classes = egraph.number_of_classes();
+        if let Some(tracker) = ctx.beam_search_tracker.as_mut() {
+            if let Some(cost) = current_cost {
+                tracker.start_iteration(iteration);
+                tracker.record_plan(root, cost);
+                let pruned = tracker.prune();
+                if pruned > 0 {
+                    debug!(
+                        "Beam search: pruned {} plans at iteration {} \
+                         (kept top {})",
+                        pruned, iteration, tracker.stats().plans_kept
+                    );
+                }
+            }
+        }
 
-        // Log pruning statistics if cost pruning was enabled
-        if let Some(pruner) = cost_pruner.as_ref() {
+        None
+    }
+
+    /// Check the continuation gate for speculative early stopping.
+    fn check_continuation(
+        gate: &mut Option<ContinuationGate>,
+        current_cost: Option<f64>,
+        iteration: usize,
+        total_size: usize,
+    ) -> Option<&'static str> {
+        use tracing::debug;
+
+        let gate = gate.as_mut()?;
+        let cost = current_cost?;
+        match gate.should_continue(iteration, cost, total_size) {
+            ContinuationDecision::StopCostStagnant => {
+                debug!(
+                    "Continuation gate: cost stagnant at iteration {}",
+                    iteration
+                );
+                Some("speculative_cost_stagnant")
+            }
+            ContinuationDecision::StopModelPrediction => {
+                debug!(
+                    "Continuation gate: model predicts no improvement at iter {}",
+                    iteration
+                );
+                Some("speculative_model_stop")
+            }
+            ContinuationDecision::Continue => None,
+        }
+    }
+
+    /// Check convergence behavior policy for early termination.
+    fn check_convergence_policy(
+        behavior: ConvergenceBehavior,
+        actual_iterations: usize,
+        table_count: usize,
+    ) -> Option<&'static str> {
+        use tracing::debug;
+
+        match behavior {
+            ConvergenceBehavior::Immediate => {
+                debug!(
+                    "Immediate convergence: stopping after {} iteration(s)",
+                    actual_iterations,
+                );
+                Some("convergence_immediate")
+            }
+            ConvergenceBehavior::Adaptive if actual_iterations >= 2 => {
+                if is_simple_query(table_count) {
+                    debug!(
+                        "Adaptive convergence: simple query, \
+                         stopping after {} iterations",
+                        actual_iterations,
+                    );
+                    Some("convergence_adaptive_simple")
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Log pruning and saturation statistics after loop completion.
+    fn log_saturation_stats(
+        ctx: &LoopContext,
+        runner_start: std::time::Instant,
+        actual_iterations: usize,
+        egraph_nodes: usize,
+        egraph_classes: usize,
+        termination_reason: &str,
+    ) {
+        use tracing::{debug, info};
+
+        if let Some(pruner) = ctx.cost_pruner.as_ref() {
             let stats = pruner.stats();
             if stats.classes_evaluated > 0 {
                 debug!(
-                    "Cost pruning: best_cost={:.2}, evaluated={}, pruned={} ({:.1}% pruning rate)",
+                    "Cost pruning: best_cost={:.2}, evaluated={}, pruned={} \
+                     ({:.1}% pruning rate)",
                     stats.global_best_cost.unwrap_or(f64::INFINITY),
                     stats.classes_evaluated,
                     stats.classes_pruned,
@@ -864,13 +1060,12 @@ impl Optimizer {
                 );
             }
         }
-
-        // Log beam search statistics if beam search was enabled
-        if let Some(tracker) = beam_search_tracker.as_ref() {
+        if let Some(tracker) = ctx.beam_search_tracker.as_ref() {
             let stats = tracker.stats();
             if stats.is_active() && stats.plans_pruned > 0 {
                 info!(
-                    "Beam search: beam_width={}, total_plans={}, kept={}, pruned={} ({:.1}% reduction)",
+                    "Beam search: beam_width={}, total_plans={}, kept={}, \
+                     pruned={} ({:.1}% reduction)",
                     stats.beam_width,
                     stats.total_plans,
                     stats.plans_kept,
@@ -881,57 +1076,56 @@ impl Optimizer {
         }
 
         info!(
-            "E-graph saturation: {:?} ({} iterations, {} nodes, {} classes, reason: {})",
-            runner_elapsed, actual_iterations, egraph_nodes, egraph_classes, termination_reason
+            "E-graph saturation: {:?} ({} iterations, {} nodes, {} classes, \
+             reason: {})",
+            runner_start.elapsed(), actual_iterations, egraph_nodes,
+            egraph_classes, termination_reason
         );
+    }
 
-        let extract_start = Instant::now();
-        let hardware = self.hardware_profile();
-        let result = self.extract_with_hybrid_fallback(&egraph, root, stats_cache.as_map(), &hardware)?;
-        let extract_elapsed = extract_start.elapsed();
-        debug!("extract_best: {:?}", extract_elapsed);
+    /// Record training trace for an e-graph optimization run.
+    fn record_egraph_training_trace(
+        &self,
+        expr: &RelExpr,
+        actual_iterations: usize,
+        termination_reason: &str,
+        egraph_nodes: usize,
+        runner_elapsed: std::time::Duration,
+        continuation_gate: Option<&ContinuationGate>,
+    ) {
+        let coordinator = match self.training_coordinator.as_ref() {
+            Some(c) => c,
+            None => return,
+        };
 
-        let total_elapsed = total_start.elapsed();
-        info!(
-            "Total optimization: {:?} (to_rec={:?}, egraph={:?}, extract={:?})",
-            total_elapsed, to_rec_elapsed, runner_elapsed, extract_elapsed
-        );
+        let cost_history: Vec<f64> = continuation_gate
+            .map(|g| g.cost_history().to_vec())
+            .unwrap_or_default();
 
-        // ─── TRAINING FEEDBACK ───
-        // Feed the optimization trace to the training coordinator
-        // so the model learns from every e-graph run.
-        if let Some(ref coordinator) = self.training_coordinator {
-            let cost_history: Vec<f64> = continuation_gate
-                .as_ref()
-                .map(|g| g.cost_history().to_vec())
-                .unwrap_or_default();
+        let final_improvement_pct = if cost_history.len() >= 2 {
+            let first = cost_history[0];
+            let last = cost_history[cost_history.len() - 1];
+            if first > 0.0 { ((first - last) / first) * 100.0 } else { 0.0 }
+        } else {
+            0.0
+        };
 
-            let final_improvement_pct = if cost_history.len() >= 2 {
-                let first = cost_history[0];
-                let last = cost_history[cost_history.len() - 1];
-                if first > 0.0 { ((first - last) / first) * 100.0 } else { 0.0 }
-            } else {
-                0.0
-            };
+        let trace = OptimizationTrace {
+            features: crate::cost_model::extract_features(expr),
+            iterations_run: actual_iterations,
+            cost_per_iteration: cost_history.clone(),
+            termination_reason: termination_reason.to_string(),
+            final_improvement_pct,
+            optimal_stop_point: OptimizationTrace::compute_optimal_stop(
+                &cost_history,
+            ),
+            egraph_nodes_final: egraph_nodes,
+            optimization_time_ms: runner_elapsed.as_secs_f64() * 1000.0,
+        };
 
-            let trace = OptimizationTrace {
-                features: crate::cost_model::extract_features(expr),
-                iterations_run: actual_iterations,
-                cost_per_iteration: cost_history.clone(),
-                termination_reason: termination_reason.to_string(),
-                final_improvement_pct,
-                optimal_stop_point: OptimizationTrace::compute_optimal_stop(&cost_history),
-                egraph_nodes_final: egraph_nodes,
-                optimization_time_ms: runner_elapsed.as_secs_f64() * 1000.0,
-            };
-
-            if let Ok(mut coord) = coordinator.lock() {
-                coord.record_trace(trace);
-            }
+        if let Ok(mut coord) = coordinator.lock() {
+            coord.record_trace(trace);
         }
-
-        self.insert_into_cache(fingerprint.as_ref(), &result);
-        Ok(result)
     }
 
     /// Insert a plan into the cache if caching is enabled.
@@ -945,6 +1139,30 @@ impl Optimizer {
             }
         }
     }
+
+    /// Record a zero-iteration trace for fast-path queries
+    /// (trivial/left-deep/skip).
+    ///
+    /// Feeds the training coordinator so the model learns which queries
+    /// do NOT need e-graph optimization.
+    fn record_fast_path_trace(&self, expr: &RelExpr, reason: &str, time_ms: f64) {
+        if let Some(ref coordinator) = self.training_coordinator {
+            let trace = OptimizationTrace {
+                features: crate::cost_model::extract_features(expr),
+                iterations_run: 0,
+                cost_per_iteration: Vec::new(),
+                termination_reason: reason.to_string(),
+                final_improvement_pct: 0.0,
+                optimal_stop_point: 0,
+                egraph_nodes_final: 0,
+                optimization_time_ms: time_ms,
+            };
+            if let Ok(mut coord) = coordinator.lock() {
+                coord.record_trace(trace);
+            }
+        }
+    }
+
 
     /// Optimize using pre-condition-filtered rules based on available system facts.
     ///
@@ -1004,7 +1222,7 @@ impl Optimizer {
 
         let root = runner.roots[0];
         let hardware = self.hardware_profile();
-        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &self.table_stats, &hardware)?;
+        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &*self.table_stats, &hardware)?;
         Ok((result, runner.egraph))
     }
 
@@ -1038,19 +1256,8 @@ impl Optimizer {
         let node_limit = self.config.node_limit;
         let time_limit_secs = self.config.time_limit_secs;
 
-        // Compute query complexity for Adaptive convergence decisions
-        let complexity = if self.config.use_adaptive_limits {
-            crate::query_complexity::QueryComplexity::from_expr(expr)
-        } else {
-            let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
-            match table_count {
-                0..=1 => crate::query_complexity::QueryComplexity::Trivial,
-                2..=4 => crate::query_complexity::QueryComplexity::Simple,
-                5..=7 => crate::query_complexity::QueryComplexity::Medium,
-                8..=9 => crate::query_complexity::QueryComplexity::Complex,
-                _ => crate::query_complexity::QueryComplexity::VeryComplex,
-            }
-        };
+        // Table count for Adaptive convergence decisions
+        let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
 
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
@@ -1065,7 +1272,7 @@ impl Optimizer {
         );
 
         // Extract initial plan (the original, unoptimized)
-        if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware) {
+        if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware) {
             best_plan = Some(plan);
             best_cost = estimate_plan_cost(&egraph, root, &hardware);
         }
@@ -1110,7 +1317,7 @@ impl Optimizer {
             });
 
             // Try to extract the best plan from the current e-graph
-            if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware) {
+            if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware) {
                 let cost = estimate_plan_cost(&egraph, root, &hardware);
                 if cost < best_cost {
                     best_cost = cost;
@@ -1139,12 +1346,7 @@ impl Optimizer {
                     break;
                 }
                 ConvergenceBehavior::Adaptive if iterations_done >= 2 => {
-                    let is_simple = matches!(
-                        complexity,
-                        crate::query_complexity::QueryComplexity::Trivial
-                            | crate::query_complexity::QueryComplexity::Simple
-                    );
-                    if is_simple {
+                    if is_simple_query(table_count) {
                         debug!(
                             "Adaptive convergence: simple query, \
                              stopping after {} iterations",
@@ -1241,7 +1443,7 @@ impl Optimizer {
         let initial_cost = estimate_plan_cost(&egraph, root, &hardware);
 
         // Extract initial plan (the original, unoptimized)
-        if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware) {
+        if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware) {
             best_plan = Some(plan);
             best_cost = initial_cost;
         }
@@ -1279,7 +1481,7 @@ impl Optimizer {
 
                 // Extract plan before if verbose mode
                 let plan_before = if verbose {
-                    self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware).ok()
+                    self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware).ok()
                 } else {
                     None
                 };
@@ -1308,7 +1510,7 @@ impl Optimizer {
                     };
 
                     // Try to extract better plan
-                    if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &self.table_stats, &hardware) {
+                    if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware) {
                         if cost_after < best_cost {
                             best_cost = cost_after;
                             best_plan = Some(plan.clone());
@@ -1450,7 +1652,7 @@ impl Optimizer {
             .run(&rules);
 
         let root = runner.roots[0];
-        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &self.table_stats, &hardware)?;
+        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &*self.table_stats, &hardware)?;
 
         let elapsed = start.elapsed();
         let nodes_in_egraph = runner.egraph.total_number_of_nodes();
@@ -1476,12 +1678,12 @@ impl Optimizer {
     #[cfg(feature = "timeline")]
     fn apply_stats_delta(&mut self, delta_set: &DeltaSet) -> usize {
         let mut updated_tables = std::collections::HashSet::<String>::new();
+        let stats_map = Arc::make_mut(&mut self.table_stats);
 
         for delta in delta_set {
             match delta {
                 ra_stats::delta::StatisticsDelta::TableRowCount { table, new, .. } => {
-                    let stats = self
-                        .table_stats
+                    let stats = stats_map
                         .entry(table.clone())
                         .or_insert_with(|| ra_core::statistics::Statistics::new(*new as f64));
                     stats.row_count = *new as f64;
@@ -1490,7 +1692,7 @@ impl Optimizer {
                 ra_stats::delta::StatisticsDelta::ColumnNDV {
                     table, column, new, ..
                 } => {
-                    if let Some(stats) = self.table_stats.get_mut(table) {
+                    if let Some(stats) = stats_map.get_mut(table) {
                         let col = stats
                             .columns
                             .entry(column.clone())
@@ -1502,7 +1704,7 @@ impl Optimizer {
                 ra_stats::delta::StatisticsDelta::ColumnNullFraction {
                     table, column, new, ..
                 } => {
-                    if let Some(stats) = self.table_stats.get_mut(table) {
+                    if let Some(stats) = stats_map.get_mut(table) {
                         if let Some(col) = stats.columns.get_mut(column) {
                             col.null_fraction = *new;
                             updated_tables.insert(table.clone());
@@ -1510,14 +1712,14 @@ impl Optimizer {
                     }
                 }
                 ra_stats::delta::StatisticsDelta::TableAdded { table, row_count } => {
-                    self.table_stats.insert(
+                    stats_map.insert(
                         table.clone(),
                         ra_core::statistics::Statistics::new(*row_count as f64),
                     );
                     updated_tables.insert(table.clone());
                 }
                 ra_stats::delta::StatisticsDelta::TableRemoved { table, .. } => {
-                    self.table_stats.remove(table);
+                    stats_map.remove(table);
                     updated_tables.insert(table.clone());
                 }
                 // ColumnCorrelation and StalenessChanged don't
@@ -1610,7 +1812,7 @@ fn estimate_plan_cost(
 /// Statistics provider for table statistics.
 #[derive(Debug, Clone)]
 struct TableStatsProvider {
-    stats: HashMap<String, ra_core::statistics::Statistics>,
+    stats: Arc<HashMap<String, ra_core::statistics::Statistics>>,
 }
 
 impl ra_core::cost::StatisticsProvider for TableStatsProvider {

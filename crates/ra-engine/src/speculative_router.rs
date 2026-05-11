@@ -1,8 +1,7 @@
 //! Speculative optimization routing using BitNet prediction.
 //!
-//! Replaces the hard-coded `QueryComplexity` heuristic with a trained
-//! predictor that routes queries to the optimal optimization path
-//! (skip / left-deep / e-graph) and dynamically caps e-graph budgets.
+//! Uses a trained predictor that routes queries to the optimal optimization
+//! path (skip / left-deep / e-graph) and dynamically caps e-graph budgets.
 //!
 //! Inspired by Google's DFlash speculative decoding architecture: a
 //! lightweight model (~87ns BitNet forward pass) makes an O(1) prediction
@@ -11,10 +10,9 @@
 
 use std::sync::Arc;
 
-use ra_core::algebra::{JoinType, RelExpr};
-use ra_core::expr::{BinOp, Expr};
+use ra_core::algebra::RelExpr;
 
-use crate::cost_model::BitNetCostModel;
+use crate::cost_model::{BitNetCostModel, FeatureExtractor, StructuralCounts};
 use crate::join_graph::JoinGraph;
 
 /// Optimization route predicted by the speculative model.
@@ -151,14 +149,15 @@ impl OptimizationFeatures {
     pub fn from_expr_with_graph(expr: &RelExpr, join_graph: &JoinGraph) -> Self {
         let stats = join_graph.stats();
 
-        // Structural counts
-        let mut counter = StructuralCounter::default();
-        counter.visit(expr);
+        // Structural counts (reuse the canonical FeatureExtractor)
+        let mut extractor = FeatureExtractor::new();
+        extractor.visit(expr);
+        let counter = extractor.structural_counts();
 
         // Join topology
         let join_graph_density = stats.density() as f32;
         let max_join_fan_out = compute_max_fan_out(join_graph);
-        let equi_join_fraction = compute_equi_join_fraction(expr, &counter);
+        let equi_join_fraction = compute_equi_join_fraction(&counter);
         let cross_join_present = if counter.cross_join_count > 0 {
             1.0
         } else {
@@ -329,8 +328,7 @@ impl SpeculativeRouter {
 
     /// Heuristic fallback when no trained model is available.
     ///
-    /// Reproduces the current `QueryComplexity` logic but enhanced with
-    /// topology signals for better left-deep routing.
+    /// Routes queries based on table count and topology signals.
     #[must_use]
     pub fn heuristic_fallback(features: &OptimizationFeatures) -> RoutePrediction {
         let table_count = features.table_count as usize;
@@ -364,7 +362,7 @@ impl SpeculativeRouter {
             };
         }
 
-        // E-graph routing by complexity (matching QueryComplexity logic)
+        // E-graph routing by table count complexity
         let (route, iters, improvement) = match table_count {
             2..=4 => {
                 if join_count > 3
@@ -392,193 +390,6 @@ impl SpeculativeRouter {
 
 // ─── Feature extraction helpers ───
 
-/// Counts structural elements during expression tree traversal.
-#[derive(Debug, Default)]
-struct StructuralCounter {
-    table_count: u32,
-    join_count: u32,
-    filter_count: u32,
-    aggregate_count: u32,
-    subquery_count: u32,
-    window_count: u32,
-    cross_join_count: u32,
-    equi_join_count: u32,
-    non_equi_join_count: u32,
-    has_limit: bool,
-    has_distinct: bool,
-    has_group_by: bool,
-}
-
-impl StructuralCounter {
-    fn visit(&mut self, expr: &RelExpr) {
-        match expr {
-            RelExpr::Scan { .. }
-            | RelExpr::IndexScan { .. }
-            | RelExpr::IndexOnlyScan { .. }
-            | RelExpr::BitmapHeapScan { .. }
-            | RelExpr::ParallelScan { .. }
-            | RelExpr::MvScan { .. } => {
-                self.table_count += 1;
-            }
-
-            RelExpr::Filter { input, predicate } => {
-                self.filter_count += count_predicates(predicate);
-                self.visit(input);
-            }
-
-            RelExpr::Join {
-                join_type,
-                condition,
-                left,
-                right,
-                ..
-            } => {
-                self.join_count += 1;
-                self.classify_join(join_type, condition);
-                self.visit(left);
-                self.visit(right);
-            }
-
-            RelExpr::Aggregate {
-                input, group_by, ..
-            } => {
-                self.aggregate_count += 1;
-                if !group_by.is_empty() {
-                    self.has_group_by = true;
-                }
-                self.visit(input);
-            }
-
-            RelExpr::Window { input, .. } => {
-                self.window_count += 1;
-                self.visit(input);
-            }
-
-            RelExpr::Limit { input, .. } => {
-                self.has_limit = true;
-                self.visit(input);
-            }
-
-            RelExpr::Distinct { input } => {
-                self.has_distinct = true;
-                self.visit(input);
-            }
-
-            RelExpr::CTE {
-                definition, body, ..
-            } => {
-                self.subquery_count += 1;
-                self.visit(definition);
-                self.visit(body);
-            }
-
-            RelExpr::RecursiveCTE {
-                base_case,
-                recursive_case,
-                body,
-                ..
-            } => {
-                self.subquery_count += 1;
-                self.visit(base_case);
-                self.visit(recursive_case);
-                self.visit(body);
-            }
-
-            RelExpr::Project { input, .. }
-            | RelExpr::Sort { input, .. }
-            | RelExpr::Gather { input, .. }
-            | RelExpr::TopK { input, .. }
-            | RelExpr::VectorFilter { input, .. }
-            | RelExpr::IncrementalSort { input, .. }
-            | RelExpr::ParallelAggregate { input, .. }
-            | RelExpr::RowPattern { input, .. } => {
-                self.visit(input);
-            }
-
-            RelExpr::ParallelHashJoin {
-                left, right, ..
-            }
-            | RelExpr::Union { left, right, .. }
-            | RelExpr::Intersect { left, right, .. }
-            | RelExpr::Except { left, right, .. } => {
-                self.visit(left);
-                self.visit(right);
-            }
-
-            RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
-                for inp in inputs {
-                    self.visit(inp);
-                }
-            }
-
-            RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
-                if let Some(inp) = input {
-                    self.visit(inp);
-                }
-            }
-
-            RelExpr::BitmapIndexScan { .. } => {
-                self.table_count += 1;
-            }
-
-            RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
-        }
-    }
-
-    fn classify_join(&mut self, join_type: &JoinType, condition: &Expr) {
-        // Cross join detection
-        if matches!(join_type, JoinType::Cross) || is_trivial_condition(condition) {
-            self.cross_join_count += 1;
-            return;
-        }
-
-        // Equi-join detection
-        if is_equi_join_condition(condition) {
-            self.equi_join_count += 1;
-        } else {
-            self.non_equi_join_count += 1;
-        }
-    }
-}
-
-/// Count predicate conjuncts.
-fn count_predicates(expr: &Expr) -> u32 {
-    match expr {
-        Expr::BinOp {
-            op: BinOp::And,
-            left,
-            right,
-        } => count_predicates(left) + count_predicates(right),
-        Expr::Const(_) => 0,
-        _ => 1,
-    }
-}
-
-/// Check if condition is trivially true (cross join).
-fn is_trivial_condition(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::Const(ra_core::expr::Const::Bool(true))
-    )
-}
-
-/// Check if condition is an equi-join (column = column).
-fn is_equi_join_condition(expr: &Expr) -> bool {
-    match expr {
-        Expr::BinOp {
-            op: BinOp::Eq,
-            left,
-            right,
-        } => matches!(left.as_ref(), Expr::Column(_)) && matches!(right.as_ref(), Expr::Column(_)),
-        Expr::BinOp {
-            op: BinOp::And,
-            left,
-            right,
-        } => is_equi_join_condition(left) && is_equi_join_condition(right),
-        _ => false,
-    }
-}
-
 /// Compute max fan-out (degree) of any node in the join graph.
 fn compute_max_fan_out(join_graph: &JoinGraph) -> f32 {
     let tables = join_graph.tables();
@@ -603,8 +414,7 @@ fn compute_max_fan_out(join_graph: &JoinGraph) -> f32 {
 }
 
 /// Compute the fraction of joins that are equi-joins.
-fn compute_equi_join_fraction(expr: &RelExpr, counter: &StructuralCounter) -> f32 {
-    let _ = expr; // Used indirectly via counter
+fn compute_equi_join_fraction(counter: &StructuralCounts) -> f32 {
     let total = counter.equi_join_count + counter.non_equi_join_count + counter.cross_join_count;
     if total == 0 {
         return 1.0; // No joins = all "equi" (vacuously true)
@@ -630,7 +440,7 @@ fn estimate_avg_selectivity(filter_count: u32, join_count: u32) -> f32 {
 }
 
 /// Estimate log10(output rows) from structural features.
-fn estimate_log_rows(counter: &StructuralCounter) -> f32 {
+fn estimate_log_rows(counter: &StructuralCounts) -> f32 {
     // Rough heuristic: base cardinality grows with tables, reduced by predicates
     let base = (counter.table_count as f32) * 3.0; // ~1000 rows per table
     let reduction = (counter.filter_count as f32) * 0.5;
@@ -647,7 +457,7 @@ fn estimate_log_rows(counter: &StructuralCounter) -> f32 {
 mod tests {
     use super::*;
     use ra_core::algebra::JoinType;
-    use ra_core::expr::{ColumnRef, Const};
+    use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 
     fn scan(name: &str) -> RelExpr {
         RelExpr::Scan {

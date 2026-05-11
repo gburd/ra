@@ -25,7 +25,7 @@ use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::Statistics;
 use ra_engine::{
     ConvergenceBehavior, OptimizationStatus, Optimizer, OptimizerConfig, OverflowStrategy,
-    QueryComplexity, ResourceBudget, ResourceUsageReport,
+    ResourceBudget, ResourceUsageReport,
 };
 use ra_test_utils::TestProfile;
 
@@ -687,20 +687,22 @@ fn simple_oltp_filtered_scan_under_1ms() {
 }
 
 #[test]
-fn simple_oltp_complexity_is_trivial_or_simple() {
-    let lookup = oltp_point_lookup();
-    let scan = oltp_filtered_scan();
+fn simple_oltp_is_trivial_or_simple_by_table_count() {
+    use ra_engine::LargeJoinOptimizer;
 
-    let c1 = QueryComplexity::from_expr(&lookup);
-    let c2 = QueryComplexity::from_expr(&scan);
+    let lookup = oltp_point_lookup();
+    let scan_expr = oltp_filtered_scan();
+
+    let c1 = LargeJoinOptimizer::count_tables(&lookup);
+    let c2 = LargeJoinOptimizer::count_tables(&scan_expr);
 
     assert!(
-        c1 <= QueryComplexity::Simple,
-        "point lookup should be Trivial/Simple, got {c1:?}"
+        c1 <= 4,
+        "point lookup should be simple (<=4 tables), got {c1}"
     );
     assert!(
-        c2 <= QueryComplexity::Simple,
-        "filtered scan should be Trivial/Simple, got {c2:?}"
+        c2 <= 4,
+        "filtered scan should be simple (<=4 tables), got {c2}"
     );
 }
 

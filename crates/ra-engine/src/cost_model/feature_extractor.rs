@@ -5,11 +5,31 @@
 
 use std::collections::HashMap;
 
-use ra_core::algebra::{RelExpr, WindowExpr};
-use ra_core::expr::Expr;
+use ra_core::algebra::{JoinType, RelExpr, WindowExpr};
+use ra_core::expr::{BinOp, Expr};
 use ra_core::statistics::Statistics;
 
 use super::QueryFeatures;
+
+/// Raw structural counts from expression tree traversal.
+///
+/// Produced by [`FeatureExtractor::structural_counts()`] for use in
+/// optimization routing without duplicating the tree walk.
+#[derive(Debug, Clone, Default)]
+pub struct StructuralCounts {
+    pub table_count: u32,
+    pub join_count: u32,
+    pub filter_count: u32,
+    pub aggregate_count: u32,
+    pub subquery_count: u32,
+    pub window_count: u32,
+    pub cross_join_count: u32,
+    pub equi_join_count: u32,
+    pub non_equi_join_count: u32,
+    pub has_limit: bool,
+    pub has_distinct: bool,
+    pub has_group_by: bool,
+}
 
 /// Extract query features from a parsed RelExpr.
 ///
@@ -141,8 +161,13 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
     }
 }
 
-/// Internal visitor that accumulates feature counts.
-struct FeatureExtractor {
+/// Visitor that accumulates feature counts from a `RelExpr` tree.
+///
+/// Produces both the 12-dimensional [`QueryFeatures`] (via
+/// [`into_features()`](Self::into_features)) and the raw
+/// [`StructuralCounts`] (via [`structural_counts()`](Self::structural_counts))
+/// needed by the speculative router.
+pub struct FeatureExtractor {
     table_count: u32,
     join_count: u32,
     filter_count: u32,
@@ -155,10 +180,13 @@ struct FeatureExtractor {
     distinct_flag: bool,
     limit_present: bool,
     max_join_cardinality_estimate: f64,
+    cross_join_count: u32,
+    equi_join_count: u32,
+    non_equi_join_count: u32,
 }
 
 impl FeatureExtractor {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             table_count: 0,
             join_count: 0,
@@ -172,10 +200,13 @@ impl FeatureExtractor {
             distinct_flag: false,
             limit_present: false,
             max_join_cardinality_estimate: 1.0,
+            cross_join_count: 0,
+            equi_join_count: 0,
+            non_equi_join_count: 0,
         }
     }
 
-    fn visit(&mut self, expr: &RelExpr) {
+    pub fn visit(&mut self, expr: &RelExpr) {
         match expr {
             RelExpr::Scan { .. }
             | RelExpr::ParallelScan { .. }
@@ -199,18 +230,21 @@ impl FeatureExtractor {
             }
 
             RelExpr::Join {
+                join_type,
                 left,
                 right,
                 condition,
-                ..
             }
             | RelExpr::ParallelHashJoin {
+                join_type,
                 left,
                 right,
                 condition,
                 ..
             } => {
                 self.join_count += 1;
+                self.classify_join(join_type, condition);
+
                 // Estimate join cardinality based on table count
                 // This is a rough heuristic: assume each join multiplies cardinality
                 let cardinality_estimate = f64::from(self.table_count + 2).powi(2);
@@ -486,6 +520,72 @@ impl FeatureExtractor {
     /// Count window functions in a list of window expressions.
     fn count_window_functions(functions: &[WindowExpr]) -> u32 {
         functions.len() as u32
+    }
+
+    /// Classify a join as cross, equi, or non-equi.
+    fn classify_join(&mut self, join_type: &JoinType, condition: &Expr) {
+        if matches!(join_type, JoinType::Cross)
+            || Self::is_trivial_condition(condition)
+        {
+            self.cross_join_count += 1;
+            return;
+        }
+
+        if Self::is_equi_join_condition(condition) {
+            self.equi_join_count += 1;
+        } else {
+            self.non_equi_join_count += 1;
+        }
+    }
+
+    /// Check if condition is trivially true (cross join).
+    fn is_trivial_condition(expr: &Expr) -> bool {
+        matches!(
+            expr,
+            Expr::Const(ra_core::expr::Const::Bool(true))
+        )
+    }
+
+    /// Check if condition contains at least one equi-join predicate
+    /// (column = column).
+    fn is_equi_join_condition(expr: &Expr) -> bool {
+        match expr {
+            Expr::BinOp {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => {
+                matches!(left.as_ref(), Expr::Column(_))
+                    && matches!(right.as_ref(), Expr::Column(_))
+            }
+            Expr::BinOp {
+                op: BinOp::And,
+                left,
+                right,
+            } => {
+                Self::is_equi_join_condition(left)
+                    || Self::is_equi_join_condition(right)
+            }
+            _ => false,
+        }
+    }
+
+    /// Return the raw structural counts for use by the speculative router.
+    pub fn structural_counts(&self) -> StructuralCounts {
+        StructuralCounts {
+            table_count: self.table_count,
+            join_count: self.join_count,
+            filter_count: self.filter_count,
+            aggregate_count: self.aggregate_count,
+            subquery_count: self.subquery_count,
+            window_count: self.window_function_count,
+            cross_join_count: self.cross_join_count,
+            equi_join_count: self.equi_join_count,
+            non_equi_join_count: self.non_equi_join_count,
+            has_limit: self.limit_present,
+            has_distinct: self.distinct_flag,
+            has_group_by: self.group_by_count > 0,
+        }
     }
 
     /// Convert accumulated counts into QueryFeatures.

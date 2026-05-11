@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use ra_core::{
     algebra::{JoinType, RelExpr},
-    cost::{CostModel, StatisticsProvider},
+    cost::StatisticsProvider,
     expr::Expr,
 };
 
@@ -31,21 +31,13 @@ use ra_core::{
 /// This is optimal for many simple queries and avoids the overhead
 /// of e-graph equality saturation.
 pub struct LeftDeepBuilder {
-    #[expect(dead_code)] // Reserved for future cost-based ordering
-    cost_model: Arc<dyn CostModel>,
     stats_provider: Arc<dyn StatisticsProvider>,
 }
 
 impl LeftDeepBuilder {
     /// Create a new left-deep tree builder.
-    pub fn new(
-        cost_model: Arc<dyn CostModel>,
-        stats_provider: Arc<dyn StatisticsProvider>,
-    ) -> Self {
-        Self {
-            cost_model,
-            stats_provider,
-        }
+    pub fn new(stats_provider: Arc<dyn StatisticsProvider>) -> Self {
+        Self { stats_provider }
     }
 
     /// Build a left-deep join tree from a query.
@@ -116,7 +108,10 @@ impl LeftDeepBuilder {
     }
 
     /// Extract all scan nodes and join conditions from an expression.
-    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
+    #[expect(
+        clippy::self_only_used_in_recursion,
+        reason = "method on optimizer struct"
+    )]
     fn extract_tables_and_conditions(
         &self,
         expr: &RelExpr,
@@ -186,20 +181,23 @@ impl LeftDeepBuilder {
             | RelExpr::IndexScan { table, .. }
             | RelExpr::IndexOnlyScan { table, .. }
             | RelExpr::ParallelScan { table, .. }
-            | RelExpr::MvScan { view_name: table, .. } => Some(table.as_str()),
+            | RelExpr::MvScan {
+                view_name: table, ..
+            } => Some(table.as_str()),
             RelExpr::BitmapHeapScan { table, .. } => Some(table.as_str()),
             _ => None,
         };
-        table_name.and_then(|t| {
-            self.stats_provider.get_statistics(t).map(|s| s.row_count)
-        })
+        table_name.and_then(|t| self.stats_provider.get_statistics(t).map(|s| s.row_count))
     }
 
     /// Find the best join condition between two tables.
     ///
     /// This is a simple heuristic that looks for conditions referencing
     /// columns from both tables.
-    #[expect(clippy::unused_self, reason = "will use self for table statistics lookup")]
+    #[expect(
+        clippy::unused_self,
+        reason = "will use self for table statistics lookup"
+    )]
     fn find_join_condition(
         &self,
         _left: &RelExpr,
@@ -357,8 +355,7 @@ fn count_tables(expr: &RelExpr) -> usize {
         | RelExpr::BitmapHeapScan { .. }
         | RelExpr::ParallelScan { .. }
         | RelExpr::MvScan { .. } => 1,
-        RelExpr::Join { left, right, .. }
-        | RelExpr::ParallelHashJoin { left, right, .. } => {
+        RelExpr::Join { left, right, .. } | RelExpr::ParallelHashJoin { left, right, .. } => {
             count_tables(left) + count_tables(right)
         }
         RelExpr::Filter { input, .. }
@@ -391,8 +388,7 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
         | RelExpr::BitmapHeapScan { .. }
         | RelExpr::ParallelScan { .. }
         | RelExpr::MvScan { .. } => true,
-        RelExpr::Join { left, right, .. }
-        | RelExpr::ParallelHashJoin { left, right, .. } => {
+        RelExpr::Join { left, right, .. } | RelExpr::ParallelHashJoin { left, right, .. } => {
             is_left_deep_eligible(left) && is_left_deep_eligible(right)
         }
         RelExpr::Filter { input, .. }
@@ -415,19 +411,9 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
 #[expect(clippy::panic, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
-    use ra_core::cost::Cost;
     use ra_core::expr::{BinOp, ColumnRef, Const};
     use ra_core::statistics::Statistics;
     use std::collections::HashMap;
-
-    #[derive(Debug)]
-    struct MockCostModel;
-
-    impl CostModel for MockCostModel {
-        fn estimate(&self, _expr: &RelExpr, _stats: &dyn StatisticsProvider) -> Cost {
-            Cost::new(10.0, 0.0, 0.0, 0)
-        }
-    }
 
     #[derive(Debug)]
     struct MockStats {
@@ -568,10 +554,7 @@ mod tests {
 
     #[test]
     fn test_build_left_deep_two_tables() {
-        let builder = LeftDeepBuilder::new(
-            Arc::new(MockCostModel),
-            Arc::new(MockStats::new(&[("a", 100.0), ("b", 200.0)])),
-        );
+        let builder = LeftDeepBuilder::new(Arc::new(MockStats::new(&[("a", 100.0), ("b", 200.0)])));
 
         let query = join(scan("a"), scan("b"), eq_col("a.id", "b.id"));
         let result = builder.build(&query).unwrap();
@@ -594,14 +577,11 @@ mod tests {
 
     #[test]
     fn test_build_left_deep_three_tables_sorted_by_size() {
-        let builder = LeftDeepBuilder::new(
-            Arc::new(MockCostModel),
-            Arc::new(MockStats::new(&[
-                ("large", 1000.0),
-                ("medium", 500.0),
-                ("small", 100.0),
-            ])),
-        );
+        let builder = LeftDeepBuilder::new(Arc::new(MockStats::new(&[
+            ("large", 1000.0),
+            ("medium", 500.0),
+            ("small", 100.0),
+        ])));
 
         let query = join(
             join(
@@ -647,10 +627,7 @@ mod tests {
 
     #[test]
     fn test_build_left_deep_single_table_returns_scan() {
-        let builder = LeftDeepBuilder::new(
-            Arc::new(MockCostModel),
-            Arc::new(MockStats::new(&[("a", 100.0)])),
-        );
+        let builder = LeftDeepBuilder::new(Arc::new(MockStats::new(&[("a", 100.0)])));
 
         let query = scan("a");
         let result = builder.build(&query).unwrap();

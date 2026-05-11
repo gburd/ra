@@ -17,10 +17,12 @@
 
 mod tokenizer;
 pub mod feedback;
-mod feature_extractor;
+pub mod feature_extractor;
 
 pub use tokenizer::{Tokenizer, TimeBudget};
-pub use feature_extractor::{extract_features, extract_features_with_stats};
+pub use feature_extractor::{
+    extract_features, extract_features_with_stats, FeatureExtractor, StructuralCounts,
+};
 pub use feedback::{ExecutionFeedback, FeedbackCollector, MapeTracker, OptimizationTrace};
 pub use ra_bitnet::{BitNetCostModel, BitNetTrainer, TrainerConfig};
 

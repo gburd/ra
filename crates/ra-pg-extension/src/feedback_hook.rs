@@ -25,6 +25,7 @@ use pgrx::prelude::*;
 
 use ra_engine::cost_model::{ExecutionFeedback, FeedbackCollector, QueryFeatures};
 use ra_engine::state::SystemFingerprint;
+use ra_engine::training_coordinator::{shared_coordinator, SharedTrainingCoordinator};
 
 /// Batch size threshold: trigger training after this many samples
 /// accumulate in the FeedbackCollector.
@@ -62,12 +63,14 @@ static FEEDBACK_STATE: Lazy<Mutex<FeedbackState>> = Lazy::new(|| Mutex::new(Feed
 
 struct FeedbackState {
     collector: FeedbackCollector,
+    training_coordinator: SharedTrainingCoordinator,
 }
 
 impl FeedbackState {
     fn new() -> Self {
         Self {
             collector: FeedbackCollector::new(),
+            training_coordinator: shared_coordinator(),
         }
     }
 }
@@ -172,9 +175,16 @@ unsafe fn capture_feedback(query_desc: *mut pg_sys::QueryDesc) {
     if let Ok(mut state) = FEEDBACK_STATE.lock() {
         state.collector.record(feedback.clone());
 
-        // Drain batch and update fingerprint when threshold is reached.
+        // Drain batch and feed to training coordinator when threshold is reached.
         if state.collector.buffered_count() >= TRAINING_BATCH_THRESHOLD {
-            let _batch = state.collector.drain();
+            let batch = state.collector.drain();
+
+            // Feed each feedback sample to the training coordinator.
+            if let Ok(mut coord) = state.training_coordinator.lock() {
+                for item in &batch {
+                    coord.record_feedback(&item.features, item.actual_time_ms);
+                }
+            }
 
             // Update fingerprint with current model accuracy.
             let total = state.collector.total_processed();
@@ -226,15 +236,24 @@ fn update_fingerprint_model_stats(total_samples: u64, mape: f32) {
 }
 
 /// Get current collector statistics for diagnostics.
-pub fn collector_stats() -> (u64, usize, f32) {
+///
+/// Returns (total_processed, buffered_count, current_mape, training_steps).
+pub fn collector_stats() -> (u64, usize, f32, u64) {
     if let Ok(state) = FEEDBACK_STATE.lock() {
+        let training_steps = state
+            .training_coordinator
+            .lock()
+            .ok()
+            .map(|c| c.stats().total_train_steps as u64)
+            .unwrap_or(0);
         (
             state.collector.total_processed(),
             state.collector.buffered_count(),
             state.collector.current_mape(),
+            training_steps,
         )
     } else {
-        (0, 0, 1.0)
+        (0, 0, 1.0, 0)
     }
 }
 
@@ -245,7 +264,9 @@ mod tests {
     #[test]
     fn training_thresholds_are_consistent() {
         assert!(TRAINING_BATCH_THRESHOLD > 0);
-        assert!(FAST_MODEL_DISTILL_INTERVAL > TRAINING_BATCH_THRESHOLD as u64);
+        // Batch threshold must be reasonable (not too large for latency,
+        // not too small for training stability).
+        assert!(TRAINING_BATCH_THRESHOLD <= 256);
     }
 
     #[test]

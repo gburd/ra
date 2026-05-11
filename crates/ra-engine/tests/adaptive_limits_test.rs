@@ -164,28 +164,28 @@ fn test_adaptive_limits_vs_fixed() {
 }
 
 #[test]
-fn test_query_complexity_classification() {
-    use ra_engine::query_complexity::QueryComplexity;
+fn test_table_count_classification() {
+    use ra_engine::LargeJoinOptimizer;
 
     // Trivial (1 table)
     let query = scan("users");
-    assert_eq!(QueryComplexity::from_expr(&query), QueryComplexity::Trivial);
+    assert_eq!(LargeJoinOptimizer::count_tables(&query), 1);
 
     // Simple (2 tables)
     let query = join(scan("users"), scan("orders"), eq(col("a"), col("b")));
-    assert_eq!(QueryComplexity::from_expr(&query), QueryComplexity::Simple);
+    assert_eq!(LargeJoinOptimizer::count_tables(&query), 2);
 
     // Medium (5 tables)
     let mut query = join(scan("t1"), scan("t2"), eq(col("a"), col("b")));
     for i in 3..=5 {
         query = join(query, scan(&format!("t{i}")), eq(col("a"), col("b")));
     }
-    assert_eq!(QueryComplexity::from_expr(&query), QueryComplexity::Medium);
+    assert_eq!(LargeJoinOptimizer::count_tables(&query), 5);
 
     // Complex (8 tables)
     let mut query = join(scan("t1"), scan("t2"), eq(col("a"), col("b")));
     for i in 3..=8 {
         query = join(query, scan(&format!("t{i}")), eq(col("a"), col("b")));
     }
-    assert_eq!(QueryComplexity::from_expr(&query), QueryComplexity::Complex);
+    assert_eq!(LargeJoinOptimizer::count_tables(&query), 8);
 }

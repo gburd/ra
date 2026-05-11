@@ -42,6 +42,15 @@ impl StatsCache {
         }
     }
 
+    /// Create a cache by sharing an existing `Arc<HashMap>`.
+    ///
+    /// This is a zero-copy operation (just an Arc reference count
+    /// increment). Use when the source already stores stats in an Arc.
+    #[must_use]
+    pub fn from_arc(inner: Arc<HashMap<String, Statistics>>) -> Self {
+        Self { inner }
+    }
+
     /// Get statistics for a table.
     ///
     /// Returns None if the table is not registered.

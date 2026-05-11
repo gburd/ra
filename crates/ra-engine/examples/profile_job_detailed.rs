@@ -109,15 +109,25 @@ fn main() {
         let rec_expr = to_rec_expr(&relexpr).expect("to_rec");
         let rec_us = rec_start.elapsed().as_micros();
 
-        // Determine adaptive limits
-        let complexity = ra_engine::query_complexity::QueryComplexity::from_expr(&relexpr);
-        let iter_limit = complexity.default_iter_limit();
-        let timeout_ms = complexity.default_timeout_ms();
+        // Determine adaptive limits based on table count
+        let iter_limit = match tables {
+            0..=1 => 3,
+            2..=4 => 5,
+            5..=7 => 10,
+            8..=9 => 15,
+            _ => 20,
+        };
+        let timeout_ms: u64 = match tables {
+            0..=1 => 50,
+            2..=4 => 200,
+            5..=7 => 500,
+            8..=9 => 2000,
+            _ => 5000,
+        };
 
         eprintln!(
             "\n--- {target}: {tables} tables, \
-             complexity={complexity:?}, iter_limit={iter_limit}, \
-             timeout={timeout_ms}ms ---"
+             iter_limit={iter_limit}, timeout={timeout_ms}ms ---"
         );
 
         let egraph_start = Instant::now();

@@ -41,6 +41,9 @@ pub extern "C-unwind" fn _PG_init() {
     extension_state::register_gucs();
     ab_testing::register_gucs();
 
+    // Load BitNet cost model from disk (if available)
+    extension_state::init_cost_model();
+
     // Initialize system fingerprint monitor for neural optimization
     monitor::init();
 

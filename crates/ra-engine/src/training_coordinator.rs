@@ -282,7 +282,12 @@ pub fn bootstrap_model() -> BitNetCostModel {
     )
 }
 
-fn generate_bootstrap_samples() -> Vec<([f32; 12], [f32; 16])> {
+/// Generate synthetic training samples spanning the query space.
+///
+/// Used by the training harness to provide additional training signal
+/// alongside real query optimization traces.
+#[must_use]
+pub fn generate_bootstrap_samples() -> Vec<([f32; 12], [f32; 16])> {
     let mut samples = Vec::with_capacity(200);
 
     // Trivial queries: 1 table, no joins → skip (0ms)
