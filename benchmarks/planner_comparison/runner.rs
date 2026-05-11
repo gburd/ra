@@ -95,7 +95,11 @@ fn make_stats(rows: f64, avg_row_size: u64) -> Statistics {
 }
 
 fn make_optimizer() -> Optimizer {
-    let mut opt = Optimizer::new();
+    // Enable online training: each optimization run feeds the model.
+    let coordinator = ra_engine::training_coordinator::shared_coordinator();
+
+    let mut opt = Optimizer::new().with_training(coordinator);
+    opt.enable_training();
     for (name, stats) in [
         ("lineitem", make_stats(6_001_215.0, 128)),
         ("orders", make_stats(1_500_000.0, 150)),
@@ -549,4 +553,13 @@ fn main() {
         report.overall_summary.total_queries,
         report.overall_summary.optimizer_success_rate
     );
+
+    // Report training statistics
+    if let Some(stats) = optimizer.training_stats() {
+        println!("\n  Training loop:");
+        println!("    Traces collected: {}", stats.total_traces);
+        println!("    Train steps: {}", stats.total_train_steps);
+        println!("    Model samples: {}", stats.model_samples_trained);
+        println!("    Avg loss: {:.6}", stats.avg_loss);
+    }
 }

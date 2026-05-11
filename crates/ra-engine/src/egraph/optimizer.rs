@@ -11,7 +11,9 @@ use tracing::warn;
 use crate::analysis::RelAnalysis;
 use crate::continuation_gate::{ContinuationDecision, ContinuationGate};
 use crate::cost_model::BitNetCostModel;
+use crate::cost_model::feedback::OptimizationTrace;
 use crate::extract::{extract_best, extract_best_bitnet};
+use crate::training_coordinator::SharedTrainingCoordinator;
 use crate::genetic_fingerprint::QueryFingerprint;
 use crate::plan_cache::{PlanCache, PlanCacheConfig, PlanCacheStats};
 use crate::resource_budget::{
@@ -53,6 +55,7 @@ pub struct Optimizer {
     cost_model: Option<Arc<BitNetCostModel>>,
     fingerprint_reader: Option<FingerprintReader>,
     speculative_router: Option<SpeculativeRouter>,
+    training_coordinator: Option<SharedTrainingCoordinator>,
 }
 
 impl Optimizer {
@@ -69,6 +72,7 @@ impl Optimizer {
             cost_model: None,
             fingerprint_reader: None,
             speculative_router: None,
+            training_coordinator: None,
         }
     }
 
@@ -97,6 +101,7 @@ impl Optimizer {
             cost_model: None,
             fingerprint_reader: None,
             speculative_router: None,
+            training_coordinator: None,
         }
     }
 
@@ -235,6 +240,31 @@ impl Optimizer {
         if let Some(ref model) = self.cost_model {
             self.speculative_router = Some(SpeculativeRouter::new(Arc::clone(model)));
         }
+    }
+
+    /// Enable online training: each optimization run feeds back to the model.
+    ///
+    /// When enabled, the optimizer records `OptimizationTrace` for every
+    /// e-graph run and feeds batches to the `BitNetTrainer`. The model
+    /// improves over time based on observed optimization difficulty.
+    #[must_use]
+    pub fn with_training(mut self, coordinator: SharedTrainingCoordinator) -> Self {
+        self.training_coordinator = Some(coordinator);
+        self
+    }
+
+    /// Enable online training with a new coordinator.
+    pub fn enable_training(&mut self) {
+        self.training_coordinator =
+            Some(crate::training_coordinator::shared_coordinator());
+    }
+
+    /// Get training statistics (if training is enabled).
+    #[must_use]
+    pub fn training_stats(&self) -> Option<crate::training_coordinator::TrainingStats> {
+        self.training_coordinator.as_ref().and_then(|c| {
+            c.lock().ok().map(|coord| coord.stats())
+        })
     }
 
     /// Load a BitNet cost model from a JSON file.
@@ -860,6 +890,39 @@ impl Optimizer {
             "Total optimization: {:?} (to_rec={:?}, egraph={:?}, extract={:?})",
             total_elapsed, to_rec_elapsed, runner_elapsed, extract_elapsed
         );
+
+        // ─── TRAINING FEEDBACK ───
+        // Feed the optimization trace to the training coordinator
+        // so the model learns from every e-graph run.
+        if let Some(ref coordinator) = self.training_coordinator {
+            let cost_history: Vec<f64> = continuation_gate
+                .as_ref()
+                .map(|g| g.cost_history().to_vec())
+                .unwrap_or_default();
+
+            let final_improvement_pct = if cost_history.len() >= 2 {
+                let first = cost_history[0];
+                let last = cost_history[cost_history.len() - 1];
+                if first > 0.0 { ((first - last) / first) * 100.0 } else { 0.0 }
+            } else {
+                0.0
+            };
+
+            let trace = OptimizationTrace {
+                features: crate::cost_model::extract_features(expr),
+                iterations_run: actual_iterations,
+                cost_per_iteration: cost_history.clone(),
+                termination_reason: termination_reason.to_string(),
+                final_improvement_pct,
+                optimal_stop_point: OptimizationTrace::compute_optimal_stop(&cost_history),
+                egraph_nodes_final: egraph_nodes,
+                optimization_time_ms: runner_elapsed.as_secs_f64() * 1000.0,
+            };
+
+            if let Ok(mut coord) = coordinator.lock() {
+                coord.record_trace(trace);
+            }
+        }
 
         self.insert_into_cache(fingerprint.as_ref(), &result);
         Ok(result)

@@ -117,6 +117,7 @@ pub mod selectivity;
 pub mod semi_join;
 pub mod speculative_router;
 pub mod continuation_gate;
+pub mod training_coordinator;
 #[cfg(feature = "timeline")]
 pub mod timeline_config;
 #[cfg(feature = "timeline")]
@@ -263,6 +264,9 @@ pub use progressive_reopt::{
 pub use query_complexity::QueryComplexity;
 pub use speculative_router::{OptimizationFeatures, OptRoute, RoutePrediction, SpeculativeRouter};
 pub use continuation_gate::{ContinuationDecision, ContinuationGate};
+pub use training_coordinator::{
+    SharedTrainingCoordinator, TrainingCoordinator, TrainingStats,
+};
 pub use query_features::QueryFeatureSet;
 pub use recursive::{
     ExecutionContext, ExecutionError, ExprEvaluator, RecursionResult, RecursiveCTEConfig,
