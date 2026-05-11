@@ -160,6 +160,11 @@ struct BenchArgs {
     #[arg(long)]
     quiet: bool,
 
+    /// Verify result correctness by comparing optimized query output
+    /// against original query output on Postgres (requires --db).
+    #[arg(long)]
+    verify_results: bool,
+
     /// Override scoring weights as JSON (e.g. '{"structural":0.5}').
     #[arg(long)]
     weights: Option<String>,
@@ -227,6 +232,7 @@ fn run_bench(args: BenchArgs) -> Result<()> {
     let config = RunnerConfig {
         weights,
         pg_connection: args.db.clone(),
+        verify_results: args.verify_results,
     };
 
     let optimizer = Optimizer::new();

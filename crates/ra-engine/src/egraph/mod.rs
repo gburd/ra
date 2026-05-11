@@ -715,11 +715,21 @@ mod tests {
     #[test]
     fn plan_cache_miss_then_hit() {
         let opt = cached_optimizer();
-        let q1 = RelExpr::scan("users").filter(Expr::BinOp {
-            op: BinOp::Eq,
-            left: Box::new(Expr::Column(ColumnRef::new("id"))),
-            right: Box::new(Expr::Const(Const::Int(42))),
-        });
+        // Use a join query so it doesn't hit the trivial-query fast path
+        let q1 = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("o", "uid"))),
+            },
+            left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("id"))),
+                right: Box::new(Expr::Const(Const::Int(42))),
+            })),
+            right: Box::new(RelExpr::scan("orders")),
+        };
         // First call: cache miss, runs optimization
         let _ = opt.optimize(&q1).expect("should succeed");
         let stats = opt.cache_stats().expect("cache enabled");
@@ -735,19 +745,38 @@ mod tests {
     #[test]
     fn plan_cache_parameter_variation_hits() {
         let opt = cached_optimizer();
-        let q1 = RelExpr::scan("users").filter(Expr::BinOp {
-            op: BinOp::Gt,
-            left: Box::new(Expr::Column(ColumnRef::new("age"))),
-            right: Box::new(Expr::Const(Const::Int(18))),
-        });
+        // Use a join query so it doesn't hit the trivial-query fast path
+        let q1 = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("o", "uid"))),
+            },
+            left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                right: Box::new(Expr::Const(Const::Int(18))),
+            })),
+            right: Box::new(RelExpr::scan("orders")),
+        };
         let _ = opt.optimize(&q1).expect("should succeed");
 
         // Different constant value, same structure
-        let q2 = RelExpr::scan("users").filter(Expr::BinOp {
-            op: BinOp::Gt,
-            left: Box::new(Expr::Column(ColumnRef::new("age"))),
-            right: Box::new(Expr::Const(Const::Int(65))),
-        });
+        let q2 = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("o", "uid"))),
+            },
+            left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                right: Box::new(Expr::Const(Const::Int(65))),
+            })),
+            right: Box::new(RelExpr::scan("orders")),
+        };
         let _ = opt.optimize(&q2).expect("should succeed");
 
         let stats = opt.cache_stats().expect("cache enabled");
@@ -767,7 +796,17 @@ mod tests {
     #[test]
     fn plan_cache_clear() {
         let opt = cached_optimizer();
-        let q = RelExpr::scan("users");
+        // Use a join query so it doesn't hit the trivial-query fast path
+        let q = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("o", "uid"))),
+            },
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
         let _ = opt.optimize(&q).expect("should succeed");
         assert_eq!(opt.cache_stats().expect("cache enabled").current_entries, 1);
 
@@ -779,22 +818,41 @@ mod tests {
     fn plan_cache_oltp_hit_rate_above_90_pct() {
         let opt = cached_optimizer();
 
-        // 5 templates, 20 parameter variations each = 100 queries
+        // 5 join templates, 20 parameter variations each = 100 queries
+        // All templates use joins to avoid the trivial-query fast path.
         let total = 100_u32;
 
         for i in 0..20_i64 {
-            let _ = opt.optimize(&RelExpr::scan("users").filter(Expr::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Column(ColumnRef::new("id"))),
-                right: Box::new(Expr::Const(Const::Int(i))),
-            }));
+            let _ = opt.optimize(&RelExpr::Join {
+                join_type: JoinType::Inner,
+                condition: Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                    right: Box::new(Expr::Column(ColumnRef::qualified("o", "uid"))),
+                },
+                left: Box::new(RelExpr::scan("users").filter(Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column(ColumnRef::new("id"))),
+                    right: Box::new(Expr::Const(Const::Int(i))),
+                })),
+                right: Box::new(RelExpr::scan("orders")),
+            });
         }
         for i in 0..20_i64 {
-            let _ = opt.optimize(&RelExpr::scan("orders").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new("amount"))),
-                right: Box::new(Expr::Const(Const::Int(i * 100))),
-            }));
+            let _ = opt.optimize(&RelExpr::Join {
+                join_type: JoinType::Inner,
+                condition: Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column(ColumnRef::qualified("o", "id"))),
+                    right: Box::new(Expr::Column(ColumnRef::qualified("p", "oid"))),
+                },
+                left: Box::new(RelExpr::scan("orders").filter(Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(ColumnRef::new("amount"))),
+                    right: Box::new(Expr::Const(Const::Int(i * 100))),
+                })),
+                right: Box::new(RelExpr::scan("payments")),
+            });
         }
         for i in 0..20_i64 {
             let _ = opt.optimize(&RelExpr::Join {
@@ -813,27 +871,36 @@ mod tests {
             });
         }
         for i in 0..20_i64 {
-            let _ = opt.optimize(&RelExpr::Aggregate {
-                group_by: vec![Expr::Column(ColumnRef::new("dept"))],
-                aggregates: vec![AggregateExpr {
-                    function: AggregateFunction::Count,
-                    arg: None,
-                    distinct: false,
-                    alias: None,
-                }],
-                input: Box::new(RelExpr::scan("employees").filter(Expr::BinOp {
+            let _ = opt.optimize(&RelExpr::Join {
+                join_type: JoinType::LeftOuter,
+                condition: Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column(ColumnRef::qualified("e", "dept_id"))),
+                    right: Box::new(Expr::Column(ColumnRef::qualified("d", "id"))),
+                },
+                left: Box::new(RelExpr::scan("employees").filter(Expr::BinOp {
                     op: BinOp::Gt,
                     left: Box::new(Expr::Column(ColumnRef::new("salary"))),
                     right: Box::new(Expr::Const(Const::Int(50000 + i * 1000))),
                 })),
+                right: Box::new(RelExpr::scan("departments")),
             });
         }
         for i in 0..20_i64 {
-            let _ = opt.optimize(&RelExpr::scan("products").filter(Expr::BinOp {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new("price"))),
-                right: Box::new(Expr::Const(Const::Int(i * 10))),
-            }));
+            let _ = opt.optimize(&RelExpr::Join {
+                join_type: JoinType::Inner,
+                condition: Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column(ColumnRef::qualified("p", "cat_id"))),
+                    right: Box::new(Expr::Column(ColumnRef::qualified("c", "id"))),
+                },
+                left: Box::new(RelExpr::scan("products").filter(Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(ColumnRef::new("price"))),
+                    right: Box::new(Expr::Const(Const::Int(i * 10))),
+                })),
+                right: Box::new(RelExpr::scan("categories")),
+            });
         }
 
         let stats = opt.cache_stats().expect("cache enabled");
@@ -849,6 +916,63 @@ mod tests {
             total,
             stats
         );
+    }
+
+    // ---- trivial query fast-path tests ----
+
+    #[test]
+    fn trivial_scan_skips_egraph() {
+        let opt = Optimizer::new();
+        let scan = RelExpr::scan("users");
+        let result = opt.optimize(&scan).expect("should succeed");
+        // Trivial query returns input unchanged
+        assert_eq!(result, scan);
+    }
+
+    #[test]
+    fn trivial_filter_scan_skips_egraph() {
+        let opt = Optimizer::new();
+        let q = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Const(Const::Int(1))),
+        });
+        let result = opt.optimize(&q).expect("should succeed");
+        assert_eq!(result, q);
+    }
+
+    #[test]
+    fn trivial_aggregate_skips_egraph() {
+        let opt = Optimizer::new();
+        let q = RelExpr::Aggregate {
+            group_by: vec![Expr::Column(ColumnRef::new("dept"))],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: None,
+                distinct: false,
+                alias: None,
+            }],
+            input: Box::new(RelExpr::scan("employees")),
+        };
+        let result = opt.optimize(&q).expect("should succeed");
+        assert_eq!(result, q);
+    }
+
+    #[test]
+    fn join_does_not_skip_egraph() {
+        let opt = Optimizer::new();
+        let q = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("o", "uid"))),
+            },
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        // Join queries go through optimization — result may differ
+        let _ = opt.optimize(&q).expect("should succeed");
     }
 
     // ---- rule tracking tests ----

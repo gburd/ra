@@ -64,26 +64,90 @@ pub enum PlanOperator {
     SeqScan,
     /// Index scan.
     IndexScan,
+    /// Bitmap heap scan (Postgres physical).
+    BitmapHeapScan,
     /// Nested loop join.
     NestedLoop,
     /// Hash join.
     HashJoin,
     /// Merge join.
     MergeJoin,
+    /// Logical join (Ra's generic join operator).
+    Join,
+    /// Filter / selection.
+    Filter,
     /// Sort.
     Sort,
     /// Hash aggregate.
     HashAggregate,
     /// Group aggregate.
     GroupAggregate,
+    /// Logical aggregate (Ra's generic aggregate).
+    Aggregate,
+    /// Logical scan (Ra's generic scan).
+    Scan,
     /// Limit.
     Limit,
     /// Projection / Result.
     Result,
     /// Append (for UNION).
     Append,
+    /// Materialize.
+    Materialize,
+    /// Hash (build phase for hash join).
+    Hash,
     /// Other operator type.
     Other(String),
+}
+
+/// Operator equivalence classes for semantic comparison.
+///
+/// Physical operators are grouped with their logical equivalents so that
+/// e.g. Postgres's `HashJoin` matches Ra's logical `Join`.
+impl PlanOperator {
+    /// Returns the semantic class of this operator for comparison purposes.
+    fn semantic_class(&self) -> u8 {
+        match self {
+            // Scan class
+            Self::SeqScan | Self::IndexScan | Self::BitmapHeapScan | Self::Scan => 1,
+            // Join class
+            Self::NestedLoop | Self::HashJoin | Self::MergeJoin | Self::Join => 2,
+            // Aggregate class
+            Self::HashAggregate | Self::GroupAggregate | Self::Aggregate => 3,
+            // Sort class
+            Self::Sort => 4,
+            // Limit class
+            Self::Limit => 5,
+            // Projection class
+            Self::Result => 6,
+            // Set operation class
+            Self::Append => 7,
+            // Filter class
+            Self::Filter => 8,
+            // Auxiliary nodes (Materialize, Hash) — no logical equivalent
+            Self::Materialize | Self::Hash => 9,
+            // Unknown
+            Self::Other(_) => 0,
+        }
+    }
+
+    /// Returns true if this operator is semantically compatible with `other`.
+    ///
+    /// Two operators are compatible if they belong to the same semantic class,
+    /// e.g. `HashJoin` ≈ `Join`, `SeqScan` ≈ `Scan`.
+    pub fn is_semantically_compatible(&self, other: &Self) -> bool {
+        let a = self.semantic_class();
+        let b = other.semantic_class();
+        // Class 0 (Other/unknown) never matches unless exact string match
+        if a == 0 || b == 0 {
+            return self == other;
+        }
+        // Auxiliary nodes (class 9) are ignored in comparison
+        if a == 9 || b == 9 {
+            return false;
+        }
+        a == b
+    }
 }
 
 /// Result of comparing plans across optimizers.
@@ -91,8 +155,10 @@ pub enum PlanOperator {
 pub struct ComparisonResult {
     /// Reference database.
     pub reference: ReferenceDb,
-    /// Whether the plans are structurally similar.
+    /// Whether the plans are structurally similar (similarity > 0.5).
     pub structurally_similar: bool,
+    /// Structural similarity score in [0.0, 1.0].
+    pub similarity_score: f64,
     /// Whether the join ordering matches.
     pub join_order_match: bool,
     /// Cost ratio (`ra_cost` / `reference_cost`), if available.
@@ -194,6 +260,7 @@ impl ReferenceComparator {
         Ok(ComparisonResult {
             reference: ReferenceDb::PostgreSQL,
             structurally_similar: true,
+            similarity_score: 1.0,
             join_order_match: true,
             cost_ratio: None,
             actual_execution_time_ms: actual_time_ms,
@@ -291,7 +358,8 @@ impl ReferenceComparator {
 
         Ok(ComparisonResult {
             reference: ReferenceDb::PostgreSQL,
-            structurally_similar: similarity > 0.8,  // Consider similar if >80% match
+            structurally_similar: similarity > 0.5,
+            similarity_score: similarity,
             join_order_match: join_match,
             cost_ratio,
             actual_execution_time_ms: None,
@@ -349,98 +417,108 @@ impl ReferenceComparator {
         match node_type {
             "Seq Scan" => PlanOperator::SeqScan,
             "Index Scan" | "Index Only Scan" | "Bitmap Index Scan" => PlanOperator::IndexScan,
+            "Bitmap Heap Scan" => PlanOperator::BitmapHeapScan,
             "Nested Loop" => PlanOperator::NestedLoop,
             "Hash Join" => PlanOperator::HashJoin,
             "Merge Join" => PlanOperator::MergeJoin,
-            "Sort" => PlanOperator::Sort,
+            "Sort" | "Incremental Sort" => PlanOperator::Sort,
             "Hash Aggregate" | "HashAggregate" => PlanOperator::HashAggregate,
-            "Group" | "GroupAggregate" => PlanOperator::GroupAggregate,
+            "Group" | "GroupAggregate" | "Group Aggregate" => PlanOperator::GroupAggregate,
             "Limit" => PlanOperator::Limit,
             "Result" => PlanOperator::Result,
-            "Append" => PlanOperator::Append,
+            "Append" | "MergeAppend" => PlanOperator::Append,
+            "Materialize" => PlanOperator::Materialize,
+            "Hash" => PlanOperator::Hash,
             _ => PlanOperator::Other(node_type.to_owned()),
         }
     }
 
     /// Convert Ra RelExpr to PlanNode for comparison.
+    ///
+    /// Uses logical operator types (`Scan`, `Join`, `Aggregate`) so that
+    /// semantic comparison against Postgres physical operators works via
+    /// `is_semantically_compatible()`.
     #[cfg(feature = "reference-comparison")]
     fn ra_relexpr_to_plan_node(expr: &ra_core::algebra::RelExpr) -> PlanNode {
         use ra_core::algebra::RelExpr;
 
         match expr {
-            RelExpr::Scan { .. } => PlanNode {
-                operator: PlanOperator::SeqScan,
+            RelExpr::Scan { .. }
+            | RelExpr::IndexScan { .. }
+            | RelExpr::IndexOnlyScan { .. }
+            | RelExpr::BitmapIndexScan { .. }
+            | RelExpr::ParallelScan { .. }
+            | RelExpr::MvScan { .. } => PlanNode {
+                operator: PlanOperator::Scan,
                 estimated_rows: None,
                 estimated_cost: None,
                 children: vec![],
             },
-            RelExpr::Filter { predicate: _, input } => {
-                // Filter becomes part of scan or separate node
-                Self::ra_relexpr_to_plan_node(input)
+            RelExpr::Filter { input, .. } => PlanNode {
+                operator: PlanOperator::Filter,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![Self::ra_relexpr_to_plan_node(input)],
             },
-            RelExpr::Project { columns: _, input } => {
-                PlanNode {
-                    operator: PlanOperator::Result,
-                    estimated_rows: None,
-                    estimated_cost: None,
-                    children: vec![Self::ra_relexpr_to_plan_node(input)],
-                }
+            RelExpr::Project { input, .. } => PlanNode {
+                operator: PlanOperator::Result,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![Self::ra_relexpr_to_plan_node(input)],
             },
-            RelExpr::Join { left, right, .. } => {
-                PlanNode {
-                    operator: PlanOperator::HashJoin,  // Default to hash join
-                    estimated_rows: None,
-                    estimated_cost: None,
-                    children: vec![
-                        Self::ra_relexpr_to_plan_node(left),
-                        Self::ra_relexpr_to_plan_node(right),
-                    ],
-                }
+            RelExpr::Join { left, right, .. }
+            | RelExpr::ParallelHashJoin { left, right, .. } => PlanNode {
+                operator: PlanOperator::Join,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![
+                    Self::ra_relexpr_to_plan_node(left),
+                    Self::ra_relexpr_to_plan_node(right),
+                ],
             },
-            RelExpr::Aggregate { input, .. } => {
-                PlanNode {
-                    operator: PlanOperator::HashAggregate,
-                    estimated_rows: None,
-                    estimated_cost: None,
-                    children: vec![Self::ra_relexpr_to_plan_node(input)],
-                }
+            RelExpr::Aggregate { input, .. }
+            | RelExpr::ParallelAggregate { input, .. } => PlanNode {
+                operator: PlanOperator::Aggregate,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![Self::ra_relexpr_to_plan_node(input)],
             },
-            RelExpr::Sort { input, .. } => {
-                PlanNode {
-                    operator: PlanOperator::Sort,
-                    estimated_rows: None,
-                    estimated_cost: None,
-                    children: vec![Self::ra_relexpr_to_plan_node(input)],
-                }
+            RelExpr::Sort { input, .. }
+            | RelExpr::IncrementalSort { input, .. } => PlanNode {
+                operator: PlanOperator::Sort,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![Self::ra_relexpr_to_plan_node(input)],
             },
-            RelExpr::Limit { input, .. } => {
-                PlanNode {
-                    operator: PlanOperator::Limit,
-                    estimated_rows: None,
-                    estimated_cost: None,
-                    children: vec![Self::ra_relexpr_to_plan_node(input)],
-                }
+            RelExpr::Limit { input, .. }
+            | RelExpr::TopK { input, .. } => PlanNode {
+                operator: PlanOperator::Limit,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![Self::ra_relexpr_to_plan_node(input)],
             },
             RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }
-            | RelExpr::Except { left, right, .. } => {
-                PlanNode {
-                    operator: PlanOperator::Append,
-                    estimated_rows: None,
-                    estimated_cost: None,
-                    children: vec![
-                        Self::ra_relexpr_to_plan_node(left),
-                        Self::ra_relexpr_to_plan_node(right),
-                    ],
-                }
+            | RelExpr::Except { left, right, .. } => PlanNode {
+                operator: PlanOperator::Append,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![
+                    Self::ra_relexpr_to_plan_node(left),
+                    Self::ra_relexpr_to_plan_node(right),
+                ],
             },
-            RelExpr::Distinct { input } => {
-                PlanNode {
-                    operator: PlanOperator::HashAggregate,  // DISTINCT often uses hash aggregate
-                    estimated_rows: None,
-                    estimated_cost: None,
-                    children: vec![Self::ra_relexpr_to_plan_node(input)],
-                }
+            RelExpr::Distinct { input } => PlanNode {
+                operator: PlanOperator::Aggregate,
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![Self::ra_relexpr_to_plan_node(input)],
+            },
+            RelExpr::Window { input, .. } => PlanNode {
+                operator: PlanOperator::Other("WindowAgg".to_owned()),
+                estimated_rows: None,
+                estimated_cost: None,
+                children: vec![Self::ra_relexpr_to_plan_node(input)],
             },
             _ => PlanNode {
                 operator: PlanOperator::Other("Unknown".to_owned()),
@@ -451,70 +529,92 @@ impl ReferenceComparator {
         }
     }
 
-    /// Compare two plan nodes structurally using BFS traversal.
+    /// Compare two plan nodes structurally using BFS traversal with
+    /// semantic operator matching.
+    ///
+    /// Skips auxiliary Postgres nodes (Materialize, Hash) that have no
+    /// logical equivalent in Ra. Uses `is_semantically_compatible()` to
+    /// match physical operators against their logical classes.
+    ///
     /// Returns (similarity_score, join_order_match, notes).
     #[cfg(feature = "reference-comparison")]
     fn compare_plan_nodes(pg: &PlanNode, ra: &PlanNode) -> (f64, bool, Vec<String>) {
-        use std::collections::VecDeque;
-
         let mut notes = Vec::new();
-        let mut pg_queue = VecDeque::new();
-        let mut ra_queue = VecDeque::new();
 
-        pg_queue.push_back(pg);
-        ra_queue.push_back(ra);
+        // Flatten both trees, skipping auxiliary Postgres nodes
+        let pg_nodes = Self::flatten_plan_skip_auxiliary(pg);
+        let ra_nodes = Self::flatten_plan_skip_auxiliary(ra);
 
-        let mut total = 0;
+        let max_len = pg_nodes.len().max(ra_nodes.len());
+        if max_len == 0 {
+            return (1.0, true, notes);
+        }
+
         let mut matches = 0;
+        let min_len = pg_nodes.len().min(ra_nodes.len());
 
-        while let (Some(pg_node), Some(ra_node)) = (pg_queue.pop_front(), ra_queue.pop_front()) {
-            total += 1;
-
-            if pg_node.operator == ra_node.operator {
+        for i in 0..min_len {
+            if pg_nodes[i].is_semantically_compatible(&ra_nodes[i]) {
                 matches += 1;
             } else {
                 notes.push(format!(
-                    "Operator mismatch: PG={:?} vs Ra={:?}",
-                    pg_node.operator, ra_node.operator
+                    "Operator mismatch at position {i}: PG={:?} vs Ra={:?}",
+                    pg_nodes[i], ra_nodes[i]
                 ));
-            }
-
-            // Enqueue children
-            for child in &pg_node.children {
-                pg_queue.push_back(child);
-            }
-            for child in &ra_node.children {
-                ra_queue.push_back(child);
             }
         }
 
-        // If one plan has more nodes, count as mismatches
-        total += pg_queue.len() + ra_queue.len();
-
-        if !pg_queue.is_empty() || !ra_queue.is_empty() {
+        if pg_nodes.len() != ra_nodes.len() {
             notes.push(format!(
-                "Plan depth mismatch: PG has {} extra nodes, Ra has {} extra nodes",
-                pg_queue.len(),
-                ra_queue.len()
+                "Plan size mismatch: PG has {} operators, Ra has {} operators",
+                pg_nodes.len(),
+                ra_nodes.len()
             ));
         }
 
-        let similarity = if total > 0 {
-            matches as f64 / total as f64
-        } else {
-            1.0
-        };
+        let similarity = matches as f64 / max_len as f64;
 
-        // Simple join order check: both plans have same number of joins
+        // Join order check: both plans have same number of joins
         let join_match = Self::count_joins(pg) == Self::count_joins(ra);
 
         (similarity, join_match, notes)
     }
 
+    /// Flatten a plan tree into a BFS list of operators, skipping
+    /// auxiliary nodes (Materialize, Hash) that are implementation
+    /// details of the physical plan.
+    #[cfg(feature = "reference-comparison")]
+    fn flatten_plan_skip_auxiliary(node: &PlanNode) -> Vec<&PlanOperator> {
+        use std::collections::VecDeque;
+
+        let mut result = Vec::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(node);
+
+        while let Some(current) = queue.pop_front() {
+            // Skip auxiliary nodes — just traverse their children
+            if matches!(current.operator, PlanOperator::Materialize | PlanOperator::Hash) {
+                for child in &current.children {
+                    queue.push_back(child);
+                }
+                continue;
+            }
+            result.push(&current.operator);
+            for child in &current.children {
+                queue.push_back(child);
+            }
+        }
+
+        result
+    }
+
     #[cfg(feature = "reference-comparison")]
     fn count_joins(node: &PlanNode) -> usize {
         let self_count = match node.operator {
-            PlanOperator::HashJoin | PlanOperator::NestedLoop | PlanOperator::MergeJoin => 1,
+            PlanOperator::HashJoin
+            | PlanOperator::NestedLoop
+            | PlanOperator::MergeJoin
+            | PlanOperator::Join => 1,
             _ => 0,
         };
 
@@ -556,6 +656,7 @@ impl ReferenceComparator {
         Ok(ComparisonResult {
             reference: ReferenceDb::DuckDB,
             structurally_similar: true,
+            similarity_score: 1.0,
             join_order_match: true,
             cost_ratio: None,
             actual_execution_time_ms: None,

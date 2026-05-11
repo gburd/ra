@@ -266,6 +266,30 @@ impl Optimizer {
         }
     }
 
+    /// Returns true if the query is trivial enough to skip the e-graph
+    /// entirely. A trivial query has no joins, no subqueries, no CTEs,
+    /// no window functions, and at most one table reference.
+    fn is_trivial_query(expr: &RelExpr) -> bool {
+        match expr {
+            RelExpr::Scan { .. } | RelExpr::Values { .. } => true,
+            RelExpr::Filter { input, predicate, .. } => {
+                !crate::subquery_decorrelation::contains_subquery(predicate)
+                    && Self::is_trivial_query(input)
+            }
+            RelExpr::Project { input, columns, .. } => {
+                !columns.iter().any(|c| {
+                    crate::subquery_decorrelation::contains_subquery(&c.expr)
+                }) && Self::is_trivial_query(input)
+            }
+            RelExpr::Sort { input, .. }
+            | RelExpr::Limit { input, .. }
+            | RelExpr::Distinct { input } => Self::is_trivial_query(input),
+            RelExpr::Aggregate { input, .. } => Self::is_trivial_query(input),
+            // Joins, CTEs, window functions, set ops → not trivial
+            _ => false,
+        }
+    }
+
     /// Optimize a relational expression using equality saturation.
     ///
     /// Returns the optimized expression, or an error if conversion
@@ -281,6 +305,14 @@ impl Optimizer {
         use tracing::{debug, info};
 
         let total_start = Instant::now();
+
+        // Fast-path: single-table queries skip e-graph entirely.
+        // These queries have no joins, subqueries, CTEs, or window
+        // functions, so the optimal plan is trivially the input itself.
+        if Self::is_trivial_query(expr) {
+            debug!("Trivial query fast-path: skipping e-graph");
+            return Ok(expr.clone());
+        }
 
         // Plan cache fast path: check if we have a cached plan for
         // a structurally equivalent query.
