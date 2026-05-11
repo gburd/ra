@@ -1,0 +1,408 @@
+{
+  "workload_name": "tproc_c",
+  "query_timings": [
+    {
+      "query_id": "TPCC_NO_warehouse",
+      "sql": "SELECT w_tax FROM warehouse WHERE w_id = 1",
+      "ra_times_ms": [
+        0.197541,
+        0.006333000000000001,
+        0.004083,
+        0.004792,
+        0.0036249999999999998,
+        0.003667,
+        0.003041,
+        0.0020829999999999998,
+        0.004876,
+        0.012207999999999998
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0161416,
+      "mean_optimize_ms": 0.0080833
+    },
+    {
+      "query_id": "TPCC_NO_district",
+      "sql": "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = 1 AND d_id = 1",
+      "ra_times_ms": [
+        0.007042,
+        0.004999,
+        0.005541999999999999,
+        0.0034590000000000003,
+        0.004916,
+        0.005625000000000001,
+        0.003334,
+        0.002958,
+        0.002959,
+        0.004125
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.004100100000000001,
+      "mean_optimize_ms": 0.0003958000000000001
+    },
+    {
+      "query_id": "TPCC_NO_customer",
+      "sql": "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = 1 AND c_d_id = 1 AND c_id = 1",
+      "ra_times_ms": [
+        0.007709,
+        0.005834,
+        0.004166,
+        0.0051660000000000005,
+        0.006167000000000001,
+        0.004416,
+        0.004083,
+        0.003917,
+        0.003875,
+        0.004958000000000001
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0044417000000000015,
+      "mean_optimize_ms": 0.0005874000000000001
+    },
+    {
+      "query_id": "TPCC_NO_item",
+      "sql": "SELECT i_price, i_name, i_data FROM item WHERE i_id = 42",
+      "ra_times_ms": [
+        0.003125,
+        0.003624,
+        0.002334,
+        0.002208,
+        0.002083,
+        0.002084,
+        0.002125,
+        0.002125,
+        0.002208,
+        0.002166
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0022124,
+      "mean_optimize_ms": 0.00019580000000000002
+    },
+    {
+      "query_id": "TPCC_NO_stock",
+      "sql": "SELECT s_quantity, s_data, s_dist_01, s_dist_02, s_dist_03, s_dist_04, s_dist_05 FROM stock WHERE s_i_id = 42 AND s_w_id = 1",
+      "ra_times_ms": [
+        0.005292,
+        0.004333,
+        0.003999,
+        0.003958,
+        0.047375,
+        0.005999999999999999,
+        0.0042510000000000004,
+        0.005875,
+        0.005542,
+        0.004083
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.008499900000000001,
+      "mean_optimize_ms": 0.0005709
+    },
+    {
+      "query_id": "TPCC_PAY_warehouse",
+      "sql": "SELECT w_name, w_street_1, w_street_2, w_city, w_state, w_zip FROM warehouse WHERE w_id = 1",
+      "ra_times_ms": [
+        0.00425,
+        0.003292,
+        0.0031670000000000005,
+        0.003,
+        0.0029170000000000003,
+        0.002875,
+        0.002916,
+        0.0029170000000000003,
+        0.003,
+        0.0028329999999999996
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0028458999999999993,
+      "mean_optimize_ms": 0.0002708
+    },
+    {
+      "query_id": "TPCC_PAY_district",
+      "sql": "SELECT d_name, d_street_1, d_street_2, d_city, d_state, d_zip FROM district WHERE d_w_id = 1 AND d_id = 1",
+      "ra_times_ms": [
+        0.0069180000000000005,
+        0.004124,
+        0.003958,
+        0.0035830000000000002,
+        0.003584,
+        0.003584,
+        0.004959,
+        0.0037920000000000002,
+        0.0036260000000000003,
+        0.003543
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0037334999999999994,
+      "mean_optimize_ms": 0.0004336
+    },
+    {
+      "query_id": "TPCC_PAY_customer_by_id",
+      "sql": "SELECT c_first, c_middle, c_last, c_street_1, c_street_2, c_city, c_state, c_zip, c_phone, c_credit, c_credit_lim, c_discount, c_balance, c_since FROM customer WHERE c_w_id = 1 AND c_d_id = 1 AND c_id = 1",
+      "ra_times_ms": [
+        0.009583000000000001,
+        0.008291999999999999,
+        0.006541,
+        0.006332999999999999,
+        0.008042,
+        0.006333,
+        0.006208,
+        0.006750000000000001,
+        0.006251,
+        0.006125
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.006399999999999999,
+      "mean_optimize_ms": 0.0006458
+    },
+    {
+      "query_id": "TPCC_PAY_customer_by_name",
+      "sql": "SELECT c_id, c_first, c_middle, c_credit, c_credit_lim, c_discount, c_balance FROM customer WHERE c_w_id = 1 AND c_d_id = 1 AND c_last = 'BARBARBAR' ORDER BY c_first",
+      "ra_times_ms": [
+        0.009166,
+        0.006958000000000001,
+        0.007500000000000001,
+        0.006541,
+        0.006208,
+        0.006083000000000001,
+        0.006125,
+        0.006,
+        0.007125,
+        0.007417
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0062999,
+      "mean_optimize_ms": 0.0006124000000000001
+    },
+    {
+      "query_id": "TPCC_OS_customer",
+      "sql": "SELECT c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = 1 AND c_d_id = 1 AND c_id = 1",
+      "ra_times_ms": [
+        0.004958000000000001,
+        0.004334,
+        0.004083,
+        0.004209,
+        0.011292,
+        0.009375999999999999,
+        0.005333,
+        0.016083,
+        0.012125,
+        0.0055839999999999996
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.007050000000000001,
+      "mean_optimize_ms": 0.0006877000000000001
+    },
+    {
+      "query_id": "TPCC_OS_last_order",
+      "sql": "SELECT o_id, o_carrier_id, o_entry_d FROM orders WHERE o_w_id = 1 AND o_d_id = 1 AND o_c_id = 1 ORDER BY o_id DESC LIMIT 1",
+      "ra_times_ms": [
+        0.009416999999999998,
+        0.006709,
+        0.006333,
+        0.006124999999999999,
+        0.007667,
+        0.007,
+        0.005959000000000001,
+        0.005958,
+        0.006374,
+        0.005751
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.006296099999999999,
+      "mean_optimize_ms": 0.0004332
+    },
+    {
+      "query_id": "TPCC_OS_order_lines",
+      "sql": "SELECT ol_i_id, ol_supply_w_id, ol_quantity, ol_amount, ol_delivery_d FROM order_line WHERE ol_o_id = 3001 AND ol_d_id = 1 AND ol_w_id = 1",
+      "ra_times_ms": [
+        0.006208,
+        0.004916,
+        0.004583,
+        0.004541,
+        0.004542,
+        0.004457999999999999,
+        0.004417,
+        0.004459,
+        0.004458,
+        0.005624
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0044124,
+      "mean_optimize_ms": 0.00040819999999999995
+    },
+    {
+      "query_id": "TPCC_DEL_oldest_new_order",
+      "sql": "SELECT no_o_id FROM new_order WHERE no_d_id = 1 AND no_w_id = 1 ORDER BY no_o_id ASC LIMIT 1",
+      "ra_times_ms": [
+        0.005333999999999999,
+        0.004542,
+        0.033292,
+        0.00925,
+        0.008875000000000001,
+        0.004708,
+        0.004292,
+        0.004292,
+        0.006166,
+        0.0043749999999999995
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0077417000000000015,
+      "mean_optimize_ms": 0.0007708999999999999
+    },
+    {
+      "query_id": "TPCC_DEL_order_customer",
+      "sql": "SELECT o_c_id FROM orders WHERE o_id = 3001 AND o_d_id = 1 AND o_w_id = 1",
+      "ra_times_ms": [
+        0.004875,
+        0.0037920000000000002,
+        0.003709,
+        0.003542,
+        0.003542,
+        0.0035,
+        0.0035,
+        0.003292,
+        0.003458,
+        0.003292
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0033459999999999996,
+      "mean_optimize_ms": 0.00030419999999999997
+    },
+    {
+      "query_id": "TPCC_DEL_order_line_sum",
+      "sql": "SELECT SUM(ol_amount) AS total FROM order_line WHERE ol_o_id = 3001 AND ol_d_id = 1 AND ol_w_id = 1",
+      "ra_times_ms": [
+        0.006041,
+        0.004625,
+        0.0041259999999999995,
+        0.004208,
+        0.004042,
+        0.004041,
+        0.004083,
+        0.004083,
+        0.003999,
+        0.004167
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.003929,
+      "mean_optimize_ms": 0.00041249999999999994
+    },
+    {
+      "query_id": "TPCC_DEL_pending_by_district",
+      "sql": "SELECT COUNT(*) AS pending_count, MIN(no_o_id) AS oldest_id FROM new_order WHERE no_w_id = 1 GROUP BY no_d_id ORDER BY no_d_id",
+      "ra_times_ms": [
+        0.018042,
+        0.0075,
+        0.004916,
+        0.004542,
+        0.004541,
+        0.004542,
+        0.004625000000000001,
+        0.0045,
+        0.006458,
+        0.0047090000000000005
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.006062499999999999,
+      "mean_optimize_ms": 0.00037499999999999995
+    },
+    {
+      "query_id": "TPCC_SL_district_next_oid",
+      "sql": "SELECT d_next_o_id FROM district WHERE d_w_id = 1 AND d_id = 1",
+      "ra_times_ms": [
+        0.003542,
+        0.00275,
+        0.002499,
+        0.0024590000000000002,
+        0.002376,
+        0.0024159999999999997,
+        0.0024999999999999996,
+        0.002458,
+        0.002375,
+        0.002418
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0023543,
+      "mean_optimize_ms": 0.00022500000000000002
+    },
+    {
+      "query_id": "TPCC_SL_low_stock_count",
+      "sql": "SELECT COUNT(DISTINCT ol.ol_i_id) AS low_stock FROM order_line AS ol, stock AS s WHERE ol.ol_w_id = 1 AND ol.ol_d_id = 1 AND ol.ol_o_id < 3020 AND ol.ol_o_id >= 3020 - 20 AND s.s_w_id = 1 AND s.s_i_id = ol.ol_i_id AND s.s_quantity < 15",
+      "ra_times_ms": [
+        24.9365,
+        201.377499,
+        1.5130000000000001,
+        1.368874,
+        1.371833,
+        1.440291,
+        1.377375,
+        1.3201239999999999,
+        1.3309159999999998,
+        1.2571670000000001
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0200415,
+      "mean_optimize_ms": 23.7093164
+    },
+    {
+      "query_id": "TPCC_MIXED_district_summary",
+      "sql": "SELECT d.d_id, d.d_name, COUNT(o.o_id) AS order_count, SUM(ol.ol_amount) AS total_revenue FROM district AS d JOIN orders AS o ON o.o_w_id = d.d_w_id AND o.o_d_id = d.d_id JOIN order_line AS ol ON ol.ol_w_id = o.o_w_id AND ol.ol_d_id = o.o_d_id AND ol.ol_o_id = o.o_id WHERE d.d_w_id = 1 GROUP BY d.d_id, d.d_name ORDER BY total_revenue DESC",
+      "ra_times_ms": [
+        0.036166000000000004,
+        0.023251,
+        0.02025,
+        0.019208,
+        0.019000000000000003,
+        0.018542,
+        0.057623999999999995,
+        0.028916999999999998,
+        0.021,
+        0.0195
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.0195125,
+      "mean_optimize_ms": 0.0068333000000000005
+    },
+    {
+      "query_id": "TPCC_MIXED_customer_ranking",
+      "sql": "SELECT c.c_id, c.c_last, c.c_balance, RANK() OVER (PARTITION BY c.c_d_id ORDER BY c.c_balance DESC) AS balance_rank FROM customer AS c WHERE c.c_w_id = 1 ORDER BY c.c_d_id, balance_rank LIMIT 100",
+      "ra_times_ms": [
+        0.031208999999999997,
+        0.008708,
+        0.007667,
+        0.007625,
+        0.007458,
+        0.007375,
+        0.007416,
+        0.007416,
+        0.007457999999999999,
+        0.007291000000000001
+      ],
+      "postgres_times_ms": [],
+      "ra_success_count": 10,
+      "mean_parse_ms": 0.009116500000000003,
+      "mean_optimize_ms": 0.0008458000000000001
+    }
+  ],
+  "statistical_analysis": null,
+  "timestamp": "2026-05-11T22:00:18.463359+00:00",
+  "ra_version": "0.2.0"
+}
