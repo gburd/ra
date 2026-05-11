@@ -9,6 +9,7 @@ use ra_stats::delta::DeltaSet;
 use tracing::warn;
 
 use crate::analysis::RelAnalysis;
+use crate::continuation_gate::{ContinuationDecision, ContinuationGate};
 use crate::cost_model::BitNetCostModel;
 use crate::extract::{extract_best, extract_best_bitnet};
 use crate::genetic_fingerprint::QueryFingerprint;
@@ -17,6 +18,7 @@ use crate::resource_budget::{
     ConvergenceBehavior, OverflowStrategy, ResourceBudget, ResourceTracker,
 };
 use crate::rewrite::all_rules;
+use crate::speculative_router::{OptRoute, OptimizationFeatures, SpeculativeRouter};
 use crate::state::FingerprintReader;
 
 use super::config::OptimizerConfig;
@@ -50,6 +52,7 @@ pub struct Optimizer {
     rule_advisor: Option<Mutex<crate::rule_advisor::RuleAdvisor>>,
     cost_model: Option<Arc<BitNetCostModel>>,
     fingerprint_reader: Option<FingerprintReader>,
+    speculative_router: Option<SpeculativeRouter>,
 }
 
 impl Optimizer {
@@ -65,6 +68,7 @@ impl Optimizer {
             rule_advisor: None,
             cost_model: None,
             fingerprint_reader: None,
+            speculative_router: None,
         }
     }
 
@@ -92,6 +96,7 @@ impl Optimizer {
             rule_advisor,
             cost_model: None,
             fingerprint_reader: None,
+            speculative_router: None,
         }
     }
 
@@ -209,6 +214,27 @@ impl Optimizer {
     pub fn with_fingerprint_reader(mut self, reader: FingerprintReader) -> Self {
         self.fingerprint_reader = Some(reader);
         self
+    }
+
+    /// Enable speculative routing with the given cost model.
+    ///
+    /// When enabled, the optimizer uses a BitNet forward pass (~87ns)
+    /// to predict the optimal optimization strategy before running
+    /// the e-graph. This can route simple queries (equi-join chains)
+    /// directly to left-deep construction, bypassing e-graph entirely.
+    #[must_use]
+    pub fn with_speculative_router(mut self, model: Arc<BitNetCostModel>) -> Self {
+        self.speculative_router = Some(SpeculativeRouter::new(model));
+        self
+    }
+
+    /// Enable speculative routing using the already-loaded cost model.
+    ///
+    /// Reuses the existing model if one is loaded. No-op if no model exists.
+    pub fn enable_speculative_routing(&mut self) {
+        if let Some(ref model) = self.cost_model {
+            self.speculative_router = Some(SpeculativeRouter::new(Arc::clone(model)));
+        }
     }
 
     /// Load a BitNet cost model from a JSON file.
@@ -339,28 +365,64 @@ impl Optimizer {
             None
         };
 
-        // Fast path: Use left-deep tree for queries with 2-7 tables
-        if crate::left_deep::can_use_left_deep(expr) {
-            debug!("Using left-deep tree optimization");
-            let cost_model: Arc<dyn ra_core::cost::CostModel> =
-                Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
-            let stats_provider = Arc::new(TableStatsProvider {
-                stats: self.table_stats.clone(),
-            });
+        // ─── SPECULATIVE ROUTING ───
+        // Uses a BitNet forward pass (~87ns) or heuristic fallback to predict
+        // the optimal optimization route. Replaces the hard-coded left-deep
+        // eligibility check with a topology-aware prediction.
+        let opt_features = OptimizationFeatures::from_expr(expr)
+            .with_table_stats(&self.table_stats);
 
-            let builder = crate::left_deep::LeftDeepBuilder::new(cost_model, stats_provider);
-            match builder.build(expr) {
-                Ok(optimized) => {
-                    info!(
-                        "Left-deep optimization completed in {:?}",
-                        total_start.elapsed()
-                    );
-                    self.insert_into_cache(fingerprint.as_ref(), &optimized);
-                    return Ok(optimized);
+        let route_prediction = if let Some(ref router) = self.speculative_router {
+            router.predict(&opt_features)
+        } else {
+            SpeculativeRouter::heuristic_fallback(&opt_features)
+        };
+
+        match route_prediction.route {
+            OptRoute::Skip => {
+                debug!(
+                    "Speculative route: SKIP (conf={:.2})",
+                    route_prediction.confidence
+                );
+                return Ok(expr.clone());
+            }
+            OptRoute::LeftDeep => {
+                debug!(
+                    "Speculative route: LEFT_DEEP (conf={:.2})",
+                    route_prediction.confidence
+                );
+                if crate::left_deep::can_use_left_deep(expr) {
+                    let cost_model: Arc<dyn ra_core::cost::CostModel> =
+                        Arc::new(ra_hardware::HardwareCostModel::new(self.hardware_profile()));
+                    let stats_provider = Arc::new(TableStatsProvider {
+                        stats: self.table_stats.clone(),
+                    });
+
+                    let builder =
+                        crate::left_deep::LeftDeepBuilder::new(cost_model, stats_provider);
+                    match builder.build(expr) {
+                        Ok(optimized) => {
+                            info!(
+                                "Left-deep optimization completed in {:?}",
+                                total_start.elapsed()
+                            );
+                            self.insert_into_cache(fingerprint.as_ref(), &optimized);
+                            return Ok(optimized);
+                        }
+                        Err(e) => {
+                            debug!("Left-deep failed ({}), falling back to e-graph", e);
+                        }
+                    }
                 }
-                Err(e) => {
-                    debug!("Left-deep failed ({}), falling back to e-graph", e);
-                }
+            }
+            OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => {
+                // E-graph route — budget override applied below
+                debug!(
+                    "Speculative route: {:?} (conf={:.2}, predicted_iters={})",
+                    route_prediction.route,
+                    route_prediction.confidence,
+                    route_prediction.predicted_iterations_needed,
+                );
             }
         }
 
@@ -409,10 +471,21 @@ impl Optimizer {
             }
         };
 
-        let base_iter_limit = if self.config.use_adaptive_limits {
-            complexity.default_iter_limit()
-        } else {
-            self.config.iter_limit
+        // Apply speculative route budget when confident, else fall back
+        // to adaptive complexity limits.
+        let base_iter_limit = match route_prediction.route {
+            OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh
+                if route_prediction.confidence >= 0.5 =>
+            {
+                route_prediction.route.iter_limit()
+            }
+            _ => {
+                if self.config.use_adaptive_limits {
+                    complexity.default_iter_limit()
+                } else {
+                    self.config.iter_limit
+                }
+            }
         };
 
         // Cap iteration limit by the resource budget when set.
@@ -423,10 +496,19 @@ impl Optimizer {
             None => base_iter_limit,
         };
 
-        let timeout_ms = if self.config.use_adaptive_limits {
-            complexity.default_timeout_ms()
-        } else {
-            self.config.time_limit_secs * 1000
+        let timeout_ms = match route_prediction.route {
+            OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh
+                if route_prediction.confidence >= 0.5 =>
+            {
+                route_prediction.route.timeout_ms()
+            }
+            _ => {
+                if self.config.use_adaptive_limits {
+                    complexity.default_timeout_ms()
+                } else {
+                    self.config.time_limit_secs * 1000
+                }
+            }
         };
 
         // Standard e-graph optimization with timing
@@ -514,8 +596,24 @@ impl Optimizer {
         let mut best_cost = f64::INFINITY;
         let mut cost_improvement_stalled = 0;
 
+        // Create continuation gate for speculative early stopping.
+        // Only active when the speculative router predicted an e-graph route.
+        let mut continuation_gate = match route_prediction.route {
+            OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => {
+                Some(ContinuationGate::new(
+                    opt_features.clone(),
+                    self.cost_model.clone(),
+                ))
+            }
+            _ => None,
+        };
+
         // Cache hardware profile outside loop to avoid repeated clones
-        let hardware_cached = if cost_pruner.is_some() || beam_search_tracker.is_some() {
+        // Also needed for continuation gate cost extraction.
+        let hardware_cached = if cost_pruner.is_some()
+            || beam_search_tracker.is_some()
+            || continuation_gate.is_some()
+        {
             Some(self.hardware_profile())
         } else {
             None
@@ -612,6 +710,34 @@ impl Optimizer {
                             iteration,
                             tracker.stats().plans_kept
                         );
+                    }
+                }
+            }
+
+            // Continuation gate: speculative early stopping based on
+            // cost trajectory and model prediction.
+            if let Some(gate) = continuation_gate.as_mut() {
+                if let Some(cost) = current_cost {
+                    let decision =
+                        gate.should_continue(iteration, cost, egraph.total_size());
+                    match decision {
+                        ContinuationDecision::StopCostStagnant => {
+                            termination_reason = "speculative_cost_stagnant";
+                            debug!(
+                                "Continuation gate: cost stagnant at iteration {}",
+                                iteration
+                            );
+                            break;
+                        }
+                        ContinuationDecision::StopModelPrediction => {
+                            termination_reason = "speculative_model_stop";
+                            debug!(
+                                "Continuation gate: model predicts no improvement at iter {}",
+                                iteration
+                            );
+                            break;
+                        }
+                        ContinuationDecision::Continue => {}
                     }
                 }
             }

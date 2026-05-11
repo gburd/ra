@@ -21,7 +21,7 @@ mod feature_extractor;
 
 pub use tokenizer::{Tokenizer, TimeBudget};
 pub use feature_extractor::{extract_features, extract_features_with_stats};
-pub use feedback::{ExecutionFeedback, FeedbackCollector, MapeTracker};
+pub use feedback::{ExecutionFeedback, FeedbackCollector, MapeTracker, OptimizationTrace};
 pub use ra_bitnet::{BitNetCostModel, BitNetTrainer, TrainerConfig};
 
 /// Query structural features for neural cost prediction.

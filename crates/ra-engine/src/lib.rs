@@ -115,6 +115,8 @@ pub mod rum_index;
 pub mod runtime_filters;
 pub mod selectivity;
 pub mod semi_join;
+pub mod speculative_router;
+pub mod continuation_gate;
 #[cfg(feature = "timeline")]
 pub mod timeline_config;
 #[cfg(feature = "timeline")]
@@ -259,6 +261,8 @@ pub use progressive_reopt::{
     StitchPointMeta, StitchTransferKind,
 };
 pub use query_complexity::QueryComplexity;
+pub use speculative_router::{OptimizationFeatures, OptRoute, RoutePrediction, SpeculativeRouter};
+pub use continuation_gate::{ContinuationDecision, ContinuationGate};
 pub use query_features::QueryFeatureSet;
 pub use recursive::{
     ExecutionContext, ExecutionError, ExprEvaluator, RecursionResult, RecursiveCTEConfig,

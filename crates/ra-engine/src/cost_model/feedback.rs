@@ -119,6 +119,74 @@ impl<'de> Deserialize<'de> for SystemFingerprint {
     }
 }
 
+/// Training signal for the speculative router and continuation gate.
+///
+/// Records the full optimization trajectory for a single query, enabling
+/// post-hoc computation of the optimal stopping point and route label.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OptimizationTrace {
+    /// 12-dimensional structural features at optimization time.
+    pub features: QueryFeatures,
+    /// Total iterations actually run.
+    pub iterations_run: usize,
+    /// Cost at each iteration (index 0 = after first iteration).
+    pub cost_per_iteration: Vec<f64>,
+    /// Why the optimizer stopped.
+    pub termination_reason: String,
+    /// Final cost improvement vs iteration 0 (as percentage).
+    pub final_improvement_pct: f64,
+    /// Iteration where 95% of total improvement was achieved.
+    /// This is the "ground truth" for the router's prediction target.
+    pub optimal_stop_point: usize,
+    /// E-graph size at termination (nodes).
+    pub egraph_nodes_final: usize,
+    /// Wall-clock time spent in e-graph optimization (ms).
+    pub optimization_time_ms: f64,
+}
+
+impl OptimizationTrace {
+    /// Compute the optimal stopping point from cost history.
+    ///
+    /// Finds the first iteration N where `cost[N] <= cost[final] * 1.05`.
+    #[must_use]
+    pub fn compute_optimal_stop(cost_history: &[f64]) -> usize {
+        if cost_history.is_empty() {
+            return 0;
+        }
+
+        let final_cost = cost_history[cost_history.len() - 1];
+        if final_cost <= 0.0 || !final_cost.is_finite() {
+            return 0;
+        }
+
+        let threshold = final_cost * 1.05;
+        for (i, &cost) in cost_history.iter().enumerate() {
+            if cost <= threshold {
+                return i;
+            }
+        }
+        cost_history.len().saturating_sub(1)
+    }
+
+    /// Map the optimal stop point to a route label for training.
+    ///
+    /// - 0 iterations needed → Skip
+    /// - 1 iteration → `LeftDeep`
+    /// - 2-3 → `EGraphLow`
+    /// - 4-8 → `EGraphMedium`
+    /// - 9+ → `EGraphHigh`
+    #[must_use]
+    pub fn route_label(&self) -> u8 {
+        match self.optimal_stop_point {
+            0 => 0,     // Skip
+            1 => 1,     // LeftDeep
+            2..=3 => 2, // EGraphLow
+            4..=8 => 3, // EGraphMedium
+            _ => 4,     // EGraphHigh
+        }
+    }
+}
+
 /// Computes the mean absolute percentage error between predicted and actual.
 #[must_use]
 pub fn compute_mape(predicted: f64, actual: f64) -> f64 {
