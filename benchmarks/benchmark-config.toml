@@ -1,0 +1,233 @@
+# Comprehensive Ra vs Postgres Benchmark Configuration
+# Configuration for multi-hour statistical comparison testing
+
+[general]
+# Total runtime target (hours) - will run for approximately this duration
+target_runtime_hours = 4
+
+# Number of iterations per query for statistical significance
+# Higher numbers provide better statistics but take longer
+iterations_per_query = 50
+
+# Timeout for individual query execution (seconds)
+query_timeout_sec = 300
+
+# Number of parallel benchmark workers
+parallel_jobs = 2
+
+# Random seed for reproducible results
+random_seed = 42
+
+[databases]
+# Database configurations for testing
+# Each database represents a different scale/size for comprehensive testing
+
+[databases.tproc_tiny]
+connection_string = "postgres://localhost/tproc"
+scale_factor = 0.01
+description = "Tiny dataset - cache resident, minimal I/O"
+lineitem_rows = 34
+expected_query_time_range_ms = [1, 50]
+
+[databases.tproc_small]
+connection_string = "postgres://localhost/tproc_small"
+scale_factor = 0.1
+description = "Small dataset - mixed cache behavior"
+lineitem_rows = 600572
+expected_query_time_range_ms = [10, 500]
+
+[databases.tproc_medium]
+connection_string = "postgres://localhost/tproc_medium"
+scale_factor = 1.0
+description = "Medium dataset - realistic workload patterns"
+lineitem_rows = 6001215
+expected_query_time_range_ms = [50, 5000]
+
+# Future: tproc_large database for comprehensive testing
+# [databases.tproc_large]
+# connection_string = "postgres://localhost/tproc_large"
+# scale_factor = 5.0
+# description = "Large dataset - memory pressure, complex optimization"
+# lineitem_rows = 30000000
+# expected_query_time_range_ms = [200, 30000]
+
+[query_types]
+# Types of queries to benchmark, each testing different optimization scenarios
+
+[query_types.table_scans]
+enabled = true
+iterations = 25
+description = "Simple table scans - tests basic access path selection"
+expected_improvement_pct = 5  # Conservative: neural models help less with simple scans
+
+[query_types.simple_joins]
+enabled = true
+iterations = 50
+description = "Two-table joins - tests join order and algorithm selection"
+expected_improvement_pct = 15  # Neural models shine in join optimization
+
+[query_types.complex_joins]
+enabled = true
+iterations = 75
+description = "Multi-table joins - tests complex join reordering"
+expected_improvement_pct = 25  # Biggest gains expected here
+
+[query_types.aggregations]
+enabled = true
+iterations = 40
+description = "GROUP BY and aggregate queries - tests memory/sort optimization"
+expected_improvement_pct = 12  # Moderate gains from better memory estimation
+
+[query_types.subqueries]
+enabled = true
+iterations = 30
+description = "Correlated and nested subqueries - tests subquery optimization"
+expected_improvement_pct = 20  # Neural models help with correlation patterns
+
+[query_types.window_functions]
+enabled = true
+iterations = 25
+description = "Window and analytic functions - tests advanced optimization"
+expected_improvement_pct = 10  # Modest gains in specialized operations
+
+[performance_targets]
+# Statistical significance and performance targets
+
+# Minimum improvement percentage to consider meaningful
+minimum_meaningful_improvement_pct = 5.0
+
+# Required confidence level for statistical significance
+confidence_level = 0.95
+
+# Required p-value threshold for significance testing
+significance_p_value = 0.05
+
+# Maximum acceptable regression percentage
+max_acceptable_regression_pct = -2.0
+
+# Target overall improvement across all queries
+target_overall_improvement_pct = 15.0
+
+# Target improvement by database size (larger databases should see more improvement)
+target_improvement_by_scale = [
+    { scale_factor = 0.01, target_improvement_pct = 5.0 },   # tiny
+    { scale_factor = 0.1,  target_improvement_pct = 12.0 },  # small
+    { scale_factor = 1.0,  target_improvement_pct = 18.0 },  # medium
+    { scale_factor = 5.0,  target_improvement_pct = 25.0 },  # large (future)
+]
+
+[neural_model]
+# Neural cost model configuration
+
+# Path to trained neural model (if available)
+model_path = "models/neural_cost_model.onnx"
+
+# Training data used for model
+training_data_path = "training_data_tproc_demo.json"
+
+# Model training parameters used
+training_epochs = 50
+training_samples = 142
+model_accuracy_pct = 87.7
+
+# Whether to use neural model predictions in comparison
+# If false, simulates neural improvements based on expected gains
+use_actual_neural_model = false
+simulation_improvement_factor = 0.85  # 15% average improvement
+
+[output]
+# Output and reporting configuration
+
+# Results directory (relative to benchmark script location)
+results_dir = "results"
+
+# Whether to save individual query plans
+save_query_plans = true
+
+# Whether to generate detailed HTML report
+generate_html_report = true
+
+# Whether to save raw execution logs
+save_execution_logs = true
+
+# Compression for large result files
+compress_results = true
+
+# Real-time progress reporting interval (seconds)
+progress_report_interval_sec = 30
+
+[monitoring]
+# System monitoring during benchmark execution
+
+# Monitor system resources during benchmarking
+monitor_system_resources = true
+
+# Resource monitoring interval (seconds)
+resource_monitoring_interval_sec = 5
+
+# Monitor PostgreSQL statistics
+monitor_postgres_stats = true
+
+# Save system resource graphs
+generate_resource_graphs = true
+
+[quality_control]
+# Quality control and validation settings
+
+# Automatically retry failed queries
+retry_failed_queries = true
+max_query_retries = 3
+
+# Validate query result consistency between Postgres and Ra
+validate_result_consistency = true
+
+# Warm up database before each benchmark session
+perform_warmup_queries = true
+warmup_iterations = 5
+
+# Detect and handle query timeout issues
+handle_query_timeouts = true
+timeout_retry_with_longer_limit = true
+
+# Validate database state before/after benchmarking
+validate_database_integrity = true
+
+[reporting]
+# Final report generation settings
+
+# Include confidence intervals in all reports
+include_confidence_intervals = true
+
+# Generate comparative charts and graphs
+generate_comparison_charts = true
+
+# Include query plan analysis in reports
+include_plan_analysis = true
+
+# Generate executive summary
+generate_executive_summary = true
+
+# Export results in multiple formats
+export_formats = ["json", "csv", "html", "pdf"]
+
+# Include recommendations based on results
+include_optimization_recommendations = true
+
+[experimental]
+# Experimental features and advanced options
+
+# Use parallel query execution for faster benchmarking
+parallel_query_execution = false
+
+# Adaptive iteration count based on variance
+adaptive_iteration_count = false
+
+# Machine learning-based benchmark optimization
+ml_benchmark_optimization = false
+
+# Advanced statistical analysis (requires R/scipy)
+advanced_statistical_analysis = true
+
+# Benchmark result comparison with historical data
+historical_comparison = false
+historical_data_path = "historical_results/"
