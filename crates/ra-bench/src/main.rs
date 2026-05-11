@@ -7,6 +7,7 @@
 // The workspace lint denies print_stdout; this binary intentionally uses it.
 #![allow(clippy::print_stdout)]
 
+mod compare;
 mod report;
 mod runner;
 pub mod benchmark_harness;
@@ -46,6 +47,8 @@ struct Cli {
 enum Commands {
     /// Run benchmark against corpus and/or fuzz-generated queries
     Bench(BenchArgs),
+    /// Compare Ra planner vs PG planner on a live database
+    Compare(CompareArgs),
     /// Collect training data from Postgres execution
     CollectTraining(CollectTrainingArgs),
     /// Generate comprehensive analysis report from saved benchmark results
@@ -56,6 +59,33 @@ enum Commands {
     Train(TrainArgs),
     /// Run TPROC-C (TPC-C-like) OLTP queries offline against Ra optimizer
     BenchmarkOltp(BenchmarkOltpArgs),
+}
+
+#[derive(Debug, Parser)]
+struct CompareArgs {
+    /// Postgres connection string (required — must have ra_planner extension installed).
+    #[arg(long)]
+    db: String,
+
+    /// Query source: corpus, fuzz, or both.
+    #[arg(long, default_value = "corpus")]
+    mode: Mode,
+
+    /// Number of fuzz-generated queries (if mode=fuzz or both).
+    #[arg(long, default_value_t = 100)]
+    fuzz_count: usize,
+
+    /// Write JSON comparison report to this path.
+    #[arg(long, default_value = "comparison_results.json")]
+    output: PathBuf,
+
+    /// Number of repetitions per query for statistical stability.
+    #[arg(long, default_value_t = 5)]
+    repetitions: usize,
+
+    /// Verify result correctness (compare result sets).
+    #[arg(long)]
+    verify: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -218,6 +248,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Bench(args) => run_bench(args),
+        Commands::Compare(args) => run_compare(args),
         Commands::CollectTraining(args) => run_collect_training(args),
         Commands::Analyze(args) => run_analyze(args),
         Commands::BenchmarkJob(args) => run_benchmark_job(args),
@@ -308,6 +339,74 @@ fn run_bench(args: BenchArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// compare subcommand
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "live-comparison")]
+fn run_compare(args: CompareArgs) -> Result<()> {
+    println!("Ra vs PostgreSQL planner comparison");
+    println!("Database: {}", args.db);
+    println!("Mode: {:?}", args.mode);
+    println!("Repetitions per query: {}", args.repetitions);
+    println!();
+
+    // Collect queries
+    let mut queries: Vec<(String, String)> = Vec::new();
+
+    if matches!(args.mode, Mode::Corpus | Mode::Both) {
+        for entry in corpus::all_queries() {
+            queries.push((entry.category.to_owned(), entry.sql.to_owned()));
+        }
+    }
+
+    if matches!(args.mode, Mode::Fuzz | Mode::Both) {
+        let emitter = SqlEmitter::new();
+        let gen = SqlGenerator::with_config(GeneratorConfig {
+            max_depth: 4,
+            ..GeneratorConfig::default()
+        });
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+        let mut runner = TestRunner::default();
+        for _ in 0..args.fuzz_count {
+            if let Ok(tree) = gen.strategy().new_tree(&mut runner) {
+                let sql = emitter.emit(&tree.current());
+                queries.push(("fuzz".to_owned(), sql));
+            }
+        }
+    }
+
+    println!("Queries to compare: {}", queries.len());
+    println!();
+
+    let config = compare::CompareConfig {
+        db_url: args.db,
+        repetitions: args.repetitions,
+        verify_results: args.verify,
+    };
+
+    let results = compare::run_comparison(&queries, &config)?;
+
+    // Print summary
+    compare::print_summary(&results);
+
+    // Write JSON report
+    let json = serde_json::to_string_pretty(&results)?;
+    std::fs::write(&args.output, json)?;
+    println!("\nReport written to {}", args.output.display());
+
+    Ok(())
+}
+
+#[cfg(not(feature = "live-comparison"))]
+fn run_compare(_args: CompareArgs) -> Result<()> {
+    anyhow::bail!(
+        "The 'compare' subcommand requires a live Postgres connection.\n\
+         Build with: cargo build -p ra-bench --features live-comparison"
+    );
 }
 
 #[cfg(feature = "live-comparison")]
