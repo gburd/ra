@@ -267,6 +267,12 @@ impl Optimizer {
         })
     }
 
+    /// Get a reference to the training coordinator handle.
+    #[must_use]
+    pub fn training_coordinator_handle(&self) -> Option<&SharedTrainingCoordinator> {
+        self.training_coordinator.as_ref()
+    }
+
     /// Load a BitNet cost model from a JSON file.
     ///
     /// The path can be overridden via the `RA_MODEL_PATH` environment variable.

@@ -1,0 +1,352 @@
+[
+  ✓ simple_01_simple_scan: cost=1219.36
+0
+{
+  "query_id": "simple_01_simple_scan",
+  "category": "simple",
+  "sql_file": "queries/simple/01_simple_scan.sql",
+  "plan_time_us": 0,
+  "total_cost": 1219.36
+0,
+  "startup_cost": 109.76
+0,
+  "success": true
+}
+,
+  ✓ simple_02_simple_aggregate: cost=2054.03
+0
+{
+  "query_id": "simple_02_simple_aggregate",
+  "category": "simple",
+  "sql_file": "queries/simple/02_simple_aggregate.sql",
+  "plan_time_us": 0,
+  "total_cost": 2054.03
+0,
+  "startup_cost": 2054.02
+0,
+  "success": true
+}
+,
+  ✓ simple_03_group_by: cost=2354.11
+0
+{
+  "query_id": "simple_03_group_by",
+  "category": "simple",
+  "sql_file": "queries/simple/03_group_by.sql",
+  "plan_time_us": 0,
+  "total_cost": 2354.11
+0,
+  "startup_cost": 2354.02
+0,
+  "success": true
+}
+,
+  ✓ simple_04_filter_aggregate: cost=1300.58
+0
+{
+  "query_id": "simple_04_filter_aggregate",
+  "category": "simple",
+  "sql_file": "queries/simple/04_filter_aggregate.sql",
+  "plan_time_us": 0,
+  "total_cost": 1300.58
+0,
+  "startup_cost": 1300.56
+0,
+  "success": true
+}
+,
+  ✓ simple_05_selective_filter: cost=2054.02
+0
+{
+  "query_id": "simple_05_selective_filter",
+  "category": "simple",
+  "sql_file": "queries/simple/05_selective_filter.sql",
+  "plan_time_us": 0,
+  "total_cost": 2054.02
+0,
+  "startup_cost": 0.00
+0,
+  "success": true
+}
+,
+  ✓ simple_06_order_limit: cost=3897.46
+0
+{
+  "query_id": "simple_06_order_limit",
+  "category": "simple",
+  "sql_file": "queries/simple/06_order_limit.sql",
+  "plan_time_us": 0,
+  "total_cost": 3897.46
+0,
+  "startup_cost": 3897.21
+0,
+  "success": true
+}
+,
+  ✓ simple_07_distinct_count: cost=1382.32
+0
+{
+  "query_id": "simple_07_distinct_count",
+  "category": "simple",
+  "sql_file": "queries/simple/07_distinct_count.sql",
+  "plan_time_us": 0,
+  "total_cost": 1382.32
+0,
+  "startup_cost": 1382.31
+0,
+  "success": true
+}
+,
+  ✓ simple_08_having_clause: cost=1904.05
+0
+{
+  "query_id": "simple_08_having_clause",
+  "category": "simple",
+  "sql_file": "queries/simple/08_having_clause.sql",
+  "plan_time_us": 0,
+  "total_cost": 1904.05
+0,
+  "startup_cost": 1904.02
+0,
+  "success": true
+}
+,
+  ✓ simple_09_multiple_filters: cost=1509.94
+0
+{
+  "query_id": "simple_09_multiple_filters",
+  "category": "simple",
+  "sql_file": "queries/simple/09_multiple_filters.sql",
+  "plan_time_us": 0,
+  "total_cost": 1509.94
+0,
+  "startup_cost": 212.27
+0,
+  "success": true
+}
+,
+  ✓ simple_10_offset: cost=87.18
+0
+{
+  "query_id": "simple_10_offset",
+  "category": "simple",
+  "sql_file": "queries/simple/10_offset.sql",
+  "plan_time_us": 0,
+  "total_cost": 87.18
+0,
+  "startup_cost": 79.28
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_01_inner_join: cost=328.52
+0
+{
+  "query_id": "basic_joins_01_inner_join",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/01_inner_join.sql",
+  "plan_time_us": 0,
+  "total_cost": 328.52
+0,
+  "startup_cost": 88.43
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_02_left_join: cost=549.24
+0
+{
+  "query_id": "basic_joins_02_left_join",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/02_left_join.sql",
+  "plan_time_us": 0,
+  "total_cost": 549.24
+0,
+  "startup_cost": 534.24
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_03_right_join: cost=459.24
+0
+{
+  "query_id": "basic_joins_03_right_join",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/03_right_join.sql",
+  "plan_time_us": 0,
+  "total_cost": 459.24
+0,
+  "startup_cost": 57.75
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_04_equi_join_filter: cost=1219.00
+0
+{
+  "query_id": "basic_joins_04_equi_join_filter",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/04_equi_join_filter.sql",
+  "plan_time_us": 0,
+  "total_cost": 1219.00
+0,
+  "startup_cost": 0.29
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_05_three_table_join: cost=847.25
+0
+{
+  "query_id": "basic_joins_05_three_table_join",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/05_three_table_join.sql",
+  "plan_time_us": 0,
+  "total_cost": 847.25
+0,
+  "startup_cost": 30.53
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_06_foreign_key: cost=4.68
+0
+{
+  "query_id": "basic_joins_06_foreign_key",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/06_foreign_key.sql",
+  "plan_time_us": 0,
+  "total_cost": 4.68
+0,
+  "startup_cost": 1.38
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_07_multi_predicate_join: cost=236.94
+0
+{
+  "query_id": "basic_joins_07_multi_predicate_join",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/07_multi_predicate_join.sql",
+  "plan_time_us": 0,
+  "total_cost": 236.94
+0,
+  "startup_cost": 69.04
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_08_cross_product: cost=2.48
+0
+{
+  "query_id": "basic_joins_08_cross_product",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/08_cross_product.sql",
+  "plan_time_us": 0,
+  "total_cost": 2.48
+0,
+  "startup_cost": 1.11
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_09_join_aggregate: cost=2456.07
+0
+{
+  "query_id": "basic_joins_09_join_aggregate",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/09_join_aggregate.sql",
+  "plan_time_us": 0,
+  "total_cost": 2456.07
+0,
+  "startup_cost": 2456.02
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_10_self_join: cost=111.56
+0
+{
+  "query_id": "basic_joins_10_self_join",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/10_self_join.sql",
+  "plan_time_us": 0,
+  "total_cost": 111.56
+0,
+  "startup_cost": 0.30
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_11_dimension_table: cost=6.26
+0
+{
+  "query_id": "basic_joins_11_dimension_table",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/11_dimension_table.sql",
+  "plan_time_us": 0,
+  "total_cost": 6.26
+0,
+  "startup_cost": 6.20
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_12_join_with_in: cost=444.41
+0
+{
+  "query_id": "basic_joins_12_join_with_in",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/12_join_with_in.sql",
+  "plan_time_us": 0,
+  "total_cost": 444.41
+0,
+  "startup_cost": 42.93
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_13_non_equi_join: cost=28.78
+0
+{
+  "query_id": "basic_joins_13_non_equi_join",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/13_non_equi_join.sql",
+  "plan_time_us": 0,
+  "total_cost": 28.78
+0,
+  "startup_cost": 0.58
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_14_join_distinct: cost=535.49
+0
+{
+  "query_id": "basic_joins_14_join_distinct",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/14_join_distinct.sql",
+  "plan_time_us": 0,
+  "total_cost": 535.49
+0,
+  "startup_cost": 534.24
+0,
+  "success": true
+}
+,
+  ✓ basic_joins_15_join_computed: cost=2120.08
+0
+{
+  "query_id": "basic_joins_15_join_computed",
+  "category": "basic_joins",
+  "sql_file": "queries/basic_joins/15_join_computed.sql",
+  "plan_time_us": 0,
+  "total_cost": 2120.08
+0,
+  "startup_cost": 314.81
+0,
+  "success": true
+}
+
+]

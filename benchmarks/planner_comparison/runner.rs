@@ -95,11 +95,19 @@ fn make_stats(rows: f64, avg_row_size: u64) -> Statistics {
 }
 
 fn make_optimizer() -> Optimizer {
-    // Enable online training: each optimization run feeds the model.
-    let coordinator = ra_engine::training_coordinator::shared_coordinator();
+    // Bootstrap model from synthetic data or load existing.
+    let model_path = "models/cost_model.bitnet.json";
+    let initial_model = if std::path::Path::new(model_path).exists() {
+        ra_engine::cost_model::BitNetCostModel::load_from_file(model_path)
+            .unwrap_or_else(|_| ra_engine::training_coordinator::bootstrap_model())
+    } else {
+        ra_engine::training_coordinator::bootstrap_model()
+    };
+
+    let coordinator = ra_engine::training_coordinator::shared_coordinator_from_model(initial_model);
 
     let mut opt = Optimizer::new().with_training(coordinator);
-    opt.enable_training();
+    // Note: do NOT call enable_training() — it would replace the coordinator
     for (name, stats) in [
         ("lineitem", make_stats(6_001_215.0, 128)),
         ("orders", make_stats(1_500_000.0, 150)),
@@ -554,12 +562,25 @@ fn main() {
         report.overall_summary.optimizer_success_rate
     );
 
-    // Report training statistics
+    // Report training statistics and save model
     if let Some(stats) = optimizer.training_stats() {
         println!("\n  Training loop:");
         println!("    Traces collected: {}", stats.total_traces);
         println!("    Train steps: {}", stats.total_train_steps);
         println!("    Model samples: {}", stats.model_samples_trained);
         println!("    Avg loss: {:.6}", stats.avg_loss);
+
+        // Save trained model to models/ directory
+        let model_dir = PathBuf::from("models");
+        fs::create_dir_all(&model_dir).ok();
+        let model_path = model_dir.join("cost_model.bitnet.json");
+        if let Some(ref coord) = optimizer.training_coordinator_handle() {
+            if let Ok(c) = coord.lock() {
+                match c.save_model(model_path.to_str().unwrap_or("models/cost_model.bitnet.json")) {
+                    Ok(()) => println!("    Model saved to {}", model_path.display()),
+                    Err(e) => println!("    Failed to save model: {e}"),
+                }
+            }
+        }
     }
 }
