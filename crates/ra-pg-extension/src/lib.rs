@@ -11,8 +11,8 @@
 use pgrx::prelude::*;
 
 pub mod ab_testing;
-mod extension_state;
 mod expr_translator;
+mod extension_state;
 pub mod feedback_hook;
 mod metadata_cache;
 pub mod model_safety;
@@ -20,8 +20,7 @@ pub mod monitor;
 mod plan_builder;
 mod planner_hook;
 mod query_parser;
-mod stats_bridge;
-mod timeline_capture;
+pub mod stats_bridge;
 
 #[cfg(any(test, feature = "pg_test"))]
 mod integration_tests;
@@ -84,10 +83,7 @@ fn register_relcache_callback() {
 /// memory context. Called automatically by PostgreSQL's cache invalidation
 /// system.
 #[pg_guard]
-extern "C-unwind" fn ra_relcache_callback(
-    _arg: pgrx::pg_sys::Datum,
-    relid: pgrx::pg_sys::Oid,
-) {
+extern "C-unwind" fn ra_relcache_callback(_arg: pgrx::pg_sys::Datum, relid: pgrx::pg_sys::Oid) {
     // Forward to Rust implementation
     metadata_cache::ra_rust_invalidate_table(relid);
 }
@@ -134,98 +130,6 @@ fn metadata_cache_stats() -> TableIterator<
     })
 }
 
-// ---------------------------------------------------------------
-// Timeline snapshot capture functions
-// ---------------------------------------------------------------
-
-/// Capture a fingerprint snapshot from PostgreSQL catalogs.
-///
-/// SQL: `SELECT ra.capture_snapshot(ARRAY['schema.table1', 'schema.table2']);`
-///
-/// Returns JSON representation of the captured snapshot.
-#[pg_extern]
-fn capture_snapshot(
-    table_names: Vec<String>,
-) -> Result<pgrx::JsonB, String> {
-    // Parse "schema.table" strings
-    let parsed_names: Vec<(&str, &str)> = table_names
-        .iter()
-        .filter_map(|name| {
-            let parts: Vec<&str> = name.splitn(2, '.').collect();
-            if parts.len() == 2 {
-                Some((parts[0], parts[1]))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if parsed_names.is_empty() {
-        return Err("No valid table names provided (use schema.table format)".to_string());
-    }
-
-    let config = timeline_capture::CaptureConfig::default();
-
-    let snapshot = timeline_capture::capture_snapshot_from_catalog(&parsed_names, &config)
-        .map_err(|e| e.to_string())?;
-
-    // Convert to JSON
-    let json_str = serde_json::to_string(&snapshot)
-        .map_err(|e| format!("Failed to serialize snapshot: {e}"))?;
-
-    let json_value: serde_json::Value = serde_json::from_str(&json_str)
-        .map_err(|e| format!("Failed to parse JSON: {e}"))?;
-
-    Ok(pgrx::JsonB(json_value))
-}
-
-/// Capture a snapshot and save to TOML file.
-///
-/// SQL: `SELECT ra.capture_snapshot_to_file(
-///          ARRAY['public.orders', 'public.customers'],
-///          '/tmp/snapshot.toml',
-///          'Initial snapshot'
-///      );`
-#[pg_extern]
-fn capture_snapshot_to_file(
-    table_names: Vec<String>,
-    output_path: String,
-    label: Option<String>,
-) -> Result<String, String> {
-    // Parse "schema.table" strings
-    let parsed_names: Vec<(&str, &str)> = table_names
-        .iter()
-        .filter_map(|name| {
-            let parts: Vec<&str> = name.splitn(2, '.').collect();
-            if parts.len() == 2 {
-                Some((parts[0], parts[1]))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if parsed_names.is_empty() {
-        return Err("No valid table names provided (use schema.table format)".to_string());
-    }
-
-    let mut config = timeline_capture::CaptureConfig::default();
-    config.label = label;
-
-    let snapshot = timeline_capture::capture_snapshot_from_catalog(&parsed_names, &config)
-        .map_err(|e| e.to_string())?;
-
-    // Serialize to TOML
-    let toml_str = timeline_capture::snapshot_to_toml(&snapshot)
-        .map_err(|e| e.to_string())?;
-
-    // Write to file
-    std::fs::write(&output_path, toml_str)
-        .map_err(|e| format!("Failed to write file: {e}"))?;
-
-    Ok(format!("Snapshot written to {output_path}"))
-}
-
 /// Get hardware profile detected by the extension.
 ///
 /// SQL: `SELECT * FROM ra.hardware_profile();`
@@ -242,12 +146,14 @@ fn hardware_profile() -> TableIterator<
 > {
     let hw = extension_state::hardware_profile();
 
+    let total_mem = (hw.l3_cache_bytes * 64).max(16 * 1024 * 1024 * 1024);
+    let avail_mem = (hw.l3_cache_bytes * 64).max(8 * 1024 * 1024 * 1024);
     TableIterator::once((
         hw.cpu_cores as i32,
-        hw.total_memory as f64 / 1_000_000_000.0,
-        hw.available_memory as f64 / 1_000_000_000.0,
-        hw.simd_width as i32,
-        hw.has_gpu,
+        total_mem as f64 / 1_000_000_000.0,
+        avail_mem as f64 / 1_000_000_000.0,
+        hw.simd_width_bits as i32,
+        hw.gpu_available,
     ))
 }
 

@@ -9,12 +9,10 @@ use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use ra_hardware::HardwareProfile;
 
 /// GUC: master switch (`ra_planner.enabled`).
-pub static RA_ENABLED: GucSetting<bool> =
-    GucSetting::<bool>::new(true);
+pub static RA_ENABLED: GucSetting<bool> = GucSetting::<bool>::new(true);
 
 /// GUC: log all optimizer decisions for debugging.
-pub static RA_LOG_DECISIONS: GucSetting<bool> =
-    GucSetting::<bool>::new(false);
+pub static RA_LOG_DECISIONS: GucSetting<bool> = GucSetting::<bool>::new(false);
 
 /// Hardware profile detected at extension initialization.
 ///
@@ -24,7 +22,9 @@ static HARDWARE_PROFILE: OnceLock<HardwareProfile> = OnceLock::new();
 
 /// Get the detected hardware profile.
 pub fn hardware_profile() -> &'static HardwareProfile {
-    HARDWARE_PROFILE.get().expect("Hardware profile not initialized")
+    HARDWARE_PROFILE
+        .get()
+        .expect("Hardware profile not initialized")
 }
 
 /// Detect and store hardware profile.
@@ -32,7 +32,9 @@ pub fn hardware_profile() -> &'static HardwareProfile {
 /// Called once during extension initialization (_PG_init).
 pub fn init_hardware_profile() {
     let profile = ra_hardware::detect_hardware();
-    HARDWARE_PROFILE.set(profile).expect("Hardware profile already initialized");
+    HARDWARE_PROFILE
+        .set(profile)
+        .expect("Hardware profile already initialized");
 }
 
 /// Register all GUC variables with PostgreSQL.

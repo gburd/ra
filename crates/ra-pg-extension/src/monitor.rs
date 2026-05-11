@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use pgrx::prelude::*;
 
-use ra_engine::state::{FingerprintReader, SystemFingerprint, capabilities};
+use ra_engine::state::{capabilities, FingerprintReader, SystemFingerprint};
 
 /// Refresh interval for hardware metrics (CPU load, memory, I/O, buffer hit).
 const HARDWARE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -52,7 +52,9 @@ pub fn init() {
 /// Returns the global `FingerprintReader` that can be cloned cheaply
 /// and passed into neural optimizer pipelines.
 pub fn fingerprint_reader() -> &'static FingerprintReader {
-    FINGERPRINT.get().expect("Fingerprint monitor not initialized")
+    FINGERPRINT
+        .get()
+        .expect("Fingerprint monitor not initialized")
 }
 
 /// Check whether a refresh is due and update the fingerprint if so.
@@ -124,15 +126,10 @@ fn poll_hardware_metrics() -> (f32, f32, f32, f32) {
             "SELECT blks_hit::float8 / GREATEST(blks_hit + blks_read, 1) \
              FROM pg_stat_database WHERE datname = current_database()",
             None,
-            None,
+            &[],
         );
         match result {
-            Ok(table) => table
-                .first()
-                .get::<f64>(1)
-                .ok()
-                .flatten()
-                .unwrap_or(0.99),
+            Ok(table) => table.first().get::<f64>(1).ok().flatten().unwrap_or(0.99),
             Err(_) => 0.99,
         }
     });
@@ -148,15 +145,10 @@ fn poll_hardware_metrics() -> (f32, f32, f32, f32) {
              END \
              FROM pg_stat_bgwriter",
             None,
-            None,
+            &[],
         );
         match result {
-            Ok(table) => table
-                .first()
-                .get::<f64>(1)
-                .ok()
-                .flatten()
-                .unwrap_or(0.0) as f32,
+            Ok(table) => table.first().get::<f64>(1).ok().flatten().unwrap_or(0.0) as f32,
             Err(_) => 0.0,
         }
     });
@@ -173,15 +165,10 @@ fn poll_hardware_metrics() -> (f32, f32, f32, f32) {
                     GREATEST(current_setting('max_connections')::float8, 1) \
              FROM pg_stat_activity WHERE state = 'active'",
             None,
-            None,
+            &[],
         );
         match result {
-            Ok(table) => table
-                .first()
-                .get::<f64>(1)
-                .ok()
-                .flatten()
-                .unwrap_or(0.0) as f32,
+            Ok(table) => table.first().get::<f64>(1).ok().flatten().unwrap_or(0.0) as f32,
             Err(_) => 0.0,
         }
     });
@@ -203,11 +190,7 @@ fn poll_capabilities() -> u64 {
 
     // Query loaded extensions.
     Spi::connect(|client| {
-        let result = client.select(
-            "SELECT extname FROM pg_extension",
-            None,
-            None,
-        );
+        let result = client.select("SELECT extname FROM pg_extension", None, &[]);
         if let Ok(table) = result {
             for row in table {
                 if let Ok(Some(name)) = row.get::<&str>(1) {
@@ -238,7 +221,7 @@ fn poll_capabilities() -> u64 {
         let result = client.select(
             "SELECT current_setting('max_parallel_workers_per_gather')::int",
             None,
-            None,
+            &[],
         );
         if let Ok(table) = result {
             if let Ok(Some(val)) = table.first().get::<i32>(1) {
@@ -254,7 +237,7 @@ fn poll_capabilities() -> u64 {
         let result = client.select(
             "SELECT current_setting('server_version_num')::int",
             None,
-            None,
+            &[],
         );
         if let Ok(table) = result {
             if let Ok(Some(version)) = table.first().get::<i32>(1) {
@@ -273,7 +256,7 @@ fn poll_capabilities() -> u64 {
         let result = client.select(
             "SELECT EXISTS(SELECT 1 FROM pg_foreign_table LIMIT 1)",
             None,
-            None,
+            &[],
         );
         if let Ok(table) = result {
             if let Ok(Some(true)) = table.first().get::<bool>(1) {
@@ -302,7 +285,7 @@ fn poll_statistics_quality() -> (f32, f32, f32) {
              FROM pg_stat_user_tables \
              WHERE last_analyze IS NOT NULL",
             None,
-            None,
+            &[],
         );
         match result {
             Ok(table) => {
@@ -346,7 +329,7 @@ fn poll_statistics_quality() -> (f32, f32, f32) {
                        AND c.relkind = 'r') AS stats_cols \
              ) sub",
             None,
-            None,
+            &[],
         );
         match result {
             Ok(table) => table

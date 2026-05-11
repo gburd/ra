@@ -107,8 +107,7 @@ impl MetadataCache {
 
         // Log invalidation if debug logging is enabled
         if crate::extension_state::RA_LOG_DECISIONS.get() {
-            pgrx::log!(
-                pgrx::PgLogLevel::DEBUG1,
+            pgrx::debug1!(
                 "Ra: invalidated metadata cache for relation OID {}",
                 u32::from(oid)
             );
@@ -155,8 +154,7 @@ impl MetadataCache {
 
         // Log refresh if debug logging is enabled
         if crate::extension_state::RA_LOG_DECISIONS.get() {
-            pgrx::log!(
-                pgrx::PgLogLevel::DEBUG1,
+            pgrx::debug1!(
                 "Ra: refreshed metadata cache for relation OID {} ({} rows, {} columns)",
                 u32::from(oid),
                 stats.row_count,
@@ -222,8 +220,7 @@ impl MetadataCache {
         }
 
         if crate::extension_state::RA_LOG_DECISIONS.get() {
-            pgrx::log!(
-                pgrx::PgLogLevel::DEBUG1,
+            pgrx::debug1!(
                 "Ra: evicted {} LRU entries from metadata cache",
                 num_to_evict
             );
@@ -297,10 +294,7 @@ pub extern "C" fn ra_rust_invalidate_table(oid: pg_sys::Oid) {
 ///
 /// Returns None if the table doesn't exist or catalog access fails.
 pub fn get_table_metadata(oid: pg_sys::Oid) -> Option<Statistics> {
-    METADATA_CACHE
-        .lock()
-        .ok()?
-        .get_or_refresh(oid)
+    METADATA_CACHE.lock().ok()?.get_or_refresh(oid)
 }
 
 /// Clear all cached metadata (manual refresh function).
@@ -316,10 +310,7 @@ pub fn clear_cache() {
 ///
 /// Exposed as SQL function: `SELECT * FROM ra.metadata_cache_stats();`
 pub fn get_cache_stats() -> Option<CacheStats> {
-    METADATA_CACHE
-        .lock()
-        .ok()
-        .map(|cache| cache.stats())
+    METADATA_CACHE.lock().ok().map(|cache| cache.stats())
 }
 
 #[cfg(test)]
@@ -333,7 +324,9 @@ mod tests {
 
         // Insert entry
         let stats = Statistics::new(1000.0);
-        cache.tables.insert(oid, CachedTableMetadata::new(stats.clone()));
+        cache
+            .tables
+            .insert(oid, CachedTableMetadata::new(stats.clone()));
 
         assert!(cache.is_valid(oid));
 
@@ -351,7 +344,9 @@ mod tests {
 
         // Insert entry
         let stats = Statistics::new(1000.0);
-        cache.tables.insert(oid, CachedTableMetadata::new(stats.clone()));
+        cache
+            .tables
+            .insert(oid, CachedTableMetadata::new(stats.clone()));
 
         assert_eq!(cache.hits, 0);
 
@@ -381,7 +376,9 @@ mod tests {
 
         // Insert and invalidate
         let stats = Statistics::new(1000.0);
-        cache.tables.insert(oid, CachedTableMetadata::new(stats.clone()));
+        cache
+            .tables
+            .insert(oid, CachedTableMetadata::new(stats.clone()));
         cache.invalidate(oid);
 
         // Should return None (invalid)

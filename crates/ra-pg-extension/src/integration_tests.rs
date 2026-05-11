@@ -21,7 +21,10 @@ mod tests {
         )
         .unwrap();
 
-        Spi::run("INSERT INTO cache_test_users SELECT i, 'User ' || i FROM generate_series(1, 100) i;").unwrap();
+        Spi::run(
+            "INSERT INTO cache_test_users SELECT i, 'User ' || i FROM generate_series(1, 100) i;",
+        )
+        .unwrap();
         Spi::run("ANALYZE cache_test_users;").unwrap();
 
         // Populate cache
@@ -38,7 +41,8 @@ mod tests {
         Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_users WHERE id < 50;").ok();
 
         // Check invalidations counter increased
-        let invalidations = Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
+        let invalidations =
+            Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
         assert!(invalidations.unwrap_or(Some(0)).unwrap_or(0) > 0);
     }
 
@@ -62,13 +66,15 @@ mod tests {
         Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_products WHERE price > 500;").ok();
 
         // CREATE INDEX triggers invalidation
-        Spi::run("CREATE INDEX idx_cache_test_products_price ON cache_test_products(price);").unwrap();
+        Spi::run("CREATE INDEX idx_cache_test_products_price ON cache_test_products(price);")
+            .unwrap();
 
         // Next query should see new index
         Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_products WHERE price > 500;").ok();
 
         // Check invalidations counter
-        let invalidations = Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
+        let invalidations =
+            Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
         assert!(invalidations.unwrap_or(Some(0)).unwrap_or(0) > 0);
     }
 
@@ -85,7 +91,8 @@ mod tests {
         )
         .unwrap();
 
-        Spi::run("CREATE INDEX idx_cache_test_orders_customer ON cache_test_orders(customer_id);").unwrap();
+        Spi::run("CREATE INDEX idx_cache_test_orders_customer ON cache_test_orders(customer_id);")
+            .unwrap();
         Spi::run("INSERT INTO cache_test_orders (customer_id, amount) SELECT (random() * 99 + 1)::INT, random() * 1000 FROM generate_series(1, 100);").unwrap();
         Spi::run("ANALYZE cache_test_orders;").unwrap();
 
@@ -99,7 +106,8 @@ mod tests {
         Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_orders WHERE customer_id = 42;").ok();
 
         // Check invalidations counter
-        let invalidations = Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
+        let invalidations =
+            Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
         assert!(invalidations.unwrap_or(Some(0)).unwrap_or(0) > 0);
     }
 
@@ -132,7 +140,8 @@ mod tests {
         Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_items WHERE stock > 200;").ok();
 
         // Check invalidations counter
-        let invalidations = Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
+        let invalidations =
+            Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
         assert!(invalidations.unwrap_or(Some(0)).unwrap_or(0) > 0);
     }
 
@@ -148,21 +157,26 @@ mod tests {
         )
         .unwrap();
 
-        Spi::run("INSERT INTO cache_test_clear SELECT i, 'Data-' || i FROM generate_series(1, 50) i;").unwrap();
+        Spi::run(
+            "INSERT INTO cache_test_clear SELECT i, 'Data-' || i FROM generate_series(1, 50) i;",
+        )
+        .unwrap();
         Spi::run("ANALYZE cache_test_clear;").unwrap();
 
         // Populate cache
         Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_clear;").ok();
 
         // Check cache has entries
-        let entries_before = Spi::get_one::<i32>("SELECT entries FROM ra.metadata_cache_stats();").ok();
+        let entries_before =
+            Spi::get_one::<i32>("SELECT entries FROM ra.metadata_cache_stats();").ok();
         assert!(entries_before.unwrap_or(Some(0)).unwrap_or(0) > 0);
 
         // Clear cache
         Spi::run("SELECT ra.clear_metadata_cache();").unwrap();
 
         // Cache should be empty
-        let entries_after = Spi::get_one::<i32>("SELECT entries FROM ra.metadata_cache_stats();").ok();
+        let entries_after =
+            Spi::get_one::<i32>("SELECT entries FROM ra.metadata_cache_stats();").ok();
         assert_eq!(entries_after.unwrap_or(Some(-1)).unwrap_or(-1), 0);
     }
 
@@ -178,7 +192,8 @@ mod tests {
         )
         .unwrap();
 
-        Spi::run("INSERT INTO cache_test_repop SELECT i, i * 10 FROM generate_series(1, 50) i;").unwrap();
+        Spi::run("INSERT INTO cache_test_repop SELECT i, i * 10 FROM generate_series(1, 50) i;")
+            .unwrap();
         Spi::run("ANALYZE cache_test_repop;").unwrap();
 
         // Clear cache
@@ -204,7 +219,10 @@ mod tests {
         )
         .unwrap();
 
-        Spi::run("INSERT INTO cache_test_hitrate SELECT i, i * 1.5 FROM generate_series(1, 100) i;").unwrap();
+        Spi::run(
+            "INSERT INTO cache_test_hitrate SELECT i, i * 1.5 FROM generate_series(1, 100) i;",
+        )
+        .unwrap();
         Spi::run("ANALYZE cache_test_hitrate;").unwrap();
 
         // Clear cache to start fresh
@@ -680,18 +698,9 @@ mod tests {
         )
         .unwrap();
 
-        Spi::run(
-            "INSERT INTO sensor_readings VALUES (1, '2024-01-01 10:00:00', 20.5);",
-        )
-        .unwrap();
-        Spi::run(
-            "INSERT INTO sensor_readings VALUES (1, '2024-01-01 11:00:00', 21.0);",
-        )
-        .unwrap();
-        Spi::run(
-            "INSERT INTO sensor_readings VALUES (1, '2024-01-01 12:00:00', 22.5);",
-        )
-        .unwrap();
+        Spi::run("INSERT INTO sensor_readings VALUES (1, '2024-01-01 10:00:00', 20.5);").unwrap();
+        Spi::run("INSERT INTO sensor_readings VALUES (1, '2024-01-01 11:00:00', 21.0);").unwrap();
+        Spi::run("INSERT INTO sensor_readings VALUES (1, '2024-01-01 12:00:00', 22.5);").unwrap();
 
         let result = Spi::get_one::<i64>(
             "WITH temperature_changes AS (

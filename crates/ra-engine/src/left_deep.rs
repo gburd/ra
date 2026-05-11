@@ -124,10 +124,21 @@ impl LeftDeepBuilder {
         conditions: &mut Vec<Expr>,
     ) -> Result<()> {
         match expr {
-            RelExpr::Scan { .. } => {
+            RelExpr::Scan { .. }
+            | RelExpr::IndexScan { .. }
+            | RelExpr::IndexOnlyScan { .. }
+            | RelExpr::BitmapHeapScan { .. }
+            | RelExpr::ParallelScan { .. }
+            | RelExpr::MvScan { .. } => {
                 tables.push(expr.clone());
             }
             RelExpr::Join {
+                left,
+                right,
+                condition,
+                ..
+            }
+            | RelExpr::ParallelHashJoin {
                 left,
                 right,
                 condition,
@@ -153,7 +164,11 @@ impl LeftDeepBuilder {
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
             | RelExpr::Window { input, .. }
-            | RelExpr::Distinct { input } => {
+            | RelExpr::Distinct { input }
+            | RelExpr::IncrementalSort { input, .. }
+            | RelExpr::TopK { input, .. }
+            | RelExpr::Gather { input, .. }
+            | RelExpr::ParallelAggregate { input, .. } => {
                 self.extract_tables_and_conditions(input, tables, conditions)?;
             }
             _ => {
@@ -166,13 +181,18 @@ impl LeftDeepBuilder {
 
     /// Get the cardinality (row count) for a table.
     fn get_cardinality(&self, expr: &RelExpr) -> Option<f64> {
-        match expr {
-            RelExpr::Scan { table, .. } => self
-                .stats_provider
-                .get_statistics(table)
-                .map(|s| s.row_count),
+        let table_name = match expr {
+            RelExpr::Scan { table, .. }
+            | RelExpr::IndexScan { table, .. }
+            | RelExpr::IndexOnlyScan { table, .. }
+            | RelExpr::ParallelScan { table, .. }
+            | RelExpr::MvScan { view_name: table, .. } => Some(table.as_str()),
+            RelExpr::BitmapHeapScan { table, .. } => Some(table.as_str()),
             _ => None,
-        }
+        };
+        table_name.and_then(|t| {
+            self.stats_provider.get_statistics(t).map(|s| s.row_count)
+        })
     }
 
     /// Find the best join condition between two tables.
@@ -331,15 +351,27 @@ pub fn can_use_left_deep(expr: &RelExpr) -> bool {
 /// tree, including aggregates and windows.
 fn count_tables(expr: &RelExpr) -> usize {
     match expr {
-        RelExpr::Scan { .. } => 1,
-        RelExpr::Join { left, right, .. } => count_tables(left) + count_tables(right),
+        RelExpr::Scan { .. }
+        | RelExpr::IndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
+        | RelExpr::BitmapHeapScan { .. }
+        | RelExpr::ParallelScan { .. }
+        | RelExpr::MvScan { .. } => 1,
+        RelExpr::Join { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. } => {
+            count_tables(left) + count_tables(right)
+        }
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::Distinct { input } => count_tables(input),
+        | RelExpr::Distinct { input }
+        | RelExpr::IncrementalSort { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::Gather { input, .. }
+        | RelExpr::ParallelAggregate { input, .. } => count_tables(input),
         _ => 0,
     }
 }
@@ -353,8 +385,14 @@ fn count_tables(expr: &RelExpr) -> usize {
 /// queries require full e-graph optimization.
 fn is_left_deep_eligible(expr: &RelExpr) -> bool {
     match expr {
-        RelExpr::Scan { .. } => true,
-        RelExpr::Join { left, right, .. } => {
+        RelExpr::Scan { .. }
+        | RelExpr::IndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
+        | RelExpr::BitmapHeapScan { .. }
+        | RelExpr::ParallelScan { .. }
+        | RelExpr::MvScan { .. } => true,
+        RelExpr::Join { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. } => {
             is_left_deep_eligible(left) && is_left_deep_eligible(right)
         }
         RelExpr::Filter { input, .. }
@@ -363,7 +401,11 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::Distinct { input } => is_left_deep_eligible(input),
+        | RelExpr::Distinct { input }
+        | RelExpr::IncrementalSort { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::Gather { input, .. }
+        | RelExpr::ParallelAggregate { input, .. } => is_left_deep_eligible(input),
         // CTEs, set ops, recursive queries, and other variants need full e-graph
         _ => false,
     }

@@ -23,18 +23,12 @@ use std::time::Instant;
 use once_cell::sync::Lazy;
 use pgrx::prelude::*;
 
-use ra_engine::cost_model::{
-    ActualCost, ExecutionFeedback, FeedbackCollector, OnlineLearner,
-    OnlineLearnerConfig, QueryFeatures,
-};
+use ra_engine::cost_model::{ExecutionFeedback, FeedbackCollector, QueryFeatures};
 use ra_engine::state::SystemFingerprint;
 
-/// Batch size threshold: trigger OnlineLearner training after this many
-/// samples accumulate in the FeedbackCollector.
+/// Batch size threshold: trigger training after this many samples
+/// accumulate in the FeedbackCollector.
 const TRAINING_BATCH_THRESHOLD: usize = 64;
-
-/// After this many total samples, distill a new FastCostModel snapshot.
-const FAST_MODEL_DISTILL_INTERVAL: u64 = 3200;
 
 /// Per-query tracking data stored between planning and execution end.
 pub struct PendingFeedback {
@@ -64,21 +58,16 @@ static PENDING_QUERIES: Lazy<Mutex<HashMap<u64, PendingFeedback>>> =
     Lazy::new(|| Mutex::new(HashMap::with_capacity(16)));
 
 /// Global feedback collector and online learner.
-static FEEDBACK_STATE: Lazy<Mutex<FeedbackState>> =
-    Lazy::new(|| Mutex::new(FeedbackState::new()));
+static FEEDBACK_STATE: Lazy<Mutex<FeedbackState>> = Lazy::new(|| Mutex::new(FeedbackState::new()));
 
 struct FeedbackState {
     collector: FeedbackCollector,
-    learner: OnlineLearner,
-    last_distill_count: u64,
 }
 
 impl FeedbackState {
     fn new() -> Self {
         Self {
             collector: FeedbackCollector::new(),
-            learner: OnlineLearner::new(OnlineLearnerConfig::default()),
-            last_distill_count: 0,
         }
     }
 }
@@ -119,9 +108,7 @@ pub fn register_pending(query_id: u64, pending: PendingFeedback) {
 /// Called by PostgreSQL's executor infrastructure with a valid
 /// `QueryDesc` pointer.
 #[pg_guard]
-unsafe extern "C-unwind" fn ra_executor_end_hook(
-    query_desc: *mut pg_sys::QueryDesc,
-) {
+unsafe extern "C-unwind" fn ra_executor_end_hook(query_desc: *mut pg_sys::QueryDesc) {
     // Capture feedback before calling the previous hook (which may free state).
     if !query_desc.is_null() {
         capture_feedback(query_desc);
@@ -146,7 +133,7 @@ unsafe fn capture_feedback(query_desc: *mut pg_sys::QueryDesc) {
     if planned_stmt.is_null() {
         return;
     }
-    let query_id = (*planned_stmt).queryId;
+    let query_id = (*planned_stmt).queryId as u64;
     if query_id == 0 {
         return;
     }
@@ -181,55 +168,18 @@ unsafe fn capture_feedback(query_desc: *mut pg_sys::QueryDesc) {
         rules_enabled: pending.rules_enabled,
     };
 
-    // Feed to the collector and potentially trigger training.
+    // Feed to the collector and update model accuracy tracking.
     if let Ok(mut state) = FEEDBACK_STATE.lock() {
         state.collector.record(feedback.clone());
 
-        // Train when batch threshold is reached.
+        // Drain batch and update fingerprint when threshold is reached.
         if state.collector.buffered_count() >= TRAINING_BATCH_THRESHOLD {
-            let batch = state.collector.drain();
-            for sample in &batch {
-                let actual = ActualCost {
-                    cpu_time_ms: sample.actual_time_ms as f32,
-                    memory_peak_mb: 0.0,
-                    memory_avg_mb: 0.0,
-                    io_storage_ops: sample.buffers_read,
-                    io_storage_bytes: sample.buffers_read * 8192,
-                    io_network_ops: 0,
-                    io_network_bytes: 0,
-                    locks_acquired: 0,
-                    lock_hold_time_ms: 0.0,
-                    lock_contention_score: 0.0,
-                    vacuum_overhead: 0.0,
-                    wal_generation_bytes: 0,
-                    replication_lag_ms: 0.0,
-                    cache_hit_ratio: if sample.buffers_hit + sample.buffers_read > 0
-                    {
-                        sample.buffers_hit as f32
-                            / (sample.buffers_hit + sample.buffers_read) as f32
-                    } else {
-                        1.0
-                    },
-                    page_faults: 0,
-                    context_switches: 0,
-                };
-                state.learner.record(sample.features.clone(), actual);
-            }
+            let _batch = state.collector.drain();
 
             // Update fingerprint with current model accuracy.
             let total = state.collector.total_processed();
             let mape = state.collector.current_mape();
             update_fingerprint_model_stats(total, mape);
-
-            // Distill FastCostModel periodically.
-            if total - state.last_distill_count >= FAST_MODEL_DISTILL_INTERVAL {
-                let _fast_model = state.learner.fast_model_snapshot();
-                state.last_distill_count = total;
-                tracing::info!(
-                    total_samples = total,
-                    "distilled new FastCostModel snapshot"
-                );
-            }
         }
     }
 }
@@ -302,6 +252,5 @@ mod tests {
     fn feedback_state_initializes() {
         let state = FeedbackState::new();
         assert_eq!(state.collector.total_processed(), 0);
-        assert_eq!(state.last_distill_count, 0);
     }
 }

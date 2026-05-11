@@ -62,8 +62,8 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 
-use pgrx::prelude::*;
 use pgrx::pg_sys;
+use pgrx::prelude::*;
 
 use ra_core::algebra::{AggregateExpr, JoinType, ProjectionColumn, RelExpr, SortKey};
 
@@ -134,7 +134,10 @@ impl PlanBuilder {
             rtindex_map.insert(name.clone(), idx);
             rtoid_map.insert(name, oid);
         }
-        let expr_ctx = ExprContext { rtindex_map, rtoid_map };
+        let expr_ctx = ExprContext {
+            rtindex_map,
+            rtoid_map,
+        };
         Self {
             original_query: query,
             expr_ctx,
@@ -161,7 +164,9 @@ impl PlanBuilder {
 
         let stmt = self.alloc_node::<pg_sys::PlannedStmt>();
         if stmt.is_null() {
-            return Err(PlanBuilderError::NullPointer("PlannedStmt allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "PlannedStmt allocation".to_string(),
+            ));
         }
 
         (*stmt).type_ = pg_sys::NodeTag::T_PlannedStmt;
@@ -191,10 +196,7 @@ impl PlanBuilder {
     /// `Filter` and `Project` are folded into their child's `qual` /
     /// `targetlist` fields rather than generating separate plan nodes,
     /// matching PostgreSQL's standard plan representation.
-    unsafe fn build_plan(
-        &mut self,
-        expr: &RelExpr,
-    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+    unsafe fn build_plan(&mut self, expr: &RelExpr) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         match expr {
             RelExpr::Scan { table, .. } => self.build_seq_scan(table),
             RelExpr::Filter { predicate, input } => {
@@ -210,37 +212,51 @@ impl PlanBuilder {
                 self.set_targetlist(child, columns);
                 Ok(child)
             }
-            RelExpr::Join { join_type, condition: _, left, right } => {
-                self.build_join(*join_type, left, right)
-            }
-            RelExpr::Aggregate { group_by, aggregates, input } => {
-                self.build_aggregate(group_by, aggregates, input)
-            }
+            RelExpr::Join {
+                join_type,
+                condition: _,
+                left,
+                right,
+            } => self.build_join(*join_type, left, right),
+            RelExpr::Aggregate {
+                group_by,
+                aggregates,
+                input,
+            } => self.build_aggregate(group_by, aggregates, input),
             RelExpr::Sort { keys, input } => self.build_sort(keys, input),
-            RelExpr::Limit { count, offset, input } => {
-                self.build_limit(*count, *offset, input)
-            }
+            RelExpr::Limit {
+                count,
+                offset,
+                input,
+            } => self.build_limit(*count, *offset, input),
             RelExpr::IndexScan { table, column } => self.build_index_scan(table, column),
-            RelExpr::BitmapIndexScan { table, index, predicate: _ } => {
-                self.build_bitmap_index_scan(table, index)
-            }
+            RelExpr::BitmapIndexScan {
+                table,
+                index,
+                predicate: _,
+            } => self.build_bitmap_index_scan(table, index),
             RelExpr::BitmapHeapScan { table, bitmap, .. } => {
                 self.build_bitmap_heap_scan(table, bitmap)
             }
             RelExpr::BitmapAnd { inputs } => self.build_bitmap_and(inputs),
             RelExpr::BitmapOr { inputs } => self.build_bitmap_or(inputs),
-            RelExpr::IndexOnlyScan { table, index, .. } => {
-                self.build_index_only_scan(table, index)
-            }
+            RelExpr::IndexOnlyScan { table, index, .. } => self.build_index_only_scan(table, index),
             RelExpr::ParallelScan { table, workers } => {
                 self.build_parallel_seq_scan(table, *workers)
             }
-            RelExpr::ParallelHashJoin { join_type, condition: _, left, right, workers } => {
-                self.build_parallel_hash_join(*join_type, left, right, *workers)
-            }
-            RelExpr::ParallelAggregate { group_by, aggregates, input, workers } => {
-                self.build_parallel_aggregate(group_by, aggregates, input, *workers)
-            }
+            RelExpr::ParallelHashJoin {
+                join_type,
+                condition: _,
+                left,
+                right,
+                workers,
+            } => self.build_parallel_hash_join(*join_type, left, right, *workers),
+            RelExpr::ParallelAggregate {
+                group_by,
+                aggregates,
+                input,
+                workers,
+            } => self.build_parallel_aggregate(group_by, aggregates, input, *workers),
             RelExpr::Gather { input, workers } => self.build_gather(input, *workers),
             RelExpr::Distinct { input } => self.build_unique(input),
             RelExpr::Union { all, left, right } => self.build_set_op_union(*all, left, right),
@@ -248,10 +264,13 @@ impl PlanBuilder {
                 self.build_set_op_intersect(*all, left, right)
             }
             RelExpr::Except { all, left, right } => self.build_set_op_except(*all, left, right),
-            RelExpr::Window { functions: _, input } => self.build_window_agg(input),
-            RelExpr::IncrementalSort { suffix_keys, input, .. } => {
-                self.build_incremental_sort(suffix_keys, input)
-            }
+            RelExpr::Window {
+                functions: _,
+                input,
+            } => self.build_window_agg(input),
+            RelExpr::IncrementalSort {
+                suffix_keys, input, ..
+            } => self.build_incremental_sort(suffix_keys, input),
             RelExpr::CTE { body, .. } => {
                 // CTE body is the primary output; definition is already materialized.
                 self.build_plan(body)
@@ -269,9 +288,9 @@ impl PlanBuilder {
             RelExpr::RowPattern { .. } => Err(PlanBuilderError::UnsupportedVariant(
                 "RowPattern (MATCH_RECOGNIZE)".to_string(),
             )),
-            RelExpr::TopK { .. } => {
-                Err(PlanBuilderError::UnsupportedVariant("TopK (vector)".to_string()))
-            }
+            RelExpr::TopK { .. } => Err(PlanBuilderError::UnsupportedVariant(
+                "TopK (vector)".to_string(),
+            )),
             RelExpr::VectorFilter { .. } => Err(PlanBuilderError::UnsupportedVariant(
                 "VectorFilter (vector)".to_string(),
             )),
@@ -290,12 +309,14 @@ impl PlanBuilder {
         let rtindex = self.rtindex_for(table)?;
         let node = self.alloc_node::<pg_sys::SeqScan>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("SeqScan allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "SeqScan allocation".to_string(),
+            ));
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_SeqScan;
         (*node).scan.scanrelid = rtindex;
         self.set_default_costs(&mut (*node).scan.plan, table);
-        Ok((*node).scan.plan.as_mut_ptr())
+        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
     /// Build an `IndexScan` node for MIN/MAX index optimization.
@@ -307,13 +328,15 @@ impl PlanBuilder {
         let rtindex = self.rtindex_for(table)?;
         let node = self.alloc_node::<pg_sys::IndexScan>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("IndexScan allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "IndexScan allocation".to_string(),
+            ));
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_IndexScan;
         (*node).scan.scanrelid = rtindex;
         // TODO: resolve index OID from column name via catalog lookup.
         self.set_default_costs(&mut (*node).scan.plan, table);
-        Ok((*node).scan.plan.as_mut_ptr())
+        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
     /// Build a `BitmapIndexScan` node.
@@ -325,12 +348,14 @@ impl PlanBuilder {
         let rtindex = self.rtindex_for(table)?;
         let node = self.alloc_node::<pg_sys::BitmapIndexScan>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("BitmapIndexScan allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "BitmapIndexScan allocation".to_string(),
+            ));
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_BitmapIndexScan;
         (*node).scan.scanrelid = rtindex;
         // TODO: resolve index OID and set indexid, indexqual, indexqualorig.
-        Ok((*node).scan.plan.as_mut_ptr())
+        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
     /// Build a `BitmapHeapScan` node.
@@ -343,13 +368,15 @@ impl PlanBuilder {
         let bitmap_plan = self.build_plan(bitmap_input)?;
         let node = self.alloc_node::<pg_sys::BitmapHeapScan>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("BitmapHeapScan allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "BitmapHeapScan allocation".to_string(),
+            ));
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_BitmapHeapScan;
         (*node).scan.scanrelid = rtindex;
         (*node).scan.plan.lefttree = bitmap_plan;
         self.set_default_costs(&mut (*node).scan.plan, table);
-        Ok((*node).scan.plan.as_mut_ptr())
+        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
     /// Build a `BitmapAnd` node combining multiple bitmap scans.
@@ -359,12 +386,14 @@ impl PlanBuilder {
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let node = self.alloc_node::<pg_sys::BitmapAnd>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("BitmapAnd allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "BitmapAnd allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_BitmapAnd;
         // TODO: build bitmapplans list from inputs.
         let _ = inputs;
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     /// Build a `BitmapOr` node combining multiple bitmap scans.
@@ -374,12 +403,14 @@ impl PlanBuilder {
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let node = self.alloc_node::<pg_sys::BitmapOr>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("BitmapOr allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "BitmapOr allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_BitmapOr;
         // TODO: build bitmapplans list from inputs.
         let _ = inputs;
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     /// Build an `IndexOnlyScan` node (covering index — no heap fetch).
@@ -391,13 +422,15 @@ impl PlanBuilder {
         let rtindex = self.rtindex_for(table)?;
         let node = self.alloc_node::<pg_sys::IndexOnlyScan>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("IndexOnlyScan allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "IndexOnlyScan allocation".to_string(),
+            ));
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_IndexOnlyScan;
         (*node).scan.scanrelid = rtindex;
         // TODO: resolve index OID, set indexid and indexqual.
         self.set_default_costs(&mut (*node).scan.plan, table);
-        Ok((*node).scan.plan.as_mut_ptr())
+        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
     // -----------------------------------------------------------------------
@@ -435,7 +468,9 @@ impl PlanBuilder {
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let node = self.alloc_node::<pg_sys::HashJoin>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("HashJoin allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "HashJoin allocation".to_string(),
+            ));
         }
         (*node).join.plan.type_ = pg_sys::NodeTag::T_HashJoin;
         (*node).join.jointype = ra_join_type_to_pg(join_type);
@@ -448,15 +483,11 @@ impl PlanBuilder {
         }
         (*hash_node).plan.type_ = pg_sys::NodeTag::T_Hash;
         (*hash_node).plan.lefttree = right_plan;
-        (*node).join.plan.righttree = (*hash_node).plan.as_mut_ptr();
+        (*node).join.plan.righttree = &mut (*hash_node).plan as *mut pg_sys::Plan;
 
         // TODO: populate hashclauses (join condition as hash-compatible OpExpr).
-        self.propagate_costs_binary(
-            &mut (*node).join.plan,
-            left_plan,
-            right_plan,
-        );
-        Ok((*node).join.plan.as_mut_ptr())
+        self.propagate_costs_binary(&mut (*node).join.plan, left_plan, right_plan);
+        Ok(&mut (*node).join.plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_nested_loop(
@@ -467,14 +498,16 @@ impl PlanBuilder {
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let node = self.alloc_node::<pg_sys::NestLoop>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("NestLoop allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "NestLoop allocation".to_string(),
+            ));
         }
         (*node).join.plan.type_ = pg_sys::NodeTag::T_NestLoop;
         (*node).join.jointype = ra_join_type_to_pg(join_type);
         (*node).join.plan.lefttree = left_plan;
         (*node).join.plan.righttree = right_plan;
         self.propagate_costs_binary(&mut (*node).join.plan, left_plan, right_plan);
-        Ok((*node).join.plan.as_mut_ptr())
+        Ok(&mut (*node).join.plan as *mut pg_sys::Plan)
     }
 
     // -----------------------------------------------------------------------
@@ -502,7 +535,7 @@ impl PlanBuilder {
             (*node).plan.total_cost = (*child).total_cost + 100.0;
             (*node).plan.plan_rows = ((*child).plan_rows * 0.1).max(1.0);
         }
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_sort(
@@ -524,7 +557,7 @@ impl PlanBuilder {
             (*node).plan.total_cost = (*node).plan.startup_cost;
             (*node).plan.plan_rows = (*child).plan_rows;
         }
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_limit(
@@ -536,7 +569,9 @@ impl PlanBuilder {
         let child = self.build_plan(input)?;
         let node = self.alloc_node::<pg_sys::Limit>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("Limit allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "Limit allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Limit;
         (*node).plan.lefttree = child;
@@ -551,7 +586,7 @@ impl PlanBuilder {
             (*node).plan.total_cost = (*child).total_cost;
             (*node).plan.plan_rows = count as f64;
         }
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     // -----------------------------------------------------------------------
@@ -612,7 +647,9 @@ impl PlanBuilder {
         let child = self.build_plan(input)?;
         let node = self.alloc_node::<pg_sys::Gather>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("Gather allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "Gather allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Gather;
         (*node).plan.lefttree = child;
@@ -621,7 +658,7 @@ impl PlanBuilder {
             (*node).plan.total_cost = (*child).total_cost;
             (*node).plan.plan_rows = (*child).plan_rows;
         }
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     // -----------------------------------------------------------------------
@@ -635,7 +672,9 @@ impl PlanBuilder {
         let child = self.build_plan(input)?;
         let node = self.alloc_node::<pg_sys::Unique>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("Unique allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "Unique allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Unique;
         (*node).plan.lefttree = child;
@@ -644,7 +683,7 @@ impl PlanBuilder {
             (*node).plan.total_cost = (*child).total_cost;
             (*node).plan.plan_rows = (*child).plan_rows * 0.8; // rough distinct estimate
         }
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_set_op_union(
@@ -657,13 +696,15 @@ impl PlanBuilder {
         let right_plan = self.build_plan(right)?;
         let node = self.alloc_node::<pg_sys::Append>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("Append allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "Append allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Append;
         // TODO: build appendplans list from left_plan and right_plan.
         // For UNION (not ALL): wrap with SetOp to deduplicate.
         let _ = (all, left_plan, right_plan);
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_set_op_intersect(
@@ -672,12 +713,7 @@ impl PlanBuilder {
         left: &RelExpr,
         right: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        self.build_setop_node(
-            pg_sys::SetOpCmd::SETOPCMD_INTERSECT,
-            all,
-            left,
-            right,
-        )
+        self.build_setop_node(pg_sys::SetOpCmd::SETOPCMD_INTERSECT, all, left, right)
     }
 
     unsafe fn build_set_op_except(
@@ -691,7 +727,7 @@ impl PlanBuilder {
 
     unsafe fn build_setop_node(
         &mut self,
-        cmd: pg_sys::SetOpCmd,
+        cmd: pg_sys::SetOpCmd::Type,
         all: bool,
         left: &RelExpr,
         right: &RelExpr,
@@ -700,7 +736,9 @@ impl PlanBuilder {
         let right_plan = self.build_plan(right)?;
         let node = self.alloc_node::<pg_sys::SetOp>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("SetOp allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "SetOp allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_SetOp;
         (*node).cmd = cmd;
@@ -711,7 +749,7 @@ impl PlanBuilder {
         };
         (*node).plan.lefttree = left_plan;
         (*node).plan.righttree = right_plan;
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_window_agg(
@@ -721,7 +759,9 @@ impl PlanBuilder {
         let child = self.build_plan(input)?;
         let node = self.alloc_node::<pg_sys::WindowAgg>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("WindowAgg allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "WindowAgg allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_WindowAgg;
         (*node).plan.lefttree = child;
@@ -730,7 +770,7 @@ impl PlanBuilder {
             (*node).plan.total_cost = (*child).total_cost + (*child).plan_rows * 0.01;
             (*node).plan.plan_rows = (*child).plan_rows;
         }
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_incremental_sort(
@@ -752,7 +792,7 @@ impl PlanBuilder {
             (*node).sort.plan.total_cost = (*child).total_cost;
             (*node).sort.plan.plan_rows = (*child).plan_rows;
         }
-        Ok((*node).sort.plan.as_mut_ptr())
+        Ok(&mut (*node).sort.plan as *mut pg_sys::Plan)
     }
 
     // -----------------------------------------------------------------------
@@ -765,24 +805,28 @@ impl PlanBuilder {
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let node = self.alloc_node::<pg_sys::FunctionScan>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("FunctionScan allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "FunctionScan allocation".to_string(),
+            ));
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_FunctionScan;
         // TODO: build functions list from the Unnest/TableFunction expression.
         (*node).scan.plan.plan_rows = 100.0; // conservative estimate
         (*node).scan.plan.total_cost = 10.0;
-        Ok((*node).scan.plan.as_mut_ptr())
+        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_values_result(&mut self) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let node = self.alloc_node::<pg_sys::Result>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("Result allocation".to_string()));
+            return Err(PlanBuilderError::NullPointer(
+                "Result allocation".to_string(),
+            ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Result;
         (*node).plan.plan_rows = 1.0;
         (*node).plan.total_cost = 0.01;
-        Ok((*node).plan.as_mut_ptr())
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     // -----------------------------------------------------------------------
@@ -840,10 +884,26 @@ impl PlanBuilder {
         left: *mut pg_sys::Plan,
         right: *mut pg_sys::Plan,
     ) {
-        let left_cost = if left.is_null() { 0.0 } else { (*left).total_cost };
-        let right_cost = if right.is_null() { 0.0 } else { (*right).total_cost };
-        let left_rows = if left.is_null() { 1.0 } else { (*left).plan_rows };
-        let right_rows = if right.is_null() { 1.0 } else { (*right).plan_rows };
+        let left_cost = if left.is_null() {
+            0.0
+        } else {
+            (*left).total_cost
+        };
+        let right_cost = if right.is_null() {
+            0.0
+        } else {
+            (*right).total_cost
+        };
+        let left_rows = if left.is_null() {
+            1.0
+        } else {
+            (*left).plan_rows
+        };
+        let right_rows = if right.is_null() {
+            1.0
+        } else {
+            (*right).plan_rows
+        };
         plan.startup_cost = left_cost;
         plan.total_cost = left_cost + right_cost + left_rows * right_rows * 0.01;
         plan.plan_rows = (left_rows * right_rows * 0.1).max(1.0);
@@ -861,7 +921,7 @@ impl PlanBuilder {
 // ---------------------------------------------------------------------------
 
 /// Convert a Ra `JoinType` to the corresponding PostgreSQL `JoinType`.
-fn ra_join_type_to_pg(jt: JoinType) -> pg_sys::JoinType {
+fn ra_join_type_to_pg(jt: JoinType) -> pg_sys::JoinType::Type {
     match jt {
         JoinType::Inner => pg_sys::JoinType::JOIN_INNER,
         JoinType::LeftOuter => pg_sys::JoinType::JOIN_LEFT,
@@ -883,9 +943,8 @@ unsafe fn make_int8_const(val: i64) -> *mut pg_sys::Expr {
     (*node).constvalue = pg_sys::Datum::from(val);
     (*node).constisnull = false;
     (*node).constbyval = true;
-    (*node).xpr.cast()
+    node as *mut pg_sys::Expr
 }
-
 
 /// Build a `HashMap<String, (pg_sys::Index, pg_sys::Oid)>` from a PostgreSQL
 /// range table list.
@@ -923,7 +982,9 @@ pub unsafe fn build_table_map(
         if relname.is_null() {
             continue;
         }
-        let name = std::ffi::CStr::from_ptr(relname).to_string_lossy().to_lowercase();
+        let name = std::ffi::CStr::from_ptr(relname)
+            .to_string_lossy()
+            .to_lowercase();
         let rtindex = (i + 1) as pg_sys::Index;
         map.insert(name, (rtindex, relid));
     }
@@ -949,5 +1010,13 @@ pub unsafe fn resolve_table_oid(table_name: &str) -> pg_sys::Oid {
     if rv.is_null() {
         return pg_sys::InvalidOid;
     }
-    pg_sys::RangeVarGetRelid(rv, pg_sys::NoLock as i32, true /* missing_ok */)
+    // RangeVarGetRelid is a C macro; call the Extended variant directly.
+    // Flags: RVR_MISSING_OK = 1 (don't error if relation not found).
+    pg_sys::RangeVarGetRelidExtended(
+        rv,
+        pg_sys::NoLock as i32,
+        1, // RVR_MISSING_OK
+        None,
+        std::ptr::null_mut(),
+    )
 }

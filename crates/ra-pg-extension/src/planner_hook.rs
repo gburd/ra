@@ -68,9 +68,7 @@ unsafe extern "C-unwind" fn ra_planner_hook(
     match result {
         Ok(plan) => plan,
         Err(_) => {
-            pgrx::warning!(
-                "ra_planner: caught panic, falling back to standard planner"
-            );
+            pgrx::warning!("ra_planner: caught panic, falling back to standard planner");
             call_prev_planner(parse, query_string, cursor_options, bound_params)
         }
     }
@@ -95,9 +93,7 @@ unsafe fn ra_planner_hook_inner(
     let sql = if query_string.is_null() {
         String::new()
     } else {
-        CStr::from_ptr(query_string)
-            .to_string_lossy()
-            .into_owned()
+        CStr::from_ptr(query_string).to_string_lossy().into_owned()
     };
 
     // Empty query string: can't parse with Lime.
@@ -119,9 +115,7 @@ unsafe fn ra_planner_hook_inner(
                     truncate_sql(&sql, 120)
                 );
             }
-            return call_prev_planner(
-                parse, query_string, cursor_options, bound_params,
-            );
+            return call_prev_planner(parse, query_string, cursor_options, bound_params);
         }
     };
     let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -144,9 +138,7 @@ unsafe fn ra_planner_hook_inner(
                     truncate_sql(&sql, 120)
                 );
             }
-            return call_prev_planner(
-                parse, query_string, cursor_options, bound_params,
-            );
+            return call_prev_planner(parse, query_string, cursor_options, bound_params);
         }
     };
     let optimize_ms = t1.elapsed().as_secs_f64() * 1000.0;
@@ -166,9 +158,7 @@ unsafe fn ra_planner_hook_inner(
                     truncate_sql(&sql, 120)
                 );
             }
-            return call_prev_planner(
-                parse, query_string, cursor_options, bound_params,
-            );
+            return call_prev_planner(parse, query_string, cursor_options, bound_params);
         }
     };
     let translate_ms = t2.elapsed().as_secs_f64() * 1000.0;
@@ -198,7 +188,7 @@ unsafe fn register_feedback(
     sql: &str,
     optimized: &ra_core::algebra::RelExpr,
 ) {
-    let query_id = (*parse).queryId;
+    let query_id = (*parse).queryId as u64;
     if query_id == 0 {
         return;
     }
@@ -262,9 +252,7 @@ unsafe fn call_prev_planner(
 }
 
 /// Extract `(schema, table)` pairs from the Query's range table.
-unsafe fn extract_rtable_schema_names(
-    parse: *mut pg_sys::Query,
-) -> Vec<(String, String)> {
+unsafe fn extract_rtable_schema_names(parse: *mut pg_sys::Query) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     if parse.is_null() {
         return pairs;
@@ -287,10 +275,7 @@ unsafe fn extract_rtable_schema_names(
         let rel_name = get_rel_name(relid);
         let schema_name = get_rel_schema_name(relid);
         if let Some(name) = rel_name {
-            pairs.push((
-                schema_name.unwrap_or_else(|| "public".to_string()),
-                name,
-            ));
+            pairs.push((schema_name.unwrap_or_else(|| "public".to_string()), name));
         }
     }
     pairs
@@ -319,14 +304,8 @@ unsafe fn references_system_catalogs(parse: *mut pg_sys::Query) -> bool {
         return false;
     }
 
-    let pg_catalog_oid = pg_sys::LookupExplicitNamespace(
-        c"pg_catalog".as_ptr(),
-        true,
-    );
-    let info_schema_oid = pg_sys::LookupExplicitNamespace(
-        c"information_schema".as_ptr(),
-        true,
-    );
+    let pg_catalog_oid = pg_sys::LookupExplicitNamespace(c"pg_catalog".as_ptr(), true);
+    let info_schema_oid = pg_sys::LookupExplicitNamespace(c"information_schema".as_ptr(), true);
 
     let length = (*rtable).length as i32;
     for i in 0..length {
@@ -349,12 +328,12 @@ unsafe fn references_system_catalogs(parse: *mut pg_sys::Query) -> bool {
 unsafe fn get_rel_namespace(relid: pg_sys::Oid) -> pg_sys::Oid {
     let tuple = pg_sys::SearchSysCache1(
         pg_sys::SysCacheIdentifier::RELOID as _,
-        pg_sys::ObjectIdGetDatum(relid),
+        pg_sys::Datum::from(relid),
     );
     if tuple.is_null() {
         return pg_sys::InvalidOid;
     }
-    let rel_form = pg_sys::GETSTRUCT(tuple) as pg_sys::Form_pg_class;
+    let rel_form = pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_class;
     let ns_oid = (*rel_form).relnamespace;
     pg_sys::ReleaseSysCache(tuple);
     ns_oid
@@ -385,19 +364,14 @@ fn truncate_sql(sql: &str, max_len: usize) -> String {
 /// FactsProvider backed by PostgreSQL catalog statistics.
 struct SimpleFactsProvider {
     table_stats: std::collections::HashMap<String, ra_core::CoreTableStats>,
-    column_stats: std::collections::HashMap<
-        String,
-        std::collections::HashMap<String, ra_core::ColumnStats>,
-    >,
+    column_stats:
+        std::collections::HashMap<String, std::collections::HashMap<String, ra_core::ColumnStats>>,
     schemas: std::collections::HashMap<String, ra_core::TableInfo>,
     hardware: ra_core::CoreHardwareProfile,
 }
 
 impl SimpleFactsProvider {
-    fn new(
-        table_names: &[(String, String)],
-        stats: &[(String, ra_core::Statistics)],
-    ) -> Self {
+    fn new(table_names: &[(String, String)], stats: &[(String, ra_core::Statistics)]) -> Self {
         let mut table_stats = std::collections::HashMap::new();
         let mut column_stats = std::collections::HashMap::new();
         let mut schemas = std::collections::HashMap::new();
@@ -431,6 +405,7 @@ impl SimpleFactsProvider {
                     dead_tuples: None,
                     last_analyzed: None,
                     confidence: compute_stats_confidence(stat),
+                    estimated_modifications: 0,
                 },
             );
 
@@ -487,6 +462,7 @@ impl SimpleFactsProvider {
                     primary_key,
                     foreign_keys,
                     indexes,
+                    storage_format: ra_core::facts::StorageFormat::RowBased,
                 },
             );
         }
@@ -509,7 +485,12 @@ impl SimpleFactsProvider {
             cpu_architecture: ra_core::CpuArchitecture::X86_64,
         };
 
-        Self { table_stats, column_stats, schemas, hardware }
+        Self {
+            table_stats,
+            column_stats,
+            schemas,
+            hardware,
+        }
     }
 }
 
@@ -562,7 +543,9 @@ impl ra_core::FactsProvider for SimpleFactsProvider {
     }
 
     fn get_column_stats(&self, table: &str, column: &str) -> Option<&ra_core::ColumnStats> {
-        self.column_stats.get(table).and_then(|cols| cols.get(column))
+        self.column_stats
+            .get(table)
+            .and_then(|cols| cols.get(column))
     }
 
     fn hardware_profile(&self) -> &ra_core::CoreHardwareProfile {
@@ -577,7 +560,7 @@ impl ra_core::FactsProvider for SimpleFactsProvider {
         None
     }
 
-    fn database_name(&self) -> &str {
+    fn database_name(&self) -> &'static str {
         "postgresql"
     }
 

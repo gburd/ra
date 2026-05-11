@@ -20,12 +20,10 @@ use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::prelude::*;
 
 /// GUC: enable A/B testing between model versions.
-pub static AB_TESTING_ENABLED: GucSetting<bool> =
-    GucSetting::<bool>::new(true);
+pub static AB_TESTING_ENABLED: GucSetting<bool> = GucSetting::<bool>::new(true);
 
 /// GUC: fraction of queries routed to the experiment arm (0.0 to 1.0).
-pub static AB_EXPERIMENT_FRACTION: GucSetting<f64> =
-    GucSetting::<f64>::new(0.1);
+pub static AB_EXPERIMENT_FRACTION: GucSetting<f64> = GucSetting::<f64>::new(0.1);
 
 /// Register A/B testing GUC variables.
 pub fn register_gucs() {
@@ -110,8 +108,7 @@ pub struct ABTestAnalysis {
 }
 
 /// Global A/B testing state.
-static AB_STATE: Lazy<Mutex<ABTestState>> =
-    Lazy::new(|| Mutex::new(ABTestState::new()));
+static AB_STATE: Lazy<Mutex<ABTestState>> = Lazy::new(|| Mutex::new(ABTestState::new()));
 
 struct ABTestState {
     config: ABTestConfig,
@@ -176,11 +173,12 @@ pub fn record_result(arm: Arm, predicted: f64, actual: f64) {
     let ratio = (predicted / actual - 1.0).abs();
 
     if let Ok(mut state) = AB_STATE.lock() {
+        let max = state.max_samples;
         let results = match arm {
             Arm::Control => &mut state.control_results,
             Arm::Experiment => &mut state.experiment_results,
         };
-        if results.len() >= state.max_samples {
+        if results.len() >= max {
             results.remove(0);
         }
         results.push(ratio);
@@ -220,10 +218,7 @@ pub fn analyze() -> ABTestAnalysis {
 
     let control_mean = mean(&state.control_results);
     let experiment_mean = mean(&state.experiment_results);
-    let p_value = two_sample_t_test(
-        &state.control_results,
-        &state.experiment_results,
-    );
+    let p_value = two_sample_t_test(&state.control_results, &state.experiment_results);
     let d = cohens_d(&state.control_results, &state.experiment_results);
 
     // Lower mean ratio = better predictions (closer to actual).
@@ -301,8 +296,7 @@ fn two_sample_t_test(a: &[f64], b: &[f64]) -> f64 {
 
     // Welch-Satterthwaite degrees of freedom.
     let num = se_sq.powi(2);
-    let denom = (var_a / n_a).powi(2) / (n_a - 1.0)
-        + (var_b / n_b).powi(2) / (n_b - 1.0);
+    let denom = (var_a / n_a).powi(2) / (n_a - 1.0) + (var_b / n_b).powi(2) / (n_b - 1.0);
     let df = if denom > 0.0 {
         (num / denom).floor() as usize
     } else {
@@ -318,8 +312,7 @@ fn cohens_d(a: &[f64], b: &[f64]) -> f64 {
     let n_b = b.len() as f64;
     let var_a = variance(a);
     let var_b = variance(b);
-    let pooled_var =
-        ((n_a - 1.0) * var_a + (n_b - 1.0) * var_b) / (n_a + n_b - 2.0);
+    let pooled_var = ((n_a - 1.0) * var_a + (n_b - 1.0) * var_b) / (n_a + n_b - 2.0);
     let pooled_std = pooled_var.sqrt();
     if pooled_std <= 0.0 {
         return 0.0;
@@ -349,8 +342,7 @@ fn regularized_incomplete_beta(x: f64, a: f64, b: f64) -> f64 {
     if x > (a + 1.0) / (a + b + 2.0) {
         return 1.0 - regularized_incomplete_beta(1.0 - x, b, a);
     }
-    let ln_prefix = a * x.ln() + b * (1.0 - x).ln()
-        - (a.ln() + ln_beta(a, b));
+    let ln_prefix = a * x.ln() + b * (1.0 - x).ln() - (a.ln() + ln_beta(a, b));
     let prefix = ln_prefix.exp();
     prefix * beta_cf(x, a, b) / a
 }
@@ -386,8 +378,7 @@ fn beta_cf(x: f64, a: f64, b: f64) -> f64 {
         h *= d * c;
 
         // Odd step.
-        let num = -((a + m_f) * (a + b + m_f) * x)
-            / ((a + 2.0 * m_f) * (a + 2.0 * m_f + 1.0));
+        let num = -((a + m_f) * (a + b + m_f) * x) / ((a + 2.0 * m_f) * (a + 2.0 * m_f + 1.0));
         d = 1.0 + num * d;
         if d.abs() < tiny {
             d = tiny;
@@ -419,8 +410,7 @@ fn lgamma(x: f64) -> f64 {
     }
     let inv = 1.0 / x;
     let inv2 = inv * inv;
-    (x - 0.5) * x.ln()
-        - x
+    (x - 0.5) * x.ln() - x
         + 0.5 * (2.0 * std::f64::consts::PI).ln()
         + inv * (1.0 / 12.0 - inv2 * (1.0 / 360.0 - inv2 / 1260.0))
 }
@@ -471,7 +461,10 @@ mod tests {
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let b = vec![4.0, 5.0, 6.0, 7.0, 8.0];
         let d = cohens_d(&a, &b);
-        assert!(d.abs() > 1.0, "d={d} should be large for well-separated groups");
+        assert!(
+            d.abs() > 1.0,
+            "d={d} should be large for well-separated groups"
+        );
     }
 
     #[test]

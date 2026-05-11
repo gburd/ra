@@ -57,16 +57,24 @@ pub unsafe fn translate(expr: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
         RaExpr::UnaryOp { op, operand } => match op {
             UnaryOp::Not => build_not(operand, ctx),
             UnaryOp::IsNull => build_null_test(operand, pg_sys::NullTestType::IS_NULL, ctx),
-            UnaryOp::IsNotNull => {
-                build_null_test(operand, pg_sys::NullTestType::IS_NOT_NULL, ctx)
-            }
+            UnaryOp::IsNotNull => build_null_test(operand, pg_sys::NullTestType::IS_NOT_NULL, ctx),
             UnaryOp::Neg => build_unary_neg(operand, ctx),
         },
         RaExpr::Function { name, args } => build_func_expr(name, args, ctx),
-        RaExpr::Case { operand, when_clauses, else_result } => {
-            build_case_expr(operand.as_deref(), when_clauses, else_result.as_deref(), ctx)
-        }
-        RaExpr::Cast { expr: inner, target_type } => build_cast(inner, target_type, ctx),
+        RaExpr::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } => build_case_expr(
+            operand.as_deref(),
+            when_clauses,
+            else_result.as_deref(),
+            ctx,
+        ),
+        RaExpr::Cast {
+            expr: inner,
+            target_type,
+        } => build_cast(inner, target_type, ctx),
         RaExpr::Array(elements) => build_array_expr(elements, ctx),
         // Unsupported: SubQuery, FullTextMatch, VectorDistance, Pattern*, ArraySlice, etc.
         _ => std::ptr::null_mut(),
@@ -118,7 +126,8 @@ unsafe fn const_to_pg(c: &RaConst) -> *mut pg_sys::Expr {
             (*node).consttype = pg_sys::FLOAT8OID;
             (*node).consttypmod = -1;
             (*node).constlen = 8;
-            (*node).constvalue = pg_sys::Float8GetDatum(*f);
+            // Float8GetDatum: reinterpret f64 bits as Datum (pass-by-val on 64-bit)
+            (*node).constvalue = pg_sys::Datum::from((*f).to_bits() as usize);
             (*node).constisnull = false;
             (*node).constbyval = true;
         }
@@ -127,7 +136,8 @@ unsafe fn const_to_pg(c: &RaConst) -> *mut pg_sys::Expr {
                 (*node).consttype = pg_sys::TEXTOID;
                 (*node).consttypmod = -1;
                 (*node).constlen = -1;
-                (*node).constvalue = pg_sys::CStringGetTextDatum(cs.as_ptr());
+                let text_ptr = pg_sys::cstring_to_text(cs.as_ptr());
+                (*node).constvalue = pg_sys::Datum::from(text_ptr as usize);
                 (*node).constisnull = false;
                 (*node).constbyval = false;
             } else {
@@ -135,7 +145,7 @@ unsafe fn const_to_pg(c: &RaConst) -> *mut pg_sys::Expr {
             }
         }
     }
-    (*node).xpr.cast()
+    (node as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,10 +153,7 @@ unsafe fn const_to_pg(c: &RaConst) -> *mut pg_sys::Expr {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Translate a Ra `ColumnRef` to a PostgreSQL `Var` node.
-unsafe fn column_to_var(
-    col: &ra_core::expr::ColumnRef,
-    ctx: &ExprContext,
-) -> *mut pg_sys::Expr {
+unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *mut pg_sys::Expr {
     let table = col.table.as_deref().unwrap_or("").to_lowercase();
     let rtindex = match ctx.rtindex_map.get(&table) {
         Some(&idx) => idx,
@@ -162,24 +169,27 @@ unsafe fn column_to_var(
         Err(_) => return std::ptr::null_mut(),
     };
     let attnum = pg_sys::get_attnum(reloid, col_name.as_ptr());
-    if attnum == pg_sys::InvalidAttrNumber {
+    if attnum == pg_sys::InvalidAttrNumber as i16 {
         return std::ptr::null_mut();
     }
     let atttype = pg_sys::get_atttype(reloid, attnum);
     if atttype == pg_sys::InvalidOid {
         return std::ptr::null_mut();
     }
-    let atttypmod = pg_sys::get_atttypmod(reloid, attnum);
+    // get_atttypmod is not exposed by pgrx; use -1 (unspecified typmod).
+    // For columns with explicit typemod (e.g., varchar(255)), the executor
+    // will still function correctly since the type itself carries the info.
+    let atttypmod: i32 = -1;
 
     let var = alloc::<pg_sys::Var>();
     (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
-    (*var).varno = rtindex;
+    (*var).varno = rtindex as i32;
     (*var).varattno = attnum;
     (*var).vartype = atttype;
     (*var).vartypmod = atttypmod;
     (*var).varcollid = pg_sys::InvalidOid;
     (*var).varlevelsup = 0;
-    (*var).xpr.cast()
+    (var as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -220,7 +230,7 @@ unsafe fn build_op_expr(
         Err(_) => return std::ptr::null_mut(),
     };
     let op_string_node = pg_sys::makeString(op_cstr.as_ptr().cast_mut());
-    let opname_list = pg_sys::list_make1(op_string_node.cast());
+    let opname_list = pg_sys::lappend(std::ptr::null_mut(), op_string_node.cast());
 
     let left_type = expr_result_type(left_pg);
     let right_type = expr_result_type(right_pg);
@@ -245,7 +255,7 @@ unsafe fn build_op_expr(
     args = pg_sys::lappend(args, left_pg.cast());
     args = pg_sys::lappend(args, right_pg.cast());
     (*node).args = args;
-    (*node).xpr.cast()
+    (node as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,7 +264,7 @@ unsafe fn build_op_expr(
 
 /// Build a PostgreSQL `BoolExpr` (AND/OR) from two Ra expressions.
 unsafe fn build_bool_expr(
-    bool_type: pg_sys::BoolExprType,
+    bool_type: pg_sys::BoolExprType::Type,
     left: &RaExpr,
     right: &RaExpr,
     ctx: &ExprContext,
@@ -271,7 +281,7 @@ unsafe fn build_bool_expr(
     args = pg_sys::lappend(args, left_pg.cast());
     args = pg_sys::lappend(args, right_pg.cast());
     (*node).args = args;
-    (*node).xpr.cast()
+    (node as *mut pg_sys::Expr)
 }
 
 /// Build NOT expression.
@@ -283,8 +293,8 @@ unsafe fn build_not(operand: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
     let node = alloc::<pg_sys::BoolExpr>();
     (*node).xpr.type_ = pg_sys::NodeTag::T_BoolExpr;
     (*node).boolop = pg_sys::BoolExprType::NOT_EXPR;
-    (*node).args = pg_sys::list_make1(arg.cast());
-    (*node).xpr.cast()
+    (*node).args = pg_sys::lappend(std::ptr::null_mut(), arg.cast());
+    (node as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -294,7 +304,7 @@ unsafe fn build_not(operand: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
 /// Build a PostgreSQL `NullTest` node (IS NULL / IS NOT NULL).
 unsafe fn build_null_test(
     operand: &RaExpr,
-    test_type: pg_sys::NullTestType,
+    test_type: pg_sys::NullTestType::Type,
     ctx: &ExprContext,
 ) -> *mut pg_sys::Expr {
     let arg = translate(operand, ctx);
@@ -306,7 +316,7 @@ unsafe fn build_null_test(
     (*node).arg = arg.cast();
     (*node).nulltesttype = test_type;
     (*node).argisrow = false;
-    (*node).xpr.cast()
+    (node as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -322,7 +332,7 @@ unsafe fn build_unary_neg(operand: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::E
     let arg_type = expr_result_type(arg);
     let op_cstr = c"-";
     let op_node = pg_sys::makeString(op_cstr.as_ptr().cast_mut());
-    let opname = pg_sys::list_make1(op_node.cast());
+    let opname = pg_sys::lappend(std::ptr::null_mut(), op_node.cast());
     let opno = pg_sys::OpernameGetOprid(opname, arg_type, pg_sys::InvalidOid);
     if opno == pg_sys::InvalidOid {
         return std::ptr::null_mut();
@@ -334,8 +344,8 @@ unsafe fn build_unary_neg(operand: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::E
     (*node).opno = opno;
     (*node).opfuncid = opfuncid;
     (*node).opresulttype = opresulttype;
-    (*node).args = pg_sys::list_make1(arg.cast());
-    (*node).xpr.cast()
+    (*node).args = pg_sys::lappend(std::ptr::null_mut(), arg.cast());
+    (node as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -346,11 +356,7 @@ unsafe fn build_unary_neg(operand: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::E
 ///
 /// Resolves the function OID from `pg_proc` using the function name and
 /// argument types.
-unsafe fn build_func_expr(
-    name: &str,
-    args: &[RaExpr],
-    ctx: &ExprContext,
-) -> *mut pg_sys::Expr {
+unsafe fn build_func_expr(name: &str, args: &[RaExpr], ctx: &ExprContext) -> *mut pg_sys::Expr {
     // Translate all arguments first to determine arg types.
     let mut pg_args = std::ptr::null_mut::<pg_sys::List>();
     let mut arg_types = Vec::with_capacity(args.len());
@@ -370,7 +376,7 @@ unsafe fn build_func_expr(
         Err(_) => return std::ptr::null_mut(),
     };
     let name_node = pg_sys::makeString(func_name.as_ptr().cast_mut());
-    let funcname_list = pg_sys::list_make1(name_node.cast());
+    let funcname_list = pg_sys::lappend(std::ptr::null_mut(), name_node.cast());
 
     let funcoid = pg_sys::LookupFuncName(
         funcname_list,
@@ -394,7 +400,7 @@ unsafe fn build_func_expr(
     (*node).funccollid = pg_sys::InvalidOid;
     (*node).inputcollid = pg_sys::InvalidOid;
     (*node).args = pg_args;
-    (*node).xpr.cast()
+    (node as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -455,7 +461,7 @@ unsafe fn build_case_expr(
     }
     (*node).casetype = result_type;
 
-    (*node).xpr.cast()
+    (node as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -465,11 +471,7 @@ unsafe fn build_case_expr(
 /// Build a type coercion node.
 ///
 /// Uses `CoerceViaIO` which works for any type with I/O functions.
-unsafe fn build_cast(
-    inner: &RaExpr,
-    target_type: &str,
-    ctx: &ExprContext,
-) -> *mut pg_sys::Expr {
+unsafe fn build_cast(inner: &RaExpr, target_type: &str, ctx: &ExprContext) -> *mut pg_sys::Expr {
     let arg = translate(inner, ctx);
     if arg.is_null() {
         return std::ptr::null_mut();
@@ -486,13 +488,14 @@ unsafe fn build_cast(
     (*node).resulttype = target_oid;
     (*node).resultcollid = pg_sys::InvalidOid;
     (*node).coerceformat = pg_sys::CoercionForm::COERCE_EXPLICIT_CAST;
-    (*node).xpr.cast()
+    (node as *mut pg_sys::Expr)
 }
 
 /// Resolve a type name string to its OID.
 unsafe fn resolve_type_oid(type_name: &str) -> pg_sys::Oid {
     // Map common SQL type names to PG type names
-    let pg_type = match type_name.to_lowercase().as_str() {
+    let lower = type_name.to_lowercase();
+    let pg_type = match lower.as_str() {
         "int" | "integer" | "int4" => "int4",
         "bigint" | "int8" => "int8",
         "smallint" | "int2" => "int2",
@@ -518,7 +521,7 @@ unsafe fn resolve_type_oid(type_name: &str) -> pg_sys::Oid {
         Err(_) => return pg_sys::InvalidOid,
     };
     let type_name_node = pg_sys::makeString(type_cstr.as_ptr().cast_mut());
-    let type_name_list = pg_sys::list_make1(type_name_node.cast());
+    let type_name_list = pg_sys::lappend(std::ptr::null_mut(), type_name_node.cast());
 
     pg_sys::LookupTypeNameOid(
         std::ptr::null_mut(), // pstate
@@ -561,7 +564,7 @@ unsafe fn build_array_expr(elements: &[RaExpr], ctx: &ExprContext) -> *mut pg_sy
     }
     (*node).array_collid = pg_sys::InvalidOid;
     (*node).elements = elem_list;
-    (*node).xpr.cast()
+    (node as *mut pg_sys::Expr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

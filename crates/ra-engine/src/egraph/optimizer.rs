@@ -372,7 +372,7 @@ impl Optimizer {
         let opt_features = OptimizationFeatures::from_expr(expr)
             .with_table_stats(&self.table_stats);
 
-        let route_prediction = if let Some(ref router) = self.speculative_router {
+        let mut route_prediction = if let Some(ref router) = self.speculative_router {
             router.predict(&opt_features)
         } else {
             SpeculativeRouter::heuristic_fallback(&opt_features)
@@ -410,9 +410,15 @@ impl Optimizer {
                             return Ok(optimized);
                         }
                         Err(e) => {
-                            debug!("Left-deep failed ({}), falling back to e-graph", e);
+                            debug!("Left-deep failed ({}), falling back to EGraphLow", e);
+                            route_prediction.route = OptRoute::EGraphLow;
+                            route_prediction.confidence = 0.7;
                         }
                     }
+                } else {
+                    debug!("Left-deep not eligible, falling back to EGraphLow");
+                    route_prediction.route = OptRoute::EGraphLow;
+                    route_prediction.confidence = 0.7;
                 }
             }
             OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => {
@@ -898,83 +904,12 @@ impl Optimizer {
     pub fn optimize_with_facts(
         &self,
         expr: &RelExpr,
-        facts: &dyn ra_core::FactsProvider,
+        _facts: &dyn ra_core::FactsProvider,
     ) -> Result<RelExpr, EGraphError> {
-        use tracing::{debug, info};
-
-        // Note: In a full implementation, we would:
-        // 1. Load RuleMetadata from .rra files
-        // 2. Evaluate pre-conditions for each rule using PreConditionEvaluator
-        // 3. Filter egg::Rewrite rules based on matching RuleMetadata
-        // 4. Run optimization with filtered rules
-        //
-        // For now, we demonstrate the API and log the filtering intent.
-
-        let total_rules = all_rules().len();
-
-        // Log facts availability
-        debug!(
-            "Optimizing with facts: database={}, dialect={:?}, cpu_cores={}, has_gpu={}, memory={}",
-            facts.database_name(),
-            facts.sql_dialect(),
-            facts.cpu_cores(),
-            facts.has_gpu(),
-            facts.available_memory(),
-        );
-
-        info!(
-            "Pre-condition filtering enabled ({} total rules available)",
-            total_rules
-        );
-
-        // Load RuleMetadata from .rra files and filter based on pre-conditions
-        let filtered_rules = if let Ok(rules_dir) = std::env::var("RA_RULES_DIR") {
-            let rules_path = std::path::PathBuf::from(rules_dir);
-            match crate::rule_metadata::load_rules_from_directory(&rules_path) {
-                Ok(parsed_rules) => {
-                    let applicable_rule_ids =
-                        crate::rule_metadata::filter_rules_by_preconditions(&parsed_rules, facts);
-
-                    info!(
-                        "Loaded {} rules, {} applicable after precondition filtering",
-                        parsed_rules.len(),
-                        applicable_rule_ids.len()
-                    );
-
-                    // For now, use all rules since we need to map rule IDs to egg::Rewrite
-                    // TODO: Build a HashMap<String, egg::Rewrite> to enable actual filtering
-                    all_rules()
-                }
-                Err(e) => {
-                    warn!("Failed to load rules from {}: {}", rules_path.display(), e);
-                    all_rules()
-                }
-            }
-        } else {
-            // No RA_RULES_DIR set, use all rules
-            debug!("RA_RULES_DIR not set, using all rules");
-            all_rules()
-        };
-
-        info!(
-            "Applying {} rules (filtered from {} total)",
-            filtered_rules.len(),
-            total_rules
-        );
-
-        // Run optimization with filtered rules
-        let rec_expr = to_rec_expr(expr)?;
-        let runner: Runner<RelLang, RelAnalysis> = Runner::default()
-            .with_expr(&rec_expr)
-            .with_node_limit(self.config.node_limit)
-            .with_iter_limit(self.config.iter_limit)
-            .with_time_limit(std::time::Duration::from_secs(self.config.time_limit_secs))
-            .run(&filtered_rules);
-
-        let root = runner.roots[0];
-        let hardware = self.hardware_profile();
-        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &self.table_stats, &hardware)?;
-        Ok(result)
+        // Delegate to the main optimize() pipeline which includes all fast
+        // paths: trivial query detection, plan cache, speculative routing,
+        // left-deep construction, and continuation gate.
+        self.optimize(expr)
     }
 
     /// Run optimization and return both the result and the e-graph

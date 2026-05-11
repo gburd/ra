@@ -24,9 +24,7 @@ use ra_core::{ColumnStats, Statistics};
 
 /// Equivalent to C macro `DatumGetArrayTypeP(d)`.
 #[expect(clippy::cast_ptr_alignment, reason = "legacy allow")]
-unsafe fn datum_get_array_type_p(
-    datum: pg_sys::Datum,
-) -> *mut pg_sys::ArrayType {
+unsafe fn datum_get_array_type_p(datum: pg_sys::Datum) -> *mut pg_sys::ArrayType {
     // For non-toasted arrays the datum IS the pointer. For toasted
     // arrays we must detoast first via `pg_detoast_datum`.
     let raw = datum.cast_mut_ptr::<pg_sys::varlena>();
@@ -42,8 +40,7 @@ unsafe fn arr_ndim(a: *mut pg_sys::ArrayType) -> i32 {
 #[expect(clippy::cast_ptr_alignment, reason = "legacy allow")]
 unsafe fn arr_dims(a: *mut pg_sys::ArrayType) -> *mut i32 {
     // dims start right after the ArrayType header
-    (a as *mut u8).add(std::mem::size_of::<pg_sys::ArrayType>())
-        as *mut i32
+    (a as *mut u8).add(std::mem::size_of::<pg_sys::ArrayType>()) as *mut i32
 }
 
 /// Equivalent to C macro `ARR_ELEMTYPE(a)`.
@@ -163,16 +160,10 @@ unsafe fn resolve_namespace_oid(schema: &str) -> Option<pg_sys::Oid> {
 /// # Safety
 ///
 /// Must be called within a PostgreSQL backend process.
-unsafe fn resolve_relation_oid(
-    schema: &str,
-    table: &str,
-) -> Option<pg_sys::Oid> {
+unsafe fn resolve_relation_oid(schema: &str, table: &str) -> Option<pg_sys::Oid> {
     let ns_oid = resolve_namespace_oid(schema)?;
     let c_table = std::ffi::CString::new(table).ok()?;
-    let rel_oid = pg_sys::get_relname_relid(
-        c_table.as_ptr(),
-        ns_oid,
-    );
+    let rel_oid = pg_sys::get_relname_relid(c_table.as_ptr(), ns_oid);
     if rel_oid == pg_sys::InvalidOid {
         None
     } else {
@@ -192,9 +183,7 @@ struct RelClassInfo {
 /// # Safety
 ///
 /// Must be called within a PostgreSQL backend process.
-unsafe fn read_relclass_info(
-    rel_oid: pg_sys::Oid,
-) -> Option<RelClassInfo> {
+unsafe fn read_relclass_info(rel_oid: pg_sys::Oid) -> Option<RelClassInfo> {
     let tuple = pg_sys::SearchSysCache1(
         pg_sys::SysCacheIdentifier::RELOID as i32,
         pg_sys::Datum::from(rel_oid),
@@ -203,8 +192,7 @@ unsafe fn read_relclass_info(
         return None;
     }
 
-    let class_form =
-        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_class;
+    let class_form = pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_class;
     let info = RelClassInfo {
         reltuples: (*class_form).reltuples,
         relpages: (*class_form).relpages,
@@ -229,8 +217,7 @@ unsafe fn read_relnatts(rel_oid: pg_sys::Oid) -> Option<i16> {
         return None;
     }
 
-    let class_form =
-        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_class;
+    let class_form = pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_class;
     let natts = (*class_form).relnatts;
 
     pg_sys::ReleaseSysCache(tuple);
@@ -243,10 +230,7 @@ unsafe fn read_relnatts(rel_oid: pg_sys::Oid) -> Option<i16> {
 /// # Safety
 ///
 /// Must be called within a PostgreSQL backend process.
-unsafe fn read_attname(
-    rel_oid: pg_sys::Oid,
-    attnum: i16,
-) -> Option<String> {
+unsafe fn read_attname(rel_oid: pg_sys::Oid, attnum: i16) -> Option<String> {
     let tuple = pg_sys::SearchSysCache2(
         pg_sys::SysCacheIdentifier::ATTNUM as i32,
         pg_sys::Datum::from(rel_oid),
@@ -256,8 +240,7 @@ unsafe fn read_attname(
         return None;
     }
 
-    let att_form =
-        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_attribute;
+    let att_form = pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_attribute;
 
     // Skip dropped attributes
     if (*att_form).attisdropped {
@@ -298,8 +281,7 @@ unsafe fn read_column_stats(
         return None;
     }
 
-    let stat_form =
-        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
+    let stat_form = pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
 
     // Extract basic stats from the fixed-length portion
     let n_distinct = (*stat_form).stadistinct;
@@ -334,11 +316,8 @@ unsafe fn read_column_stats(
 /// # Safety
 ///
 /// Must be called with a valid pg_statistic HeapTuple.
-unsafe fn read_stat_correlation(
-    tuple: pg_sys::HeapTuple,
-) -> Option<f32> {
-    let stat_form =
-        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
+unsafe fn read_stat_correlation(tuple: pg_sys::HeapTuple) -> Option<f32> {
+    let stat_form = pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
 
     // Scan the 5 stakind slots for CORRELATION (kind = 3)
     let stakinds = [
@@ -371,8 +350,7 @@ unsafe fn read_stat_slots(
     row_count: f64,
     distinct: f64,
 ) {
-    let stat_form =
-        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
+    let stat_form = pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
 
     let stakinds = [
         (*stat_form).stakind1,
@@ -394,11 +372,7 @@ unsafe fn read_stat_slots(
         } else if kind == pg_sys::STATISTIC_KIND_HISTOGRAM as i16 {
             // Histogram bounds are stored in stavalues
             if let Some(bounds) = read_stavalues_as_strings(tuple, slot_idx) {
-                col_stats.histogram = Some(create_equidepth_histogram(
-                    bounds,
-                    row_count,
-                    distinct,
-                ));
+                col_stats.histogram = Some(create_equidepth_histogram(bounds, row_count, distinct));
             }
         }
     }
@@ -411,14 +385,10 @@ unsafe fn read_stat_slots(
 /// # Safety
 ///
 /// Must be called with a valid pg_statistic HeapTuple.
-unsafe fn read_stanumbers(
-    tuple: pg_sys::HeapTuple,
-    slot_idx: usize,
-) -> Option<Vec<f64>> {
+unsafe fn read_stanumbers(tuple: pg_sys::HeapTuple, slot_idx: usize) -> Option<Vec<f64>> {
     // stanumbers1..stanumbers5 are at attribute numbers
     // Anum_pg_statistic_stanumbers1 + slot_idx
-    let attnum = (pg_sys::Anum_pg_statistic_stanumbers1 as i32
-        + slot_idx as i32) as i16;
+    let attnum = (pg_sys::Anum_pg_statistic_stanumbers1 as i32 + slot_idx as i32) as i16;
 
     let mut is_null = false;
     let datum = pg_sys::SysCacheGetAttr(
@@ -472,10 +442,7 @@ unsafe fn read_stanumbers(
 /// # Safety
 ///
 /// Must be called with a valid pg_statistic HeapTuple.
-unsafe fn read_stanumbers_first(
-    tuple: pg_sys::HeapTuple,
-    slot_idx: usize,
-) -> Option<f32> {
+unsafe fn read_stanumbers_first(tuple: pg_sys::HeapTuple, slot_idx: usize) -> Option<f32> {
     let numbers = read_stanumbers(tuple, slot_idx)?;
     numbers.first().map(|&f| f as f32)
 }
@@ -494,8 +461,7 @@ unsafe fn read_stavalues_as_strings(
 ) -> Option<Vec<String>> {
     // stavalues1..stavalues5 are at attribute numbers
     // Anum_pg_statistic_stavalues1 + slot_idx
-    let attnum = (pg_sys::Anum_pg_statistic_stavalues1 as i32
-        + slot_idx as i32) as i16;
+    let attnum = (pg_sys::Anum_pg_statistic_stavalues1 as i32 + slot_idx as i32) as i16;
 
     let mut is_null = false;
     let datum = pg_sys::SysCacheGetAttr(
@@ -515,10 +481,7 @@ unsafe fn read_stavalues_as_strings(
         return None;
     }
 
-    let nelems = pg_sys::ArrayGetNItems(
-        arr_ndim(array),
-        arr_dims(array),
-    );
+    let nelems = pg_sys::ArrayGetNItems(arr_ndim(array), arr_dims(array));
     if nelems <= 0 {
         return Some(Vec::new());
     }
@@ -533,9 +496,7 @@ unsafe fn read_stavalues_as_strings(
     let mut typlen: i16 = 0;
     let mut typbyval: bool = false;
     let mut typalign: i8 = 0;
-    pg_sys::get_typlenbyvalalign(
-        elem_type, &mut typlen, &mut typbyval, &mut typalign,
-    );
+    pg_sys::get_typlenbyvalalign(elem_type, &mut typlen, &mut typbyval, &mut typalign);
 
     // Deconstruct the array into datums
     let mut elems: *mut pg_sys::Datum = std::ptr::null_mut();
@@ -555,14 +516,9 @@ unsafe fn read_stavalues_as_strings(
     let mut result = Vec::with_capacity(n as usize);
     for i in 0..n as usize {
         if !(*nulls.add(i)) {
-            let text_ptr = pg_sys::OidOutputFunctionCall(
-                typoutput,
-                *elems.add(i),
-            );
+            let text_ptr = pg_sys::OidOutputFunctionCall(typoutput, *elems.add(i));
             if !text_ptr.is_null() {
-                let s = CStr::from_ptr(text_ptr)
-                    .to_string_lossy()
-                    .into_owned();
+                let s = CStr::from_ptr(text_ptr).to_string_lossy().into_owned();
                 result.push(s);
                 pg_sys::pfree(text_ptr as *mut std::ffi::c_void);
             }
@@ -586,10 +542,7 @@ unsafe fn read_stavalues_as_strings(
 ///
 /// Returns `None` if the table has no statistics (unanalyzed) or
 /// does not exist.
-pub fn gather_table_stats(
-    schema: &str,
-    table: &str,
-) -> Option<Statistics> {
+pub fn gather_table_stats(schema: &str, table: &str) -> Option<Statistics> {
     unsafe {
         let rel_oid = resolve_relation_oid(schema, table)?;
         gather_table_stats_by_oid(rel_oid)
@@ -617,8 +570,7 @@ pub fn gather_table_stats_by_oid(rel_oid: pg_sys::Oid) -> Option<Statistics> {
 
         // Populate page-level size from pg_class.relpages
         let page_count = class_info.relpages.max(0) as u64;
-        stats.total_size =
-            page_count * pg_sys::BLCKSZ as u64;
+        stats.total_size = page_count * pg_sys::BLCKSZ as u64;
 
         let natts = read_relnatts(rel_oid)?;
 
@@ -629,17 +581,14 @@ pub fn gather_table_stats_by_oid(rel_oid: pg_sys::Oid) -> Option<Statistics> {
                 None => continue, // dropped column
             };
 
-            if let Some(col_stats) =
-                read_column_stats(rel_oid, attnum, row_count)
-            {
+            if let Some(col_stats) = read_column_stats(rel_oid, attnum, row_count) {
                 stats.columns.insert(col_name, col_stats);
             }
         }
 
         // Derive avg_row_size from column avg_length or from
         // total_size / row_count.
-        stats.avg_row_size =
-            compute_avg_row_size(&stats, page_count) as u64;
+        stats.avg_row_size = compute_avg_row_size(&stats, page_count) as u64;
 
         // Gather index statistics for index-aware optimization
         gather_index_stats_by_oid(rel_oid, &mut stats);
@@ -652,11 +601,7 @@ pub fn gather_table_stats_by_oid(rel_oid: pg_sys::Oid) -> Option<Statistics> {
 ///
 /// Uses `RelationGetIndexList` and syscache lookups on `pg_index`
 /// and `pg_class` instead of SPI.
-fn gather_index_stats(
-    schema: &str,
-    table: &str,
-    stats: &mut Statistics,
-) {
+fn gather_index_stats(schema: &str, table: &str, stats: &mut Statistics) {
     unsafe {
         let rel_oid = match resolve_relation_oid(schema, table) {
             Some(oid) => oid,
@@ -671,17 +616,11 @@ fn gather_index_stats(
 ///
 /// Uses `RelationGetIndexList` and syscache lookups on `pg_index`
 /// and `pg_class` instead of SPI.
-fn gather_index_stats_by_oid(
-    rel_oid: pg_sys::Oid,
-    stats: &mut Statistics,
-) {
+fn gather_index_stats_by_oid(rel_oid: pg_sys::Oid, stats: &mut Statistics) {
     unsafe {
         // Open the relation to get its index list.
         // AccessShareLock is sufficient for reading metadata.
-        let rel = pg_sys::table_open(
-            rel_oid,
-            pg_sys::AccessShareLock as pg_sys::LOCKMODE,
-        );
+        let rel = pg_sys::table_open(rel_oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
         if rel.is_null() {
             return;
         }
@@ -701,10 +640,7 @@ fn gather_index_stats_by_oid(
         }
 
         pg_sys::list_free(index_list);
-        pg_sys::table_close(
-            rel,
-            pg_sys::AccessShareLock as pg_sys::LOCKMODE,
-        );
+        pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
     }
 }
 
@@ -713,9 +649,7 @@ fn gather_index_stats_by_oid(
 /// # Safety
 ///
 /// Must be called within a PostgreSQL backend process.
-unsafe fn read_single_index(
-    idx_oid: pg_sys::Oid,
-) -> Option<(String, ra_core::IndexStats)> {
+unsafe fn read_single_index(idx_oid: pg_sys::Oid) -> Option<(String, ra_core::IndexStats)> {
     // Look up pg_class entry for the index
     let class_tuple = pg_sys::SearchSysCache1(
         pg_sys::SysCacheIdentifier::RELOID as i32,
@@ -725,17 +659,13 @@ unsafe fn read_single_index(
         return None;
     }
 
-    let class_form =
-        pg_sys::GETSTRUCT(class_tuple) as *mut pg_sys::FormData_pg_class;
+    let class_form = pg_sys::GETSTRUCT(class_tuple) as *mut pg_sys::FormData_pg_class;
 
-    let idx_name = CStr::from_ptr(
-        (*class_form).relname.data.as_ptr(),
-    )
-    .to_string_lossy()
-    .into_owned();
+    let idx_name = CStr::from_ptr((*class_form).relname.data.as_ptr())
+        .to_string_lossy()
+        .into_owned();
 
-    let index_size = (*class_form).relpages as u64
-        * pg_sys::BLCKSZ as u64;
+    let index_size = (*class_form).relpages as u64 * pg_sys::BLCKSZ as u64;
 
     // Get the access method name for index type
     let am_oid = (*class_form).relam;
@@ -752,8 +682,7 @@ unsafe fn read_single_index(
         return None;
     }
 
-    let idx_form =
-        pg_sys::GETSTRUCT(idx_tuple) as *mut pg_sys::FormData_pg_index;
+    let idx_form = pg_sys::GETSTRUCT(idx_tuple) as *mut pg_sys::FormData_pg_index;
 
     let is_unique = (*idx_form).indisunique;
     let is_primary = (*idx_form).indisprimary;
@@ -796,11 +725,9 @@ unsafe fn resolve_am_type(am_oid: pg_sys::Oid) -> ra_core::IndexType {
         return ra_core::IndexType::Unknown;
     }
 
-    let name = CStr::from_ptr(am_name_ptr)
-        .to_string_lossy();
+    let name = CStr::from_ptr(am_name_ptr).to_string_lossy();
 
-    let result = parse_index_type(&name)
-        .unwrap_or(ra_core::IndexType::Unknown);
+    let result = parse_index_type(&name).unwrap_or(ra_core::IndexType::Unknown);
 
     pg_sys::pfree(am_name_ptr as *mut std::ffi::c_void);
 
@@ -811,9 +738,7 @@ unsafe fn resolve_am_type(am_oid: pg_sys::Oid) -> ra_core::IndexType {
 ///
 /// `table_names` should be a list of `(schema, table)` pairs.
 /// Tables with no statistics are silently skipped.
-pub fn gather_all_stats(
-    table_names: &[(String, String)],
-) -> Vec<(String, Statistics)> {
+pub fn gather_all_stats(table_names: &[(String, String)]) -> Vec<(String, Statistics)> {
     let mut result = Vec::with_capacity(table_names.len());
     for (schema, table) in table_names {
         if let Some(stats) = gather_table_stats(schema, table) {
@@ -871,8 +796,7 @@ unsafe fn estimate_dead_ratio(rel_oid: pg_sys::Oid) -> f64 {
         return 0.0;
     }
 
-    let class_form = pg_sys::GETSTRUCT(class_tuple)
-        as *mut pg_sys::FormData_pg_class;
+    let class_form = pg_sys::GETSTRUCT(class_tuple) as *mut pg_sys::FormData_pg_class;
     let relpages = (*class_form).relpages;
     let relallvisible = (*class_form).relallvisible;
     pg_sys::ReleaseSysCache(class_tuple);
@@ -896,10 +820,7 @@ unsafe fn estimate_dead_ratio(rel_oid: pg_sys::Oid) -> f64 {
 /// # Safety
 ///
 /// Must be called within a PostgreSQL backend process.
-unsafe fn estimate_bloat(
-    rel_oid: pg_sys::Oid,
-    base_stats: &Statistics,
-) -> f64 {
+unsafe fn estimate_bloat(rel_oid: pg_sys::Oid, base_stats: &Statistics) -> f64 {
     let class_tuple = pg_sys::SearchSysCache1(
         pg_sys::SysCacheIdentifier::RELOID as i32,
         pg_sys::Datum::from(rel_oid),
@@ -908,8 +829,7 @@ unsafe fn estimate_bloat(
         return 1.0;
     }
 
-    let class_form = pg_sys::GETSTRUCT(class_tuple)
-        as *mut pg_sys::FormData_pg_class;
+    let class_form = pg_sys::GETSTRUCT(class_tuple) as *mut pg_sys::FormData_pg_class;
     let relpages = (*class_form).relpages;
     let reltuples = (*class_form).reltuples;
     pg_sys::ReleaseSysCache(class_tuple);
@@ -919,8 +839,7 @@ unsafe fn estimate_bloat(
     }
 
     let table_size = relpages as f64 * pg_sys::BLCKSZ as f64;
-    let expected_size =
-        base_stats.row_count * base_stats.avg_row_size as f64;
+    let expected_size = base_stats.row_count * base_stats.avg_row_size as f64;
 
     if expected_size > 0.0 {
         (table_size / expected_size).max(1.0)
@@ -967,10 +886,7 @@ const NATTS_PG_CONSTRAINT: usize = 26;
 /// Safe to call from planner hooks.
 ///
 /// Returns one `ForeignKeyInfo` per foreign key constraint found.
-pub fn gather_foreign_keys(
-    schema: &str,
-    table: &str,
-) -> Vec<ForeignKeyInfo> {
+pub fn gather_foreign_keys(schema: &str, table: &str) -> Vec<ForeignKeyInfo> {
     unsafe { gather_foreign_keys_inner(schema, table) }
 }
 
@@ -980,10 +896,7 @@ pub fn gather_foreign_keys(
 ///
 /// Must be called within a PostgreSQL backend process with valid
 /// memory context.
-unsafe fn gather_foreign_keys_inner(
-    schema: &str,
-    table: &str,
-) -> Vec<ForeignKeyInfo> {
+unsafe fn gather_foreign_keys_inner(schema: &str, table: &str) -> Vec<ForeignKeyInfo> {
     let rel_oid = match resolve_relation_oid(schema, table) {
         Some(oid) => oid,
         None => return Vec::new(),
@@ -1012,10 +925,10 @@ unsafe fn gather_foreign_keys_inner(
     // constraint indexes, and the catalog is typically small).
     let scan = pg_sys::systable_beginscan(
         con_rel,
-        pg_sys::InvalidOid, // no index
-        false,              // no index scan
+        pg_sys::InvalidOid,   // no index
+        false,                // no index scan
         std::ptr::null_mut(), // snapshot (current)
-        1,                  // number of scan keys
+        1,                    // number of scan keys
         &mut scan_key,
     );
 
@@ -1034,10 +947,7 @@ unsafe fn gather_foreign_keys_inner(
     }
 
     pg_sys::systable_endscan(scan);
-    pg_sys::table_close(
-        con_rel,
-        pg_sys::AccessShareLock as pg_sys::LOCKMODE,
-    );
+    pg_sys::table_close(con_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
 
     result
 }
@@ -1054,16 +964,10 @@ unsafe fn extract_foreign_key(
     tuple: pg_sys::HeapTuple,
     tupdesc: pg_sys::TupleDesc,
 ) -> Option<ForeignKeyInfo> {
-    let mut values =
-        vec![pg_sys::Datum::from(0usize); NATTS_PG_CONSTRAINT];
+    let mut values = vec![pg_sys::Datum::from(0usize); NATTS_PG_CONSTRAINT];
     let mut nulls = vec![false; NATTS_PG_CONSTRAINT];
 
-    pg_sys::heap_deform_tuple(
-        tuple,
-        tupdesc,
-        values.as_mut_ptr(),
-        nulls.as_mut_ptr(),
-    );
+    pg_sys::heap_deform_tuple(tuple, tupdesc, values.as_mut_ptr(), nulls.as_mut_ptr());
 
     // contype is attribute 4 (index 3). Check for 'f' (foreign key).
     if nulls[ANUM_CONTYPE as usize - 1] {
@@ -1078,8 +982,7 @@ unsafe fn extract_foreign_key(
     if nulls[ANUM_CONFRELID as usize - 1] {
         return None;
     }
-    let confrelid =
-        pg_sys::Oid::from(values[ANUM_CONFRELID as usize - 1].value() as u32);
+    let confrelid = pg_sys::Oid::from(values[ANUM_CONFRELID as usize - 1].value() as u32);
 
     // conkey: attribute 13 (index 12) -- int2[] of local column attnums
     if nulls[ANUM_CONKEY as usize - 1] {
@@ -1097,8 +1000,7 @@ unsafe fn extract_foreign_key(
     if nulls[ANUM_CONRELID as usize - 1] {
         return None;
     }
-    let conrelid =
-        pg_sys::Oid::from(values[ANUM_CONRELID as usize - 1].value() as u32);
+    let conrelid = pg_sys::Oid::from(values[ANUM_CONRELID as usize - 1].value() as u32);
 
     // Resolve referenced table name.
     let ref_table = get_rel_name_safe(confrelid)?;
@@ -1107,8 +1009,7 @@ unsafe fn extract_foreign_key(
     let columns = decode_attnum_array(conkey_datum, conrelid)?;
 
     // Decode confkey int2 array to column names.
-    let referenced_columns =
-        decode_attnum_array(confkey_datum, confrelid)?;
+    let referenced_columns = decode_attnum_array(confkey_datum, confrelid)?;
 
     Some(ForeignKeyInfo {
         columns,
@@ -1124,10 +1025,7 @@ unsafe fn extract_foreign_key(
 /// # Safety
 ///
 /// Must be called with a valid int2[] Datum within a PG backend.
-unsafe fn decode_attnum_array(
-    datum: pg_sys::Datum,
-    rel_oid: pg_sys::Oid,
-) -> Option<Vec<String>> {
+unsafe fn decode_attnum_array(datum: pg_sys::Datum, rel_oid: pg_sys::Oid) -> Option<Vec<String>> {
     let array = datum_get_array_type_p(datum);
     if array.is_null() {
         return None;
@@ -1140,8 +1038,8 @@ unsafe fn decode_attnum_array(
     pg_sys::deconstruct_array(
         array,
         pg_sys::INT2OID,
-        2,     // int2 = 2 bytes
-        true,  // pass by value
+        2,    // int2 = 2 bytes
+        true, // pass by value
         pg_sys::TYPALIGN_SHORT as i8,
         &mut elems,
         &mut elem_nulls,
@@ -1169,7 +1067,11 @@ unsafe fn decode_attnum_array(
     pg_sys::pfree(elems as *mut std::ffi::c_void);
     pg_sys::pfree(elem_nulls as *mut std::ffi::c_void);
 
-    if failed { None } else { Some(names) }
+    if failed {
+        None
+    } else {
+        Some(names)
+    }
 }
 
 /// Get a relation name by OID (safe wrapper).
@@ -1178,9 +1080,7 @@ unsafe fn get_rel_name_safe(relid: pg_sys::Oid) -> Option<String> {
     if name_ptr.is_null() {
         return None;
     }
-    let s = CStr::from_ptr(name_ptr)
-        .to_string_lossy()
-        .into_owned();
+    let s = CStr::from_ptr(name_ptr).to_string_lossy().into_owned();
     pg_sys::pfree(name_ptr as *mut std::ffi::c_void);
     Some(s)
 }
@@ -1196,10 +1096,7 @@ unsafe fn get_rel_name_safe(relid: pg_sys::Oid) -> Option<String> {
 ///
 /// Returns a placeholder timestamp string if analyzed, or None if
 /// the table appears unanalyzed.
-pub fn last_analyze_time(
-    schema: &str,
-    table: &str,
-) -> Option<String> {
+pub fn last_analyze_time(schema: &str, table: &str) -> Option<String> {
     unsafe {
         let rel_oid = resolve_relation_oid(schema, table)?;
 
@@ -1211,8 +1108,7 @@ pub fn last_analyze_time(
             return None;
         }
 
-        let class_form = pg_sys::GETSTRUCT(class_tuple)
-            as *mut pg_sys::FormData_pg_class;
+        let class_form = pg_sys::GETSTRUCT(class_tuple) as *mut pg_sys::FormData_pg_class;
         let reltuples = (*class_form).reltuples;
         pg_sys::ReleaseSysCache(class_tuple);
 
@@ -1491,7 +1387,10 @@ mod tests {
     #[test]
     fn parse_simple_array() {
         let result = parse_pg_array("{a,b,c}");
-        assert_eq!(result, Some(vec!["a".to_string(), "b".to_string(), "c".to_string()]));
+        assert_eq!(
+            result,
+            Some(vec!["a".to_string(), "b".to_string(), "c".to_string()])
+        );
     }
 
     #[test]
@@ -1503,7 +1402,10 @@ mod tests {
     #[test]
     fn parse_quoted_array() {
         let result = parse_pg_array(r#"{"hello world","test,value"}"#);
-        assert_eq!(result, Some(vec!["hello world".to_string(), "test,value".to_string()]));
+        assert_eq!(
+            result,
+            Some(vec!["hello world".to_string(), "test,value".to_string()])
+        );
     }
 
     #[test]
@@ -1532,7 +1434,12 @@ mod tests {
 
     #[test]
     fn histogram_from_bounds() {
-        let bounds = vec!["1".to_string(), "10".to_string(), "20".to_string(), "30".to_string()];
+        let bounds = vec![
+            "1".to_string(),
+            "10".to_string(),
+            "20".to_string(),
+            "30".to_string(),
+        ];
         let hist = create_equidepth_histogram(bounds, 1000.0, 30.0);
 
         match hist {
@@ -1706,15 +1613,9 @@ mod tests {
     #[test]
     fn foreign_key_info_composite() {
         let fk = ForeignKeyInfo {
-            columns: vec![
-                "tenant_id".to_string(),
-                "order_id".to_string(),
-            ],
+            columns: vec!["tenant_id".to_string(), "order_id".to_string()],
             referenced_table: "orders".to_string(),
-            referenced_columns: vec![
-                "tenant_id".to_string(),
-                "id".to_string(),
-            ],
+            referenced_columns: vec!["tenant_id".to_string(), "id".to_string()],
         };
 
         assert_eq!(fk.columns.len(), 2);

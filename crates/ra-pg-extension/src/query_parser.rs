@@ -64,8 +64,7 @@ unsafe fn parse_with_depth(
 
     // Handle set operations (UNION/INTERSECT/EXCEPT).
     if !q.setOperations.is_null() {
-        let set_expr =
-            parse_set_operation(q, q.setOperations, depth)?;
+        let set_expr = parse_set_operation(q, q.setOperations, depth)?;
         let set_expr = match set_expr {
             Some(e) => e,
             None => return Ok(None),
@@ -124,10 +123,7 @@ struct CteDef {
 /// proceeds without CTE wrapping (the main query may still
 /// succeed, and `RTE_CTE` references will produce Scan nodes
 /// with the CTE name).
-unsafe fn build_cte_definitions(
-    q: &pg_sys::Query,
-    depth: u32,
-) -> Result<Vec<CteDef>, String> {
+unsafe fn build_cte_definitions(q: &pg_sys::Query, depth: u32) -> Result<Vec<CteDef>, String> {
     let cte_list = q.cteList;
     if cte_list.is_null() || list_length(cte_list) == 0 {
         return Ok(Vec::new());
@@ -286,8 +282,7 @@ unsafe fn parse_set_operation(
 
     // Leaf: a RangeTblRef pointing to a subquery RTE.
     if tag == pg_sys::NodeTag::T_RangeTblRef {
-        let rtref =
-            node.cast::<pg_sys::RangeTblRef>();
+        let rtref = node.cast::<pg_sys::RangeTblRef>();
         let rtindex = (*rtref).rtindex;
         return parse_set_operation_leaf(q, rtindex, depth);
     }
@@ -297,22 +292,11 @@ unsafe fn parse_set_operation(
         return Ok(None);
     }
 
-    let stmt =
-        node.cast::<pg_sys::SetOperationStmt>();
-    let Some(left) = parse_set_operation(
-        q,
-        (*stmt).larg,
-        depth + 1,
-    )?
-    else {
+    let stmt = node.cast::<pg_sys::SetOperationStmt>();
+    let Some(left) = parse_set_operation(q, (*stmt).larg, depth + 1)? else {
         return Ok(None);
     };
-    let Some(right) = parse_set_operation(
-        q,
-        (*stmt).rarg,
-        depth + 1,
-    )?
-    else {
+    let Some(right) = parse_set_operation(q, (*stmt).rarg, depth + 1)? else {
         return Ok(None);
     };
 
@@ -1479,11 +1463,13 @@ unsafe fn numeric_to_double(numeric: *mut pg_sys::NumericData) -> f64 {
 
     // Use PostgreSQL's built-in numeric_float8 function
     let datum = pg_sys::Datum::from(numeric as usize);
-    let result = pg_sys::DirectFunctionCall1Coll(
-        Some(pg_sys::numeric_float8),
-        pg_sys::InvalidOid,
-        datum,
-    );
+    let result =
+        {
+            // numeric_float8 is declared as a Rust fn (not extern "C-unwind")
+            // in pgrx bindings. Use OidFunctionCall1Coll with its OID instead.
+            // float8(numeric) has OID 1746 in all PG versions.
+            pg_sys::OidFunctionCall1Coll(1746u32.into(), pg_sys::InvalidOid, datum)
+        };
 
     // Extract f64 from result datum
     f64::from_bits(result.value() as u64)
@@ -2766,9 +2752,7 @@ mod tests {
         } = &result
         {
             assert_eq!(name, "r");
-            let cd = cycle_detection
-                .as_ref()
-                .expect("expected cycle_detection");
+            let cd = cycle_detection.as_ref().expect("expected cycle_detection");
             assert_eq!(cd.track_columns, vec!["id"]);
             assert_eq!(cd.cycle_mark_column, Some("is_cycle".into()));
             assert_eq!(cd.path_column, Some("path".into()));
@@ -2789,13 +2773,7 @@ mod tests {
     fn set_operation_null_node_returns_none() {
         let mut q = pg_sys::Query::default();
         q.commandType = pg_sys::CmdType::CMD_SELECT;
-        let result = unsafe {
-            parse_set_operation(
-                &q,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
+        let result = unsafe { parse_set_operation(&q, std::ptr::null_mut(), 0) };
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -2805,13 +2783,7 @@ mod tests {
         let q = pg_sys::Query::default();
         // Use a non-null but invalid pointer to test depth
         // check before any dereference.
-        let result = unsafe {
-            parse_set_operation(
-                &q,
-                std::ptr::null_mut(),
-                MAX_DEPTH + 1,
-            )
-        };
+        let result = unsafe { parse_set_operation(&q, std::ptr::null_mut(), MAX_DEPTH + 1) };
         // Null node short-circuits before depth check,
         // so null returns Ok(None).
         assert!(result.is_ok());
@@ -2822,9 +2794,7 @@ mod tests {
     fn set_operation_leaf_null_rte_returns_none() {
         let q = pg_sys::Query::default();
         // rtable is null, so get_rte returns None.
-        let result = unsafe {
-            parse_set_operation_leaf(&q, 1, 0)
-        };
+        let result = unsafe { parse_set_operation_leaf(&q, 1, 0) };
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -2832,9 +2802,7 @@ mod tests {
     #[test]
     fn set_operation_leaf_invalid_rtindex_returns_none() {
         let q = pg_sys::Query::default();
-        let result = unsafe {
-            parse_set_operation_leaf(&q, 0, 0)
-        };
+        let result = unsafe { parse_set_operation_leaf(&q, 0, 0) };
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }

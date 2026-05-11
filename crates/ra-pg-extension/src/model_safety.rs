@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use ra_engine::cost_model::feedback::MapeTracker;
-use ra_engine::cost_model::FastCostModel;
+use ra_engine::cost_model::BitNetCostModel;
 
 /// Configuration for model safety rollback behavior.
 pub struct ModelSafetyConfig {
@@ -33,13 +33,13 @@ impl Default for ModelSafetyConfig {
 /// Manages model versions with automatic rollback on quality regression.
 ///
 /// Held behind a `Mutex` in the extension state. The planner hook obtains
-/// an `Arc<FastCostModel>` via `current_model()` and can use it without
+/// an `Arc<BitNetCostModel>` via `current_model()` and can use it without
 /// holding the lock during optimization.
 pub struct ModelVersionManager {
     /// Currently active model.
-    current: Arc<FastCostModel>,
+    current: Arc<BitNetCostModel>,
     /// Previous model version (for rollback).
-    previous: Option<Arc<FastCostModel>>,
+    previous: Option<Arc<BitNetCostModel>>,
     /// MAPE tracker for current model.
     current_mape: MapeTracker,
     /// MAPE tracker for previous model (during A/B window).
@@ -67,7 +67,7 @@ pub struct ModelStatus {
 impl ModelVersionManager {
     /// Create a new manager with the initial model (version 1).
     #[must_use]
-    pub fn new(initial_model: FastCostModel) -> Self {
+    pub fn new(initial_model: BitNetCostModel) -> Self {
         Self {
             current: Arc::new(initial_model),
             previous: None,
@@ -82,7 +82,7 @@ impl ModelVersionManager {
 
     /// Create with custom configuration.
     #[must_use]
-    pub fn with_config(initial_model: FastCostModel, config: ModelSafetyConfig) -> Self {
+    pub fn with_config(initial_model: BitNetCostModel, config: ModelSafetyConfig) -> Self {
         Self {
             current: Arc::new(initial_model),
             previous: None,
@@ -99,7 +99,7 @@ impl ModelVersionManager {
     ///
     /// Current becomes previous, new becomes current. Resets prediction
     /// counters and MAPE trackers for the new evaluation window.
-    pub fn promote_model(&mut self, new_model: FastCostModel) {
+    pub fn promote_model(&mut self, new_model: BitNetCostModel) {
         self.previous = Some(Arc::clone(&self.current));
         self.current = Arc::new(new_model);
         self.previous_mape = std::mem::replace(&mut self.current_mape, MapeTracker::new());
@@ -158,7 +158,7 @@ impl ModelVersionManager {
 
     /// Get the current active model for use in the planner hook.
     #[must_use]
-    pub fn current_model(&self) -> Arc<FastCostModel> {
+    pub fn current_model(&self) -> Arc<BitNetCostModel> {
         Arc::clone(&self.current)
     }
 
@@ -208,12 +208,12 @@ mod tests {
     use super::*;
 
     fn make_manager() -> ModelVersionManager {
-        ModelVersionManager::new(FastCostModel::new_random())
+        ModelVersionManager::new(BitNetCostModel::new_zeros())
     }
 
     fn make_manager_with_window(window: u64) -> ModelVersionManager {
         ModelVersionManager::with_config(
-            FastCostModel::new_random(),
+            BitNetCostModel::new_zeros(),
             ModelSafetyConfig {
                 rollback_threshold: 2.0,
                 evaluation_window: window,
@@ -228,7 +228,7 @@ mod tests {
         assert!(!mgr.status().has_previous);
         assert_eq!(mgr.status().version, 1);
 
-        mgr.promote_model(FastCostModel::new_random());
+        mgr.promote_model(BitNetCostModel::new_zeros());
         assert!(mgr.status().has_previous);
         assert_eq!(mgr.status().version, 2);
     }
@@ -243,7 +243,7 @@ mod tests {
         }
 
         // Promote a new model
-        mgr.promote_model(FastCostModel::new_random());
+        mgr.promote_model(BitNetCostModel::new_zeros());
         assert!(mgr.status().has_previous);
         let version_before = mgr.status().version;
 
@@ -272,7 +272,7 @@ mod tests {
         }
 
         // Promote a new model
-        mgr.promote_model(FastCostModel::new_random());
+        mgr.promote_model(BitNetCostModel::new_zeros());
         let version_before = mgr.status().version;
 
         // Feed better predictions (lower error than before)
@@ -296,7 +296,7 @@ mod tests {
         assert!(!mgr.force_rollback());
 
         // Promote and then force rollback
-        mgr.promote_model(FastCostModel::new_random());
+        mgr.promote_model(BitNetCostModel::new_zeros());
         assert!(mgr.status().has_previous);
         assert!(mgr.force_rollback());
         assert!(!mgr.status().has_previous);
@@ -312,7 +312,7 @@ mod tests {
             mgr.record_prediction(100.0, 100.0);
         }
 
-        mgr.promote_model(FastCostModel::new_random());
+        mgr.promote_model(BitNetCostModel::new_zeros());
 
         // Feed terrible predictions but fewer than the evaluation window
         let mut rolled_back = false;
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn test_disabled_config_prevents_rollback() {
         let mut mgr = ModelVersionManager::with_config(
-            FastCostModel::new_random(),
+            BitNetCostModel::new_zeros(),
             ModelSafetyConfig {
                 rollback_threshold: 2.0,
                 evaluation_window: 10,
@@ -354,7 +354,7 @@ mod tests {
             mgr.record_prediction(100.0, 100.0);
         }
 
-        mgr.promote_model(FastCostModel::new_random());
+        mgr.promote_model(BitNetCostModel::new_zeros());
 
         // Terrible predictions but rollback is disabled
         let mut rolled_back = false;
