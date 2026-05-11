@@ -30,6 +30,7 @@ pgrx = "=0.17.0"
 ra-core = { path = "../ra-core" }
 ra-engine = { path = "../ra-engine" }
 ra-hardware = { path = "../ra-hardware" }
+ra-parser = { path = "../ra-parser" }
 once_cell = "1.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

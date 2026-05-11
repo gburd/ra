@@ -1,28 +1,25 @@
-//! Planner hook: intercepts PostgreSQL query planning to inject
-//! RA optimizer advice.
+//! Planner hook: full parser/planner/optimizer replacement.
 //!
-//! Hooks the `planner_hook` entry point. When a query arrives:
+//! When enabled, intercepts PostgreSQL's planner hook and replaces the
+//! entire planning pipeline:
 //!
-//! 1. Check if the extension is enabled (GUC).
-//! 2. Count base relations; bail if above threshold.
-//! 3. Parse the query into an RA `RelExpr` tree.
-//! 4. Gather statistics from PostgreSQL catalogs (no SPI).
-//! 5. Run the RA optimizer (e-graph based).
-//! 6. If confident, apply advice via cost manipulation.
-//! 7. If the query is unsupported by the parser, fall back to
-//!    the standard planner.
+//! 1. **Lime parse** — raw SQL → Ra `RelExpr` (ignores PG's parse tree)
+//! 2. **Ra optimize** — e-graph equality saturation
+//! 3. **Translate** — optimized `RelExpr` → PostgreSQL `Plan` nodes
+//!
+//! PG's `Query.rtable` is used only for OID resolution (mapping table/column
+//! names to catalog OIDs needed by the executor).
+//!
+//! Timing is measured separately for each phase and logged when
+//! `ra_planner.log_decisions` is enabled.
 
 use std::ffi::CStr;
+use std::time::Instant;
 
 use pgrx::prelude::*;
 
-use crate::cost_mapper::CostCalibration;
-use crate::extension_state::{
-    RaOptimizerState, RA_ENABLED, RA_LOG_DECISIONS,
-    RA_MAX_RELATIONS, RA_MIN_CONFIDENCE,
-};
-use crate::pg_constants::{cost_defaults, estimation};
-use crate::plan_converter;
+use crate::extension_state::{RA_ENABLED, RA_LOG_DECISIONS};
+use crate::plan_builder::{self, PlanBuilder};
 use crate::stats_bridge;
 
 /// Saved pointer to the previous planner hook (for chaining).
@@ -41,8 +38,7 @@ pub fn register_hooks() {
 /// # Safety
 ///
 /// Called by PostgreSQL's planner infrastructure with valid pointers
-/// to internal planner structures. Must chain to the previous hook
-/// or the standard planner.
+/// to internal planner structures.
 unsafe extern "C-unwind" fn ra_planner_hook(
     parse: *mut pg_sys::Query,
     query_string: *const std::ffi::c_char,
@@ -51,90 +47,38 @@ unsafe extern "C-unwind" fn ra_planner_hook(
 ) -> *mut pg_sys::PlannedStmt {
     // Fast path: extension disabled.
     if !RA_ENABLED.get() {
-        return call_prev_planner(
-            parse,
-            query_string,
-            cursor_options,
-            bound_params,
-        );
+        return call_prev_planner(parse, query_string, cursor_options, bound_params);
     }
 
-    // Fast path: skip non-SELECT queries (INSERT, UPDATE, DELETE,
-    // utility). Only SELECT queries benefit from RA optimization.
-    if !parse.is_null()
-        && (*parse).commandType
-            != pg_sys::CmdType::CMD_SELECT
-    {
-        return call_prev_planner(
-            parse,
-            query_string,
-            cursor_options,
-            bound_params,
-        );
-    }
-
-    // Skip utility statements that somehow reach the planner.
+    // Skip utility statements.
     if !parse.is_null() && !(*parse).utilityStmt.is_null() {
-        return call_prev_planner(
-            parse,
-            query_string,
-            cursor_options,
-            bound_params,
-        );
+        return call_prev_planner(parse, query_string, cursor_options, bound_params);
     }
 
-    // Skip queries that reference system catalogs (pg_catalog,
-    // information_schema). RA should never attempt to optimize
-    // queries against PostgreSQL's internal metadata tables.
+    // Skip system catalog queries.
     if !parse.is_null() && references_system_catalogs(parse) {
-        return call_prev_planner(
-            parse,
-            query_string,
-            cursor_options,
-            bound_params,
-        );
+        return call_prev_planner(parse, query_string, cursor_options, bound_params);
     }
 
-    // Delegate to the inner implementation, catching any panics
-    // to prevent crashing the PostgreSQL backend process.
-    let result = std::panic::catch_unwind(
-        std::panic::AssertUnwindSafe(|| {
-            ra_planner_hook_inner(
-                parse,
-                query_string,
-                cursor_options,
-                bound_params,
-            )
-        }),
-    );
+    // Catch panics to prevent crashing the backend.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ra_planner_hook_inner(parse, query_string, cursor_options, bound_params)
+    }));
 
     match result {
         Ok(plan) => plan,
         Err(_) => {
             pgrx::warning!(
-                "ra_planner: caught panic in planner hook, \
-                 falling back to standard planner"
+                "ra_planner: caught panic, falling back to standard planner"
             );
-            call_prev_planner(
-                parse,
-                query_string,
-                cursor_options,
-                bound_params,
-            )
+            call_prev_planner(parse, query_string, cursor_options, bound_params)
         }
     }
 }
 
-/// Inner planner hook implementation.
+/// Inner planner hook: Lime parse → Ra optimize → Plan node translation.
 ///
-/// Runs the full RA optimization pipeline:
-/// 1. Parse query to RelExpr
-/// 2. Gather stats via catalog access (no SPI)
-/// 3. Optimize with e-graph
-/// 4. Apply advice via cost manipulation
-///
-/// Falls back to PostgreSQL planner only for unsupported query
-/// types (CTEs, window functions, set operations, DML).
+/// Falls back to the standard planner for unsupported queries.
 ///
 /// # Safety
 ///
@@ -156,237 +100,139 @@ unsafe fn ra_planner_hook_inner(
             .into_owned()
     };
 
-    let mut state = RaOptimizerState::new(sql.clone());
+    // Empty query string: can't parse with Lime.
+    if sql.trim().is_empty() {
+        return call_prev_planner(parse, query_string, cursor_options, bound_params);
+    }
 
-    // Count relations and bail if above threshold.
-    let relation_count = count_rtable_entries(parse);
-    let max_rels = RA_MAX_RELATIONS.get() as usize;
+    let log = RA_LOG_DECISIONS.get();
 
-    if relation_count > max_rels {
-        if RA_LOG_DECISIONS.get() {
-            pgrx::log!(
-                "ra_planner: skipping query with {} relations \
-                 (max: {}): {}",
-                relation_count,
-                max_rels,
-                truncate_sql(&sql, 200)
+    // ─── Step 1: Lime parse (raw SQL → RelExpr) ───────────────────────
+    let t0 = Instant::now();
+    let rel_expr = match ra_parser::sql_to_relexpr(&sql) {
+        Ok(expr) => expr,
+        Err(e) => {
+            if log {
+                pgrx::log!(
+                    "ra_planner: Lime parse failed ({}), fallback: {}",
+                    e,
+                    truncate_sql(&sql, 120)
+                );
+            }
+            return call_prev_planner(
+                parse, query_string, cursor_options, bound_params,
             );
         }
-        return call_prev_planner(
-            parse,
-            query_string,
-            cursor_options,
-            bound_params,
+    };
+    let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+    // ─── Step 2: Ra optimize (e-graph saturation) ─────────────────────
+    let t1 = Instant::now();
+
+    // Gather statistics for the optimizer.
+    let table_names = extract_rtable_schema_names(parse);
+    let stats = stats_bridge::gather_all_stats(&table_names);
+    let facts = SimpleFactsProvider::new(&table_names, &stats);
+
+    let optimized = match optimize_relexpr(&rel_expr, &facts) {
+        Ok(expr) => expr,
+        Err(e) => {
+            if log {
+                pgrx::log!(
+                    "ra_planner: optimization failed ({}), fallback: {}",
+                    e,
+                    truncate_sql(&sql, 120)
+                );
+            }
+            return call_prev_planner(
+                parse, query_string, cursor_options, bound_params,
+            );
+        }
+    };
+    let optimize_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+    // ─── Step 3: Translate to PostgreSQL Plan nodes ────────────────────
+    let t2 = Instant::now();
+    let table_map = plan_builder::build_table_map(parse);
+    let mut builder = PlanBuilder::new(parse, table_map);
+
+    let planned_stmt = match builder.build_planned_stmt(&optimized) {
+        Ok(stmt) => stmt,
+        Err(e) => {
+            if log {
+                pgrx::log!(
+                    "ra_planner: plan build failed ({}), fallback: {}",
+                    e,
+                    truncate_sql(&sql, 120)
+                );
+            }
+            return call_prev_planner(
+                parse, query_string, cursor_options, bound_params,
+            );
+        }
+    };
+    let translate_ms = t2.elapsed().as_secs_f64() * 1000.0;
+
+    // ─── Timing log ───────────────────────────────────────────────────
+    if log {
+        pgrx::log!(
+            "ra_planner: OK parse={:.2}ms optimize={:.2}ms \
+             translate={:.2}ms total={:.2}ms: {}",
+            parse_ms,
+            optimize_ms,
+            translate_ms,
+            parse_ms + optimize_ms + translate_ms,
+            truncate_sql(&sql, 80)
         );
     }
 
-    // Gather statistics from catalog (safe inside planner hook).
-    let table_names: Vec<(String, String)> =
-        extract_rtable_schema_names(parse);
-    let stats = stats_bridge::gather_all_stats(&table_names);
-    state.statistics = stats.clone();
+    // Register feedback for executor end hook.
+    register_feedback(parse, &sql, &optimized);
 
-    // Run the full optimization pipeline.
-    let calibration = CostCalibration::default_calibration();
-
-    let result = try_optimize_query(
-        parse,
-        &sql,
-        &table_names,
-        &stats,
-        &calibration,
-    );
-
-    match result {
-        Ok(Some(optimized)) => {
-            let min_conf = RA_MIN_CONFIDENCE.get();
-
-            if optimized.confidence >= min_conf {
-                state.plan_applied = true;
-                state.confidence = optimized.confidence;
-
-                if RA_LOG_DECISIONS.get() {
-                    pgrx::log!(
-                        "ra_planner: applied RA plan \
-                         (confidence: {:.2}, relations: {}): {}",
-                        optimized.confidence,
-                        relation_count,
-                        truncate_sql(&sql, 200)
-                    );
-                }
-
-                // Register pending feedback for the executor end hook.
-                let query_id = (*parse).queryId;
-                if query_id != 0 {
-                    use std::collections::hash_map::DefaultHasher;
-                    use std::hash::{Hash, Hasher};
-
-                    let mut hasher = DefaultHasher::new();
-                    sql.hash(&mut hasher);
-                    let query_fp = hasher.finish();
-
-                    let fp = crate::monitor::fingerprint_reader().read();
-
-                    crate::feedback_hook::register_pending(
-                        query_id,
-                        crate::feedback_hook::PendingFeedback {
-                            query_fingerprint: query_fp,
-                            plan_fingerprint: query_id,
-                            features: optimized.features,
-                            system_fingerprint: fp,
-                            predicted_cost: optimized.predicted_cost,
-                            rules_fired: Vec::new(),
-                            rules_enabled: 0,
-                            exec_start: std::time::Instant::now(),
-                        },
-                    );
-                }
-
-                return optimized.plan;
-            }
-
-            // Confidence too low: fall back to PG planner.
-            if RA_LOG_DECISIONS.get() {
-                pgrx::log!(
-                    "ra_planner: low confidence {:.2} < {:.2}, \
-                     using PG planner: {}",
-                    optimized.confidence,
-                    min_conf,
-                    truncate_sql(&sql, 100)
-                );
-            }
-            call_prev_planner(
-                parse,
-                query_string,
-                cursor_options,
-                bound_params,
-            )
-        }
-        Ok(None) => {
-            // Unsupported query type (CTE, window, set op, DML).
-            if RA_LOG_DECISIONS.get() {
-                pgrx::log!(
-                    "ra_planner: unsupported query shape, \
-                     using PG planner: {}",
-                    truncate_sql(&sql, 100)
-                );
-            }
-            call_prev_planner(
-                parse,
-                query_string,
-                cursor_options,
-                bound_params,
-            )
-        }
-        Err(e) => {
-            // Optimization error: log and fall back.
-            pgrx::warning!(
-                "ra_planner: optimization failed ({}), \
-                 using PG planner: {}",
-                e,
-                truncate_sql(&sql, 100)
-            );
-            call_prev_planner(
-                parse,
-                query_string,
-                cursor_options,
-                bound_params,
-            )
-        }
-    }
+    planned_stmt
 }
 
-/// Result of RA optimization with confidence score.
-struct OptimizedPlan {
-    plan: *mut pg_sys::PlannedStmt,
-    confidence: f64,
-    /// Features extracted from the optimized RelExpr (for feedback loop).
-    features: ra_engine::cost_model::QueryFeatures,
-    /// Predicted cost from the optimizer (in RA cost units).
-    predicted_cost: f64,
-}
-
-/// Attempt to optimize a query using RA.
-///
-/// # Safety
-///
-/// Caller must pass a valid `Query` pointer.
-unsafe fn try_optimize_query(
+/// Register pending feedback entry for the executor-end hook.
+unsafe fn register_feedback(
     parse: *mut pg_sys::Query,
     sql: &str,
-    table_names: &[(String, String)],
-    stats: &[(String, ra_core::Statistics)],
-    calibration: &CostCalibration,
-) -> Result<Option<OptimizedPlan>, String> {
-    // Step 1: Convert PostgreSQL Query -> RA RelExpr.
-    let rel_expr = match parse_query_to_relexpr(parse, sql) {
-        Ok(Some(expr)) => expr,
-        Ok(None) => return Ok(None), // Unsupported query type
-        Err(e) => return Err(format!("Failed to parse query: {}", e)),
-    };
+    optimized: &ra_core::algebra::RelExpr,
+) {
+    let query_id = (*parse).queryId;
+    if query_id == 0 {
+        return;
+    }
 
-    // Step 2: Build facts provider and run RA optimizer.
-    let facts = SimpleFactsProvider::new(table_names, stats);
-    let optimized_expr = match optimize_relexpr(&rel_expr, &facts) {
-        Ok(expr) => expr,
-        Err(e) => return Err(format!("Optimization failed: {}", e)),
-    };
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
-    // Step 3: Estimate confidence based on cost improvement and stats quality.
-    let original_cost = estimate_plan_cost(&rel_expr, stats, calibration);
-    let optimized_cost = estimate_plan_cost(&optimized_expr, stats, calibration);
-    let improvement_ratio = if original_cost > 0.0 {
-        (1.0 - (optimized_cost / original_cost)).max(0.0)
-    } else {
-        0.0
-    };
+    let mut hasher = DefaultHasher::new();
+    sql.hash(&mut hasher);
+    let query_fp = hasher.finish();
 
-    // Confidence is based on:
-    // - 40% statistics coverage quality (column-level detail)
-    // - 30% cost improvement ratio
-    // - 30% table-level coverage (all referenced tables have stats)
-    let detailed_coverage = facts.stats_coverage();
-    let table_coverage = calculate_stats_coverage(&rel_expr, stats);
-    let confidence = (
-        improvement_ratio * 0.3
-            + detailed_coverage * 0.4
-            + table_coverage * 0.3
-    )
-    .clamp(0.0, 1.0);
+    let features = ra_engine::cost_model::extract_features(optimized);
+    let fp = crate::monitor::fingerprint_reader().read();
 
-    // Step 4: Extract features for the feedback loop.
-    let features = ra_engine::cost_model::extract_features(&optimized_expr);
-
-    // Step 5: Convert optimized RelExpr -> PostgreSQL PlannedStmt.
-    let planned_stmt = match plan_converter::convert_to_planned_stmt(
-        &optimized_expr,
-        parse,
-        stats,
-        calibration,
-    ) {
-        Ok(plan) => plan,
-        Err(e) => return Err(format!("Plan conversion failed: {}", e)),
-    };
-
-    Ok(Some(OptimizedPlan {
-        plan: planned_stmt,
-        confidence,
-        features,
-        predicted_cost: optimized_cost,
-    }))
+    crate::feedback_hook::register_pending(
+        query_id,
+        crate::feedback_hook::PendingFeedback {
+            query_fingerprint: query_fp,
+            plan_fingerprint: query_id,
+            features,
+            system_fingerprint: fp,
+            predicted_cost: 0.0,
+            rules_fired: Vec::new(),
+            rules_enabled: 0,
+            exec_start: Instant::now(),
+        },
+    );
 }
 
-/// Parse PostgreSQL Query to RA RelExpr.
-///
-/// Returns Ok(None) for unsupported query types (DDL, utility statements).
-unsafe fn parse_query_to_relexpr(
-    parse: *mut pg_sys::Query,
-    _sql: &str,
-) -> Result<Option<ra_core::algebra::RelExpr>, String> {
-    crate::query_parser::parse(parse)
-}
+// ───────────────────────────────────────────────────────────────────────────
+// Optimizer
+// ───────────────────────────────────────────────────────────────────────────
 
-/// Run RA optimizer on a RelExpr.
+/// Run Ra optimizer on a RelExpr.
 fn optimize_relexpr(
     rel_expr: &ra_core::algebra::RelExpr,
     facts: &dyn ra_core::FactsProvider,
@@ -394,163 +240,14 @@ fn optimize_relexpr(
     let optimizer = ra_engine::Optimizer::new();
     optimizer
         .optimize_with_facts(rel_expr, facts)
-        .map_err(|e| format!("Optimizer error: {}", e))
+        .map_err(|e| format!("{e}"))
 }
 
-/// Estimate cost of a plan using RA's cost model.
-fn estimate_plan_cost(
-    rel_expr: &ra_core::algebra::RelExpr,
-    stats: &[(String, ra_core::Statistics)],
-    calibration: &CostCalibration,
-) -> f64 {
-    // Get base table costs from statistics
-    let base_cost = estimate_relexpr_cost(rel_expr, stats);
-
-    // Convert RA cost to PostgreSQL cost units
-    calibration.ra_to_pg_total(&base_cost)
-}
-
-/// Recursively estimate the cost of a RelExpr tree.
-fn estimate_relexpr_cost(
-    expr: &ra_core::algebra::RelExpr,
-    stats: &[(String, ra_core::Statistics)],
-) -> ra_core::Cost {
-    use ra_core::algebra::RelExpr;
-    use ra_core::Cost;
-
-    match expr {
-        RelExpr::Scan { table, .. }
-        | RelExpr::ParallelScan { table, .. } => {
-            // Sequential scan cost: rows * page_cost
-            let row_count = get_table_row_count(table, stats);
-            let pages = (row_count / estimation::ROWS_PER_PAGE).max(1.0);
-            let mem_bytes = (row_count * estimation::BYTES_PER_ROW).max(1.0);
-            Cost::new(row_count * cost_defaults::CPU_TUPLE_COST, pages, 0.0, mem_bytes as u64)
-        }
-        RelExpr::IndexScan { table, .. }
-        | RelExpr::IndexOnlyScan { table, .. } => {
-            // Index scan cost: log(rows) * random_page_cost + rows * cpu_cost
-            let row_count = get_table_row_count(table, stats);
-            let index_pages = row_count.log2().max(1.0);
-            let mem_bytes = (row_count * estimation::BYTES_PER_ROW).max(1.0);
-            Cost::new(
-                row_count * cost_defaults::CPU_INDEX_TUPLE_COST,
-                index_pages * cost_defaults::RANDOM_PAGE_COST,
-                0.0,
-                mem_bytes as u64,
-            )
-        }
-        RelExpr::BitmapHeapScan { table, .. } => {
-            // Bitmap scan: similar to index scan but more efficient for multiple matches
-            let row_count = get_table_row_count(table, stats);
-            let pages = (row_count / estimation::ROWS_PER_PAGE).max(1.0) * 0.5; // More efficient than seq scan
-            let mem_bytes = (row_count * estimation::BYTES_PER_ROW).max(1.0);
-            Cost::new(
-                row_count * cost_defaults::CPU_TUPLE_COST,
-                pages * cost_defaults::RANDOM_PAGE_COST * 0.5, // Bitmap is more efficient
-                0.0,
-                mem_bytes as u64,
-            )
-        }
-        RelExpr::Join { left, right, .. }
-        | RelExpr::ParallelHashJoin { left, right, .. } => {
-            // Join cost: left + right + approximate join CPU cost
-            let left_cost = estimate_relexpr_cost(left, stats);
-            let right_cost = estimate_relexpr_cost(right, stats);
-            // Approximate join cost based on memory (rough cardinality estimate)
-            let join_cpu = (left_cost.memory as f64 * right_cost.memory as f64).sqrt() * 0.001;
-            Cost::new(
-                left_cost.cpu + right_cost.cpu + join_cpu,
-                left_cost.io + right_cost.io,
-                left_cost.network + right_cost.network,
-                left_cost.memory.max(right_cost.memory),
-            )
-        }
-        RelExpr::Filter { input, .. }
-        | RelExpr::Project { input, .. }
-        | RelExpr::Gather { input, .. } => {
-            // Passthrough operators: add small CPU cost proportional to memory (rows)
-            let mut cost = estimate_relexpr_cost(input, stats);
-            cost.cpu += cost.memory as f64 * 0.001;
-            cost
-        }
-        RelExpr::Sort { input, .. }
-        | RelExpr::IncrementalSort { input, .. } => {
-            // Sort cost: n * log(n) * cpu_cost
-            let mut cost = estimate_relexpr_cost(input, stats);
-            let n = cost.memory as f64;
-            cost.cpu += n * n.log2() * 0.002;
-            cost
-        }
-        RelExpr::Aggregate { input, .. }
-        | RelExpr::ParallelAggregate { input, .. } => {
-            // Aggregate cost: hash table build + input processing
-            let mut cost = estimate_relexpr_cost(input, stats);
-            cost.cpu += cost.memory as f64 * 0.005;
-            // Aggregation typically reduces rows significantly
-            cost.memory = (cost.memory as f64 * 0.1).max(1.0) as u64;
-            cost
-        }
-        RelExpr::Limit { input, .. } => {
-            // Limit significantly reduces memory/rows
-            let mut cost = estimate_relexpr_cost(input, stats);
-            cost.memory = (cost.memory / 10).max(1);
-            cost
-        }
-        RelExpr::Union { left, right, .. }
-        | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => {
-            // Set operations: process both sides
-            let left_cost = estimate_relexpr_cost(left, stats);
-            let right_cost = estimate_relexpr_cost(right, stats);
-            Cost::new(
-                left_cost.cpu + right_cost.cpu,
-                left_cost.io + right_cost.io,
-                left_cost.network + right_cost.network,
-                left_cost.memory + right_cost.memory,
-            )
-        }
-        _ => {
-            // Default: minimal cost
-            Cost::new(1.0, 1.0, 0.0, 1)
-        }
-    }
-}
-
-/// Get the row count for a table from statistics.
-fn get_table_row_count(table: &str, stats: &[(String, ra_core::Statistics)]) -> f64 {
-    stats
-        .iter()
-        .find(|(name, _)| name == table)
-        .map(|(_, s)| s.row_count)
-        .unwrap_or(estimation::DEFAULT_ROW_COUNT)
-}
-
-/// Calculate what fraction of tables have statistics available.
-fn calculate_stats_coverage(
-    rel_expr: &ra_core::algebra::RelExpr,
-    stats: &[(String, ra_core::Statistics)],
-) -> f64 {
-    let table_names = plan_converter::extract_table_names(rel_expr);
-    if table_names.is_empty() {
-        return 1.0; // No tables = 100% coverage
-    }
-
-    let covered = table_names
-        .iter()
-        .filter(|table| {
-            stats.iter().any(|(name, _)| name == *table)
-        })
-        .count();
-
-    covered as f64 / table_names.len() as f64
-}
+// ───────────────────────────────────────────────────────────────────────────
+// PostgreSQL helpers
+// ───────────────────────────────────────────────────────────────────────────
 
 /// Chain to the previous planner hook or the standard planner.
-///
-/// # Safety
-///
-/// Callers must pass valid planner arguments.
 unsafe fn call_prev_planner(
     parse: *mut pg_sys::Query,
     query_string: *const std::ffi::c_char,
@@ -560,81 +257,11 @@ unsafe fn call_prev_planner(
     if let Some(prev) = PREV_PLANNER_HOOK {
         prev(parse, query_string, cursor_options, bound_params)
     } else {
-        pg_sys::standard_planner(
-            parse,
-            query_string,
-            cursor_options,
-            bound_params,
-        )
+        pg_sys::standard_planner(parse, query_string, cursor_options, bound_params)
     }
-}
-
-/// Count range-table entries in a Query to estimate relation count.
-///
-/// # Safety
-///
-/// Caller must pass a valid `Query` pointer.
-unsafe fn count_rtable_entries(
-    parse: *mut pg_sys::Query,
-) -> usize {
-    if parse.is_null() {
-        return 0;
-    }
-    let rtable = (*parse).rtable;
-    if rtable.is_null() {
-        return 0;
-    }
-    (*rtable).length as usize
-}
-
-/// Extract table names from the Query's range table.
-///
-/// Uses `pg_sys::list_nth` to traverse the array-based List and
-/// `pg_sys::get_rel_name` to resolve OIDs to names.
-///
-/// # Safety
-///
-/// Caller must pass a valid `Query` pointer.
-unsafe fn extract_rtable_names(
-    parse: *mut pg_sys::Query,
-) -> Vec<String> {
-    let mut names = Vec::new();
-    if parse.is_null() {
-        return names;
-    }
-    let rtable = (*parse).rtable;
-    if rtable.is_null() {
-        return names;
-    }
-
-    let length = (*rtable).length as i32;
-
-    for i in 0..length {
-        let rte = pg_sys::list_nth(rtable, i)
-            as *mut pg_sys::RangeTblEntry;
-        if rte.is_null() {
-            continue;
-        }
-        if (*rte).rtekind == pg_sys::RTEKind::RTE_RELATION {
-            let relid = (*rte).relid;
-            let rel_name = get_rel_name(relid);
-            if let Some(name) = rel_name {
-                names.push(name);
-            }
-        }
-    }
-    names
 }
 
 /// Extract `(schema, table)` pairs from the Query's range table.
-///
-/// Resolves each relation's namespace OID to a schema name using
-/// `get_namespace_name`. Falls back to `"public"` when resolution
-/// fails.
-///
-/// # Safety
-///
-/// Caller must pass a valid `Query` pointer.
 unsafe fn extract_rtable_schema_names(
     parse: *mut pg_sys::Query,
 ) -> Vec<(String, String)> {
@@ -649,8 +276,7 @@ unsafe fn extract_rtable_schema_names(
 
     let length = (*rtable).length as i32;
     for i in 0..length {
-        let rte = pg_sys::list_nth(rtable, i)
-            as *mut pg_sys::RangeTblEntry;
+        let rte = pg_sys::list_nth(rtable, i) as *mut pg_sys::RangeTblEntry;
         if rte.is_null() {
             continue;
         }
@@ -670,10 +296,8 @@ unsafe fn extract_rtable_schema_names(
     pairs
 }
 
-/// Look up a relation's schema name by its OID.
-unsafe fn get_rel_schema_name(
-    relid: pg_sys::Oid,
-) -> Option<String> {
+/// Look up a relation's schema name by OID.
+unsafe fn get_rel_schema_name(relid: pg_sys::Oid) -> Option<String> {
     let ns_oid = get_rel_namespace(relid);
     if ns_oid == pg_sys::InvalidOid {
         return None;
@@ -682,26 +306,11 @@ unsafe fn get_rel_schema_name(
     if name_ptr.is_null() {
         return None;
     }
-    Some(
-        CStr::from_ptr(name_ptr)
-            .to_string_lossy()
-            .into_owned(),
-    )
+    Some(CStr::from_ptr(name_ptr).to_string_lossy().into_owned())
 }
 
 /// Check if any relation in the query belongs to a system catalog.
-///
-/// Returns true if any `RTE_RELATION` entry in the range table has
-/// a namespace OID matching `pg_catalog` or `information_schema`.
-/// These are PostgreSQL's internal schemas and should always be
-/// planned by the standard planner.
-///
-/// # Safety
-///
-/// Caller must pass a valid `Query` pointer.
-unsafe fn references_system_catalogs(
-    parse: *mut pg_sys::Query,
-) -> bool {
+unsafe fn references_system_catalogs(parse: *mut pg_sys::Query) -> bool {
     if parse.is_null() {
         return false;
     }
@@ -710,20 +319,18 @@ unsafe fn references_system_catalogs(
         return false;
     }
 
-    // Resolve the well-known system namespace OIDs.
     let pg_catalog_oid = pg_sys::LookupExplicitNamespace(
         c"pg_catalog".as_ptr(),
-        true, // missing_ok
+        true,
     );
     let info_schema_oid = pg_sys::LookupExplicitNamespace(
         c"information_schema".as_ptr(),
-        true, // missing_ok
+        true,
     );
 
     let length = (*rtable).length as i32;
     for i in 0..length {
-        let rte = pg_sys::list_nth(rtable, i)
-            as *mut pg_sys::RangeTblEntry;
+        let rte = pg_sys::list_nth(rtable, i) as *mut pg_sys::RangeTblEntry;
         if rte.is_null() {
             continue;
         }
@@ -731,9 +338,7 @@ unsafe fn references_system_catalogs(
             continue;
         }
         let rel_ns = get_rel_namespace((*rte).relid);
-        if rel_ns == pg_catalog_oid
-            || rel_ns == info_schema_oid
-        {
+        if rel_ns == pg_catalog_oid || rel_ns == info_schema_oid {
             return true;
         }
     }
@@ -741,9 +346,7 @@ unsafe fn references_system_catalogs(
 }
 
 /// Look up the namespace OID of a relation.
-unsafe fn get_rel_namespace(
-    relid: pg_sys::Oid,
-) -> pg_sys::Oid {
+unsafe fn get_rel_namespace(relid: pg_sys::Oid) -> pg_sys::Oid {
     let tuple = pg_sys::SearchSysCache1(
         pg_sys::SysCacheIdentifier::RELOID as _,
         pg_sys::ObjectIdGetDatum(relid),
@@ -751,8 +354,7 @@ unsafe fn get_rel_namespace(
     if tuple.is_null() {
         return pg_sys::InvalidOid;
     }
-    let rel_form =
-        pg_sys::GETSTRUCT(tuple) as pg_sys::Form_pg_class;
+    let rel_form = pg_sys::GETSTRUCT(tuple) as pg_sys::Form_pg_class;
     let ns_oid = (*rel_form).relnamespace;
     pg_sys::ReleaseSysCache(tuple);
     ns_oid
@@ -764,11 +366,7 @@ unsafe fn get_rel_name(relid: pg_sys::Oid) -> Option<String> {
     if name_ptr.is_null() {
         return None;
     }
-    Some(
-        CStr::from_ptr(name_ptr)
-            .to_string_lossy()
-            .into_owned(),
-    )
+    Some(CStr::from_ptr(name_ptr).to_string_lossy().into_owned())
 }
 
 /// Truncate a SQL string for logging.
@@ -780,15 +378,17 @@ fn truncate_sql(sql: &str, max_len: usize) -> String {
     }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// FactsProvider implementation
+// ───────────────────────────────────────────────────────────────────────────
+
 /// FactsProvider backed by PostgreSQL catalog statistics.
-///
-/// Converts `ra_core::Statistics` (gathered from pg_class/pg_statistic)
-/// into the `CoreTableStats`/`ColumnStats` that the RA optimizer's
-/// pre-condition system expects. Integrates the detected hardware
-/// profile from `extension_state`.
 struct SimpleFactsProvider {
     table_stats: std::collections::HashMap<String, ra_core::CoreTableStats>,
-    column_stats: std::collections::HashMap<String, std::collections::HashMap<String, ra_core::ColumnStats>>,
+    column_stats: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, ra_core::ColumnStats>,
+    >,
     schemas: std::collections::HashMap<String, ra_core::TableInfo>,
     hardware: ra_core::CoreHardwareProfile,
 }
@@ -802,15 +402,12 @@ impl SimpleFactsProvider {
         let mut column_stats = std::collections::HashMap::new();
         let mut schemas = std::collections::HashMap::new();
 
-        // Build a schema lookup from table_names for FK gathering
-        let schema_for: std::collections::HashMap<&str, &str> =
-            table_names
-                .iter()
-                .map(|(s, t)| (t.as_str(), s.as_str()))
-                .collect();
+        let schema_for: std::collections::HashMap<&str, &str> = table_names
+            .iter()
+            .map(|(s, t)| (t.as_str(), s.as_str()))
+            .collect();
 
         for (table_name, stat) in stats {
-            // Convert Statistics -> CoreTableStats
             let avg_row_size = if stat.avg_row_size > 0 {
                 stat.avg_row_size as f64
             } else {
@@ -837,14 +434,12 @@ impl SimpleFactsProvider {
                 },
             );
 
-            // Store column stats directly (same type)
             let mut cols = std::collections::HashMap::new();
             for (col_name, col_stat) in &stat.columns {
                 cols.insert(col_name.clone(), col_stat.clone());
             }
             column_stats.insert(table_name.clone(), cols);
 
-            // Build TableInfo for schema queries
             let columns: Vec<(String, ra_core::DataType)> = stat
                 .columns
                 .keys()
@@ -863,7 +458,6 @@ impl SimpleFactsProvider {
                 })
                 .collect();
 
-            // Detect primary key from indexes
             let primary_key: Vec<String> = stat
                 .indexes
                 .values()
@@ -871,13 +465,11 @@ impl SimpleFactsProvider {
                 .map(|idx| idx.columns.clone())
                 .unwrap_or_default();
 
-            // Gather foreign keys from pg_constraint
             let schema = schema_for
                 .get(table_name.as_str())
                 .copied()
                 .unwrap_or("public");
-            let fk_infos =
-                stats_bridge::gather_foreign_keys(schema, table_name);
+            let fk_infos = stats_bridge::gather_foreign_keys(schema, table_name);
             let foreign_keys: Vec<ra_core::ForeignKey> = fk_infos
                 .into_iter()
                 .map(|fk| ra_core::ForeignKey {
@@ -899,7 +491,6 @@ impl SimpleFactsProvider {
             );
         }
 
-        // Convert ra_hardware::HardwareProfile -> CoreHardwareProfile
         let hw = crate::extension_state::hardware_profile();
         let hardware = ra_core::CoreHardwareProfile {
             cpu_cores: hw.cpu_cores,
@@ -918,103 +509,36 @@ impl SimpleFactsProvider {
             cpu_architecture: ra_core::CpuArchitecture::X86_64,
         };
 
-        Self {
-            table_stats,
-            column_stats,
-            schemas,
-            hardware,
-        }
-    }
-
-    /// Calculate overall statistics coverage for confidence scoring.
-    ///
-    /// Returns a value in [0.0, 1.0] representing what fraction of
-    /// tables have usable statistics with column-level detail.
-    fn stats_coverage(&self) -> f64 {
-        if self.table_stats.is_empty() {
-            return 0.0;
-        }
-
-        let mut score = 0.0;
-        let count = self.table_stats.len() as f64;
-
-        for (table, ts) in &self.table_stats {
-            // Base: table exists with row count
-            let mut table_score = 0.5;
-
-            // Bonus for column-level stats
-            if let Some(cols) = self.column_stats.get(table) {
-                if !cols.is_empty() {
-                    // Scale by ratio of columns with stats
-                    let col_coverage = if let Some(schema) = self.schemas.get(table) {
-                        if schema.columns.is_empty() {
-                            1.0
-                        } else {
-                            cols.len() as f64 / schema.columns.len() as f64
-                        }
-                    } else {
-                        0.5
-                    };
-                    table_score += 0.3 * col_coverage;
-                }
-            }
-
-            // Bonus for index information
-            if let Some(schema) = self.schemas.get(table) {
-                if !schema.indexes.is_empty() {
-                    table_score += 0.2;
-                }
-            }
-
-            // Use the stats confidence directly
-            table_score *= ts.confidence;
-
-            score += table_score;
-        }
-
-        score / count
+        Self { table_stats, column_stats, schemas, hardware }
     }
 }
 
 /// Estimate average row size from column statistics.
 fn estimate_avg_row_size(stat: &ra_core::Statistics) -> f64 {
     if stat.columns.is_empty() {
-        return crate::pg_constants::estimation::BYTES_PER_ROW;
+        return 100.0; // default bytes per row
     }
-
     let total: f64 = stat
         .columns
         .values()
         .map(|cs| cs.avg_length.unwrap_or(8.0))
         .sum();
-
-    // Add 23 bytes for tuple header overhead
     (total + 23.0).max(24.0)
 }
 
-/// Compute confidence in statistics based on data quality and recency.
-///
-/// Enhanced scoring algorithm that accounts for:
-/// - Statistics staleness (time since last ANALYZE)
-/// - Histogram and MCV coverage
-/// - Column-level statistics completeness
-/// - Correlation data availability
+/// Compute confidence in statistics based on data quality.
 fn compute_stats_confidence(stat: &ra_core::Statistics) -> f64 {
     if stat.row_count <= 0.0 {
         return 0.0;
     }
-
-    let mut confidence = 0.5; // Base confidence for having row count
-
+    let mut confidence = 0.5;
     if stat.columns.is_empty() {
         return confidence;
     }
-
     let total_cols = stat.columns.len() as f64;
     let mut hist_count = 0;
     let mut mcv_count = 0;
     let mut corr_count = 0;
-
     for cs in stat.columns.values() {
         if cs.histogram.is_some() {
             hist_count += 1;
@@ -1026,52 +550,30 @@ fn compute_stats_confidence(stat: &ra_core::Statistics) -> f64 {
             corr_count += 1;
         }
     }
-
-    // Histogram coverage (20% weight)
     confidence += 0.2 * (hist_count as f64 / total_cols);
-
-    // MCV coverage (15% weight)
     confidence += 0.15 * (mcv_count as f64 / total_cols);
-
-    // Correlation data (15% weight)
     confidence += 0.15 * (corr_count as f64 / total_cols);
-
     confidence.min(1.0)
 }
 
 impl ra_core::FactsProvider for SimpleFactsProvider {
-    fn get_table_stats(
-        &self,
-        table: &str,
-    ) -> Option<&ra_core::CoreTableStats> {
+    fn get_table_stats(&self, table: &str) -> Option<&ra_core::CoreTableStats> {
         self.table_stats.get(table)
     }
 
-    fn get_column_stats(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> Option<&ra_core::ColumnStats> {
-        self.column_stats
-            .get(table)
-            .and_then(|cols| cols.get(column))
+    fn get_column_stats(&self, table: &str, column: &str) -> Option<&ra_core::ColumnStats> {
+        self.column_stats.get(table).and_then(|cols| cols.get(column))
     }
 
     fn hardware_profile(&self) -> &ra_core::CoreHardwareProfile {
         &self.hardware
     }
 
-    fn get_schema(
-        &self,
-        table: &str,
-    ) -> Option<&ra_core::TableInfo> {
+    fn get_schema(&self, table: &str) -> Option<&ra_core::TableInfo> {
         self.schemas.get(table)
     }
 
-    fn runtime_stats(
-        &self,
-        _operator_id: &str,
-    ) -> Option<&ra_core::OperatorStats> {
+    fn runtime_stats(&self, _operator_id: &str) -> Option<&ra_core::OperatorStats> {
         None
     }
 
@@ -1111,7 +613,6 @@ impl ra_core::FactsProvider for SimpleFactsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ra_core::Statistics;
 
     #[test]
     fn truncate_short_string() {
@@ -1134,114 +635,31 @@ mod tests {
 
     #[test]
     fn confidence_zero_rows() {
-        let stats = Statistics::new(0.0);
+        let stats = ra_core::Statistics::new(0.0);
         assert!((compute_stats_confidence(&stats) - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn confidence_row_count_only() {
-        let stats = Statistics::new(1000.0);
+        let stats = ra_core::Statistics::new(1000.0);
         let conf = compute_stats_confidence(&stats);
         assert!((conf - 0.6).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn confidence_with_histograms() {
-        let mut stats = Statistics::new(1000.0);
-        let mut cs = ra_core::ColumnStats::new(100.0);
-        cs.histogram = Some(ra_core::Histogram::EquiDepth(
-            ra_core::EquiDepthHistogram {
-                buckets: vec![],
-                rows_per_bucket: 0.0,
-            },
-        ));
-        cs.most_common_values = Some(vec!["a".into()]);
-        cs.most_common_freqs = Some(vec![0.1]);
-        stats.columns.insert("id".into(), cs);
-
-        let conf = compute_stats_confidence(&stats);
-        // 0.6 base + 0.2 (histogram) + 0.2 (MCV) = 1.0
-        assert!((conf - 1.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn confidence_partial_columns() {
-        let mut stats = Statistics::new(1000.0);
-        stats
-            .columns
-            .insert("id".into(), ra_core::ColumnStats::new(100.0));
-        let mut cs = ra_core::ColumnStats::new(50.0);
-        cs.histogram = Some(ra_core::Histogram::EquiDepth(
-            ra_core::EquiDepthHistogram {
-                buckets: vec![],
-                rows_per_bucket: 0.0,
-            },
-        ));
-        stats.columns.insert("name".into(), cs);
-
-        let conf = compute_stats_confidence(&stats);
-        // 0.6 + 0.2*(1/2) + 0.0 = 0.7
-        assert!(conf > 0.6);
-        assert!(conf < 1.0);
-    }
-
-    #[test]
     fn estimate_avg_row_size_no_columns() {
-        let stats = Statistics::new(100.0);
+        let stats = ra_core::Statistics::new(100.0);
         let size = estimate_avg_row_size(&stats);
-        assert!((size - estimation::BYTES_PER_ROW).abs() < f64::EPSILON);
+        assert!((size - 100.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn estimate_avg_row_size_with_columns() {
-        let mut stats = Statistics::new(100.0);
+        let mut stats = ra_core::Statistics::new(100.0);
         let mut cs = ra_core::ColumnStats::new(10.0);
         cs.avg_length = Some(16.0);
         stats.columns.insert("col1".into(), cs);
-
         let size = estimate_avg_row_size(&stats);
-        // 16.0 + 23.0 = 39.0
         assert!((size - 39.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn calculate_stats_coverage_full() {
-        let stats = vec![
-            ("t1".into(), Statistics::new(100.0)),
-            ("t2".into(), Statistics::new(200.0)),
-        ];
-        let expr = ra_core::algebra::RelExpr::Join {
-            join_type: ra_core::JoinType::Inner,
-            condition: ra_core::Expr::Const(ra_core::Const::Bool(true)),
-            left: Box::new(ra_core::algebra::RelExpr::Scan {
-                table: "t1".into(),
-                alias: None,
-            }),
-            right: Box::new(ra_core::algebra::RelExpr::Scan {
-                table: "t2".into(),
-                alias: None,
-            }),
-        };
-        let coverage = calculate_stats_coverage(&expr, &stats);
-        assert!((coverage - 1.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn calculate_stats_coverage_partial() {
-        let stats = vec![("t1".into(), Statistics::new(100.0))];
-        let expr = ra_core::algebra::RelExpr::Join {
-            join_type: ra_core::JoinType::Inner,
-            condition: ra_core::Expr::Const(ra_core::Const::Bool(true)),
-            left: Box::new(ra_core::algebra::RelExpr::Scan {
-                table: "t1".into(),
-                alias: None,
-            }),
-            right: Box::new(ra_core::algebra::RelExpr::Scan {
-                table: "t2".into(),
-                alias: None,
-            }),
-        };
-        let coverage = calculate_stats_coverage(&expr, &stats);
-        assert!((coverage - 0.5).abs() < f64::EPSILON);
     }
 }

@@ -11,15 +11,13 @@
 use pgrx::prelude::*;
 
 pub mod ab_testing;
-mod cost_mapper;
 mod extension_state;
+mod expr_translator;
 pub mod feedback_hook;
 mod metadata_cache;
 pub mod model_safety;
 pub mod monitor;
-mod pg_constants;
 mod plan_builder;
-mod plan_converter;
 mod planner_hook;
 mod query_parser;
 mod stats_bridge;
