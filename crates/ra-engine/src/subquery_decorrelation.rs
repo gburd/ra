@@ -15,7 +15,7 @@
 //! | `Filter(NOT EXISTS (...), R)` | `AntiJoin(corr, R, Q)` |
 //! | `Filter(x = (SELECT scalar), R)` | `Filter(x = Q.col, CrossJoin(R, Q))` |
 
-use ra_core::algebra::{JoinType, RelExpr};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
 /// Decorrelate subquery expressions in a `RelExpr` tree.
@@ -150,19 +150,23 @@ fn try_decorrelate_predicate(predicate: &Expr, input: RelExpr) -> Option<RelExpr
 
         // Binary operations: handle AND specially, then scalar subquery comparisons
         Expr::BinOp { op, left, right } => {
-            // AND: try to decorrelate each conjunct
+            // AND: try to decorrelate each conjunct, then recurse
+            // on the remaining predicate so nested subqueries are
+            // also transformed.
             if *op == BinOp::And {
                 if let Some(result) = try_decorrelate_predicate(left, input.clone()) {
-                    return Some(RelExpr::Filter {
+                    let wrapped = RelExpr::Filter {
                         predicate: *right.clone(),
                         input: Box::new(result),
-                    });
+                    };
+                    return Some(decorrelate(&wrapped));
                 }
                 if let Some(result) = try_decorrelate_predicate(right, input) {
-                    return Some(RelExpr::Filter {
+                    let wrapped = RelExpr::Filter {
                         predicate: *left.clone(),
                         input: Box::new(result),
-                    });
+                    };
+                    return Some(decorrelate(&wrapped));
                 }
                 return None;
             }
@@ -314,20 +318,28 @@ fn decorrelate_negated_subquery(
     }
 }
 
-/// Convert a scalar comparison with a subquery into a cross join + filter.
+/// Convert a scalar comparison with a subquery into a join + filter.
 ///
-/// `x = (SELECT val FROM T)` becomes:
-/// `Filter(x = Q.col, CrossJoin(input, Q))`
+/// For **uncorrelated** scalar subqueries:
+/// `x = (SELECT val FROM T)` becomes `Filter(x = Q.col, CrossJoin(input, Q))`
 ///
-/// Always succeeds (returns `Some`) but returns `Option` for interface
-/// consistency with `try_decorrelate_predicate`.
-#[expect(clippy::unnecessary_wraps)]
+/// For **correlated** scalar aggregate subqueries (e.g., TPC-H Q20):
+/// `x > (SELECT agg(...) FROM T WHERE t.a = outer.b AND local_preds)`
+/// becomes `Filter(x > __agg, LeftJoin(input, Aggregate(...), on correlation))`
 fn decorrelate_scalar_comparison(
     op: BinOp,
     other_side: &Expr,
     subquery: &RelExpr,
     input: RelExpr,
 ) -> Option<RelExpr> {
+    // Try correlated aggregate decorrelation first
+    if let Some(result) =
+        try_decorrelate_correlated_scalar(op, other_side, subquery, input.clone())
+    {
+        return Some(result);
+    }
+
+    // Fallback: uncorrelated scalar → CrossJoin
     let decorrelated_query = decorrelate(subquery);
 
     // Extract the output column of the scalar subquery
@@ -467,6 +479,383 @@ pub fn tree_contains_subquery(rel: &RelExpr) -> bool {
             // Check children recursively
             rel.children().iter().any(|c| tree_contains_subquery(c))
         }
+    }
+}
+
+// ─── Correlated scalar aggregate subquery decorrelation ───────────────────────
+//
+// Handles the pattern:
+//   Filter(x op (SELECT agg_expr FROM T WHERE corr_preds AND local_preds), R)
+// →
+//   Filter(x op rewritten_agg_expr,
+//     LeftJoin(R, Aggregate(group_by=corr_inner_cols, aggs, Filter(local, T)),
+//              on corr_preds))
+
+/// Attempt to decorrelate a correlated scalar aggregate subquery.
+///
+/// Detects subqueries of the form:
+///   `Project([expr_with_aggregates], Filter(pred, Scan(table)))`
+/// where `pred` contains equality predicates referencing outer columns.
+///
+/// Returns `None` if the subquery is not correlated or doesn't match
+/// the supported pattern (falls back to CrossJoin in caller).
+fn try_decorrelate_correlated_scalar(
+    op: BinOp,
+    other_side: &Expr,
+    subquery: &RelExpr,
+    input: RelExpr,
+) -> Option<RelExpr> {
+    // Match: Project { columns, input: Filter { predicate, input: inner } }
+    let (proj_columns, filter_pred, inner_rel) = match subquery {
+        RelExpr::Project {
+            columns,
+            input: filter_box,
+        } => match filter_box.as_ref() {
+            RelExpr::Filter { predicate, input } => {
+                Some((columns, predicate, input.as_ref()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }?;
+
+    // Collect inner scan tables
+    let inner_tables = collect_scan_tables(inner_rel);
+    if inner_tables.is_empty() {
+        return None;
+    }
+
+    // Split the filter predicate into correlation and local predicates
+    let conjuncts = flatten_and(filter_pred);
+    let (corr_preds, local_preds) =
+        split_correlation_predicates(&conjuncts, &inner_tables);
+
+    // Must have at least one correlation predicate to qualify
+    if corr_preds.is_empty() {
+        return None;
+    }
+
+    // Extract inner-side columns from correlation predicates for GROUP BY,
+    // and build the join condition from correlation equalities.
+    let mut group_by_exprs: Vec<Expr> = Vec::new();
+    let mut join_conditions: Vec<Expr> = Vec::new();
+
+    for pred in &corr_preds {
+        if let Expr::BinOp {
+            op: BinOp::Eq,
+            left,
+            right,
+        } = pred
+        {
+            let (inner_col, _outer_col) =
+                classify_eq_columns(left, right, &inner_tables)?;
+            group_by_exprs.push(Expr::Column(inner_col.clone()));
+            // Keep the original equality as the join condition
+            join_conditions.push(pred.clone());
+        } else {
+            // Non-equality correlation predicates are not supported
+            return None;
+        }
+    }
+
+    // The projection must contain aggregate functions to decorrelate
+    if proj_columns.is_empty() {
+        return None;
+    }
+    let proj_expr = &proj_columns[0].expr;
+
+    // Replace aggregate function calls with column references, collecting
+    // the AggregateExpr nodes for the Aggregate operator.
+    let mut agg_counter = 0usize;
+    let (rewritten_expr, aggregates) =
+        replace_aggregates_in_expr(proj_expr, &mut agg_counter);
+
+    // Must have found at least one aggregate
+    if aggregates.is_empty() {
+        return None;
+    }
+
+    // Build local filter predicate (AND together local predicates)
+    let local_filter = and_together(&local_preds);
+
+    // Build inner: Filter(local_preds, inner_rel) or just inner_rel
+    let filtered_inner = if let Some(pred) = local_filter {
+        RelExpr::Filter {
+            predicate: pred,
+            input: Box::new(inner_rel.clone()),
+        }
+    } else {
+        inner_rel.clone()
+    };
+
+    // Build: Aggregate(group_by, aggs, filtered_inner)
+    let agg_node = RelExpr::Aggregate {
+        group_by: group_by_exprs,
+        aggregates,
+        input: Box::new(filtered_inner),
+    };
+
+    // Build join condition (AND together all correlation equalities)
+    let join_cond = and_together(&join_conditions)
+        .unwrap_or(Expr::Const(Const::Bool(true)));
+
+    // Build: LeftJoin(input, agg_node, on join_cond)
+    let left_join = RelExpr::Join {
+        join_type: JoinType::LeftOuter,
+        condition: join_cond,
+        left: Box::new(input),
+        right: Box::new(agg_node),
+    };
+
+    // Build comparison predicate: other_side op rewritten_expr
+    let comparison = Expr::BinOp {
+        op,
+        left: Box::new(other_side.clone()),
+        right: Box::new(rewritten_expr),
+    };
+
+    Some(RelExpr::Filter {
+        predicate: comparison,
+        input: Box::new(left_join),
+    })
+}
+
+/// Collect all table names from Scan nodes in a subtree.
+fn collect_scan_tables(expr: &RelExpr) -> Vec<String> {
+    let mut tables = Vec::new();
+    collect_scan_tables_inner(expr, &mut tables);
+    tables
+}
+
+fn collect_scan_tables_inner(expr: &RelExpr, tables: &mut Vec<String>) {
+    match expr {
+        RelExpr::Scan { table, .. } => {
+            tables.push(table.clone());
+        }
+        _ => {
+            for child in expr.children() {
+                collect_scan_tables_inner(child, tables);
+            }
+        }
+    }
+}
+
+/// Flatten an AND-tree into a vector of conjuncts.
+fn flatten_and(expr: &Expr) -> Vec<Expr> {
+    match expr {
+        Expr::BinOp {
+            op: BinOp::And,
+            left,
+            right,
+        } => {
+            let mut result = flatten_and(left);
+            result.extend(flatten_and(right));
+            result
+        }
+        other => vec![other.clone()],
+    }
+}
+
+/// AND together a list of predicates. Returns None for empty list.
+fn and_together(preds: &[Expr]) -> Option<Expr> {
+    preds.iter().cloned().reduce(|acc, p| Expr::BinOp {
+        op: BinOp::And,
+        left: Box::new(acc),
+        right: Box::new(p),
+    })
+}
+
+/// Split predicates into correlation predicates (equalities referencing
+/// both inner and outer columns) and local predicates (only inner columns).
+fn split_correlation_predicates(
+    predicates: &[Expr],
+    inner_tables: &[String],
+) -> (Vec<Expr>, Vec<Expr>) {
+    let mut correlation = Vec::new();
+    let mut local = Vec::new();
+
+    for pred in predicates {
+        if is_correlation_predicate(pred, inner_tables) {
+            correlation.push(pred.clone());
+        } else {
+            local.push(pred.clone());
+        }
+    }
+
+    (correlation, local)
+}
+
+/// Returns true if a predicate is an equality where one column belongs
+/// to the inner tables and the other does not (references an outer column).
+fn is_correlation_predicate(pred: &Expr, inner_tables: &[String]) -> bool {
+    if let Expr::BinOp {
+        op: BinOp::Eq,
+        left,
+        right,
+    } = pred
+    {
+        let left_col = extract_column_ref(left);
+        let right_col = extract_column_ref(right);
+
+        if let (Some(lc), Some(rc)) = (left_col, right_col) {
+            let l_inner = column_belongs_to_tables(lc, inner_tables);
+            let r_inner = column_belongs_to_tables(rc, inner_tables);
+            // Correlation: one inner, one outer
+            return l_inner != r_inner;
+        }
+    }
+    false
+}
+
+/// Given an equality's left and right expressions, classify which is
+/// the inner column and which is the outer column. Returns
+/// `Some((inner_col_ref, outer_col_ref))` or None if classification fails.
+fn classify_eq_columns<'a>(
+    left: &'a Expr,
+    right: &'a Expr,
+    inner_tables: &[String],
+) -> Option<(&'a ColumnRef, &'a ColumnRef)> {
+    let lc = extract_column_ref(left)?;
+    let rc = extract_column_ref(right)?;
+    let l_inner = column_belongs_to_tables(lc, inner_tables);
+    let r_inner = column_belongs_to_tables(rc, inner_tables);
+
+    if l_inner && !r_inner {
+        Some((lc, rc))
+    } else if r_inner && !l_inner {
+        Some((rc, lc))
+    } else {
+        None
+    }
+}
+
+/// Extract a `ColumnRef` from an expression if it's a simple column reference.
+fn extract_column_ref(expr: &Expr) -> Option<&ColumnRef> {
+    match expr {
+        Expr::Column(cr) => Some(cr),
+        _ => None,
+    }
+}
+
+/// Determine if a column likely belongs to one of the given tables.
+///
+/// Uses table qualifiers when available; otherwise uses TPC-H naming
+/// conventions where column prefixes map to table names.
+fn column_belongs_to_tables(col: &ColumnRef, tables: &[String]) -> bool {
+    // If qualified, check directly
+    if let Some(ref qualifier) = col.table {
+        return tables.iter().any(|t| t == qualifier);
+    }
+
+    // Unqualified: use prefix heuristic
+    let name = &col.column;
+    for table in tables {
+        if column_prefix_matches_table(name, table) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a column name's prefix suggests it belongs to a given table.
+///
+/// Handles TPC-H conventions:
+///   lineitem → l_, part → p_, partsupp → ps_, supplier → s_,
+///   orders → o_, customer → c_, nation → n_, region → r_
+fn column_prefix_matches_table(column: &str, table: &str) -> bool {
+    // Try two-char prefix first (for "partsupp" → "ps_")
+    if table.len() >= 2 {
+        let two_char = &table[..2];
+        let prefix = format!("{two_char}_");
+        if column.starts_with(&prefix) {
+            return true;
+        }
+    }
+    // Single-char prefix (for "lineitem" → "l_", "part" → "p_", etc.)
+    if let Some(first) = table.chars().next() {
+        let prefix = format!("{first}_");
+        if column.starts_with(&prefix) {
+            // Disambiguate: "p_" matches "part" but not "partsupp"
+            // If two-char prefix already matched above, we won't get here
+            // for that table. Check that the two-char prefix doesn't
+            // match a DIFFERENT table (handled by caller trying all tables).
+            return true;
+        }
+    }
+    false
+}
+
+/// Replace aggregate function calls (SUM, COUNT, AVG, MIN, MAX) in an
+/// expression with column references to generated alias names, collecting
+/// the corresponding `AggregateExpr` entries.
+///
+/// Returns the rewritten expression and the list of aggregates found.
+fn replace_aggregates_in_expr(
+    expr: &Expr,
+    counter: &mut usize,
+) -> (Expr, Vec<AggregateExpr>) {
+    let mut aggregates = Vec::new();
+    let rewritten = rewrite_expr_aggregates(expr, counter, &mut aggregates);
+    (rewritten, aggregates)
+}
+
+fn rewrite_expr_aggregates(
+    expr: &Expr,
+    counter: &mut usize,
+    aggregates: &mut Vec<AggregateExpr>,
+) -> Expr {
+    match expr {
+        Expr::Function { name, args } => {
+            if let Some(agg_fn) = parse_aggregate_function(name) {
+                let alias = format!("__agg_{counter}");
+                *counter += 1;
+                let arg = args.first().cloned();
+                aggregates.push(AggregateExpr {
+                    function: agg_fn,
+                    arg,
+                    distinct: false,
+                    alias: Some(alias.clone()),
+                });
+                return Expr::Column(ColumnRef::new(alias));
+            }
+            // Not an aggregate function; recurse into args
+            Expr::Function {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|a| rewrite_expr_aggregates(a, counter, aggregates))
+                    .collect(),
+            }
+        }
+        Expr::BinOp { op, left, right } => Expr::BinOp {
+            op: *op,
+            left: Box::new(rewrite_expr_aggregates(left, counter, aggregates)),
+            right: Box::new(rewrite_expr_aggregates(right, counter, aggregates)),
+        },
+        Expr::UnaryOp { op, operand } => Expr::UnaryOp {
+            op: *op,
+            operand: Box::new(rewrite_expr_aggregates(
+                operand, counter, aggregates,
+            )),
+        },
+        Expr::Cast { expr, target_type } => Expr::Cast {
+            expr: Box::new(rewrite_expr_aggregates(expr, counter, aggregates)),
+            target_type: target_type.clone(),
+        },
+        // Leaf expressions pass through unchanged
+        _ => expr.clone(),
+    }
+}
+
+/// Parse an aggregate function name into the enum variant, if recognized.
+fn parse_aggregate_function(name: &str) -> Option<AggregateFunction> {
+    match name.to_uppercase().as_str() {
+        "SUM" => Some(AggregateFunction::Sum),
+        "COUNT" => Some(AggregateFunction::Count),
+        "AVG" => Some(AggregateFunction::Avg),
+        "MIN" => Some(AggregateFunction::Min),
+        "MAX" => Some(AggregateFunction::Max),
+        _ => None,
     }
 }
 

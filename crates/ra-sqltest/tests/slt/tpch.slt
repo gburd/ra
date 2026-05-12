@@ -127,6 +127,8 @@ SELECT s_name, COUNT(*) as numwait FROM supplier, lineitem l1, orders, nation WH
 ----
 ok
 
-# Q22: Global Sales Opportunity (uses scalar subquery in WHERE - not yet supported)
-statement error
+# Q22: Global Sales Opportunity
+query T
 SELECT cntrycode, COUNT(*) as numcust, SUM(c_acctbal) as totacctbal FROM (SELECT SUBSTRING(c_phone FROM 1 FOR 2) as cntrycode, c_acctbal FROM customer WHERE SUBSTRING(c_phone FROM 1 FOR 2) IN ('13', '31', '23', '29', '30', '18', '17') AND c_acctbal > (SELECT AVG(c_acctbal) FROM customer WHERE c_acctbal > 0.00 AND SUBSTRING(c_phone FROM 1 FOR 2) IN ('13', '31', '23', '29', '30', '18', '17')) AND NOT EXISTS (SELECT * FROM orders WHERE o_custkey = c_custkey)) as custsale GROUP BY cntrycode ORDER BY cntrycode
+----
+ok
