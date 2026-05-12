@@ -138,17 +138,23 @@ SELECT * FROM lineitem l WHERE l.l_extendedprice > (SELECT AVG(l2.l_extendedpric
 ----
 ok
 
-# Scalar subquery in SELECT clause (known limitation - should error)
-statement error
+# Scalar subquery in SELECT clause
+query T
 SELECT c_name, (SELECT COUNT(*) FROM orders o WHERE o.o_custkey = c.c_custkey) AS order_count FROM customer c
+----
+ok
 
-# Another scalar subquery in SELECT (should error)
-statement error
+# Another scalar subquery in SELECT
+query T
 SELECT o_orderkey, (SELECT c_name FROM customer c WHERE c.c_custkey = o.o_custkey) AS customer_name FROM orders o
+----
+ok
 
-# Scalar subquery returning multiple expressions in SELECT (should error)
-statement error
+# Scalar subquery returning multiple expressions in SELECT
+query T
 SELECT l_orderkey, (SELECT MAX(l2.l_quantity) FROM lineitem l2 WHERE l2.l_orderkey = l.l_orderkey) AS max_qty FROM lineitem l
+----
+ok
 
 # Nested EXISTS within EXISTS
 query T

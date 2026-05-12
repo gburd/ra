@@ -24,9 +24,11 @@ SELECT * FROM customer c WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.o_cust
 ----
 ok
 
-# Scalar subquery in SELECT (not yet supported in e-graph)
-statement error
+# Scalar subquery in SELECT
+query T
 SELECT c_name, (SELECT COUNT(*) FROM orders o WHERE o.o_custkey = c.c_custkey) as order_count FROM customer c
+----
+ok
 
 # Subquery in FROM clause (derived table)
 query T

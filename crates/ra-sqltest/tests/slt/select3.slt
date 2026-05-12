@@ -38,13 +38,17 @@ SELECT AVG(c_acctbal) FROM customer
 ----
 ok
 
-# MIN (extraction issue with scalar aggregate - known limitation)
-statement error
+# MIN
+query T
 SELECT MIN(o_totalprice) FROM orders
+----
+ok
 
-# MAX (extraction issue with scalar aggregate - known limitation)
-statement error
+# MAX
+query T
 SELECT MAX(o_totalprice) FROM orders
+----
+ok
 
 # Multiple aggregates in one query
 query T
