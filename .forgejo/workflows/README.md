@@ -4,6 +4,34 @@ This directory contains CI/CD workflows for Codeberg using Forgejo Actions.
 
 ## Available Workflows
 
+### ci.yml
+
+Runs on every push and pull request to `main`. Validates code quality, correctness, and supply chain security.
+
+**Jobs:**
+
+| Job | Purpose | Runs on |
+|-----|---------|---------|
+| `check` | `cargo fmt --check` + `cargo clippy` | Every push/PR |
+| `test` | `cargo test --all-features` | Every push/PR |
+| `msrv` | Verify minimum supported Rust version (1.88.0) | Every push/PR |
+| `deny` | `cargo deny check` — advisories, licenses, bans, sources | Every push/PR |
+| `build` | Release build | Main branch only (after check + test pass) |
+
+**Supply chain security (`deny` job):**
+- Vulnerability advisories from RustSec database
+- License compatibility (MIT, Apache-2.0, BSD, ISC, Zlib, Unicode allowed)
+- Duplicate dependency detection
+- Registry restrictions (crates.io only)
+
+Configuration: `deny.toml` in repository root.
+
+**MSRV verification:**
+Catches accidental use of features from newer Rust versions. The minimum supported version is declared in `Cargo.toml` under `rust-version`.
+
+**Manual trigger:**
+The workflow supports `workflow_dispatch` for manual runs from the Actions tab.
+
 ### deploy-pages.yml
 
 Automatically builds and deploys documentation to Codeberg Pages when changes are pushed to the `main` branch.

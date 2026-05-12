@@ -45,7 +45,7 @@
             cargo-audit
             cargo-outdated
             cargo-mutants
-            cargo-llvm-cov
+            cargo-deny
             cargo-tarpaulin
             wasm-pack
 

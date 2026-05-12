@@ -45,6 +45,11 @@ tla/states/
 
 # Benchmarks
 /benchmarks/target/
+*_benchmark_results.json
+
+# Stale root-level scratch files
+/test_feature_extraction.rs
+/debug_feature_extraction.rs
 
 # Training data (generated artifacts, not committed)
 training_data*.json
