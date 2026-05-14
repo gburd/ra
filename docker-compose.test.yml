@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  postgres-native:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ra_test
+      POSTGRES_USER: ra_test
+      POSTGRES_PASSWORD: ra_test
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ra_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-ra:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ra_test
+      POSTGRES_USER: ra_test
+      POSTGRES_PASSWORD: ra_test
+    ports:
+      - "15433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ra_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

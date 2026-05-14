@@ -160,6 +160,22 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
         RelExpr::Values { .. }
         | RelExpr::MultiUnnest { .. }
         | RelExpr::RowPattern { .. } => {}
+        RelExpr::Insert { table, source, .. } => {
+            out.push(table.to_lowercase());
+            collect_table_names_inner(source, out);
+        }
+        RelExpr::Update { table, from, .. } => {
+            out.push(table.to_lowercase());
+            if let Some(f) = from {
+                collect_table_names_inner(f, out);
+            }
+        }
+        RelExpr::Delete { table, using, .. } => {
+            out.push(table.to_lowercase());
+            if let Some(u) = using {
+                collect_table_names_inner(u, out);
+            }
+        }
     }
 }
 
@@ -393,6 +409,23 @@ impl FeatureExtractor {
 
             RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
                 self.visit(input);
+            }
+
+            RelExpr::Insert { source, .. } => {
+                self.table_count += 1;
+                self.visit(source);
+            }
+            RelExpr::Update { from, .. } => {
+                self.table_count += 1;
+                if let Some(f) = from {
+                    self.visit(f);
+                }
+            }
+            RelExpr::Delete { using, .. } => {
+                self.table_count += 1;
+                if let Some(u) = using {
+                    self.visit(u);
+                }
             }
         }
     }

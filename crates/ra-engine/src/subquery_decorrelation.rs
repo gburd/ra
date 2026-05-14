@@ -15,7 +15,9 @@
 //! | `Filter(NOT EXISTS (...), R)` | `AntiJoin(corr, R, Q)` |
 //! | `Filter(x = (SELECT scalar), R)` | `Filter(x = Q.col, CrossJoin(R, Q))` |
 
-use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
+use ra_core::algebra::{
+    AggregateExpr, AggregateFunction, JoinType, ProjectionColumn, RelExpr,
+};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
 /// Decorrelate subquery expressions in a `RelExpr` tree.
@@ -49,16 +51,44 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
             condition,
             left,
             right,
-        } => RelExpr::Join {
-            join_type: *join_type,
-            condition: condition.clone(),
-            left: Box::new(decorrelate(left)),
-            right: Box::new(decorrelate(right)),
-        },
-        RelExpr::Project { columns, input } => RelExpr::Project {
-            columns: columns.clone(),
-            input: Box::new(decorrelate(input)),
-        },
+        } => {
+            let new_left = decorrelate(left);
+            let new_right = decorrelate(right);
+            // If join condition contains a subquery, convert to
+            // CrossJoin + Filter and re-decorrelate the filter.
+            if contains_subquery(condition) {
+                let cross = RelExpr::Join {
+                    join_type: JoinType::Cross,
+                    condition: Expr::Const(Const::Bool(true)),
+                    left: Box::new(new_left),
+                    right: Box::new(new_right),
+                };
+                let filter = RelExpr::Filter {
+                    predicate: condition.clone(),
+                    input: Box::new(cross),
+                };
+                decorrelate(&filter)
+            } else {
+                RelExpr::Join {
+                    join_type: *join_type,
+                    condition: condition.clone(),
+                    left: Box::new(new_left),
+                    right: Box::new(new_right),
+                }
+            }
+        }
+        RelExpr::Project { columns, input } => {
+            let new_input = decorrelate(input);
+            // Check if any projection column contains a subquery
+            if columns.iter().any(|c| contains_subquery(&c.expr)) {
+                decorrelate_project_subqueries(columns, new_input)
+            } else {
+                RelExpr::Project {
+                    columns: columns.clone(),
+                    input: Box::new(new_input),
+                }
+            }
+        }
         RelExpr::Aggregate {
             group_by,
             aggregates,
@@ -112,6 +142,55 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
             functions: functions.clone(),
             input: Box::new(decorrelate(input)),
         },
+        RelExpr::Insert {
+            table,
+            columns,
+            source,
+            on_conflict,
+            returning,
+        } => RelExpr::Insert {
+            table: table.clone(),
+            columns: columns.clone(),
+            source: Box::new(decorrelate(source)),
+            on_conflict: on_conflict.clone(),
+            returning: returning.clone(),
+        },
+        RelExpr::Update {
+            table,
+            assignments,
+            filter,
+            from,
+            returning,
+        } => {
+            let new_from = from.as_deref().map(|f| Box::new(decorrelate(f)));
+            let new_filter = filter.as_ref().map(|f| decorrelate_scalar_subqueries(f));
+            let new_assignments = assignments
+                .iter()
+                .map(|(col, expr)| (col.clone(), decorrelate_scalar_subqueries(expr)))
+                .collect();
+            RelExpr::Update {
+                table: table.clone(),
+                assignments: new_assignments,
+                filter: new_filter,
+                from: new_from,
+                returning: returning.clone(),
+            }
+        }
+        RelExpr::Delete {
+            table,
+            filter,
+            using,
+            returning,
+        } => {
+            let new_using = using.as_deref().map(|u| Box::new(decorrelate(u)));
+            let new_filter = filter.as_ref().map(|f| decorrelate_scalar_subqueries(f));
+            RelExpr::Delete {
+                table: table.clone(),
+                filter: new_filter,
+                using: new_using,
+                returning: returning.clone(),
+            }
+        }
         // Leaf nodes and nodes without subexpression inputs
         _ => expr.clone(),
     }
@@ -455,6 +534,41 @@ pub fn contains_subquery(expr: &Expr) -> bool {
     }
 }
 
+/// Walk a scalar `Expr` and recursively decorrelate any embedded subqueries.
+///
+/// For DML assignment/filter expressions that may contain scalar subqueries,
+/// this returns the expression unchanged if no subquery is present. When a
+/// subquery is found we cannot fully decorrelate in isolation (that requires
+/// the relational context), so we recursively decorrelate the subquery's
+/// internal relation while preserving the scalar wrapper.
+fn decorrelate_scalar_subqueries(expr: &Expr) -> Expr {
+    match expr {
+        Expr::SubQuery {
+            subquery_type,
+            query,
+            test_expr,
+        } => Expr::SubQuery {
+            subquery_type: subquery_type.clone(),
+            query: Box::new(decorrelate(query)),
+            test_expr: test_expr.clone(),
+        },
+        Expr::BinOp { op, left, right } => Expr::BinOp {
+            op: *op,
+            left: Box::new(decorrelate_scalar_subqueries(left)),
+            right: Box::new(decorrelate_scalar_subqueries(right)),
+        },
+        Expr::UnaryOp { op, operand } => Expr::UnaryOp {
+            op: *op,
+            operand: Box::new(decorrelate_scalar_subqueries(operand)),
+        },
+        Expr::Function { name, args } => Expr::Function {
+            name: name.clone(),
+            args: args.iter().map(decorrelate_scalar_subqueries).collect(),
+        },
+        _ => expr.clone(),
+    }
+}
+
 /// Check if a `RelExpr` tree contains any subquery expressions.
 #[must_use]
 pub fn tree_contains_subquery(rel: &RelExpr) -> bool {
@@ -620,7 +734,10 @@ fn try_decorrelate_correlated_scalar(
     })
 }
 
-/// Collect all table names from Scan nodes in a subtree.
+/// Collect all table names and aliases from Scan nodes in a subtree.
+///
+/// Both the table name and any alias are included so that
+/// `column_belongs_to_tables` can match qualifiers against either.
 fn collect_scan_tables(expr: &RelExpr) -> Vec<String> {
     let mut tables = Vec::new();
     collect_scan_tables_inner(expr, &mut tables);
@@ -629,8 +746,11 @@ fn collect_scan_tables(expr: &RelExpr) -> Vec<String> {
 
 fn collect_scan_tables_inner(expr: &RelExpr, tables: &mut Vec<String>) {
     match expr {
-        RelExpr::Scan { table, .. } => {
+        RelExpr::Scan { table, alias } => {
             tables.push(table.clone());
+            if let Some(a) = alias {
+                tables.push(a.clone());
+            }
         }
         _ => {
             for child in expr.children() {
@@ -856,6 +976,452 @@ fn parse_aggregate_function(name: &str) -> Option<AggregateFunction> {
         "MIN" => Some(AggregateFunction::Min),
         "MAX" => Some(AggregateFunction::Max),
         _ => None,
+    }
+}
+
+// ─── Project-column subquery decorrelation ────────────────────────────────────
+//
+// Handles scalar subqueries appearing in SELECT-list columns:
+//   SELECT (SELECT agg FROM T WHERE corr = outer.col), other_cols FROM R
+// →
+//   Project([__sq_col_0, other_cols],
+//     LeftJoin(R, decorrelated_subquery, on corr_condition))
+
+/// Decorrelate subqueries found in projection columns.
+///
+/// For each column containing a scalar subquery, the subquery is extracted
+/// and converted to a join (left outer for correlated, cross for uncorrelated).
+/// The column expression is replaced with a reference to the join output.
+fn decorrelate_project_subqueries(
+    columns: &[ProjectionColumn],
+    input: RelExpr,
+) -> RelExpr {
+    let mut current_input = input;
+    let mut new_columns = Vec::with_capacity(columns.len());
+    let mut sq_counter = 0usize;
+
+    for col in columns {
+        if !contains_subquery(&col.expr) {
+            new_columns.push(col.clone());
+            continue;
+        }
+        // Replace subquery in the column expression with a column ref,
+        // building up the join tree as we go.
+        let (rewritten_expr, updated_input) =
+            replace_subquery_in_expr(&col.expr, current_input, &mut sq_counter);
+        current_input = updated_input;
+        new_columns.push(ProjectionColumn {
+            expr: rewritten_expr,
+            alias: col.alias.clone(),
+        });
+    }
+
+    RelExpr::Project {
+        columns: new_columns,
+        input: Box::new(current_input),
+    }
+}
+
+/// Replace the first subquery found in an expression with a column reference,
+/// joining the subquery's result into the input relation.
+///
+/// Returns the rewritten expression and the new input (with join added).
+fn replace_subquery_in_expr(
+    expr: &Expr,
+    input: RelExpr,
+    counter: &mut usize,
+) -> (Expr, RelExpr) {
+    match expr {
+        Expr::SubQuery {
+            subquery_type: SubQueryType::Scalar,
+            query,
+            ..
+        } => {
+            let alias = format!("__sq_col_{counter}");
+            *counter += 1;
+
+            let decorrelated_sq = decorrelate(query);
+
+            // Try correlated decorrelation: check if the subquery has a
+            // filter with correlation predicates
+            if let Some((joined_input, col_ref)) =
+                try_correlated_project_subquery(&decorrelated_sq, &input, &alias)
+            {
+                return (col_ref, joined_input);
+            }
+
+            // Uncorrelated: CrossJoin with the subquery, reference first output col
+            let sq_col = first_output_column(&decorrelated_sq);
+            let col_ref = if alias.is_empty() {
+                sq_col
+            } else {
+                Expr::Column(ColumnRef::new(&alias))
+            };
+
+            // Wrap in a single-row projection with the alias
+            let aliased_sq = RelExpr::Project {
+                columns: vec![ProjectionColumn {
+                    expr: first_output_column(&decorrelated_sq),
+                    alias: Some(alias),
+                }],
+                input: Box::new(decorrelated_sq),
+            };
+
+            let cross = RelExpr::Join {
+                join_type: JoinType::Cross,
+                condition: Expr::Const(Const::Bool(true)),
+                left: Box::new(input),
+                right: Box::new(aliased_sq),
+            };
+
+            (col_ref, cross)
+        }
+        // EXISTS/IN/ANY/ALL in a project column: wrap in a CASE WHEN
+        Expr::SubQuery {
+            subquery_type,
+            query,
+            test_expr,
+        } => {
+            let alias = format!("__sq_col_{counter}");
+            *counter += 1;
+
+            // Convert to a semi-join existence check by wrapping in
+            // a left join and using CASE WHEN joined_col IS NOT NULL
+            let decorrelated_sq = decorrelate(query);
+            let marker_col = format!("__exists_{}", counter.wrapping_sub(1));
+
+            // Build a left join that produces a marker column
+            let marker_sq = add_existence_marker(&decorrelated_sq, &marker_col);
+
+            let condition = match subquery_type {
+                SubQueryType::Exists => {
+                    let (inner_q, corr_cond) =
+                        extract_correlation_predicate(&decorrelated_sq);
+                    let marked = add_existence_marker(&inner_q, &marker_col);
+                    let join = RelExpr::Join {
+                        join_type: JoinType::LeftOuter,
+                        condition: corr_cond,
+                        left: Box::new(input),
+                        right: Box::new(marked),
+                    };
+                    // CASE WHEN marker IS NOT NULL THEN TRUE ELSE FALSE
+                    let case_expr = Expr::Case {
+                        operand: None,
+                        when_clauses: vec![(
+                            Expr::UnaryOp {
+                                op: UnaryOp::IsNotNull,
+                                operand: Box::new(Expr::Column(ColumnRef::new(
+                                    &marker_col,
+                                ))),
+                            },
+                            Expr::Const(Const::Bool(true)),
+                        )],
+                        else_result: Some(Box::new(Expr::Const(Const::Bool(false)))),
+                    };
+                    return (case_expr, join);
+                }
+                SubQueryType::In => {
+                    build_in_condition(test_expr.as_deref(), &decorrelated_sq)
+                }
+                _ => Expr::Const(Const::Bool(true)),
+            };
+
+            // Fallback: LeftJoin with condition, use CASE on marker
+            let join = RelExpr::Join {
+                join_type: JoinType::LeftOuter,
+                condition,
+                left: Box::new(input),
+                right: Box::new(marker_sq),
+            };
+            let case_expr = Expr::Case {
+                operand: None,
+                when_clauses: vec![(
+                    Expr::UnaryOp {
+                        op: UnaryOp::IsNotNull,
+                        operand: Box::new(Expr::Column(ColumnRef::new(&marker_col))),
+                    },
+                    Expr::Const(Const::Bool(true)),
+                )],
+                else_result: Some(Box::new(Expr::Const(Const::Bool(false)))),
+            };
+            let _ = alias;
+            (case_expr, join)
+        }
+        // Recurse into binary ops
+        Expr::BinOp { op, left, right } => {
+            if contains_subquery(left) {
+                let (new_left, new_input) =
+                    replace_subquery_in_expr(left, input, counter);
+                let (new_right, final_input) = if contains_subquery(right) {
+                    replace_subquery_in_expr(right, new_input, counter)
+                } else {
+                    (*right.clone(), new_input)
+                };
+                (
+                    Expr::BinOp {
+                        op: *op,
+                        left: Box::new(new_left),
+                        right: Box::new(new_right),
+                    },
+                    final_input,
+                )
+            } else if contains_subquery(right) {
+                let (new_right, new_input) =
+                    replace_subquery_in_expr(right, input, counter);
+                (
+                    Expr::BinOp {
+                        op: *op,
+                        left: left.clone(),
+                        right: Box::new(new_right),
+                    },
+                    new_input,
+                )
+            } else {
+                (expr.clone(), input)
+            }
+        }
+        Expr::Function { name, args } => {
+            let mut current = input;
+            let mut new_args = Vec::with_capacity(args.len());
+            for arg in args {
+                if contains_subquery(arg) {
+                    let (new_arg, new_input) =
+                        replace_subquery_in_expr(arg, current, counter);
+                    current = new_input;
+                    new_args.push(new_arg);
+                } else {
+                    new_args.push(arg.clone());
+                }
+            }
+            (
+                Expr::Function {
+                    name: name.clone(),
+                    args: new_args,
+                },
+                current,
+            )
+        }
+        Expr::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } => {
+            let mut current = input;
+            let new_operand = if let Some(op) = operand {
+                if contains_subquery(op) {
+                    let (new_op, new_input) =
+                        replace_subquery_in_expr(op, current, counter);
+                    current = new_input;
+                    Some(Box::new(new_op))
+                } else {
+                    Some(op.clone())
+                }
+            } else {
+                None
+            };
+            let mut new_whens = Vec::with_capacity(when_clauses.len());
+            for (cond, result) in when_clauses {
+                let (new_cond, c1) = if contains_subquery(cond) {
+                    replace_subquery_in_expr(cond, current, counter)
+                } else {
+                    (cond.clone(), current)
+                };
+                let (new_result, c2) = if contains_subquery(result) {
+                    replace_subquery_in_expr(result, c1, counter)
+                } else {
+                    (result.clone(), c1)
+                };
+                current = c2;
+                new_whens.push((new_cond, new_result));
+            }
+            let new_else = if let Some(e) = else_result {
+                if contains_subquery(e) {
+                    let (new_e, new_input) =
+                        replace_subquery_in_expr(e, current, counter);
+                    current = new_input;
+                    Some(Box::new(new_e))
+                } else {
+                    Some(e.clone())
+                }
+            } else {
+                None
+            };
+            (
+                Expr::Case {
+                    operand: new_operand,
+                    when_clauses: new_whens,
+                    else_result: new_else,
+                },
+                current,
+            )
+        }
+        Expr::Cast { expr: inner, target_type } => {
+            if contains_subquery(inner) {
+                let (new_inner, new_input) =
+                    replace_subquery_in_expr(inner, input, counter);
+                (
+                    Expr::Cast {
+                        expr: Box::new(new_inner),
+                        target_type: target_type.clone(),
+                    },
+                    new_input,
+                )
+            } else {
+                (expr.clone(), input)
+            }
+        }
+        Expr::UnaryOp { op, operand } => {
+            if contains_subquery(operand) {
+                let (new_operand, new_input) =
+                    replace_subquery_in_expr(operand, input, counter);
+                (
+                    Expr::UnaryOp {
+                        op: *op,
+                        operand: Box::new(new_operand),
+                    },
+                    new_input,
+                )
+            } else {
+                (expr.clone(), input)
+            }
+        }
+        _ => (expr.clone(), input),
+    }
+}
+
+/// Try to decorrelate a correlated scalar subquery in a projection column.
+///
+/// If the subquery matches:
+///   `Project([agg_expr], Filter(corr_pred AND local, Scan(T)))`
+/// Converts to LeftJoin with aggregate, returns the joined input and col ref.
+fn try_correlated_project_subquery(
+    subquery: &RelExpr,
+    input: &RelExpr,
+    alias: &str,
+) -> Option<(RelExpr, Expr)> {
+    // Match: Project { columns, input: Filter { predicate, input: inner } }
+    let (proj_columns, filter_pred, inner_rel) = match subquery {
+        RelExpr::Project {
+            columns,
+            input: filter_box,
+        } => match filter_box.as_ref() {
+            RelExpr::Filter { predicate, input } => {
+                Some((columns, predicate, input.as_ref()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }?;
+
+    let inner_tables = collect_scan_tables(inner_rel);
+    if inner_tables.is_empty() {
+        return None;
+    }
+
+    let conjuncts = flatten_and(filter_pred);
+    let (corr_preds, local_preds) =
+        split_correlation_predicates(&conjuncts, &inner_tables);
+
+    if corr_preds.is_empty() {
+        return None;
+    }
+
+    // Build group-by and join conditions from correlation predicates
+    let mut group_by_exprs: Vec<Expr> = Vec::new();
+    let mut join_conditions: Vec<Expr> = Vec::new();
+
+    for pred in &corr_preds {
+        if let Expr::BinOp {
+            op: BinOp::Eq,
+            left,
+            right,
+        } = pred
+        {
+            let (inner_col, _outer_col) =
+                classify_eq_columns(left, right, &inner_tables)?;
+            group_by_exprs.push(Expr::Column(inner_col.clone()));
+            join_conditions.push(pred.clone());
+        } else {
+            return None;
+        }
+    }
+
+    if proj_columns.is_empty() {
+        return None;
+    }
+    let proj_expr = &proj_columns[0].expr;
+
+    let mut agg_counter = 0usize;
+    let (rewritten_expr, aggregates) =
+        replace_aggregates_in_expr(proj_expr, &mut agg_counter);
+
+    // If no aggregates found, still proceed — the expression might be a
+    // simple column reference from a correlated subquery
+    let local_filter = and_together(&local_preds);
+    let filtered_inner = if let Some(pred) = local_filter {
+        RelExpr::Filter {
+            predicate: pred,
+            input: Box::new(inner_rel.clone()),
+        }
+    } else {
+        inner_rel.clone()
+    };
+
+    let right_side = if aggregates.is_empty() {
+        // No aggregate: just use the filtered inner with a project
+        RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: proj_expr.clone(),
+                alias: Some(alias.to_owned()),
+            }],
+            input: Box::new(filtered_inner),
+        }
+    } else {
+        // With aggregates: wrap in Aggregate node
+        let agg_node = RelExpr::Aggregate {
+            group_by: group_by_exprs,
+            aggregates,
+            input: Box::new(filtered_inner),
+        };
+        // Project the rewritten expression with the alias
+        RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: rewritten_expr.clone(),
+                alias: Some(alias.to_owned()),
+            }],
+            input: Box::new(agg_node),
+        }
+    };
+
+    let join_cond = and_together(&join_conditions)
+        .unwrap_or(Expr::Const(Const::Bool(true)));
+
+    let left_join = RelExpr::Join {
+        join_type: JoinType::LeftOuter,
+        condition: join_cond,
+        left: Box::new(input.clone()),
+        right: Box::new(right_side),
+    };
+
+    let col_ref = Expr::Column(ColumnRef::new(alias));
+    Some((left_join, col_ref))
+}
+
+/// Add an existence marker column to a relation (for EXISTS decorrelation
+/// in project columns). Wraps in a Project that adds a constant TRUE column.
+fn add_existence_marker(rel: &RelExpr, marker_name: &str) -> RelExpr {
+    RelExpr::Project {
+        columns: vec![
+            ProjectionColumn {
+                expr: Expr::Column(ColumnRef::new("*")),
+                alias: None,
+            },
+            ProjectionColumn {
+                expr: Expr::Const(Const::Bool(true)),
+                alias: Some(marker_name.to_owned()),
+            },
+        ],
+        input: Box::new(rel.clone()),
     }
 }
 

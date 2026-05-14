@@ -185,6 +185,23 @@ fn estimate_heuristic(expr: &RelExpr, stats: &dyn StatisticsProvider) -> f64 {
             // Assume vector distance filter is selective (10% by default)
             estimate_heuristic(input, stats) * 0.1
         }
+        // DML operators: estimate based on their source/affected rows
+        RelExpr::Insert { source, .. } => estimate_heuristic(source, stats),
+        RelExpr::Update { filter, .. } => {
+            // Without a source table scan, use a default
+            if filter.is_some() {
+                100.0
+            } else {
+                1000.0
+            }
+        }
+        RelExpr::Delete { filter, .. } => {
+            if filter.is_some() {
+                100.0
+            } else {
+                1000.0
+            }
+        }
     }
 }
 
@@ -352,6 +369,19 @@ fn collect_tables_recursive(
         RelExpr::MvScan { view_name, .. } => {
             if let Some(s) = provider.get_statistics(view_name) {
                 map.insert(view_name.clone(), s.clone());
+            }
+        }
+        RelExpr::Insert { source, .. } => {
+            collect_tables_recursive(source, provider, map);
+        }
+        RelExpr::Update { from, .. } => {
+            if let Some(f) = from {
+                collect_tables_recursive(f, provider, map);
+            }
+        }
+        RelExpr::Delete { using, .. } => {
+            if let Some(u) = using {
+                collect_tables_recursive(u, provider, map);
             }
         }
     }

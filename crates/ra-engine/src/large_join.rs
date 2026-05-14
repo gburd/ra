@@ -333,6 +333,13 @@ impl LargeJoinOptimizer {
             RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
                 input.as_ref().map_or(0, |i| Self::count_tables(i))
             }
+            RelExpr::Insert { source, .. } => 1 + Self::count_tables(source),
+            RelExpr::Update { from, .. } => {
+                1 + from.as_ref().map_or(0, |f| Self::count_tables(f))
+            }
+            RelExpr::Delete { using, .. } => {
+                1 + using.as_ref().map_or(0, |u| Self::count_tables(u))
+            }
         }
     }
 
@@ -429,6 +436,19 @@ impl LargeJoinOptimizer {
             | RelExpr::IndexOnlyScan { .. }
             | RelExpr::MvScan { .. } => {
                 // Leaf nodes, no joins to extract
+            }
+            RelExpr::Insert { source, .. } => {
+                Self::extract_joins_recursive(source, joins);
+            }
+            RelExpr::Update { from, .. } => {
+                if let Some(f) = from {
+                    Self::extract_joins_recursive(f, joins);
+                }
+            }
+            RelExpr::Delete { using, .. } => {
+                if let Some(u) = using {
+                    Self::extract_joins_recursive(u, joins);
+                }
             }
         }
     }

@@ -750,6 +750,13 @@ fn contains_joins(expr: &RelExpr) -> bool {
             inputs.iter().any(|i| contains_joins(i))
         }
         RelExpr::BitmapHeapScan { bitmap, .. } => contains_joins(bitmap),
+        RelExpr::Insert { source, .. } => contains_joins(source),
+        RelExpr::Update { from, .. } => {
+            from.as_ref().is_some_and(|f| contains_joins(f))
+        }
+        RelExpr::Delete { using, .. } => {
+            using.as_ref().is_some_and(|u| contains_joins(u))
+        }
     }
 }
 
@@ -946,6 +953,22 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
             for inp in inputs {
                 collect_tables_rec(inp, out);
+            }
+        }
+        RelExpr::Insert { table, source, .. } => {
+            out.insert(table.clone());
+            collect_tables_rec(source, out);
+        }
+        RelExpr::Update { table, from, .. } => {
+            out.insert(table.clone());
+            if let Some(f) = from {
+                collect_tables_rec(f, out);
+            }
+        }
+        RelExpr::Delete { table, using, .. } => {
+            out.insert(table.clone());
+            if let Some(u) = using {
+                collect_tables_rec(u, out);
             }
         }
     }

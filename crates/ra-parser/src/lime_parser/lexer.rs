@@ -117,6 +117,10 @@ pub mod token {
     pub const JSONB_TEXT_PATH: i32 = 93; /* #>> JSONB text path extraction */
     pub const JSONB_ANY_KEY: i32 = 94;   /* ?|  JSONB any key exists */
     pub const JSONB_ALL_KEYS: i32 = 95;  /* ?&  JSONB all keys exist */
+
+    // Phase 4-5: FILTER and LATERAL keywords
+    pub const FILTER: i32 = 96;
+    pub const LATERAL: i32 = 97;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -273,6 +277,8 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "UNNEST" => Some(token::UNNEST),
         "ORDINALITY" => Some(token::ORDINALITY),
         "EXTRACT" => Some(token::EXTRACT),
+        "FILTER" => Some(token::FILTER),
+        "LATERAL" => Some(token::LATERAL),
         // Note: DATE, INTERVAL, and SUBSTRING are intentionally NOT keywords
         // — they are commonly used as column/function names. SUBSTRING is
         // handled via IDENT rules for FROM...FOR syntax.

@@ -238,6 +238,23 @@ impl FeatureSchema {
                 features[OP_TYPE_OFFSET + 1] = 1.0;
                 self.encode_expr(input, stats, features);
             }
+            // DML operators: encode their sub-expressions
+            RelExpr::Insert { source, .. } => {
+                features[OP_TYPE_OFFSET] = 1.0;
+                self.encode_expr(source, stats, features);
+            }
+            RelExpr::Update { from, .. } => {
+                features[OP_TYPE_OFFSET] = 1.0;
+                if let Some(f) = from {
+                    self.encode_expr(f, stats, features);
+                }
+            }
+            RelExpr::Delete { using, .. } => {
+                features[OP_TYPE_OFFSET] = 1.0;
+                if let Some(u) = using {
+                    self.encode_expr(u, stats, features);
+                }
+            }
         }
     }
 

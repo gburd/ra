@@ -107,6 +107,10 @@ pub fn derive_properties(expr: &RelExpr, input_props: &[&PropertySet]) -> Proper
                 .first()
                 .map_or_else(PropertySet::new, |p| (*p).clone())
         }
+        // DML operators don't provide physical property guarantees
+        RelExpr::Insert { .. } | RelExpr::Update { .. } | RelExpr::Delete { .. } => {
+            PropertySet::new()
+        }
     }
 }
 

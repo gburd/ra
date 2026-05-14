@@ -400,6 +400,73 @@ impl Optimizer {
         }
     }
 
+    /// Optimize DML sub-relations without putting the DML envelope
+    /// through equality saturation.
+    ///
+    /// Returns `Some(optimized)` for DML statements, `None` for queries.
+    fn try_optimize_dml(
+        &self,
+        expr: &RelExpr,
+    ) -> Result<Option<RelExpr>, EGraphError> {
+        match expr {
+            RelExpr::Insert {
+                table,
+                columns,
+                source,
+                on_conflict,
+                returning,
+            } => {
+                let optimized_source = self.optimize(source)?;
+                Ok(Some(RelExpr::Insert {
+                    table: table.clone(),
+                    columns: columns.clone(),
+                    source: Box::new(optimized_source),
+                    on_conflict: on_conflict.clone(),
+                    returning: returning.clone(),
+                }))
+            }
+            RelExpr::Update {
+                table,
+                assignments,
+                filter,
+                from,
+                returning,
+            } => {
+                let optimized_from = from
+                    .as_deref()
+                    .map(|f| self.optimize(f))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(Some(RelExpr::Update {
+                    table: table.clone(),
+                    assignments: assignments.clone(),
+                    filter: filter.clone(),
+                    from: optimized_from,
+                    returning: returning.clone(),
+                }))
+            }
+            RelExpr::Delete {
+                table,
+                filter,
+                using,
+                returning,
+            } => {
+                let optimized_using = using
+                    .as_deref()
+                    .map(|u| self.optimize(u))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(Some(RelExpr::Delete {
+                    table: table.clone(),
+                    filter: filter.clone(),
+                    using: optimized_using,
+                    returning: returning.clone(),
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// Optimize a relational expression using equality saturation.
     ///
     /// Returns the optimized expression, or an error if conversion
@@ -435,6 +502,13 @@ impl Optimizer {
         } else {
             None
         };
+
+        // 2a. DML fast-path: optimize sub-relations, preserve DML structure
+        if let Some(result) = self.try_optimize_dml(expr)? {
+            debug!("DML optimization completed");
+            self.insert_into_cache(fingerprint.as_ref(), &result);
+            return Ok(result);
+        }
 
         // 2. Trivial fast-path
         if Self::is_trivial_query(expr) {
@@ -1248,16 +1322,28 @@ impl Optimizer {
         let convergence_behavior = budget.convergence;
         let mut tracker = ResourceTracker::start(budget);
 
-        let rec_expr = to_rec_expr(expr)?;
+        // Pre-optimization: decorrelate subqueries before e-graph conversion
+        let decorrelated;
+        let effective_expr =
+            if crate::subquery_decorrelation::tree_contains_subquery(expr) {
+                debug!("Decorrelating subqueries before e-graph conversion");
+                decorrelated = crate::subquery_decorrelation::decorrelate(expr);
+                &decorrelated
+            } else {
+                expr
+            };
+
+        let rec_expr = to_rec_expr(effective_expr)?;
         let hardware = self.hardware_profile();
-        let rules = self.load_rules(expr);
+        let rules = self.load_rules(effective_expr);
 
         let iter_limit = self.config.iter_limit;
         let node_limit = self.config.node_limit;
         let time_limit_secs = self.config.time_limit_secs;
 
         // Table count for Adaptive convergence decisions
-        let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
+        let table_count =
+            crate::large_join::LargeJoinOptimizer::count_tables(effective_expr);
 
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);

@@ -265,6 +265,19 @@ impl FingerprintCollector {
             | RelExpr::MultiUnnest { .. }
             | RelExpr::RowPattern { .. }
             | RelExpr::MvScan { .. } => {}
+            RelExpr::Insert { source, .. } => {
+                self.visit(source);
+            }
+            RelExpr::Update { from, .. } => {
+                if let Some(f) = from {
+                    self.visit(f);
+                }
+            }
+            RelExpr::Delete { using, .. } => {
+                if let Some(u) = using {
+                    self.visit(u);
+                }
+            }
         }
     }
 

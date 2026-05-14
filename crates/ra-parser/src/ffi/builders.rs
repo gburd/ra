@@ -117,6 +117,84 @@ pub unsafe extern "C" fn ra_scan(state: *mut RaParseState, table: *const c_char)
     })
 }
 
+/// Build a `Scan` node with an alias.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `table` and `alias` must be null or valid NUL-terminated C strings.
+#[no_mangle]
+pub unsafe extern "C" fn ra_scan_alias(
+    state: *mut RaParseState,
+    table: *const c_char,
+    alias: *const c_char,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let table_name = unsafe { c_str_to_string(table) };
+    let alias_name = unsafe { c_str_to_string(alias) };
+    st.push_rel(RelExpr::Scan {
+        table: table_name,
+        alias: Some(alias_name),
+    })
+}
+
+/// Build a FILTER-clause aggregate: `agg(args) FILTER (WHERE cond)`.
+///
+/// Rewrites to `agg(CASE WHEN cond THEN first_arg ELSE NULL END)`.
+/// If the argument list has one element, that element becomes the THEN
+/// clause. Otherwise the first argument in the list is used.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `func_name` must be a valid NUL-terminated C string.
+/// - `args_list` must be a valid list node, `filter_cond` a valid expr node.
+#[no_mangle]
+pub unsafe extern "C" fn ra_filter_agg(
+    state: *mut RaParseState,
+    func_name: *const c_char,
+    args_list: *mut RaNode,
+    filter_cond: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let name = unsafe { c_str_to_string(func_name) };
+
+    // Decode the condition expression
+    let Some(cond) = decode_expr(st, filter_cond) else {
+        st.push_error("ra_filter_agg: invalid filter condition".to_owned());
+        return std::ptr::null_mut();
+    };
+
+    // Decode the argument list and get the first argument
+    let Some(list_indices) = decode_list(st, args_list) else {
+        st.push_error("ra_filter_agg: invalid args list".to_owned());
+        return std::ptr::null_mut();
+    };
+
+    let first_arg = if let Some(&idx) = list_indices.first() {
+        st.take_expr(idx).unwrap_or(Expr::Column(ColumnRef::new("*")))
+    } else {
+        Expr::Column(ColumnRef::new("*"))
+    };
+
+    // Build: CASE WHEN cond THEN first_arg ELSE NULL END
+    let case_expr = Expr::Case {
+        operand: None,
+        when_clauses: vec![(cond, first_arg)],
+        else_result: Some(Box::new(Expr::Const(Const::Null))),
+    };
+
+    // Build: func(case_expr)
+    let func_expr = Expr::Function {
+        name,
+        args: vec![case_expr],
+    };
+
+    st.push_expr(func_expr)
+}
+
 /// Build a `Filter` node.
 ///
 /// # Safety

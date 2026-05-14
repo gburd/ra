@@ -3,6 +3,15 @@
 //! Scans the `rules/` directory for `.rra` files, extracts YAML frontmatter
 //! and `## Implementation` code blocks containing `rw!()` / `rewrite!()`
 //! macros, and generates `$OUT_DIR/generated_rules.rs`.
+#![expect(
+    clippy::unwrap_used,
+    clippy::allow_attributes,
+    clippy::option_option,
+    clippy::too_many_lines,
+    clippy::format_push_string,
+    clippy::manual_strip,
+    reason = "build script — pragmatic code generation"
+)]
 
 use std::collections::BTreeMap;
 use std::env;

@@ -321,6 +321,34 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             threshold.to_bits().hash(hasher);
             hash_rel_expr(input, hasher);
         }
+        RelExpr::Insert {
+            table,
+            columns,
+            source,
+            ..
+        } => {
+            table.hash(hasher);
+            columns.hash(hasher);
+            hash_rel_expr(source, hasher);
+        }
+        RelExpr::Update {
+            table,
+            assignments,
+            from,
+            ..
+        } => {
+            table.hash(hasher);
+            assignments.len().hash(hasher);
+            if let Some(f) = from {
+                hash_rel_expr(f, hasher);
+            }
+        }
+        RelExpr::Delete { table, using, .. } => {
+            table.hash(hasher);
+            if let Some(u) = using {
+                hash_rel_expr(u, hasher);
+            }
+        }
     }
 }
 

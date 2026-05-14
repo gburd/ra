@@ -2285,6 +2285,73 @@ pub fn relexpr_to_explain_node(expr: &ra_core::algebra::RelExpr) -> ExplainNode 
             raw_detail: Some("Vector Distance Filter".to_string()),
             children: vec![relexpr_to_explain_node(input)],
         },
+
+        RelExpr::Insert { table, source, .. } => ExplainNode {
+            node_type: NodeType::Other,
+            join_type: None,
+            relation: Some(table.clone()),
+            index_name: None,
+            startup_cost: None,
+            total_cost: None,
+            estimated_rows: None,
+            estimated_width: None,
+            filter: None,
+            scan_direction: None,
+            raw_detail: Some("Insert".to_string()),
+            children: vec![relexpr_to_explain_node(source)],
+        },
+
+        RelExpr::Update {
+            table,
+            filter,
+            from,
+            ..
+        } => {
+            let mut children = Vec::new();
+            if let Some(f) = from {
+                children.push(relexpr_to_explain_node(f));
+            }
+            ExplainNode {
+                node_type: NodeType::Other,
+                join_type: None,
+                relation: Some(table.clone()),
+                index_name: None,
+                startup_cost: None,
+                total_cost: None,
+                estimated_rows: None,
+                estimated_width: None,
+                filter: filter.as_ref().map(|f| format!("{f:?}")),
+                scan_direction: None,
+                raw_detail: Some("Update".to_string()),
+                children,
+            }
+        }
+
+        RelExpr::Delete {
+            table,
+            filter,
+            using,
+            ..
+        } => {
+            let mut children = Vec::new();
+            if let Some(u) = using {
+                children.push(relexpr_to_explain_node(u));
+            }
+            ExplainNode {
+                node_type: NodeType::Other,
+                join_type: None,
+                relation: Some(table.clone()),
+                index_name: None,
+                startup_cost: None,
+                total_cost: None,
+                estimated_rows: None,
+                estimated_width: None,
+                filter: filter.as_ref().map(|f| format!("{f:?}")),
+                scan_direction: None,
+                raw_detail: Some("Delete".to_string()),
+                children,
+            }
+        }
     }
 }
 

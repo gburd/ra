@@ -37,6 +37,7 @@ members = [
     "crates/ra-bench",
     "crates/ra-sqltest",
     "crates/ra-bitnet",
+    "crates/ra-difftest",
 ]
 default-members = [
     # Core layer: cargo build builds only these by default

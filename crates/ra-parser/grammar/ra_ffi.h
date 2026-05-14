@@ -24,6 +24,9 @@ typedef struct RaNode       RaNode;
  * ------------------------------------------------------------------ */
 
 RaNode *ra_scan(RaParseState *st, const char *table);
+RaNode *ra_scan_alias(RaParseState *st, const char *table, const char *alias);
+RaNode *ra_filter_agg(RaParseState *st, const char *func_name,
+                      RaNode *args_list, RaNode *filter_cond);
 RaNode *ra_filter(RaParseState *st, RaNode *input, RaNode *predicate);
 RaNode *ra_project(RaParseState *st, RaNode *input, RaNode *columns);
 RaNode *ra_join(RaParseState *st, uint32_t join_type,

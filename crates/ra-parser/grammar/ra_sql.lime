@@ -164,6 +164,8 @@ typedef struct RaToken {
 %token JSONB_TEXT_PATH. /* #>> JSONB text path extraction */
 %token JSONB_ANY_KEY.   /* ?| JSONB any key exists */
 %token JSONB_ALL_KEYS.  /* ?& JSONB all keys exist */
+%token FILTER.          /* FILTER clause on aggregates */
+%token LATERAL.         /* LATERAL join keyword */
 
 /* ================================================================== */
 /* Precedence (low to high)                                            */
@@ -271,6 +273,25 @@ select_stmt(A) ::= select_stmt(B) EXCEPT select_no_parens(C). {
     A = ra_except(pstate, B, C, 0);
 }
 
+/* Parenthesized RHS of set operations */
+select_stmt(A) ::= select_no_parens(B) UNION ALL LPAREN select_stmt(C) RPAREN. {
+    A = ra_union(pstate, B, C, 1);
+}
+select_stmt(A) ::= select_no_parens(B) UNION LPAREN select_stmt(C) RPAREN. {
+    A = ra_union(pstate, B, C, 0);
+}
+select_stmt(A) ::= select_no_parens(B) INTERSECT ALL LPAREN select_stmt(C) RPAREN. {
+    A = ra_intersect(pstate, B, C, 1);
+}
+select_stmt(A) ::= select_no_parens(B) INTERSECT LPAREN select_stmt(C) RPAREN. {
+    A = ra_intersect(pstate, B, C, 0);
+}
+select_stmt(A) ::= select_no_parens(B) EXCEPT ALL LPAREN select_stmt(C) RPAREN. {
+    A = ra_except(pstate, B, C, 1);
+}
+select_stmt(A) ::= select_no_parens(B) EXCEPT LPAREN select_stmt(C) RPAREN. {
+    A = ra_except(pstate, B, C, 0);
+}
 /* -- SELECT body --------------------------------------------------- */
 
 select_no_parens(A) ::= SELECT target_list(B) from_clause(C)
@@ -346,11 +367,11 @@ from_list(A) ::= from_list(B) COMMA table_ref(C). {
 table_ref(A) ::= IDENT(B). {
     A = ra_scan(pstate, B.text);
 }
-table_ref(A) ::= IDENT(B) AS IDENT. {
-    A = ra_scan(pstate, B.text);
+table_ref(A) ::= IDENT(B) AS IDENT(C). {
+    A = ra_scan_alias(pstate, B.text, C.text);
 }
-table_ref(A) ::= IDENT(B) IDENT. {
-    A = ra_scan(pstate, B.text);
+table_ref(A) ::= IDENT(B) IDENT(C). {
+    A = ra_scan_alias(pstate, B.text, C.text);
 }
 
 /* Derived table (subquery in FROM) */
@@ -358,6 +379,18 @@ table_ref(A) ::= LPAREN select_stmt(B) RPAREN AS IDENT. {
     A = B;
 }
 table_ref(A) ::= LPAREN select_stmt(B) RPAREN IDENT. {
+    A = B;
+}
+
+/* LATERAL subquery (treated as a derived table; the optimizer handles
+ * the correlation via decorrelation) */
+table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN AS IDENT. {
+    A = B;
+}
+table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN IDENT. {
+    A = B;
+}
+table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN. {
     A = B;
 }
 
@@ -964,6 +997,41 @@ expr(A) ::= IDENT(B) LPAREN STAR RPAREN. {
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
     A = ra_func(pstate, B.text, l);
+}
+
+/* -- FILTER clause on aggregates ----------------------------------- */
+/* Rewrite at parse time: COUNT(*) FILTER (WHERE x > 10) →
+ *   COUNT(CASE WHEN x > 10 THEN 1 ELSE NULL END)
+ * SUM(y) FILTER (WHERE cond) →
+ *   SUM(CASE WHEN cond THEN y ELSE NULL END)
+ *
+ * We use expr_list for the args to avoid shift/reduce conflicts with
+ * the general function call rule. ra_filter_agg does the CASE rewrite. */
+
+expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN FILTER LPAREN WHERE expr(D) RPAREN. {
+    A = ra_filter_agg(pstate, B.text, C, D);
+}
+
+expr(A) ::= IDENT(B) LPAREN STAR RPAREN FILTER LPAREN WHERE expr(C) RPAREN. {
+    /* COUNT(*) FILTER (WHERE cond) → COUNT(CASE WHEN cond THEN 1 ELSE NULL END) */
+    RaNode *when_list = ra_list_new(pstate);
+    when_list = ra_list_push(pstate, when_list, C); /* condition */
+    when_list = ra_list_push(pstate, when_list, ra_const_int(pstate, 1)); /* THEN 1 */
+    RaNode *case_expr = ra_case(pstate, 0, when_list, ra_const_null(pstate));
+    RaNode *new_args = ra_list_new(pstate);
+    new_args = ra_list_push(pstate, new_args, case_expr);
+    A = ra_func(pstate, B.text, new_args);
+}
+
+expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN FILTER LPAREN WHERE expr(D) RPAREN. {
+    /* agg(DISTINCT x) FILTER (WHERE cond) → agg(DISTINCT CASE WHEN cond THEN x ELSE NULL END) */
+    RaNode *when_list = ra_list_new(pstate);
+    when_list = ra_list_push(pstate, when_list, D);
+    when_list = ra_list_push(pstate, when_list, C);
+    RaNode *case_expr = ra_case(pstate, 0, when_list, ra_const_null(pstate));
+    RaNode *new_args = ra_list_new(pstate);
+    new_args = ra_list_push(pstate, new_args, case_expr);
+    A = ra_func(pstate, B.text, new_args);
 }
 
 /* -- Aggregate DISTINCT: COUNT(DISTINCT col) etc. ------------------ */

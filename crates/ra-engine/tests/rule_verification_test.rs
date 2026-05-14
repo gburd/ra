@@ -121,6 +121,22 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_tables_rec(inp, out);
             }
         }
+        RelExpr::Insert { table, source, .. } => {
+            out.push(table.clone());
+            collect_tables_rec(source, out);
+        }
+        RelExpr::Update { table, from, .. } => {
+            out.push(table.clone());
+            if let Some(f) = from {
+                collect_tables_rec(f, out);
+            }
+        }
+        RelExpr::Delete { table, using, .. } => {
+            out.push(table.clone());
+            if let Some(u) = using {
+                collect_tables_rec(u, out);
+            }
+        }
     }
 }
 
@@ -169,6 +185,15 @@ fn depth(expr: &RelExpr) -> usize {
             1 + inputs.iter().map(|i| depth(i)).max().unwrap_or(0)
         }
         RelExpr::BitmapHeapScan { bitmap, .. } => 1 + depth(bitmap),
+        RelExpr::Insert { source, .. } => 1 + depth(source),
+        RelExpr::Update { from, .. } => match from {
+            Some(f) => 1 + depth(f),
+            None => 1,
+        },
+        RelExpr::Delete { using, .. } => match using {
+            Some(u) => 1 + depth(u),
+            None => 1,
+        },
     }
 }
 

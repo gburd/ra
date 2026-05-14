@@ -74,6 +74,7 @@ fn schema_info_to_table_stats(
                 },
                 tuple_count: row_count,
                 index_size: 0,
+                oid: None,
             };
             indexes.insert(idx.name.clone(), idx_stats);
         }

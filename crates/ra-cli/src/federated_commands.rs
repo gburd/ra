@@ -260,5 +260,18 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
         | ra_core::algebra::RelExpr::TableFunction { .. }
         | ra_core::algebra::RelExpr::RowPattern { .. }
         | ra_core::algebra::RelExpr::MvScan { .. } => {}
+        ra_core::algebra::RelExpr::Insert { source, .. } => {
+            collect_tables_recursive(source, out);
+        }
+        ra_core::algebra::RelExpr::Update { from, .. } => {
+            if let Some(f) = from {
+                collect_tables_recursive(f, out);
+            }
+        }
+        ra_core::algebra::RelExpr::Delete { using, .. } => {
+            if let Some(u) = using {
+                collect_tables_recursive(u, out);
+            }
+        }
     }
 }

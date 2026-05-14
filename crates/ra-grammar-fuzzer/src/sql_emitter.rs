@@ -332,6 +332,26 @@ impl SqlEmitter {
             RelExpr::MvScan { view_name, alias } => {
                 self.emit_scan(view_name, alias.as_deref())
             }
+
+            RelExpr::Insert { source, .. } => {
+                format!("SELECT * FROM {}", self.emit_subquery(source))
+            }
+
+            RelExpr::Update { from, .. } => {
+                if let Some(f) = from {
+                    format!("SELECT * FROM {}", self.emit_subquery(f))
+                } else {
+                    "SELECT 1".to_owned()
+                }
+            }
+
+            RelExpr::Delete { using, .. } => {
+                if let Some(u) = using {
+                    format!("SELECT * FROM {}", self.emit_subquery(u))
+                } else {
+                    "SELECT 1".to_owned()
+                }
+            }
         }
     }
 

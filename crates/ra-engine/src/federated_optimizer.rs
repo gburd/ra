@@ -220,7 +220,10 @@ impl FederatedOptimizer {
             | RelExpr::Gather { .. }
             | RelExpr::MvScan { .. }
             | RelExpr::TopK { .. }
-            | RelExpr::VectorFilter { .. } => false,
+            | RelExpr::VectorFilter { .. }
+            | RelExpr::Insert { .. }
+            | RelExpr::Update { .. }
+            | RelExpr::Delete { .. } => false,
         }
     }
 

@@ -16,7 +16,7 @@ mod api;
 mod error;
 pub(crate) mod transform;
 
-pub use api::{sql_to_relexpr, sql_to_relexprs};
+pub use api::{parse_statement, sql_to_relexpr, sql_to_relexprs};
 pub use error::SqlConversionError;
 
 #[cfg(test)]

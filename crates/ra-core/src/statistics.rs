@@ -159,6 +159,9 @@ pub struct IndexStats {
     pub tuple_count: f64,
     /// Size of the index in bytes.
     pub index_size: u64,
+    /// Raw index OID from the backend catalog (stored as u64 for portability).
+    /// Only populated when gathered from a live PostgreSQL instance.
+    pub oid: Option<u64>,
 }
 
 impl IndexStats {
@@ -172,6 +175,7 @@ impl IndexStats {
             index_type,
             tuple_count: 0.0,
             index_size: 0,
+            oid: None,
         }
     }
 }

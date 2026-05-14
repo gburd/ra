@@ -1,7 +1,7 @@
 use egg::{Id, RecExpr};
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
-    SortDirection, SortKey, WindowExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, OnConflict, ProjectionColumn,
+    RelExpr, SortDirection, SortKey, WindowExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
 };
 use ra_core::expr::{BinOp, Const, Expr, UnaryOp};
 
@@ -349,6 +349,58 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
                 metric_id,
                 threshold_id,
                 input_id,
+            ];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::Insert {
+            table,
+            columns,
+            source,
+            on_conflict,
+            returning,
+        } => {
+            let tag_id = add_symbol(rec, "insert");
+            let table_id = add_symbol(rec, table);
+            let cols_id = add_string_list(rec, columns);
+            let source_id = add_rel_expr(rec, source)?;
+            let conflict_id = add_on_conflict(rec, on_conflict.as_ref())?;
+            let returning_id = add_optional_projection(rec, returning.as_deref())?;
+            let ids = vec![
+                tag_id, table_id, cols_id, source_id, conflict_id, returning_id,
+            ];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::Update {
+            table,
+            assignments,
+            filter,
+            from,
+            returning,
+        } => {
+            let tag_id = add_symbol(rec, "update");
+            let table_id = add_symbol(rec, table);
+            let assigns_id = add_assignment_list(rec, assignments)?;
+            let filter_id = add_optional_scalar(rec, filter.as_ref())?;
+            let from_id = add_optional_rel(rec, from.as_deref())?;
+            let returning_id = add_optional_projection(rec, returning.as_deref())?;
+            let ids = vec![
+                tag_id, table_id, assigns_id, filter_id, from_id, returning_id,
+            ];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::Delete {
+            table,
+            filter,
+            using,
+            returning,
+        } => {
+            let tag_id = add_symbol(rec, "delete");
+            let table_id = add_symbol(rec, table);
+            let filter_id = add_optional_scalar(rec, filter.as_ref())?;
+            let using_id = add_optional_rel(rec, using.as_deref())?;
+            let returning_id = add_optional_projection(rec, returning.as_deref())?;
+            let ids = vec![
+                tag_id, table_id, filter_id, using_id, returning_id,
             ];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
@@ -777,6 +829,85 @@ fn add_frame_bound(rec: &mut RecExpr<RelLang>, bound: &WindowFrameBound) -> Id {
             rec.add(RelLang::FrameFollowing([n_id]))
         }
         WindowFrameBound::UnboundedFollowing => rec.add(RelLang::FrameUnboundedFollowing),
+    }
+}
+
+// -- DML helper functions --
+
+fn add_string_list(rec: &mut RecExpr<RelLang>, strings: &[String]) -> Id {
+    let ids: Vec<Id> = strings.iter().map(|s| add_symbol(rec, s)).collect();
+    rec.add(RelLang::List(ids.into_boxed_slice()))
+}
+
+fn add_on_conflict(
+    rec: &mut RecExpr<RelLang>,
+    on_conflict: Option<&OnConflict>,
+) -> Result<Id, EGraphError> {
+    let Some(oc) = on_conflict else {
+        return Ok(rec.add(RelLang::Nil));
+    };
+    match oc {
+        OnConflict::DoNothing => {
+            let tag_id = add_symbol(rec, "do_nothing");
+            Ok(rec.add(RelLang::Func(vec![tag_id].into_boxed_slice())))
+        }
+        OnConflict::DoUpdate {
+            target,
+            assignments,
+        } => {
+            let tag_id = add_symbol(rec, "do_update");
+            let target_id = add_string_list(rec, target);
+            let assigns_id = add_assignment_list(rec, assignments)?;
+            Ok(rec.add(RelLang::Func(
+                vec![tag_id, target_id, assigns_id].into_boxed_slice(),
+            )))
+        }
+    }
+}
+
+fn add_assignment_list(
+    rec: &mut RecExpr<RelLang>,
+    assignments: &[(String, Expr)],
+) -> Result<Id, EGraphError> {
+    let mut ids = Vec::with_capacity(assignments.len());
+    for (col, expr) in assignments {
+        let col_id = add_symbol(rec, col);
+        let expr_id = add_scalar_expr(rec, expr)?;
+        let pair_id = rec.add(RelLang::Func(
+            vec![col_id, expr_id].into_boxed_slice(),
+        ));
+        ids.push(pair_id);
+    }
+    Ok(rec.add(RelLang::List(ids.into_boxed_slice())))
+}
+
+fn add_optional_scalar(
+    rec: &mut RecExpr<RelLang>,
+    expr: Option<&Expr>,
+) -> Result<Id, EGraphError> {
+    match expr {
+        Some(e) => add_scalar_expr(rec, e),
+        None => Ok(rec.add(RelLang::Nil)),
+    }
+}
+
+fn add_optional_rel(
+    rec: &mut RecExpr<RelLang>,
+    rel: Option<&RelExpr>,
+) -> Result<Id, EGraphError> {
+    match rel {
+        Some(r) => add_rel_expr(rec, r),
+        None => Ok(rec.add(RelLang::Nil)),
+    }
+}
+
+fn add_optional_projection(
+    rec: &mut RecExpr<RelLang>,
+    columns: Option<&[ProjectionColumn]>,
+) -> Result<Id, EGraphError> {
+    match columns {
+        Some(cols) => add_projection_list(rec, cols),
+        None => Ok(rec.add(RelLang::Nil)),
     }
 }
 

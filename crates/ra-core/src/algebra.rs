@@ -11,6 +11,20 @@ use crate::expr::{ColumnRef, Expr};
 use crate::row_pattern::{MatchMode, PatternDefine, PatternExpr, PatternMeasure, SkipMode};
 use crate::search_types::DistanceMetric;
 
+/// Conflict resolution strategy for INSERT ... ON CONFLICT.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OnConflict {
+    /// ON CONFLICT DO NOTHING — skip conflicting rows.
+    DoNothing,
+    /// ON CONFLICT DO UPDATE — update the existing row.
+    DoUpdate {
+        /// Conflict target columns (the unique constraint columns).
+        target: Vec<String>,
+        /// SET assignments for the update.
+        assignments: Vec<(String, Expr)>,
+    },
+}
+
 /// A relational expression (query plan node).
 ///
 /// Each variant wraps its children in `Box<RelExpr>` to form a tree.
@@ -372,6 +386,48 @@ pub enum RelExpr {
         /// The input relation.
         input: Box<RelExpr>,
     },
+
+    // ===== Data Modification Language (DML) Operators =====
+
+    /// INSERT INTO table (columns) source.
+    Insert {
+        /// Target table name.
+        table: String,
+        /// Column list for the insert.
+        columns: Vec<String>,
+        /// Source relation (Values or a SELECT subquery).
+        source: Box<RelExpr>,
+        /// Optional ON CONFLICT clause.
+        on_conflict: Option<OnConflict>,
+        /// Optional RETURNING clause.
+        returning: Option<Vec<ProjectionColumn>>,
+    },
+
+    /// UPDATE table SET assignments WHERE filter.
+    Update {
+        /// Target table name.
+        table: String,
+        /// SET assignments: (column_name, new_value_expr).
+        assignments: Vec<(String, Expr)>,
+        /// WHERE clause filter.
+        filter: Option<Expr>,
+        /// FROM clause for multi-table update.
+        from: Option<Box<RelExpr>>,
+        /// Optional RETURNING clause.
+        returning: Option<Vec<ProjectionColumn>>,
+    },
+
+    /// DELETE FROM table WHERE filter.
+    Delete {
+        /// Target table name.
+        table: String,
+        /// WHERE clause filter.
+        filter: Option<Expr>,
+        /// USING clause (additional tables for the WHERE).
+        using: Option<Box<RelExpr>>,
+        /// Optional RETURNING clause.
+        returning: Option<Vec<ProjectionColumn>>,
+    },
 }
 
 /// Configuration for cycle detection in recursive CTEs.
@@ -700,6 +756,15 @@ impl RelExpr {
                 inputs.iter().map(std::convert::AsRef::as_ref).collect()
             }
             Self::BitmapHeapScan { bitmap, .. } => vec![bitmap],
+            Self::Insert { source, .. } => vec![source],
+            Self::Update { from, .. } => match from {
+                Some(f) => vec![f],
+                None => vec![],
+            },
+            Self::Delete { using, .. } => match using {
+                Some(u) => vec![u],
+                None => vec![],
+            },
         }
     }
 
@@ -912,6 +977,56 @@ impl RelExpr {
                 collect_expr_columns(query_vector, out);
                 input.collect_columns(out);
             }
+            Self::Insert {
+                source, returning, ..
+            } => {
+                source.collect_columns(out);
+                if let Some(ret) = returning {
+                    for pc in ret {
+                        collect_expr_columns(&pc.expr, out);
+                    }
+                }
+            }
+            Self::Update {
+                assignments,
+                filter,
+                from,
+                returning,
+                ..
+            } => {
+                for (_, expr) in assignments {
+                    collect_expr_columns(expr, out);
+                }
+                if let Some(f) = filter {
+                    collect_expr_columns(f, out);
+                }
+                if let Some(from_rel) = from {
+                    from_rel.collect_columns(out);
+                }
+                if let Some(ret) = returning {
+                    for pc in ret {
+                        collect_expr_columns(&pc.expr, out);
+                    }
+                }
+            }
+            Self::Delete {
+                filter,
+                using,
+                returning,
+                ..
+            } => {
+                if let Some(f) = filter {
+                    collect_expr_columns(f, out);
+                }
+                if let Some(using_rel) = using {
+                    using_rel.collect_columns(out);
+                }
+                if let Some(ret) = returning {
+                    for pc in ret {
+                        collect_expr_columns(&pc.expr, out);
+                    }
+                }
+            }
         }
     }
 }
@@ -971,6 +1086,13 @@ impl RelExpr {
             }
             Self::BitmapHeapScan { bitmap, table, .. } => {
                 table == cte_name || bitmap.references_cte(cte_name)
+            }
+            Self::Insert { source, .. } => source.references_cte(cte_name),
+            Self::Update { from, .. } => {
+                from.as_ref().is_some_and(|f| f.references_cte(cte_name))
+            }
+            Self::Delete { using, .. } => {
+                using.as_ref().is_some_and(|u| u.references_cte(cte_name))
             }
         }
     }
@@ -1120,6 +1242,141 @@ impl std::fmt::Display for SortDirection {
             Self::Desc => write!(f, "DESC"),
         }
     }
+}
+
+// ===========================================================================
+// Top-level statement types (Ra owns all parsing)
+// ===========================================================================
+
+/// A parsed SQL statement — the top-level output of Ra's parser.
+///
+/// Ra intercepts SQL at the raw parser level and classifies every
+/// statement into one of these categories before any further processing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Statement {
+    /// A query (SELECT, TABLE, VALUES) — optimized by the e-graph.
+    Query(RelExpr),
+    /// DML (INSERT/UPDATE/DELETE) — the sub-relations are optimized.
+    Dml(RelExpr),
+    /// DDL (CREATE/ALTER/DROP) — passed through to PostgreSQL.
+    Ddl(DdlStmt),
+    /// Utility statements (EXPLAIN, COPY, VACUUM, etc.).
+    Utility(UtilityStmt),
+    /// Transaction control (BEGIN, COMMIT, ROLLBACK, SAVEPOINT).
+    Transaction(TxnStmt),
+}
+
+/// DDL statement types.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DdlStmt {
+    /// CREATE TABLE.
+    CreateTable {
+        /// Schema-qualified table name.
+        name: String,
+        /// Whether IF NOT EXISTS was specified.
+        if_not_exists: bool,
+    },
+    /// ALTER TABLE.
+    AlterTable {
+        /// Schema-qualified table name.
+        name: String,
+    },
+    /// DROP (table, index, view, sequence, schema, etc.).
+    Drop {
+        /// Object type being dropped.
+        object_type: String,
+        /// Object names being dropped.
+        names: Vec<String>,
+        /// Whether IF EXISTS was specified.
+        if_exists: bool,
+        /// Whether CASCADE was specified.
+        cascade: bool,
+    },
+    /// CREATE INDEX.
+    CreateIndex {
+        /// Index name.
+        name: String,
+        /// Table the index is on.
+        table: String,
+        /// Whether UNIQUE was specified.
+        unique: bool,
+        /// Whether CONCURRENTLY was specified.
+        concurrently: bool,
+    },
+    /// CREATE/ALTER VIEW.
+    CreateView {
+        /// View name.
+        name: String,
+        /// Whether OR REPLACE was specified.
+        or_replace: bool,
+    },
+    /// CREATE/ALTER SEQUENCE.
+    CreateSequence {
+        /// Sequence name.
+        name: String,
+    },
+    /// Any other DDL not specifically enumerated.
+    Other {
+        /// Raw SQL text for pass-through.
+        sql: String,
+    },
+}
+
+/// Utility statement types (non-optimizable, passed through to PG).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum UtilityStmt {
+    /// EXPLAIN / EXPLAIN ANALYZE.
+    Explain {
+        /// The statement being explained.
+        inner: Box<Statement>,
+        /// Whether ANALYZE was specified.
+        analyze: bool,
+        /// Output format (TEXT, JSON, XML, YAML).
+        format: Option<String>,
+    },
+    /// COPY TO/FROM.
+    Copy {
+        /// Table name.
+        table: String,
+        /// Direction: true = TO, false = FROM.
+        to: bool,
+    },
+    /// VACUUM / ANALYZE.
+    Vacuum {
+        /// Table name (None = all tables).
+        table: Option<String>,
+        /// Whether ANALYZE was also requested.
+        analyze: bool,
+    },
+    /// SET / RESET / SHOW configuration.
+    Set {
+        /// Variable name.
+        name: String,
+        /// Value (None = RESET).
+        value: Option<String>,
+    },
+    /// Any other utility not specifically enumerated.
+    Other {
+        /// Raw SQL text for pass-through.
+        sql: String,
+    },
+}
+
+/// Transaction control statements.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TxnStmt {
+    /// BEGIN / START TRANSACTION.
+    Begin,
+    /// COMMIT / END.
+    Commit,
+    /// ROLLBACK / ABORT.
+    Rollback,
+    /// SAVEPOINT name.
+    Savepoint { name: String },
+    /// RELEASE SAVEPOINT name.
+    ReleaseSavepoint { name: String },
+    /// ROLLBACK TO SAVEPOINT name.
+    RollbackTo { name: String },
 }
 
 #[expect(clippy::expect_used, reason = "test code")]

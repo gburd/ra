@@ -222,6 +222,9 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::VectorFilter { threshold, .. } => {
             format!("VectorFilter(threshold={threshold})")
         }
+        RelExpr::Insert { table, .. } => format!("Insert({table})"),
+        RelExpr::Update { table, .. } => format!("Update({table})"),
+        RelExpr::Delete { table, .. } => format!("Delete({table})"),
     }
 }
 
