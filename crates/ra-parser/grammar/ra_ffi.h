@@ -76,6 +76,25 @@ RaNode *ra_window(RaParseState *st, RaNode *input, RaNode *funcs);
 RaNode *ra_distinct(RaParseState *st, RaNode *input);
 
 /* ------------------------------------------------------------------
+ * DML builders
+ * ------------------------------------------------------------------ */
+
+RaNode *ra_insert(RaParseState *st, const char *table,
+                  RaNode *columns, RaNode *source,
+                  RaNode *on_conflict, RaNode *returning);
+RaNode *ra_update(RaParseState *st, const char *table,
+                  RaNode *assignments, RaNode *filter,
+                  RaNode *from, RaNode *returning);
+RaNode *ra_delete(RaParseState *st, const char *table,
+                  RaNode *filter, RaNode *using_clause,
+                  RaNode *returning);
+RaNode *ra_on_conflict_nothing(RaParseState *st);
+RaNode *ra_on_conflict_update(RaParseState *st,
+                               RaNode *target_cols, RaNode *assignments);
+RaNode *ra_assignment(RaParseState *st, const char *column, RaNode *value);
+RaNode *ra_default_values(RaParseState *st);
+
+/* ------------------------------------------------------------------
  * Expression builders
  * ------------------------------------------------------------------ */
 

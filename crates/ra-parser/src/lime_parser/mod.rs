@@ -54,11 +54,7 @@ extern "C" {
 
     /// Fill `out` with token codes valid at `stateno`.
     /// Returns total count (may exceed `max`).
-    fn raExpectedTokens(
-        stateno: c_int,
-        out: *mut c_int,
-        max: c_int,
-    ) -> c_int;
+    fn raExpectedTokens(stateno: c_int, out: *mut c_int, max: c_int) -> c_int;
 }
 
 extern "C" {
@@ -98,9 +94,9 @@ pub fn parse_sql(sql: &str) -> Result<RelExpr, ParseErrors> {
     // SAFETY: parser_malloc is a valid allocation function.
     let parser = unsafe { raAlloc(Some(parser_malloc)) };
     if parser.is_null() {
-        return Err(ParseErrors::Strings(
-            vec!["failed to allocate parser".to_owned()],
-        ));
+        return Err(ParseErrors::Strings(vec![
+            "failed to allocate parser".to_owned()
+        ]));
     }
 
     let mut state = RaParseState::new();
@@ -479,5 +475,206 @@ mod tests {
         assert_eq!(tokens[15].code, lexer::token::VALUES);
         assert_eq!(tokens[16].code, lexer::token::INTERSECT);
         assert_eq!(tokens[17].code, lexer::token::EXCEPT);
+    }
+
+    // ---------------------------------------------------------------
+    // DML statements
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn parse_insert_values() {
+        assert_parses_as(
+            "INSERT INTO t(a) VALUES (1)",
+            |r| {
+                matches!(r, RelExpr::Insert { table, columns, .. }
+                         if table == "t" && columns == &["a"])
+            },
+            "Insert",
+        );
+    }
+
+    #[test]
+    fn parse_insert_select() {
+        assert_parses_as(
+            "INSERT INTO t SELECT * FROM s",
+            |r| matches!(r, RelExpr::Insert { table, .. } if table == "t"),
+            "Insert with SELECT",
+        );
+    }
+
+    #[test]
+    fn parse_insert_default_values() {
+        assert_parses_as(
+            "INSERT INTO t DEFAULT VALUES",
+            |r| {
+                matches!(r, RelExpr::Insert { table, source, .. }
+                         if table == "t"
+                         && matches!(source.as_ref(), RelExpr::Values { rows } if rows.is_empty()))
+            },
+            "Insert DEFAULT VALUES",
+        );
+    }
+
+    #[test]
+    fn parse_insert_on_conflict_nothing() {
+        assert_parses_as(
+            "INSERT INTO t(a) VALUES (1) ON CONFLICT DO NOTHING",
+            |r| {
+                matches!(
+                    r,
+                    RelExpr::Insert {
+                        on_conflict: Some(ra_core::algebra::OnConflict::DoNothing),
+                        ..
+                    }
+                )
+            },
+            "Insert ON CONFLICT DO NOTHING",
+        );
+    }
+
+    #[test]
+    fn parse_insert_on_conflict_update() {
+        assert_parses_as(
+            "INSERT INTO t(a) VALUES (1) ON CONFLICT (a) DO UPDATE SET a = 2",
+            |r| {
+                matches!(
+                    r,
+                    RelExpr::Insert {
+                        on_conflict: Some(ra_core::algebra::OnConflict::DoUpdate { .. }),
+                        ..
+                    }
+                )
+            },
+            "Insert ON CONFLICT DO UPDATE",
+        );
+    }
+
+    #[test]
+    fn parse_insert_returning() {
+        assert_parses_as(
+            "INSERT INTO t(a) VALUES (1) RETURNING a",
+            |r| matches!(r, RelExpr::Insert { returning: Some(cols), .. } if !cols.is_empty()),
+            "Insert RETURNING",
+        );
+    }
+
+    #[test]
+    fn parse_update_simple() {
+        assert_parses_as(
+            "UPDATE t SET a = 1",
+            |r| {
+                matches!(r, RelExpr::Update { table, assignments, filter: None, .. }
+                         if table == "t" && assignments.len() == 1)
+            },
+            "Update",
+        );
+    }
+
+    #[test]
+    fn parse_update_with_where() {
+        assert_parses_as(
+            "UPDATE t SET a = 1, b = 2 WHERE id = 5",
+            |r| {
+                matches!(r, RelExpr::Update { table, assignments, filter: Some(_), .. }
+                         if table == "t" && assignments.len() == 2)
+            },
+            "Update with WHERE",
+        );
+    }
+
+    #[test]
+    fn parse_update_with_from() {
+        assert_parses_as(
+            "UPDATE t SET a = s.x FROM s WHERE t.id = s.id",
+            |r| {
+                matches!(
+                    r,
+                    RelExpr::Update {
+                        from: Some(_),
+                        filter: Some(_),
+                        ..
+                    }
+                )
+            },
+            "Update with FROM",
+        );
+    }
+
+    #[test]
+    fn parse_update_returning() {
+        assert_parses_as(
+            "UPDATE t SET a = 1 RETURNING a",
+            |r| matches!(r, RelExpr::Update { returning: Some(cols), .. } if !cols.is_empty()),
+            "Update RETURNING",
+        );
+    }
+
+    #[test]
+    fn parse_delete_simple() {
+        assert_parses_as(
+            "DELETE FROM t",
+            |r| {
+                matches!(r, RelExpr::Delete { table, filter: None, using: None, .. }
+                         if table == "t")
+            },
+            "Delete",
+        );
+    }
+
+    #[test]
+    fn parse_delete_with_where() {
+        assert_parses_as(
+            "DELETE FROM t WHERE id = 5",
+            |r| {
+                matches!(r, RelExpr::Delete { table, filter: Some(_), .. }
+                         if table == "t")
+            },
+            "Delete with WHERE",
+        );
+    }
+
+    #[test]
+    fn parse_delete_with_using() {
+        assert_parses_as(
+            "DELETE FROM t USING s WHERE t.id = s.id",
+            |r| {
+                matches!(
+                    r,
+                    RelExpr::Delete {
+                        using: Some(_),
+                        filter: Some(_),
+                        ..
+                    }
+                )
+            },
+            "Delete with USING",
+        );
+    }
+
+    #[test]
+    fn parse_delete_returning() {
+        assert_parses_as(
+            "DELETE FROM t WHERE id = 5 RETURNING id",
+            |r| matches!(r, RelExpr::Delete { returning: Some(cols), .. } if !cols.is_empty()),
+            "Delete RETURNING",
+        );
+    }
+
+    #[test]
+    fn tokenize_dml_keywords() {
+        let tokens =
+            lexer::tokenize("INSERT INTO UPDATE SET DELETE RETURNING CONFLICT DO NOTHING DEFAULT")
+                .expect("DML keywords should tokenize");
+        assert_eq!(tokens.len(), 10);
+        assert_eq!(tokens[0].code, lexer::token::INSERT);
+        assert_eq!(tokens[1].code, lexer::token::INTO);
+        assert_eq!(tokens[2].code, lexer::token::UPDATE);
+        assert_eq!(tokens[3].code, lexer::token::SET);
+        assert_eq!(tokens[4].code, lexer::token::DELETE);
+        assert_eq!(tokens[5].code, lexer::token::RETURNING);
+        assert_eq!(tokens[6].code, lexer::token::CONFLICT);
+        assert_eq!(tokens[7].code, lexer::token::DO);
+        assert_eq!(tokens[8].code, lexer::token::NOTHING);
+        assert_eq!(tokens[9].code, lexer::token::DEFAULT);
     }
 }

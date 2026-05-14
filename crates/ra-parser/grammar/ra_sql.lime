@@ -167,6 +167,18 @@ typedef struct RaToken {
 %token FILTER.          /* FILTER clause on aggregates */
 %token LATERAL.         /* LATERAL join keyword */
 
+/* DML keywords */
+%token INSERT.
+%token INTO.
+%token UPDATE.
+%token SET.
+%token DELETE.
+%token RETURNING.
+%token CONFLICT.
+%token DO.
+%token NOTHING.
+%token DEFAULT.
+
 /* ================================================================== */
 /* Precedence (low to high)                                            */
 /* ================================================================== */
@@ -194,6 +206,9 @@ input ::= stmt(A).                          { (void)A; }
 
 stmt(A) ::= select_stmt(B).                 { A = B; }
 stmt(A) ::= with_clause(B).                 { A = B; }
+stmt(A) ::= insert_stmt(B).                 { A = B; }
+stmt(A) ::= update_stmt(B).                 { A = B; }
+stmt(A) ::= delete_stmt(B).                 { A = B; }
 
 /* -- WITH (CTE) clause --------------------------------------------- */
 
@@ -584,6 +599,77 @@ values_list(A) ::= LPAREN expr_list(B) RPAREN. {
 values_list(A) ::= values_list(B) COMMA LPAREN expr_list(C) RPAREN. {
     A = ra_list_push(pstate, B, C);
 }
+
+/* ================================================================== */
+/* DML statements                                                      */
+/* ================================================================== */
+
+/* -- INSERT -------------------------------------------------------- */
+
+insert_stmt(A) ::= INSERT INTO IDENT(T) opt_col_list(C)
+                    insert_source(S) opt_on_conflict(O) opt_returning(R). {
+    A = ra_insert(pstate, T.text, C, S, O, R);
+}
+
+insert_source(A) ::= select_stmt(B).              { A = B; }
+insert_source(A) ::= DEFAULT VALUES.              { A = ra_default_values(pstate); }
+
+opt_col_list(A) ::= .                             { A = NULL; }
+opt_col_list(A) ::= LPAREN ident_list(B) RPAREN.  { A = B; }
+
+opt_on_conflict(A) ::= .                          { A = NULL; }
+opt_on_conflict(A) ::= ON CONFLICT DO NOTHING.    { A = ra_on_conflict_nothing(pstate); }
+opt_on_conflict(A) ::= ON CONFLICT LPAREN ident_list(T) RPAREN
+                        DO UPDATE SET assignment_list(L). {
+    A = ra_on_conflict_update(pstate, T, L);
+}
+
+opt_returning(A) ::= .                            { A = NULL; }
+opt_returning(A) ::= RETURNING target_list(B).    { A = B; }
+
+/* -- UPDATE -------------------------------------------------------- */
+
+update_stmt(A) ::= UPDATE IDENT(T) SET assignment_list(S)
+                    opt_update_from(F) opt_where(W) opt_returning(R). {
+    A = ra_update(pstate, T.text, S, W, F, R);
+}
+update_stmt(A) ::= UPDATE IDENT(T) AS IDENT SET assignment_list(S)
+                    opt_update_from(F) opt_where(W) opt_returning(R). {
+    A = ra_update(pstate, T.text, S, W, F, R);
+}
+
+assignment_list(A) ::= assignment(B). {
+    A = ra_list_push(pstate, ra_list_new(pstate), B);
+}
+assignment_list(A) ::= assignment_list(L) COMMA assignment(B). {
+    A = ra_list_push(pstate, L, B);
+}
+
+assignment(A) ::= IDENT(C) EQ expr(V). {
+    A = ra_assignment(pstate, C.text, V);
+}
+
+opt_update_from(A) ::= .                          { A = NULL; }
+opt_update_from(A) ::= FROM from_list(B).         { A = B; }
+
+/* -- DELETE -------------------------------------------------------- */
+
+delete_stmt(A) ::= DELETE FROM IDENT(T)
+                    opt_using(U) opt_where(W) opt_returning(R). {
+    A = ra_delete(pstate, T.text, W, U, R);
+}
+delete_stmt(A) ::= DELETE FROM IDENT(T) AS IDENT
+                    opt_using(U) opt_where(W) opt_returning(R). {
+    A = ra_delete(pstate, T.text, W, U, R);
+}
+
+opt_using(A) ::= .                                { A = NULL; }
+opt_using(A) ::= USING from_list(B).              { A = B; }
+
+/* -- Shared DML optional WHERE ------------------------------------- */
+
+opt_where(A) ::= .                                { A = NULL; }
+opt_where(A) ::= WHERE expr(B).                   { A = B; }
 
 /* ================================================================== */
 /* Expression rules                                                    */

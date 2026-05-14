@@ -15,8 +15,8 @@ use crate::lime_parser::diagnostics;
 use crate::lime_parser::lexer::RaToken;
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, CycleDetection, JoinType, NullOrdering, ProjectionColumn,
-    RelExpr, SortDirection, SortKey, WindowExpr, WindowFunction,
+    AggregateExpr, AggregateFunction, CycleDetection, JoinType, NullOrdering, OnConflict,
+    ProjectionColumn, RelExpr, SortDirection, SortKey, WindowExpr, WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
@@ -174,7 +174,8 @@ pub unsafe extern "C" fn ra_filter_agg(
     };
 
     let first_arg = if let Some(&idx) = list_indices.first() {
-        st.take_expr(idx).unwrap_or(Expr::Column(ColumnRef::new("*")))
+        st.take_expr(idx)
+            .unwrap_or(Expr::Column(ColumnRef::new("*")))
     } else {
         Expr::Column(ColumnRef::new("*"))
     };
@@ -636,14 +637,17 @@ pub unsafe extern "C" fn ra_recursive_cte_auto(
     // If the CTE body is a plain UNION (not ALL) inside RECURSIVE, that is
     // invalid SQL: recursive CTEs must use UNION ALL.
     if let RelExpr::Union { all: false, .. } = body_rel {
-        st.push_error(
-            "WITH RECURSIVE requires UNION ALL, not plain UNION".to_owned(),
-        );
+        st.push_error("WITH RECURSIVE requires UNION ALL, not plain UNION".to_owned());
         return std::ptr::null_mut();
     }
 
     // If the CTE body is a UNION ALL, split into base and recursive cases.
-    if let RelExpr::Union { left, right, all: true } = body_rel {
+    if let RelExpr::Union {
+        left,
+        right,
+        all: true,
+    } = body_rel
+    {
         st.push_rel(RelExpr::RecursiveCTE {
             name: cte_name,
             base_case: left,
@@ -755,6 +759,380 @@ pub unsafe extern "C" fn ra_distinct(state: *mut RaParseState, input: *mut RaNod
     st.push_rel(RelExpr::Distinct {
         input: Box::new(input_rel),
     })
+}
+
+// ---------------------------------------------------------------------------
+// DML builders
+// ---------------------------------------------------------------------------
+
+/// Build an `Insert` node.
+///
+/// - `columns` is a list of column-reference expr indices (or null for all columns).
+/// - `source` is a Rel node (VALUES or SELECT).
+/// - `on_conflict` is null (no clause), an empty list (DO NOTHING), or a
+///   2-element list [target_cols_list_idx, assignments_list_idx] (DO UPDATE).
+/// - `returning` is a list of expr indices (or null for no RETURNING).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - All pointer args must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_insert(
+    state: *mut RaParseState,
+    table: *const c_char,
+    columns: *mut RaNode,
+    source: *mut RaNode,
+    on_conflict: *mut RaNode,
+    returning: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let table_name = unsafe { c_str_to_string(table) };
+
+    // Decode column list: list of Expr::Column nodes → Vec<String>
+    let col_names = if columns.is_null() {
+        vec![]
+    } else {
+        decode_column_names(st, columns)
+    };
+
+    // Decode source relation
+    let Some(source_rel) = decode_rel(st, source) else {
+        st.push_error("ra_insert: invalid source node".to_owned());
+        return std::ptr::null_mut();
+    };
+
+    // Decode on_conflict
+    let on_conflict_val = decode_on_conflict(st, on_conflict);
+
+    // Decode returning
+    let returning_val = decode_returning(st, returning);
+
+    st.push_rel(RelExpr::Insert {
+        table: table_name,
+        columns: col_names,
+        source: Box::new(source_rel),
+        on_conflict: on_conflict_val,
+        returning: returning_val,
+    })
+}
+
+/// Build an `Update` node.
+///
+/// - `assignments` is a list of 2-element sub-lists (col_expr_idx, val_expr_idx).
+/// - `filter` is an expr node (or null for no WHERE).
+/// - `from` is a Rel node (or null for no FROM).
+/// - `returning` is a list of expr indices (or null for no RETURNING).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - All pointer args must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_update(
+    state: *mut RaParseState,
+    table: *const c_char,
+    assignments: *mut RaNode,
+    filter: *mut RaNode,
+    from: *mut RaNode,
+    returning: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let table_name = unsafe { c_str_to_string(table) };
+
+    // Decode assignments
+    let assign_vec = decode_assignments(st, assignments);
+
+    // Decode optional filter
+    let filter_val = if filter.is_null() {
+        None
+    } else {
+        decode_expr(st, filter)
+    };
+
+    // Decode optional FROM
+    let from_val = if from.is_null() {
+        None
+    } else {
+        decode_rel(st, from).map(Box::new)
+    };
+
+    // Decode returning
+    let returning_val = decode_returning(st, returning);
+
+    st.push_rel(RelExpr::Update {
+        table: table_name,
+        assignments: assign_vec,
+        filter: filter_val,
+        from: from_val,
+        returning: returning_val,
+    })
+}
+
+/// Build a `Delete` node.
+///
+/// - `filter` is an expr node (or null for no WHERE).
+/// - `using_clause` is a Rel node (or null for no USING).
+/// - `returning` is a list of expr indices (or null for no RETURNING).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - All pointer args must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_delete(
+    state: *mut RaParseState,
+    table: *const c_char,
+    filter: *mut RaNode,
+    using_clause: *mut RaNode,
+    returning: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let table_name = unsafe { c_str_to_string(table) };
+
+    // Decode optional filter
+    let filter_val = if filter.is_null() {
+        None
+    } else {
+        decode_expr(st, filter)
+    };
+
+    // Decode optional USING
+    let using_val = if using_clause.is_null() {
+        None
+    } else {
+        decode_rel(st, using_clause).map(Box::new)
+    };
+
+    // Decode returning
+    let returning_val = decode_returning(st, returning);
+
+    st.push_rel(RelExpr::Delete {
+        table: table_name,
+        filter: filter_val,
+        using: using_val,
+        returning: returning_val,
+    })
+}
+
+/// Build an ON CONFLICT DO NOTHING marker (empty list).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+#[no_mangle]
+pub unsafe extern "C" fn ra_on_conflict_nothing(state: *mut RaParseState) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    // Empty list = DoNothing sentinel
+    st.push_list()
+}
+
+/// Build an ON CONFLICT DO UPDATE marker.
+///
+/// Stores a 2-element list: [target_cols_list_idx, assignments_list_idx].
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `target_cols` and `assignments` must be valid tagged list pointers.
+#[no_mangle]
+pub unsafe extern "C" fn ra_on_conflict_update(
+    state: *mut RaParseState,
+    target_cols: *mut RaNode,
+    assignments: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some((_tag1, tc_idx)) = decode(target_cols) else {
+        st.push_error("ra_on_conflict_update: invalid target_cols".to_owned());
+        return std::ptr::null_mut();
+    };
+    let Some((_tag2, as_idx)) = decode(assignments) else {
+        st.push_error("ra_on_conflict_update: invalid assignments".to_owned());
+        return std::ptr::null_mut();
+    };
+    let list_ptr = st.push_list();
+    let Some((NodeTag::List, list_idx)) = decode(list_ptr) else {
+        return std::ptr::null_mut();
+    };
+    st.list_push(list_idx, tc_idx);
+    st.list_push(list_idx, as_idx);
+    list_ptr
+}
+
+/// Build an assignment node (a 2-element list: [col_name_expr, value_expr]).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `column` must be a valid NUL-terminated C string.
+/// - `value` must be a valid tagged expr pointer.
+#[no_mangle]
+pub unsafe extern "C" fn ra_assignment(
+    state: *mut RaParseState,
+    column: *const c_char,
+    value: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let col_name = unsafe { c_str_to_string(column) };
+
+    // Push column name as a Column expr
+    let col_ptr = st.push_expr(Expr::Column(ColumnRef::new(col_name)));
+    let Some((_tag_c, col_idx)) = decode(col_ptr) else {
+        return std::ptr::null_mut();
+    };
+
+    // Get value index
+    let Some((_tag_v, val_idx)) = decode(value) else {
+        st.push_error("ra_assignment: invalid value node".to_owned());
+        return std::ptr::null_mut();
+    };
+
+    // Create a 2-element list [col_idx, val_idx]
+    let list_ptr = st.push_list();
+    let Some((NodeTag::List, list_idx)) = decode(list_ptr) else {
+        return std::ptr::null_mut();
+    };
+    st.list_push(list_idx, col_idx);
+    st.list_push(list_idx, val_idx);
+    list_ptr
+}
+
+/// Build a DEFAULT VALUES source (empty Values node).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+#[no_mangle]
+pub unsafe extern "C" fn ra_default_values(state: *mut RaParseState) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    st.push_rel(RelExpr::Values { rows: vec![] })
+}
+
+// ---------------------------------------------------------------------------
+// DML decode helpers
+// ---------------------------------------------------------------------------
+
+/// Decode a list of Column exprs into column name strings.
+fn decode_column_names(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<String> {
+    let Some(indices) = decode_list(state, list_ptr) else {
+        return vec![];
+    };
+    let mut names = Vec::with_capacity(indices.len());
+    for idx in indices {
+        if let Some(Expr::Column(col_ref)) = state.take_expr(idx) {
+            names.push(col_ref.column);
+        }
+    }
+    names
+}
+
+/// Decode an assignment list (list of 2-element sub-lists) into (column_name, Expr) pairs.
+fn decode_assignments(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<(String, Expr)> {
+    let Some(indices) = decode_list(state, list_ptr) else {
+        return vec![];
+    };
+    let mut result = Vec::with_capacity(indices.len());
+    for idx in indices {
+        // Each assignment is a 2-element list [col_expr_idx, val_expr_idx]
+        let Some(pair) = state.get_list(idx).map(<[usize]>::to_vec) else {
+            continue;
+        };
+        if pair.len() != 2 {
+            continue;
+        }
+        let col_name = if let Some(Expr::Column(col_ref)) = state.take_expr(pair[0]) {
+            col_ref.column
+        } else {
+            continue;
+        };
+        let Some(val_expr) = state.take_expr(pair[1]) else {
+            continue;
+        };
+        result.push((col_name, val_expr));
+    }
+    result
+}
+
+/// Decode an on_conflict pointer into an `Option<OnConflict>`.
+///
+/// - null → None
+/// - empty list → Some(DoNothing)
+/// - 2-element list → Some(DoUpdate { target, assignments })
+fn decode_on_conflict(state: &RaParseState, ptr: *mut RaNode) -> Option<OnConflict> {
+    if ptr.is_null() {
+        return None;
+    }
+    let Some(items) = decode_list(state, ptr) else {
+        return None;
+    };
+    if items.is_empty() {
+        return Some(OnConflict::DoNothing);
+    }
+    if items.len() == 2 {
+        // items[0] = target_cols list index, items[1] = assignments list index
+        let target_names = if let Some(tc_list) = state.get_list(items[0]).map(<[usize]>::to_vec) {
+            let mut names = Vec::with_capacity(tc_list.len());
+            for idx in tc_list {
+                if let Some(Expr::Column(col_ref)) = state.take_expr(idx) {
+                    names.push(col_ref.column);
+                }
+            }
+            names
+        } else {
+            vec![]
+        };
+        let assignments = if let Some(as_list) = state.get_list(items[1]).map(<[usize]>::to_vec) {
+            let mut assigns = Vec::with_capacity(as_list.len());
+            for idx in as_list {
+                if let Some(pair) = state.get_list(idx).map(<[usize]>::to_vec) {
+                    if pair.len() == 2 {
+                        let col_name = if let Some(Expr::Column(col_ref)) = state.take_expr(pair[0])
+                        {
+                            col_ref.column
+                        } else {
+                            continue;
+                        };
+                        let Some(val_expr) = state.take_expr(pair[1]) else {
+                            continue;
+                        };
+                        assigns.push((col_name, val_expr));
+                    }
+                }
+            }
+            assigns
+        } else {
+            vec![]
+        };
+        return Some(OnConflict::DoUpdate {
+            target: target_names,
+            assignments,
+        });
+    }
+    None
+}
+
+/// Decode a RETURNING target list into `Option<Vec<ProjectionColumn>>`.
+fn decode_returning(state: &RaParseState, ptr: *mut RaNode) -> Option<Vec<ProjectionColumn>> {
+    if ptr.is_null() {
+        return None;
+    }
+    let exprs = collect_exprs(state, ptr);
+    if exprs.is_empty() {
+        return None;
+    }
+    Some(
+        exprs
+            .into_iter()
+            .map(|expr| ProjectionColumn { expr, alias: None })
+            .collect(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1667,9 +2045,7 @@ pub unsafe extern "C" fn ra_record_parse_error(
     let token_length = usize::try_from(token.length).unwrap_or(1);
 
     let message = if let Some(ref text) = token_text {
-        format!(
-            "syntax error: unexpected {rejected_name} '{text}'"
-        )
+        format!("syntax error: unexpected {rejected_name} '{text}'")
     } else {
         format!("syntax error: unexpected {rejected_name}")
     };
@@ -1689,9 +2065,7 @@ pub unsafe extern "C" fn ra_record_parse_error(
 /// # Safety
 /// - `pstate` must be null or a valid `*mut RaParseState`.
 #[no_mangle]
-pub unsafe extern "C" fn ra_record_parse_failure(
-    pstate: *mut RaParseState,
-) {
+pub unsafe extern "C" fn ra_record_parse_failure(pstate: *mut RaParseState) {
     let Some(st) = (unsafe { state_ref(pstate) }) else {
         return;
     };
@@ -1701,8 +2075,7 @@ pub unsafe extern "C" fn ra_record_parse_failure(
         token_length: 0,
         token_text: None,
         token_name: String::new(),
-        message: "parse failed: unable to recover from syntax error"
-            .to_owned(),
+        message: "parse failed: unable to recover from syntax error".to_owned(),
         expected_tokens: Vec::new(),
     });
 }
@@ -1964,7 +2337,9 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let errs = state.take_result().expect_err("should have errors");
-        assert!(errs.as_strings().expect("should be string errors")[0].contains("unknown join type"));
+        assert!(
+            errs.as_strings().expect("should be string errors")[0].contains("unknown join type")
+        );
     }
 
     #[test]
@@ -2332,7 +2707,9 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let errs = state.take_result().expect_err("should have errors");
-        assert!(errs.as_strings().expect("should be string errors")[0].contains("unknown type code"));
+        assert!(
+            errs.as_strings().expect("should be string errors")[0].contains("unknown type code")
+        );
     }
 
     #[test]
@@ -2499,7 +2876,9 @@ mod tests {
         {
             assert_eq!(name, "reachable");
             // Builder now sets a default cycle detection with max_depth=1000.
-            let cd = cycle_detection.as_ref().expect("cycle_detection should be Some");
+            let cd = cycle_detection
+                .as_ref()
+                .expect("cycle_detection should be Some");
             assert_eq!(cd.max_depth, Some(1000));
         } else {
             panic!("expected RecursiveCTE variant");
@@ -2594,7 +2973,8 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let errs = state.take_result().expect_err("should have errors");
-        assert!(errs.as_strings().expect("should be string errors")[0].contains("unknown function code"));
+        assert!(errs.as_strings().expect("should be string errors")[0]
+            .contains("unknown function code"));
     }
 
     #[test]
@@ -2727,7 +3107,8 @@ mod tests {
 
         let state = unsafe { free_state(st) };
         let errs = state.take_result().expect_err("should have errors");
-        assert!(errs.as_strings().expect("should be string errors")[0].contains("unknown function code"));
+        assert!(errs.as_strings().expect("should be string errors")[0]
+            .contains("unknown function code"));
     }
 
     #[test]

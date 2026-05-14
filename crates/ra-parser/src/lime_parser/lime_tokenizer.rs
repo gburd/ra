@@ -140,6 +140,17 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         b"LATERAL" => Some(token::LATERAL),
         b"ANY" => Some(token::ANY),
         b"SOME" => Some(token::SOME),
+        // DML keywords
+        b"INSERT" => Some(token::INSERT),
+        b"INTO" => Some(token::INTO),
+        b"UPDATE" => Some(token::UPDATE),
+        b"SET" => Some(token::SET),
+        b"DELETE" => Some(token::DELETE),
+        b"RETURNING" => Some(token::RETURNING),
+        b"CONFLICT" => Some(token::CONFLICT),
+        b"DO" => Some(token::DO),
+        b"NOTHING" => Some(token::NOTHING),
+        b"DEFAULT" => Some(token::DEFAULT),
         _ => None,
     }
 }
@@ -257,7 +268,9 @@ fn process_token(
     };
 
     if code == token::IDENT || code == token::SCONST {
-        Ok(Some(build_text_lex(code, offset_i32, length_i32, text_bytes)?))
+        Ok(Some(build_text_lex(
+            code, offset_i32, length_i32, text_bytes,
+        )?))
     } else if code == token::ICONST {
         let text = std::str::from_utf8(text_bytes).map_err(|e| format!("int at {offset}: {e}"))?;
         let ival: i64 = text

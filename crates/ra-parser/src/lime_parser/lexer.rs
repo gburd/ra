@@ -91,14 +91,14 @@ pub mod token {
     pub const USING: i32 = 75;
 
     // JSONB operators (two-character symbol tokens)
-    pub const AT_GT: i32 = 76;      /* @>  JSON contains */
-    pub const LT_AT: i32 = 77;      /* <@  JSON contained by */
+    pub const AT_GT: i32 = 76; /* @>  JSON contains */
+    pub const LT_AT: i32 = 77; /* <@  JSON contained by */
     pub const AT_QUESTION: i32 = 78; /* @?  JSON path exists */
-    pub const AT_AT: i32 = 79;      /* @@  JSON path match */
+    pub const AT_AT: i32 = 79; /* @@  JSON path match */
 
     // Square brackets for array subscripting
-    pub const LBRACKET: i32 = 80;   /* [ */
-    pub const RBRACKET: i32 = 81;   /* ] */
+    pub const LBRACKET: i32 = 80; /* [ */
+    pub const RBRACKET: i32 = 81; /* ] */
 
     // New keywords
     pub const ARRAY: i32 = 82;
@@ -108,19 +108,31 @@ pub mod token {
     pub const INTERVAL_KW: i32 = 86;
     pub const EXTRACT: i32 = 87;
     pub const PLACEHOLDER: i32 = 88; /* ? parameter */
-    pub const COLONCOLON: i32 = 89;  /* :: PostgreSQL type cast operator */
-    pub const ARROW: i32 = 90;       /* ->  JSON field access (returns JSON) */
-    pub const ARROW_TEXT: i32 = 91;  /* ->> JSON field text extraction */
+    pub const COLONCOLON: i32 = 89; /* :: PostgreSQL type cast operator */
+    pub const ARROW: i32 = 90; /* ->  JSON field access (returns JSON) */
+    pub const ARROW_TEXT: i32 = 91; /* ->> JSON field text extraction */
 
     // JSONB operators (key-exists family + path extraction)
-    pub const JSONB_EXISTS: i32 = 92;    /* ?   JSONB key exists */
+    pub const JSONB_EXISTS: i32 = 92; /* ?   JSONB key exists */
     pub const JSONB_TEXT_PATH: i32 = 93; /* #>> JSONB text path extraction */
-    pub const JSONB_ANY_KEY: i32 = 94;   /* ?|  JSONB any key exists */
-    pub const JSONB_ALL_KEYS: i32 = 95;  /* ?&  JSONB all keys exist */
+    pub const JSONB_ANY_KEY: i32 = 94; /* ?|  JSONB any key exists */
+    pub const JSONB_ALL_KEYS: i32 = 95; /* ?&  JSONB all keys exist */
 
     // Phase 4-5: FILTER and LATERAL keywords
     pub const FILTER: i32 = 96;
     pub const LATERAL: i32 = 97;
+
+    // DML keywords
+    pub const INSERT: i32 = 98;
+    pub const INTO: i32 = 99;
+    pub const UPDATE: i32 = 100;
+    pub const SET: i32 = 101;
+    pub const DELETE: i32 = 102;
+    pub const RETURNING: i32 = 103;
+    pub const CONFLICT: i32 = 104;
+    pub const DO: i32 = 105;
+    pub const NOTHING: i32 = 106;
+    pub const DEFAULT: i32 = 107;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -194,12 +206,7 @@ fn simple_token(code: i32, location: usize, length: i32) -> LexToken {
 }
 
 /// Create a token backed by a C string.
-fn text_token(
-    code: i32,
-    location: usize,
-    length: i32,
-    text: &str,
-) -> Result<LexToken, String> {
+fn text_token(code: i32, location: usize, length: i32, text: &str) -> Result<LexToken, String> {
     let cstr =
         CString::new(text).map_err(|e| format!("invalid text at position {location}: {e}"))?;
     let ptr = cstr.as_ptr();
@@ -279,6 +286,17 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "EXTRACT" => Some(token::EXTRACT),
         "FILTER" => Some(token::FILTER),
         "LATERAL" => Some(token::LATERAL),
+        // DML keywords
+        "INSERT" => Some(token::INSERT),
+        "INTO" => Some(token::INTO),
+        "UPDATE" => Some(token::UPDATE),
+        "SET" => Some(token::SET),
+        "DELETE" => Some(token::DELETE),
+        "RETURNING" => Some(token::RETURNING),
+        "CONFLICT" => Some(token::CONFLICT),
+        "DO" => Some(token::DO),
+        "NOTHING" => Some(token::NOTHING),
+        "DEFAULT" => Some(token::DEFAULT),
         // Note: DATE, INTERVAL, and SUBSTRING are intentionally NOT keywords
         // — they are commonly used as column/function names. SUBSTRING is
         // handled via IDENT rules for FROM...FOR syntax.
