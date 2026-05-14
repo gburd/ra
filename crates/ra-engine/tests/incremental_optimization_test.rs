@@ -1210,9 +1210,13 @@ fn optimizer_incremental_reopt_small_delta() {
 
     // Small delta => limited iterations, not full reoptimization
     assert!(!stats.used_full_reoptimization);
-    // Result should be a valid plan
+    // Result should be a valid plan (optimizer may choose index access paths)
     match &result {
-        RelExpr::Filter { .. } | RelExpr::Scan { .. } => {}
+        RelExpr::Filter { .. }
+        | RelExpr::Scan { .. }
+        | RelExpr::BitmapIndexScan { .. }
+        | RelExpr::IndexScan { .. }
+        | RelExpr::BitmapHeapScan { .. } => {}
         other => panic!("unexpected plan shape: {other:?}"),
     }
 }
