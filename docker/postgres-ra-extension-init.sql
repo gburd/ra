@@ -4,10 +4,8 @@
 CREATE EXTENSION IF NOT EXISTS pg_ra_planner;
 
 -- Configure Ra optimizer settings
-ALTER SYSTEM SET ra.enable = on;
-ALTER SYSTEM SET ra.optimization_level = 'standard';
-ALTER SYSTEM SET ra.log_plans = on;
-ALTER SYSTEM SET ra.cache_plans = on;
+ALTER SYSTEM SET ra_planner.enabled = on;
+ALTER SYSTEM SET ra_planner.log_plans = on;
 
 -- Reload configuration
 SELECT pg_reload_conf();

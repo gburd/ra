@@ -28,6 +28,9 @@ pub mod stats_bridge;
 #[cfg(any(test, feature = "pg_test"))]
 mod integration_tests;
 
+#[cfg(any(test, feature = "pg_test"))]
+mod dml_tests;
+
 pgrx::pg_module_magic!();
 
 /// Extension initialization -- called when the shared library is loaded.

@@ -121,6 +121,45 @@ impl DiffTestRunner {
         // Verify
         self.compare_query(verify_sql, false).await
     }
+
+    /// Run a DML statement with RETURNING and compare the returned rows.
+    ///
+    /// Uses `query()` instead of `execute()` so RETURNING rows are captured.
+    ///
+    /// 1. Runs `setup_sql` on both connections
+    /// 2. Runs `dml_sql` via `query()` on both and compares RETURNING results
+    pub async fn compare_dml_returning(
+        &self,
+        setup_sql: &[&str],
+        dml_sql: &str,
+        ordered: bool,
+    ) -> DiffResult {
+        // Setup
+        for sql in setup_sql {
+            if let Err(e) = self.ra_client.execute(*sql, &[]).await {
+                return DiffResult::RaError(format!("setup failed: {e}"));
+            }
+            if let Err(e) = self.native_client.execute(*sql, &[]).await {
+                return DiffResult::NativeError(format!("setup failed: {e}"));
+            }
+        }
+
+        // Execute DML with RETURNING via query()
+        let ra_result = self.ra_client.query(dml_sql, &[]).await;
+        let native_result = self.native_client.query(dml_sql, &[]).await;
+
+        let ra_rows = match ra_result {
+            Ok(rows) => rows,
+            Err(e) => return DiffResult::RaError(format!("DML failed: {e}")),
+        };
+
+        let native_rows = match native_result {
+            Ok(rows) => rows,
+            Err(e) => return DiffResult::NativeError(format!("DML failed: {e}")),
+        };
+
+        compare_row_sets(&ra_rows, &native_rows, ordered)
+    }
 }
 
 /// Compare two result sets for equality.

@@ -4,6 +4,10 @@ version = "0.2.0"
 edition = "2021"
 description = "Differential testing: Ra planner results vs native PostgreSQL"
 
+[[bin]]
+name = "ra-difftest"
+path = "src/main.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = "0.7"
@@ -11,3 +15,4 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

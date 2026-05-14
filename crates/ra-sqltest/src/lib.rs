@@ -4,6 +4,7 @@
 //! and optimize SQL queries without errors. This is a "parse + optimize"
 //! harness — it does not execute queries or return actual result sets.
 
+use ra_core::algebra::Statement;
 use ra_engine::Optimizer;
 use ra_parser::sql_to_relexpr;
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
@@ -67,20 +68,34 @@ impl AsyncDB for RaDb {
         &mut self,
         sql: &str,
     ) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
-        // Skip non-query statements (DDL, DML)
-        let trimmed = sql.trim().to_uppercase();
-        if trimmed.starts_with("CREATE")
-            || trimmed.starts_with("DROP")
-            || trimmed.starts_with("INSERT")
-            || trimmed.starts_with("UPDATE")
-            || trimmed.starts_with("DELETE")
-            || trimmed.starts_with("ALTER")
-            || trimmed.starts_with("TRUNCATE")
-            || trimmed.starts_with("SET")
-            || trimmed.starts_with("BEGIN")
-            || trimmed.starts_with("COMMIT")
-            || trimmed.starts_with("ROLLBACK")
+        let trimmed = sql.trim();
+        let upper = trimmed.to_uppercase();
+
+        // Skip DDL, utility, and transaction control statements.
+        if upper.starts_with("CREATE")
+            || upper.starts_with("DROP")
+            || upper.starts_with("ALTER")
+            || upper.starts_with("TRUNCATE")
+            || upper.starts_with("SET")
+            || upper.starts_with("BEGIN")
+            || upper.starts_with("COMMIT")
+            || upper.starts_with("ROLLBACK")
         {
+            return Ok(DBOutput::StatementComplete(0));
+        }
+
+        // Route DML through parse_statement → optimize.
+        if upper.starts_with("INSERT")
+            || upper.starts_with("UPDATE")
+            || upper.starts_with("DELETE")
+        {
+            let stmt = sql_to_relexpr::parse_statement(trimmed)
+                .map_err(|e| RaTestError::Parse(e.to_string()))?;
+            if let Statement::Dml(rel) = stmt {
+                self.optimizer
+                    .optimize(&rel)
+                    .map_err(|e| RaTestError::Optimize(e.to_string()))?;
+            }
             return Ok(DBOutput::StatementComplete(0));
         }
 

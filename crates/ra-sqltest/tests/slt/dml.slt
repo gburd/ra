@@ -1,0 +1,73 @@
+# DML parse + optimize tests
+# Verifies INSERT/UPDATE/DELETE are routed through Ra's optimizer.
+
+# Basic INSERT
+statement ok
+INSERT INTO orders (o_orderkey, o_custkey, o_totalprice) VALUES (1, 100, 999.99)
+
+statement ok
+INSERT INTO orders (o_orderkey, o_custkey, o_totalprice) VALUES (2, 101, 500.00), (3, 102, 750.00)
+
+# INSERT ... SELECT
+statement ok
+INSERT INTO orders (o_orderkey, o_custkey, o_totalprice) SELECT l_orderkey, l_suppkey, l_extendedprice FROM lineitem WHERE l_quantity > 10
+
+# INSERT with DEFAULT values
+statement ok
+INSERT INTO orders (o_orderkey) VALUES (99)
+
+# Basic UPDATE
+statement ok
+UPDATE orders SET o_totalprice = 1000.00 WHERE o_orderkey = 1
+
+# UPDATE with expression
+statement ok
+UPDATE orders SET o_totalprice = o_totalprice * 1.1 WHERE o_orderstatus = 'O'
+
+# UPDATE multiple columns
+statement ok
+UPDATE orders SET o_totalprice = 0, o_orderstatus = 'C' WHERE o_custkey = 100
+
+# UPDATE with subquery in WHERE
+statement ok
+UPDATE orders SET o_orderstatus = 'P' WHERE o_custkey IN (SELECT c_custkey FROM customer WHERE c_mktsegment = 'BUILDING')
+
+# Basic DELETE
+statement ok
+DELETE FROM orders WHERE o_orderkey = 1
+
+# DELETE with complex predicate
+statement ok
+DELETE FROM orders WHERE o_totalprice < 100 AND o_orderstatus = 'F'
+
+# DELETE with subquery
+statement ok
+DELETE FROM orders WHERE o_custkey IN (SELECT c_custkey FROM customer WHERE c_acctbal < 0)
+
+# DELETE all rows
+statement ok
+DELETE FROM orders
+
+# UPDATE with FROM clause
+statement ok
+UPDATE orders SET o_totalprice = lineitem.l_extendedprice FROM lineitem WHERE orders.o_orderkey = lineitem.l_orderkey
+
+# INSERT ... ON CONFLICT DO NOTHING (parser does not yet support DO NOTHING)
+statement error
+INSERT INTO orders (o_orderkey, o_totalprice) VALUES (1, 500.00) ON CONFLICT (o_orderkey) DO NOTHING
+
+# INSERT ... ON CONFLICT DO UPDATE
+statement ok
+INSERT INTO orders (o_orderkey, o_totalprice) VALUES (1, 500.00) ON CONFLICT (o_orderkey) DO UPDATE SET o_totalprice = EXCLUDED.o_totalprice
+
+# INSERT ... RETURNING
+statement ok
+INSERT INTO orders (o_orderkey, o_totalprice) VALUES (10, 250.00) RETURNING o_orderkey
+
+# UPDATE ... RETURNING
+statement ok
+UPDATE orders SET o_totalprice = o_totalprice + 50 WHERE o_orderkey = 10 RETURNING o_orderkey, o_totalprice
+
+# DELETE ... RETURNING
+statement ok
+DELETE FROM orders WHERE o_orderkey = 10 RETURNING *

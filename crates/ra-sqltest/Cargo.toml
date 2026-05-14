@@ -9,6 +9,7 @@ repository.workspace = true
 description = "SQL logic test harness for Ra query optimizer"
 
 [dependencies]
+ra-core = { path = "../ra-core" }
 ra-parser = { path = "../ra-parser" }
 ra-engine = { path = "../ra-engine", default-features = false, features = [] }
 sqllogictest = "0.29"
