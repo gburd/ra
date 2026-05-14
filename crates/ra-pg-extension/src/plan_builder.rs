@@ -66,7 +66,7 @@ use pgrx::pg_sys;
 use pgrx::prelude::*;
 use tracing::debug;
 
-use ra_core::algebra::{AggregateExpr, JoinType, ProjectionColumn, RelExpr, SortKey};
+use ra_core::algebra::{AggregateExpr, JoinType, OnConflict, ProjectionColumn, RelExpr, SortKey};
 use ra_core::expr::Expr;
 use ra_core::statistics::Statistics;
 
@@ -209,40 +209,6 @@ impl PlanBuilder {
         Ok(stmt)
     }
 
-    /// Build a `PlannedStmt` for a DML (INSERT/UPDATE/DELETE) operation.
-    ///
-    /// Produces a `ModifyTable` plan node wrapping the subplan (the
-    /// source query for INSERT, or the scan/join for UPDATE/DELETE).
-    ///
-    /// # Safety
-    ///
-    /// Allocates PostgreSQL plan nodes in the current memory context.
-    pub unsafe fn build_dml_planned_stmt(
-        &mut self,
-        expr: &RelExpr,
-        cmd_type: pg_sys::CmdType,
-    ) -> Result<*mut pg_sys::PlannedStmt, PlanBuilderError> {
-        let plan_tree = self.build_plan(expr)?;
-
-        let stmt = self.alloc_node::<pg_sys::PlannedStmt>();
-        if stmt.is_null() {
-            return Err(PlanBuilderError::NullPointer(
-                "PlannedStmt allocation".to_string(),
-            ));
-        }
-
-        (*stmt).type_ = pg_sys::NodeTag::T_PlannedStmt;
-        (*stmt).commandType = cmd_type;
-        (*stmt).planTree = plan_tree;
-
-        if !self.original_query.is_null() {
-            (*stmt).rtable = (*self.original_query).rtable;
-            (*stmt).resultRelations = (*self.original_query).resultRelation as *mut _;
-        }
-
-        Ok(stmt)
-    }
-
     // -----------------------------------------------------------------------
     // Core dispatch
     // -----------------------------------------------------------------------
@@ -350,34 +316,8 @@ impl PlanBuilder {
                 "VectorFilter (vector)".to_string(),
             )),
             // DML variants — produce ModifyTable plan nodes.
-            RelExpr::Insert {
-                table,
-                source,
-                ..
-            } => self.build_modify_table(table, source, pg_sys::CmdType::CMD_INSERT),
-            RelExpr::Update {
-                table,
-                from,
-                ..
-            } => {
-                // Optimize the FROM clause if present; otherwise use a
-                // scan of the target table as the subplan input.
-                let sub_expr = from.as_deref().unwrap_or(&RelExpr::Scan {
-                    table: table.clone(),
-                    alias: None,
-                });
-                self.build_modify_table(table, sub_expr, pg_sys::CmdType::CMD_UPDATE)
-            }
-            RelExpr::Delete {
-                table,
-                using,
-                ..
-            } => {
-                let sub_expr = using.as_deref().unwrap_or(&RelExpr::Scan {
-                    table: table.clone(),
-                    alias: None,
-                });
-                self.build_modify_table(table, sub_expr, pg_sys::CmdType::CMD_DELETE)
+            RelExpr::Insert { .. } | RelExpr::Update { .. } | RelExpr::Delete { .. } => {
+                self.build_modify_table_from_dml(expr)
             }
         }
     }
@@ -645,10 +585,7 @@ impl PlanBuilder {
     /// Returns null if the condition is trivial (e.g., `Const(Bool(true))`)
     /// or if translation fails for a complex expression. A null return means
     /// "no join qualification" which is safe (worst case: larger result set).
-    unsafe fn translate_join_condition(
-        &self,
-        condition: &Expr,
-    ) -> *mut pg_sys::Expr {
+    unsafe fn translate_join_condition(&self, condition: &Expr) -> *mut pg_sys::Expr {
         // Trivial true condition means unconditional join (cross product).
         if matches!(condition, Expr::Const(ra_core::expr::Const::Bool(true))) {
             return std::ptr::null_mut();
@@ -701,8 +638,7 @@ impl PlanBuilder {
         // after the hash probe.
         if !condition.is_null() {
             if (*condition).type_ == pg_sys::NodeTag::T_OpExpr {
-                (*node).hashclauses =
-                    pg_sys::lappend((*node).hashclauses, condition.cast());
+                (*node).hashclauses = pg_sys::lappend((*node).hashclauses, condition.cast());
             } else {
                 // Non-OpExpr condition (e.g., AND of multiple conditions):
                 // place in joinqual where the executor evaluates it post-match.
@@ -711,8 +647,7 @@ impl PlanBuilder {
                      placing in joinqual instead of hashclauses",
                     (*condition).type_
                 );
-                (*node).join.joinqual =
-                    pg_sys::lappend((*node).join.joinqual, condition.cast());
+                (*node).join.joinqual = pg_sys::lappend((*node).join.joinqual, condition.cast());
             }
         }
 
@@ -741,8 +676,7 @@ impl PlanBuilder {
         // Wire the join condition into joinqual. The NestLoop executor
         // evaluates joinqual for every (outer, inner) tuple pair.
         if !condition.is_null() {
-            (*node).join.joinqual =
-                pg_sys::lappend((*node).join.joinqual, condition.cast());
+            (*node).join.joinqual = pg_sys::lappend((*node).join.joinqual, condition.cast());
         }
 
         self.propagate_costs_binary(&mut (*node).join.plan, left_plan, right_plan);
@@ -781,9 +715,9 @@ impl PlanBuilder {
             };
             let rel_oid = self.first_rel_oid(input);
 
-            if let Some(arrays) = crate::sort_utils::build_group_arrays(
-                group_by, child_tlist, rel_oid,
-            ) {
+            if let Some(arrays) =
+                crate::sort_utils::build_group_arrays(group_by, child_tlist, rel_oid)
+            {
                 (*node).numCols = arrays.num_cols;
                 (*node).grpColIdx = arrays.col_idx;
                 (*node).grpOperators = arrays.operators;
@@ -990,15 +924,13 @@ impl PlanBuilder {
             let rel_oid = self.first_rel_oid(input);
 
             if ncols > 0 {
-                let col_idx = pg_sys::palloc(
-                    ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>(),
-                ) as *mut pg_sys::AttrNumber;
-                let operators = pg_sys::palloc(
-                    ncols as usize * std::mem::size_of::<pg_sys::Oid>(),
-                ) as *mut pg_sys::Oid;
-                let collations = pg_sys::palloc(
-                    ncols as usize * std::mem::size_of::<pg_sys::Oid>(),
-                ) as *mut pg_sys::Oid;
+                let col_idx =
+                    pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>())
+                        as *mut pg_sys::AttrNumber;
+                let operators = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
+                    as *mut pg_sys::Oid;
+                let collations = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
+                    as *mut pg_sys::Oid;
 
                 let elements = (*(*child).targetlist).elements;
                 for i in 0..ncols as usize {
@@ -1019,13 +951,11 @@ impl PlanBuilder {
                     };
                     let _ = rel_oid; // used for fallback if needed
                     *operators.add(i) = crate::sort_utils::resolve_equality_op(type_oid);
-                    *collations.add(i) = pg_sys::exprCollation(
-                        if !te.is_null() {
-                            (*te).expr as *mut pg_sys::Node
-                        } else {
-                            std::ptr::null_mut()
-                        },
-                    );
+                    *collations.add(i) = pg_sys::exprCollation(if !te.is_null() {
+                        (*te).expr as *mut pg_sys::Node
+                    } else {
+                        std::ptr::null_mut()
+                    });
                 }
 
                 (*node).numCols = ncols;
@@ -1067,10 +997,26 @@ impl PlanBuilder {
         (*node).appendplans = plans_list;
 
         // Propagate cost estimates from children.
-        let left_cost = if left_plan.is_null() { 0.0 } else { (*left_plan).total_cost };
-        let right_cost = if right_plan.is_null() { 0.0 } else { (*right_plan).total_cost };
-        let left_rows = if left_plan.is_null() { 0.0 } else { (*left_plan).plan_rows };
-        let right_rows = if right_plan.is_null() { 0.0 } else { (*right_plan).plan_rows };
+        let left_cost = if left_plan.is_null() {
+            0.0
+        } else {
+            (*left_plan).total_cost
+        };
+        let right_cost = if right_plan.is_null() {
+            0.0
+        } else {
+            (*right_plan).total_cost
+        };
+        let left_rows = if left_plan.is_null() {
+            0.0
+        } else {
+            (*left_plan).plan_rows
+        };
+        let right_rows = if right_plan.is_null() {
+            0.0
+        } else {
+            (*right_plan).plan_rows
+        };
         (*node).plan.total_cost = left_cost + right_cost;
         (*node).plan.plan_rows = left_rows + right_rows;
 
@@ -1095,15 +1041,13 @@ impl PlanBuilder {
                 0
             };
             if ncols > 0 {
-                let col_idx = pg_sys::palloc(
-                    ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>(),
-                ) as *mut pg_sys::AttrNumber;
-                let operators = pg_sys::palloc(
-                    ncols as usize * std::mem::size_of::<pg_sys::Oid>(),
-                ) as *mut pg_sys::Oid;
-                let collations = pg_sys::palloc(
-                    ncols as usize * std::mem::size_of::<pg_sys::Oid>(),
-                ) as *mut pg_sys::Oid;
+                let col_idx =
+                    pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>())
+                        as *mut pg_sys::AttrNumber;
+                let operators = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
+                    as *mut pg_sys::Oid;
+                let collations = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
+                    as *mut pg_sys::Oid;
 
                 for i in 0..ncols as usize {
                     *col_idx.add(i) = (i + 1) as pg_sys::AttrNumber;
@@ -1194,9 +1138,9 @@ impl PlanBuilder {
 
             // Build PARTITION BY column arrays
             if !wf.partition_by.is_empty() {
-                if let Some(part_arrays) = crate::sort_utils::build_group_arrays(
-                    &wf.partition_by, child_tlist, rel_oid,
-                ) {
+                if let Some(part_arrays) =
+                    crate::sort_utils::build_group_arrays(&wf.partition_by, child_tlist, rel_oid)
+                {
                     (*node).partNumCols = part_arrays.num_cols;
                     (*node).partColIdx = part_arrays.col_idx;
                     (*node).partOperators = part_arrays.operators;
@@ -1206,9 +1150,9 @@ impl PlanBuilder {
 
             // Build ORDER BY column arrays
             if !wf.order_by.is_empty() {
-                if let Some(ord_arrays) = crate::sort_utils::build_sort_arrays(
-                    &wf.order_by, child_tlist, rel_oid,
-                ) {
+                if let Some(ord_arrays) =
+                    crate::sort_utils::build_sort_arrays(&wf.order_by, child_tlist, rel_oid)
+                {
                     (*node).ordNumCols = ord_arrays.num_cols;
                     (*node).ordColIdx = ord_arrays.col_idx;
                     (*node).ordOperators = ord_arrays.operators;
@@ -1233,10 +1177,7 @@ impl PlanBuilder {
     }
 
     /// Translate a Ra `WindowFrame` to PostgreSQL's FRAMEOPTION bitmask.
-    fn translate_frame_options(
-        &self,
-        frame: &Option<ra_core::algebra::WindowFrame>,
-    ) -> i32 {
+    fn translate_frame_options(&self, frame: &Option<ra_core::algebra::WindowFrame>) -> i32 {
         use ra_core::algebra::{WindowFrameBound, WindowFrameMode};
 
         // PG frame option constants (from nodes.h)
@@ -1312,7 +1253,11 @@ impl PlanBuilder {
         (*node).sort.plan.lefttree = child;
 
         // Total keys = prefix (already sorted) + suffix (to sort within groups)
-        let all_keys: Vec<SortKey> = prefix_keys.iter().chain(suffix_keys.iter()).cloned().collect();
+        let all_keys: Vec<SortKey> = prefix_keys
+            .iter()
+            .chain(suffix_keys.iter())
+            .cloned()
+            .collect();
         (*node).nPresortedCols = prefix_keys.len() as i32;
 
         // Build sort arrays for ALL keys (prefix + suffix)
@@ -1447,13 +1392,12 @@ impl PlanBuilder {
             | RelExpr::IndexOnlyScan { table, .. }
             | RelExpr::BitmapIndexScan { table, .. }
             | RelExpr::BitmapHeapScan { table, .. }
-            | RelExpr::ParallelScan { table, .. } => {
-                self.expr_ctx
-                    .rtoid_map
-                    .get(&table.to_lowercase())
-                    .copied()
-                    .unwrap_or(pg_sys::InvalidOid)
-            }
+            | RelExpr::ParallelScan { table, .. } => self
+                .expr_ctx
+                .rtoid_map
+                .get(&table.to_lowercase())
+                .copied()
+                .unwrap_or(pg_sys::InvalidOid),
             _ => {
                 // Recurse into first child
                 if let Some(child) = expr.children().first() {
@@ -1608,22 +1552,167 @@ impl PlanBuilder {
     // DML plan nodes
     // -----------------------------------------------------------------------
 
-    /// Build a `ModifyTable` plan node wrapping a subplan.
+    /// Build a `ModifyTable` plan from a DML `RelExpr` variant.
     ///
-    /// `table` is the target relation name. `sub_expr` is the source
-    /// query (for INSERT) or the scan/join producing rows to modify
-    /// (for UPDATE/DELETE). `cmd_type` is CMD_INSERT, CMD_UPDATE, or
-    /// CMD_DELETE.
-    unsafe fn build_modify_table(
+    /// Extracts subplan, WHERE filter, assignments (UPDATE), ON CONFLICT
+    /// (INSERT), and RETURNING from the RelExpr and translates each to
+    /// the corresponding PostgreSQL `ModifyTable` fields.
+    unsafe fn build_modify_table_from_dml(
+        &mut self,
+        expr: &RelExpr,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        match expr {
+            RelExpr::Insert {
+                table,
+                source,
+                on_conflict,
+                returning,
+                ..
+            } => self.build_modify_table_insert(
+                table,
+                source,
+                on_conflict.as_ref(),
+                returning.as_deref(),
+            ),
+            RelExpr::Update {
+                table,
+                assignments,
+                filter,
+                from,
+                returning,
+            } => self.build_modify_table_update(
+                table,
+                assignments,
+                filter.as_ref(),
+                from.as_deref(),
+                returning.as_deref(),
+            ),
+            RelExpr::Delete {
+                table,
+                filter,
+                using,
+                returning,
+            } => self.build_modify_table_delete(
+                table,
+                filter.as_ref(),
+                using.as_deref(),
+                returning.as_deref(),
+            ),
+            _ => Err(PlanBuilderError::Internal(
+                "build_modify_table_from_dml called with non-DML expr".to_string(),
+            )),
+        }
+    }
+
+    /// Build a `ModifyTable` plan for INSERT.
+    unsafe fn build_modify_table_insert(
         &mut self,
         table: &str,
-        sub_expr: &RelExpr,
-        cmd_type: pg_sys::CmdType,
+        source: &RelExpr,
+        on_conflict: Option<&OnConflict>,
+        returning: Option<&[ProjectionColumn]>,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        // Build the subplan (source query or target scan).
+        let subplan = self.build_plan(source)?;
+        let mt = self.alloc_modify_table(table, pg_sys::CmdType::CMD_INSERT, subplan)?;
+
+        if let Some(oc) = on_conflict {
+            self.apply_on_conflict(mt, oc);
+        }
+        if let Some(ret_cols) = returning {
+            let ret_list = self.build_returning_list(ret_cols);
+            if !ret_list.is_null() {
+                (*mt).returningLists = pg_sys::list_make1(ret_list.cast());
+            }
+        }
+
+        Ok(mt.cast())
+    }
+
+    /// Build a `ModifyTable` plan for UPDATE.
+    unsafe fn build_modify_table_update(
+        &mut self,
+        table: &str,
+        assignments: &[(String, Expr)],
+        filter: Option<&Expr>,
+        from: Option<&RelExpr>,
+        returning: Option<&[ProjectionColumn]>,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let scan_fallback = RelExpr::Scan {
+            table: table.to_owned(),
+            alias: None,
+        };
+        let sub_expr = from.unwrap_or(&scan_fallback);
         let subplan = self.build_plan(sub_expr)?;
 
-        // Allocate ModifyTable node.
+        // Apply WHERE filter as a qual on the subplan.
+        if let Some(pred) = filter {
+            if !subplan.is_null() {
+                let pg_expr = expr_translator::translate(pred, &self.expr_ctx);
+                if !pg_expr.is_null() {
+                    (*subplan).qual = pg_sys::lappend((*subplan).qual, pg_expr.cast());
+                }
+            }
+        }
+
+        let mt = self.alloc_modify_table(table, pg_sys::CmdType::CMD_UPDATE, subplan)?;
+
+        // Apply SET assignments as targetlist entries on the subplan.
+        self.apply_update_assignments(subplan, assignments);
+
+        if let Some(ret_cols) = returning {
+            let ret_list = self.build_returning_list(ret_cols);
+            if !ret_list.is_null() {
+                (*mt).returningLists = pg_sys::list_make1(ret_list.cast());
+            }
+        }
+
+        Ok(mt.cast())
+    }
+
+    /// Build a `ModifyTable` plan for DELETE.
+    unsafe fn build_modify_table_delete(
+        &mut self,
+        table: &str,
+        filter: Option<&Expr>,
+        using: Option<&RelExpr>,
+        returning: Option<&[ProjectionColumn]>,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let scan_fallback = RelExpr::Scan {
+            table: table.to_owned(),
+            alias: None,
+        };
+        let sub_expr = using.unwrap_or(&scan_fallback);
+        let subplan = self.build_plan(sub_expr)?;
+
+        // Apply WHERE filter as a qual on the subplan.
+        if let Some(pred) = filter {
+            if !subplan.is_null() {
+                let pg_expr = expr_translator::translate(pred, &self.expr_ctx);
+                if !pg_expr.is_null() {
+                    (*subplan).qual = pg_sys::lappend((*subplan).qual, pg_expr.cast());
+                }
+            }
+        }
+
+        let mt = self.alloc_modify_table(table, pg_sys::CmdType::CMD_DELETE, subplan)?;
+
+        if let Some(ret_cols) = returning {
+            let ret_list = self.build_returning_list(ret_cols);
+            if !ret_list.is_null() {
+                (*mt).returningLists = pg_sys::list_make1(ret_list.cast());
+            }
+        }
+
+        Ok(mt.cast())
+    }
+
+    /// Allocate and initialize a `ModifyTable` node with common fields.
+    unsafe fn alloc_modify_table(
+        &mut self,
+        table: &str,
+        cmd_type: pg_sys::CmdType,
+        subplan: *mut pg_sys::Plan,
+    ) -> Result<*mut pg_sys::ModifyTable, PlanBuilderError> {
         let mt = self.alloc_node::<pg_sys::ModifyTable>();
         if mt.is_null() {
             return Err(PlanBuilderError::NullPointer(
@@ -1633,15 +1722,13 @@ impl PlanBuilder {
 
         (*mt).plan.type_ = pg_sys::NodeTag::T_ModifyTable;
         (*mt).operation = cmd_type;
+        (*mt).canSetTag = true;
 
-        // Resolve target relation OID and RT index.
-        let table_lower = table.to_lowercase();
-        if let Some(&(rtindex, _oid)) = self.expr_ctx.rtindex_map.get(&table_lower) {
-            (*mt).nominalRelation = rtindex as u32;
-            (*mt).rootRelation = rtindex as u32;
-            // resultRelations list with the single target.
-            (*mt).resultRelations = pg_sys::list_make1_int(rtindex as i32);
-        }
+        // Resolve target relation RT index.
+        let rtindex = self.rtindex_for(table)?;
+        (*mt).nominalRelation = rtindex as u32;
+        (*mt).rootRelation = rtindex as u32;
+        (*mt).resultRelations = pg_sys::list_make1_int(rtindex as i32);
 
         // Attach subplan.
         (*mt).plan.lefttree = subplan;
@@ -1649,12 +1736,115 @@ impl PlanBuilder {
         // Propagate cost from subplan.
         if !subplan.is_null() {
             (*mt).plan.startup_cost = (*subplan).startup_cost;
-            (*mt).plan.total_cost = (*subplan).total_cost + 10.0; // ModifyTable overhead
+            (*mt).plan.total_cost = (*subplan).total_cost + 10.0;
             (*mt).plan.plan_rows = (*subplan).plan_rows;
             (*mt).plan.plan_width = (*subplan).plan_width;
         }
 
-        Ok(mt.cast())
+        debug!(
+            "build_modify_table: {} on '{}' (rtindex={})",
+            match cmd_type {
+                pg_sys::CmdType::CMD_INSERT => "INSERT",
+                pg_sys::CmdType::CMD_UPDATE => "UPDATE",
+                pg_sys::CmdType::CMD_DELETE => "DELETE",
+                _ => "UNKNOWN",
+            },
+            table,
+            rtindex
+        );
+
+        Ok(mt)
+    }
+
+    /// Build a RETURNING target list from projection columns.
+    ///
+    /// Returns a PostgreSQL `List*` of `TargetEntry` nodes.
+    unsafe fn build_returning_list(&self, columns: &[ProjectionColumn]) -> *mut pg_sys::List {
+        let mut list: *mut pg_sys::List = std::ptr::null_mut();
+        for (i, pc) in columns.iter().enumerate() {
+            let pg_expr = expr_translator::translate(&pc.expr, &self.expr_ctx);
+            if pg_expr.is_null() {
+                continue;
+            }
+            let te = self.alloc_node::<pg_sys::TargetEntry>();
+            if te.is_null() {
+                continue;
+            }
+            (*te).xpr.type_ = pg_sys::NodeTag::T_TargetEntry;
+            (*te).expr = pg_expr;
+            (*te).resno = (i + 1) as pg_sys::AttrNumber;
+            if let Some(alias) = &pc.alias {
+                if let Ok(cs) = CString::new(alias.as_str()) {
+                    (*te).resname = pg_sys::pstrdup(cs.as_ptr());
+                }
+            }
+            list = pg_sys::lappend(list, te.cast());
+        }
+        list
+    }
+
+    /// Apply UPDATE SET assignments as a targetlist on the subplan.
+    ///
+    /// Each assignment `(column_name, value_expr)` becomes a `TargetEntry`
+    /// on the subplan's targetlist, producing the new column values.
+    unsafe fn apply_update_assignments(
+        &self,
+        subplan: *mut pg_sys::Plan,
+        assignments: &[(String, Expr)],
+    ) {
+        if subplan.is_null() {
+            return;
+        }
+        for (i, (col_name, value_expr)) in assignments.iter().enumerate() {
+            let pg_expr = expr_translator::translate(value_expr, &self.expr_ctx);
+            if pg_expr.is_null() {
+                continue;
+            }
+            let te = self.alloc_node::<pg_sys::TargetEntry>();
+            if te.is_null() {
+                continue;
+            }
+            (*te).xpr.type_ = pg_sys::NodeTag::T_TargetEntry;
+            (*te).expr = pg_expr;
+            (*te).resno = (i + 1) as pg_sys::AttrNumber;
+            if let Ok(cs) = CString::new(col_name.as_str()) {
+                (*te).resname = pg_sys::pstrdup(cs.as_ptr());
+            }
+            (*subplan).targetlist = pg_sys::lappend((*subplan).targetlist, te.cast());
+        }
+    }
+
+    /// Apply ON CONFLICT clause to a ModifyTable node.
+    unsafe fn apply_on_conflict(&self, mt: *mut pg_sys::ModifyTable, on_conflict: &OnConflict) {
+        match on_conflict {
+            OnConflict::DoNothing => {
+                (*mt).onConflictAction = pg_sys::OnConflictAction::ONCONFLICT_NOTHING;
+            }
+            OnConflict::DoUpdate { assignments, .. } => {
+                (*mt).onConflictAction = pg_sys::OnConflictAction::ONCONFLICT_UPDATE;
+
+                // Build the SET targetlist for the conflict update.
+                let mut set_list: *mut pg_sys::List = std::ptr::null_mut();
+                for (i, (_col_name, value_expr)) in assignments.iter().enumerate() {
+                    let pg_expr = expr_translator::translate(value_expr, &self.expr_ctx);
+                    if pg_expr.is_null() {
+                        continue;
+                    }
+                    let te = self.alloc_node::<pg_sys::TargetEntry>();
+                    if te.is_null() {
+                        continue;
+                    }
+                    (*te).xpr.type_ = pg_sys::NodeTag::T_TargetEntry;
+                    (*te).expr = pg_expr;
+                    (*te).resno = (i + 1) as pg_sys::AttrNumber;
+                    if let Ok(cs) = CString::new(_col_name.as_str()) {
+                        (*te).resname = pg_sys::pstrdup(cs.as_ptr());
+                    }
+                    set_list = pg_sys::lappend(set_list, te.cast());
+                }
+                (*mt).onConflictSet = set_list;
+            }
+        }
     }
 
     /// Allocate a zeroed PostgreSQL node of type `T` in the current memory context.
