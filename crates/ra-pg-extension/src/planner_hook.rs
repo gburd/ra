@@ -60,23 +60,31 @@ unsafe extern "C-unwind" fn ra_planner_hook(
         return call_prev_planner(parse, query_string, cursor_options, bound_params);
     }
 
-    // Catch panics to prevent crashing the backend.
+    // Catch panics to surface as PostgreSQL ERRORs rather than crashing.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ra_planner_hook_inner(parse, query_string, cursor_options, bound_params)
     }));
 
     match result {
         Ok(plan) => plan,
-        Err(_) => {
-            pgrx::warning!("ra_planner: caught panic, falling back to standard planner");
-            call_prev_planner(parse, query_string, cursor_options, bound_params)
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = payload.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else {
+                "unknown panic".to_string()
+            };
+            pgrx::error!("ra_planner: internal error: {}", msg);
         }
     }
 }
 
 /// Inner planner hook: Lime parse → Ra optimize → Plan node translation.
 ///
-/// Falls back to the standard planner for unsupported queries.
+/// If the parser hook already parsed this query, uses the pre-parsed
+/// statement directly (no re-parsing). Otherwise falls back to parsing
+/// here in the planner hook.
 ///
 /// # Safety
 ///
@@ -87,6 +95,8 @@ unsafe fn ra_planner_hook_inner(
     cursor_options: i32,
     bound_params: *mut pg_sys::ParamListInfoData,
 ) -> *mut pg_sys::PlannedStmt {
+    use ra_core::algebra::Statement;
+
     // Refresh system fingerprint if intervals have elapsed.
     crate::monitor::maybe_refresh();
 
@@ -96,26 +106,37 @@ unsafe fn ra_planner_hook_inner(
         CStr::from_ptr(query_string).to_string_lossy().into_owned()
     };
 
-    // Empty query string: can't parse with Lime.
+    // Empty query string: nothing to plan.
     if sql.trim().is_empty() {
-        return call_prev_planner(parse, query_string, cursor_options, bound_params);
+        pgrx::error!("ra_planner: empty query");
     }
 
     let log = RA_LOG_DECISIONS.get();
 
-    // ─── Step 1: Lime parse (raw SQL → RelExpr) ───────────────────────
+    // ─── Step 1: Get RelExpr (from parser hook or re-parse) ───────────
     let t0 = Instant::now();
-    let rel_expr = match ra_parser::sql_to_relexpr(&sql) {
-        Ok(expr) => expr,
-        Err(e) => {
-            if log {
-                pgrx::log!(
-                    "ra_planner: Lime parse failed ({}), fallback: {}",
+
+    // Check if the parser hook already parsed this query.
+    let rel_expr = if let Some(stmt) = crate::parser_hook::take_parsed() {
+        match stmt {
+            Statement::Query(rel) | Statement::Dml(rel) => rel,
+            Statement::Ddl(_) | Statement::Utility(_) | Statement::Transaction(_) => {
+                // Non-optimizable statements should not reach the planner.
+                // Fall back to PG's standard planner.
+                return call_prev_planner(parse, query_string, cursor_options, bound_params);
+            }
+        }
+    } else {
+        // Parser hook didn't fire — parse now.
+        match ra_parser::sql_to_relexpr(&sql) {
+            Ok(expr) => expr,
+            Err(e) => {
+                pgrx::error!(
+                    "ra_planner: parse failure: {} [query: {}]",
                     e,
-                    truncate_sql(&sql, 120)
+                    truncate_sql(&sql, 80)
                 );
             }
-            return call_prev_planner(parse, query_string, cursor_options, bound_params);
         }
     };
     let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -131,14 +152,11 @@ unsafe fn ra_planner_hook_inner(
     let optimized = match optimize_relexpr(&rel_expr, &facts) {
         Ok(expr) => expr,
         Err(e) => {
-            if log {
-                pgrx::log!(
-                    "ra_planner: optimization failed ({}), fallback: {}",
-                    e,
-                    truncate_sql(&sql, 120)
-                );
-            }
-            return call_prev_planner(parse, query_string, cursor_options, bound_params);
+            pgrx::error!(
+                "ra_planner: optimization failure: {} [query: {}]",
+                e,
+                truncate_sql(&sql, 80)
+            );
         }
     };
     let optimize_ms = t1.elapsed().as_secs_f64() * 1000.0;
@@ -146,19 +164,16 @@ unsafe fn ra_planner_hook_inner(
     // ─── Step 3: Translate to PostgreSQL Plan nodes ────────────────────
     let t2 = Instant::now();
     let table_map = plan_builder::build_table_map(parse);
-    let mut builder = PlanBuilder::new(parse, table_map);
+    let mut builder = PlanBuilder::new(parse, table_map, &stats);
 
     let planned_stmt = match builder.build_planned_stmt(&optimized) {
         Ok(stmt) => stmt,
         Err(e) => {
-            if log {
-                pgrx::log!(
-                    "ra_planner: plan build failed ({}), fallback: {}",
-                    e,
-                    truncate_sql(&sql, 120)
-                );
-            }
-            return call_prev_planner(parse, query_string, cursor_options, bound_params);
+            pgrx::error!(
+                "ra_planner: plan build failure: {} [query: {}]",
+                e,
+                truncate_sql(&sql, 80)
+            );
         }
     };
     let translate_ms = t2.elapsed().as_secs_f64() * 1000.0;

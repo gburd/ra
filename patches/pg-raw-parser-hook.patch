@@ -1,0 +1,78 @@
+From: Ra Project <ra@example.com>
+Date: 2026-05-14
+Subject: [PATCH] Add raw_parser_hook to PostgreSQL 19
+
+Add a raw_parser_hook extension point to the PostgreSQL parser.
+
+The parser is the only stage in the query pipeline without a hook:
+  raw_parser -> (no hook) -> analyze -> rewrite -> plan -> execute
+
+All other stages have hooks (post_parse_analyze_hook, planner_hook,
+ProcessUtility_hook, ExecutorStart_hook, etc.).  This patch fills that
+gap by allowing extensions to intercept or replace the raw parser.
+
+Semantics:
+  - NULL return from hook = fall through to standard raw_parser()
+  - Non-NULL return = use the returned parse tree directly
+  - Zero overhead when hook is NULL (single pointer comparison)
+
+Follows existing PostgreSQL hook patterns (planner_hook,
+ProcessUtility_hook): a global function pointer initialized to NULL,
+checked at the top of the hooked function, set by extensions in
+_PG_init().
+
+---
+ src/backend/parser/parser.c  | 14 ++++++++++++++
+ src/include/parser/parser.h  |  6 ++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/src/include/parser/parser.h b/src/include/parser/parser.h
+index aabbccdd..eeff0011 100644
+--- a/src/include/parser/parser.h
++++ b/src/include/parser/parser.h
+@@ -33,6 +33,12 @@ typedef enum
+
+ extern List *raw_parser(const char *str, RawParseMode mode);
+
++/* Hook for extensions to replace the raw parser */
++typedef List *(*raw_parser_hook_type)(const char *query_string,
++									  RawParseMode mode);
++extern PGDLLIMPORT raw_parser_hook_type raw_parser_hook;
++
++
+ extern List *SystemFuncName(char *name);
+ extern TypeName *SystemTypeName(char *name);
+
+diff --git a/src/backend/parser/parser.c b/src/backend/parser/parser.c
+index aabbccdd..eeff0011 100644
+--- a/src/backend/parser/parser.c
++++ b/src/backend/parser/parser.c
+@@ -36,6 +36,10 @@
+ static bool check_uescapechar(unsigned char escape);
+ static char *str_udeescape(const char *str, char escape,
+ 						   int position, core_yyscan_t yyscanner);
++
++/* Hook for replacing the raw parser */
++raw_parser_hook_type raw_parser_hook = NULL;
++
+
+ /*
+  * raw_parser
+@@ -48,6 +52,16 @@ List *
+ raw_parser(const char *str, RawParseMode mode)
+ {
+ 	core_yyscan_t yyscanner;
++
++	/* Allow extension to replace parser */
++	if (raw_parser_hook)
++	{
++		List	   *result = (*raw_parser_hook)(str, mode);
++
++		if (result != NULL)
++			return result;
++		/* NULL = fall through to standard parser */
++	}
++
+ 	base_yyscan_t yyscanner_extra;
+ 	int			yyresult;
+ 	List	   *raw_parsetree_list;

@@ -55,7 +55,7 @@
 //!
 //! ```ignore
 //! let table_map = build_table_map(query);
-//! let mut builder = PlanBuilder::new(query, table_map);
+//! let mut builder = PlanBuilder::new(query, table_map, &stats);
 //! let planned = unsafe { builder.build_planned_stmt(&optimized_expr)? };
 //! ```
 
@@ -68,6 +68,7 @@ use tracing::debug;
 
 use ra_core::algebra::{AggregateExpr, JoinType, ProjectionColumn, RelExpr, SortKey};
 use ra_core::expr::Expr;
+use ra_core::statistics::Statistics;
 
 use crate::expr_translator::{self, ExprContext};
 
@@ -82,9 +83,9 @@ pub enum PlanBuilderError {
     #[error("table '{0}' not found in PostgreSQL catalog")]
     TableNotFound(String),
 
-    /// A `RelExpr` variant is not yet supported by the direct plan builder.
-    /// The caller should fall back to cost-manipulation for this query.
-    #[error("unsupported RelExpr variant for direct plan: {0}")]
+    /// A `RelExpr` variant is not supported by the plan builder.
+    /// The query will be rejected with an error to the client.
+    #[error("unsupported RelExpr variant: {0}")]
     UnsupportedVariant(String),
 
     /// An internal invariant was violated (bug in the plan builder).
@@ -113,6 +114,8 @@ pub struct PlanBuilder {
     total_cost: f64,
     /// Estimated output row count propagated from child nodes.
     plan_rows: f64,
+    /// Gathered catalog statistics per table, for realistic cost estimation.
+    stats: HashMap<String, Statistics>,
 }
 
 impl PlanBuilder {
@@ -122,6 +125,9 @@ impl PlanBuilder {
     /// to its 1-based index in the original query's range table and its relation
     /// OID. Build this with [`build_table_map`].
     ///
+    /// `gathered_stats` provides catalog statistics gathered from the live
+    /// database for realistic cost estimation.
+    ///
     /// # Safety
     ///
     /// `query` must be a valid, non-null pointer to a PostgreSQL `Query` node
@@ -129,6 +135,7 @@ impl PlanBuilder {
     pub unsafe fn new(
         query: *mut pg_sys::Query,
         table_map: HashMap<String, (pg_sys::Index, pg_sys::Oid)>,
+        gathered_stats: &[(String, Statistics)],
     ) -> Self {
         let mut rtindex_map = HashMap::new();
         let mut rtoid_map = HashMap::new();
@@ -140,11 +147,16 @@ impl PlanBuilder {
             rtindex_map,
             rtoid_map,
         };
+        let stats = gathered_stats
+            .iter()
+            .map(|(name, s)| (name.to_lowercase(), s.clone()))
+            .collect();
         Self {
             original_query: query,
             expr_ctx,
             total_cost: 0.0,
             plan_rows: 1.0,
+            stats,
         }
     }
 
@@ -171,8 +183,16 @@ impl PlanBuilder {
             ));
         }
 
+        // Detect command type from the expression.
+        let cmd_type = match expr {
+            RelExpr::Insert { .. } => pg_sys::CmdType::CMD_INSERT,
+            RelExpr::Update { .. } => pg_sys::CmdType::CMD_UPDATE,
+            RelExpr::Delete { .. } => pg_sys::CmdType::CMD_DELETE,
+            _ => pg_sys::CmdType::CMD_SELECT,
+        };
+
         (*stmt).type_ = pg_sys::NodeTag::T_PlannedStmt;
-        (*stmt).commandType = pg_sys::CmdType::CMD_SELECT;
+        (*stmt).commandType = cmd_type;
         (*stmt).planTree = plan_tree;
 
         // Copy range table and result relations from original query
@@ -184,6 +204,40 @@ impl PlanBuilder {
         // Propagate top-level plan cost estimate
         if !plan_tree.is_null() {
             (*stmt).planTree = plan_tree;
+        }
+
+        Ok(stmt)
+    }
+
+    /// Build a `PlannedStmt` for a DML (INSERT/UPDATE/DELETE) operation.
+    ///
+    /// Produces a `ModifyTable` plan node wrapping the subplan (the
+    /// source query for INSERT, or the scan/join for UPDATE/DELETE).
+    ///
+    /// # Safety
+    ///
+    /// Allocates PostgreSQL plan nodes in the current memory context.
+    pub unsafe fn build_dml_planned_stmt(
+        &mut self,
+        expr: &RelExpr,
+        cmd_type: pg_sys::CmdType,
+    ) -> Result<*mut pg_sys::PlannedStmt, PlanBuilderError> {
+        let plan_tree = self.build_plan(expr)?;
+
+        let stmt = self.alloc_node::<pg_sys::PlannedStmt>();
+        if stmt.is_null() {
+            return Err(PlanBuilderError::NullPointer(
+                "PlannedStmt allocation".to_string(),
+            ));
+        }
+
+        (*stmt).type_ = pg_sys::NodeTag::T_PlannedStmt;
+        (*stmt).commandType = cmd_type;
+        (*stmt).planTree = plan_tree;
+
+        if !self.original_query.is_null() {
+            (*stmt).rtable = (*self.original_query).rtable;
+            (*stmt).resultRelations = (*self.original_query).resultRelation as *mut _;
         }
 
         Ok(stmt)
@@ -266,13 +320,12 @@ impl PlanBuilder {
                 self.build_set_op_intersect(*all, left, right)
             }
             RelExpr::Except { all, left, right } => self.build_set_op_except(*all, left, right),
-            RelExpr::Window {
-                functions: _,
-                input,
-            } => self.build_window_agg(input),
+            RelExpr::Window { functions, input } => self.build_window_agg(functions, input),
             RelExpr::IncrementalSort {
-                suffix_keys, input, ..
-            } => self.build_incremental_sort(suffix_keys, input),
+                prefix_keys,
+                suffix_keys,
+                input,
+            } => self.build_incremental_sort(prefix_keys, suffix_keys, input),
             RelExpr::CTE { body, .. } => {
                 // CTE body is the primary output; definition is already materialized.
                 self.build_plan(body)
@@ -296,6 +349,36 @@ impl PlanBuilder {
             RelExpr::VectorFilter { .. } => Err(PlanBuilderError::UnsupportedVariant(
                 "VectorFilter (vector)".to_string(),
             )),
+            // DML variants — produce ModifyTable plan nodes.
+            RelExpr::Insert {
+                table,
+                source,
+                ..
+            } => self.build_modify_table(table, source, pg_sys::CmdType::CMD_INSERT),
+            RelExpr::Update {
+                table,
+                from,
+                ..
+            } => {
+                // Optimize the FROM clause if present; otherwise use a
+                // scan of the target table as the subplan input.
+                let sub_expr = from.as_deref().unwrap_or(&RelExpr::Scan {
+                    table: table.clone(),
+                    alias: None,
+                });
+                self.build_modify_table(table, sub_expr, pg_sys::CmdType::CMD_UPDATE)
+            }
+            RelExpr::Delete {
+                table,
+                using,
+                ..
+            } => {
+                let sub_expr = using.as_deref().unwrap_or(&RelExpr::Scan {
+                    table: table.clone(),
+                    alias: None,
+                });
+                self.build_modify_table(table, sub_expr, pg_sys::CmdType::CMD_DELETE)
+            }
         }
     }
 
@@ -317,7 +400,7 @@ impl PlanBuilder {
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_SeqScan;
         (*node).scan.scanrelid = rtindex;
-        self.set_default_costs(&mut (*node).scan.plan, table);
+        self.set_costs_from_stats(&mut (*node).scan.plan, table);
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
@@ -325,9 +408,10 @@ impl PlanBuilder {
     unsafe fn build_index_scan(
         &mut self,
         table: &str,
-        _column: &str,
+        column: &str,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let rtindex = self.rtindex_for(table)?;
+        let rel_oid = self.rel_oid_for(table)?;
         let node = self.alloc_node::<pg_sys::IndexScan>();
         if node.is_null() {
             return Err(PlanBuilderError::NullPointer(
@@ -336,19 +420,25 @@ impl PlanBuilder {
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_IndexScan;
         (*node).scan.scanrelid = rtindex;
-        // STUB: Index OID resolution requires a catalog lookup via
-        // pg_index to find an index covering `_column` on this relation.
-        // Currently the executor will treat this as a sequential scan
-        // because indexid is 0 (InvalidOid). Full implementation needs:
-        //   1. Query pg_index for relation `rtindex` matching `_column`
-        //   2. Set (*node).indexid = found_index_oid
-        //   3. Build indexqual/indexorderby from the predicate
-        debug!(
-            table = table,
-            "IndexScan: index OID resolution not yet implemented; \
-             node has no indexid set"
-        );
-        self.set_default_costs(&mut (*node).scan.plan, table);
+
+        // Resolve the index OID from catalog
+        if let Some(info) = crate::index_resolver::resolve_index(rel_oid, column) {
+            (*node).indexid = info.oid;
+            debug!(
+                table = table,
+                column = column,
+                index_oid = info.oid.as_u32(),
+                "IndexScan: resolved index"
+            );
+        } else {
+            debug!(
+                table = table,
+                column = column,
+                "IndexScan: no suitable index found for column"
+            );
+        }
+
+        self.set_index_costs(&mut (*node).scan.plan, table, 0.1);
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
@@ -356,9 +446,10 @@ impl PlanBuilder {
     unsafe fn build_bitmap_index_scan(
         &mut self,
         table: &str,
-        _index: &str,
+        index: &str,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let rtindex = self.rtindex_for(table)?;
+        let rel_oid = self.rel_oid_for(table)?;
         let node = self.alloc_node::<pg_sys::BitmapIndexScan>();
         if node.is_null() {
             return Err(PlanBuilderError::NullPointer(
@@ -367,18 +458,25 @@ impl PlanBuilder {
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_BitmapIndexScan;
         (*node).scan.scanrelid = rtindex;
-        // STUB: Requires catalog lookup (pg_index) to resolve the named
-        // index to its OID, then building indexqual and indexqualorig
-        // expression lists from the predicate. Without these the executor
-        // cannot perform the bitmap index scan. Full implementation needs:
-        //   1. Resolve `_index` name → index OID via RangeVarGetRelidExtended
-        //   2. Set (*node).indexid = index_oid
-        //   3. Translate predicate → indexqual (RestrictInfo-compatible OpExpr)
-        //   4. Copy to indexqualorig for EXPLAIN display
-        debug!(
-            table = table,
-            "BitmapIndexScan: index OID and quals not yet wired"
-        );
+
+        // Resolve the named index to its OID
+        if let Some(info) = crate::index_resolver::resolve_index_by_name(rel_oid, index) {
+            (*node).indexid = info.oid;
+            debug!(
+                table = table,
+                index = index,
+                index_oid = info.oid.as_u32(),
+                "BitmapIndexScan: resolved index"
+            );
+        } else {
+            debug!(
+                table = table,
+                index = index,
+                "BitmapIndexScan: named index not found"
+            );
+        }
+
+        self.set_index_costs(&mut (*node).scan.plan, table, 0.2);
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
@@ -399,7 +497,7 @@ impl PlanBuilder {
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_BitmapHeapScan;
         (*node).scan.scanrelid = rtindex;
         (*node).scan.plan.lefttree = bitmap_plan;
-        self.set_default_costs(&mut (*node).scan.plan, table);
+        self.set_costs_from_stats(&mut (*node).scan.plan, table);
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
@@ -470,9 +568,10 @@ impl PlanBuilder {
     unsafe fn build_index_only_scan(
         &mut self,
         table: &str,
-        _index: &str,
+        index: &str,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let rtindex = self.rtindex_for(table)?;
+        let rel_oid = self.rel_oid_for(table)?;
         let node = self.alloc_node::<pg_sys::IndexOnlyScan>();
         if node.is_null() {
             return Err(PlanBuilderError::NullPointer(
@@ -481,20 +580,26 @@ impl PlanBuilder {
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_IndexOnlyScan;
         (*node).scan.scanrelid = rtindex;
-        // STUB: Same as IndexScan — requires pg_index catalog lookup to
-        // resolve the named index to its OID. Additionally needs to set
-        // indextlist (the index's target list for index-only returns).
-        // Without indexid the executor cannot perform an index-only scan.
-        // Implementation needs:
-        //   1. Resolve `_index` → index OID
-        //   2. Set (*node).indexid = index_oid
-        //   3. Build indextlist from index column definitions
-        //   4. Build indexqual from any predicate
-        debug!(
-            table = table,
-            "IndexOnlyScan: index OID resolution not yet implemented"
-        );
-        self.set_default_costs(&mut (*node).scan.plan, table);
+
+        // Resolve the named index to its OID
+        if let Some(info) = crate::index_resolver::resolve_index_by_name(rel_oid, index) {
+            (*node).indexid = info.oid;
+            debug!(
+                table = table,
+                index = index,
+                index_oid = info.oid.as_u32(),
+                "IndexOnlyScan: resolved index"
+            );
+        } else {
+            debug!(
+                table = table,
+                index = index,
+                "IndexOnlyScan: named index not found"
+            );
+        }
+
+        // Index-only scans are cheaper than regular index scans (no heap fetch)
+        self.set_index_costs(&mut (*node).scan.plan, table, 0.05);
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
@@ -650,7 +755,7 @@ impl PlanBuilder {
 
     unsafe fn build_aggregate(
         &mut self,
-        _group_by: &[ra_core::expr::Expr],
+        group_by: &[ra_core::expr::Expr],
         _aggregates: &[AggregateExpr],
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
@@ -663,44 +768,62 @@ impl PlanBuilder {
         (*node).plan.lefttree = child;
         (*node).aggsplit = pg_sys::AggSplit::AGGSPLIT_SIMPLE;
 
-        // Determine aggregation strategy based on whether there are group-by
-        // keys. AGG_PLAIN = no grouping (single-group aggregate like COUNT(*)).
-        // AGG_HASHED = hash-based grouping (preferred for large groups).
-        // AGG_SORTED = requires pre-sorted input on group keys.
-        if _group_by.is_empty() {
+        if group_by.is_empty() {
             (*node).aggstrategy = pg_sys::AggStrategy::AGG_PLAIN;
         } else {
-            // Use hash aggregation by default — it doesn't require sorted input
-            // and works well for moderate cardinality group-by sets.
             (*node).aggstrategy = pg_sys::AggStrategy::AGG_HASHED;
-            (*node).numCols = _group_by.len() as i32;
-            // STUB: grpColIdx, grpOperators, grpCollations require translating
-            // each group-by Expr to an attribute number in the child's output
-            // targetlist, then looking up the equality operator and collation
-            // for that column's type. This is non-trivial because it depends
-            // on the child plan's targetlist being fully constructed first.
-            // Without these, PG may not correctly identify group boundaries,
-            // but for AGG_HASHED the hash key setup is the critical piece.
-            debug!(
-                num_group_by = _group_by.len(),
-                "Agg: grpColIdx/grpOperators/grpCollations not yet populated"
-            );
+
+            // Build group-by column metadata arrays
+            let child_tlist = if child.is_null() {
+                std::ptr::null_mut()
+            } else {
+                (*child).targetlist
+            };
+            let rel_oid = self.first_rel_oid(input);
+
+            if let Some(arrays) = crate::sort_utils::build_group_arrays(
+                group_by, child_tlist, rel_oid,
+            ) {
+                (*node).numCols = arrays.num_cols;
+                (*node).grpColIdx = arrays.col_idx;
+                (*node).grpOperators = arrays.operators;
+                (*node).grpCollations = arrays.collations;
+            } else {
+                (*node).numCols = group_by.len() as i32;
+            }
         }
 
-        // STUB: numGroups estimate. PG uses this for hash table sizing.
-        // A conservative default avoids excessive memory allocation.
-        (*node).numGroups = 100;
+        // Estimate numGroups from statistics
+        let input_rows = if child.is_null() {
+            1000.0
+        } else {
+            (*child).plan_rows.max(1.0)
+        };
+        (*node).numGroups = if group_by.is_empty() {
+            1
+        } else {
+            // Conservative estimate: sqrt(input_rows), clamped
+            (input_rows.sqrt() as u64).clamp(10, 1_000_000)
+        };
 
+        // Cost: child cost + per-row hashing/comparison cost
         if !child.is_null() {
-            (*node).plan.total_cost = (*child).total_cost + 100.0;
-            (*node).plan.plan_rows = ((*child).plan_rows * 0.1).max(1.0);
+            let hash_cost = input_rows * 0.01; // cpu_operator_cost per tuple
+            (*node).plan.startup_cost = (*child).total_cost + hash_cost;
+            (*node).plan.total_cost = (*node).plan.startup_cost;
+            (*node).plan.plan_rows = if group_by.is_empty() {
+                1.0
+            } else {
+                (*node).numGroups as f64
+            };
+            (*node).plan.plan_width = (*child).plan_width;
         }
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     unsafe fn build_sort(
         &mut self,
-        _keys: &[SortKey],
+        keys: &[SortKey],
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let child = self.build_plan(input)?;
@@ -710,28 +833,32 @@ impl PlanBuilder {
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Sort;
         (*node).plan.lefttree = child;
-        // Set the number of sort columns. The actual arrays (sortColIdx,
-        // sortOperators, collations, nullsFirst) require knowing the child
-        // plan's output targetlist positions for each sort key column.
-        (*node).numCols = _keys.len() as i32;
-        // STUB: sortColIdx, sortOperators, collations, nullsFirst arrays.
-        // Full implementation requires:
-        //   1. For each SortKey, find its AttrNumber in child's targetlist
-        //   2. Look up the ordering operator OID for the column's type
-        //      (via TypeCacheEntry or ordering_oper())
-        //   3. Determine collation from the column's type
-        //   4. Set nullsFirst based on SortKey.nulls_first flag
-        // Without these arrays PG cannot execute the sort, but the plan
-        // structure is correct for cost estimation and EXPLAIN output.
-        debug!(
-            num_sort_keys = _keys.len(),
-            "Sort: sortColIdx/sortOperators arrays not yet populated"
-        );
+
+        // Build sort column metadata arrays using sort_utils
+        let child_tlist = if child.is_null() {
+            std::ptr::null_mut()
+        } else {
+            (*child).targetlist
+        };
+        let rel_oid = self.first_rel_oid(input);
+
+        if let Some(arrays) = crate::sort_utils::build_sort_arrays(keys, child_tlist, rel_oid) {
+            (*node).numCols = arrays.num_cols;
+            (*node).sortColIdx = arrays.col_idx;
+            (*node).sortOperators = arrays.operators;
+            (*node).collations = arrays.collations;
+            (*node).nullsFirst = arrays.nulls_first;
+        } else {
+            (*node).numCols = keys.len() as i32;
+        }
+
+        // Cost: n*log(n) comparison cost on top of child
         if !child.is_null() {
             let n = (*child).plan_rows.max(1.0);
             (*node).plan.startup_cost = (*child).total_cost + n * n.ln().max(1.0) * 0.001;
             (*node).plan.total_cost = (*node).plan.startup_cost;
             (*node).plan.plan_rows = (*child).plan_rows;
+            (*node).plan.plan_width = (*child).plan_width;
         }
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
@@ -855,16 +982,61 @@ impl PlanBuilder {
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Unique;
         (*node).plan.lefttree = child;
-        // STUB: Unique requires the input to be sorted on the distinct
-        // columns, and needs uniqColIdx (attribute numbers of distinct
-        // columns in the child targetlist), uniqOperators (equality
-        // operator OIDs for each column type), and uniqCollations.
-        // Without these the executor cannot compare adjacent tuples
-        // for uniqueness. The plan is structurally valid for EXPLAIN.
-        debug!("Unique: uniqColIdx/uniqOperators not yet populated");
-        if !child.is_null() {
+
+        // Build unique column arrays from child's targetlist
+        // Unique operates on ALL output columns (SELECT DISTINCT)
+        if !child.is_null() && !(*child).targetlist.is_null() {
+            let ncols = (*(*child).targetlist).length;
+            let rel_oid = self.first_rel_oid(input);
+
+            if ncols > 0 {
+                let col_idx = pg_sys::palloc(
+                    ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>(),
+                ) as *mut pg_sys::AttrNumber;
+                let operators = pg_sys::palloc(
+                    ncols as usize * std::mem::size_of::<pg_sys::Oid>(),
+                ) as *mut pg_sys::Oid;
+                let collations = pg_sys::palloc(
+                    ncols as usize * std::mem::size_of::<pg_sys::Oid>(),
+                ) as *mut pg_sys::Oid;
+
+                let elements = (*(*child).targetlist).elements;
+                for i in 0..ncols as usize {
+                    let cell = elements.add(i);
+                    let te = (*cell).ptr_value as *mut pg_sys::TargetEntry;
+                    let resno = if te.is_null() {
+                        (i + 1) as pg_sys::AttrNumber
+                    } else {
+                        (*te).resno
+                    };
+                    *col_idx.add(i) = resno;
+
+                    // Get type info for equality operator
+                    let type_oid = if !te.is_null() && !(*te).expr.is_null() {
+                        pg_sys::exprType((*te).expr as *mut pg_sys::Node)
+                    } else {
+                        pg_sys::INT4OID
+                    };
+                    let _ = rel_oid; // used for fallback if needed
+                    *operators.add(i) = crate::sort_utils::resolve_equality_op(type_oid);
+                    *collations.add(i) = pg_sys::exprCollation(
+                        if !te.is_null() {
+                            (*te).expr as *mut pg_sys::Node
+                        } else {
+                            std::ptr::null_mut()
+                        },
+                    );
+                }
+
+                (*node).numCols = ncols;
+                (*node).uniqColIdx = col_idx;
+                (*node).uniqOperators = operators;
+                (*node).uniqCollations = collations;
+            }
+
             (*node).plan.total_cost = (*child).total_cost;
-            (*node).plan.plan_rows = (*child).plan_rows * 0.8; // rough distinct estimate
+            (*node).plan.plan_rows = ((*child).plan_rows * 0.75).max(1.0);
+            (*node).plan.plan_width = (*child).plan_width;
         }
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
@@ -903,11 +1075,48 @@ impl PlanBuilder {
         (*node).plan.plan_rows = left_rows + right_rows;
 
         if !all {
-            // STUB: For UNION (not ALL), the result needs deduplication.
-            // A full implementation would wrap this Append in a Sort + Unique
-            // or use a HashSetOp. Currently returns all rows (superset of
-            // correct result — safe but may contain duplicates).
-            debug!("Union: UNION DISTINCT deduplication not yet applied");
+            // UNION DISTINCT: wrap Append in Unique to deduplicate.
+            // The Unique node uses all output columns for comparison.
+            let append_plan = &mut (*node).plan as *mut pg_sys::Plan;
+            let unique = self.alloc_node::<pg_sys::Unique>();
+            if unique.is_null() {
+                return Ok(append_plan);
+            }
+            (*unique).plan.type_ = pg_sys::NodeTag::T_Unique;
+            (*unique).plan.lefttree = append_plan;
+            (*unique).plan.total_cost = (*append_plan).total_cost;
+            (*unique).plan.plan_rows = ((*append_plan).plan_rows * 0.75).max(1.0);
+            (*unique).plan.plan_width = (*append_plan).plan_width;
+
+            // Set unique column arrays for all output columns
+            let ncols = if !left_plan.is_null() && !(*left_plan).targetlist.is_null() {
+                (*(*left_plan).targetlist).length
+            } else {
+                0
+            };
+            if ncols > 0 {
+                let col_idx = pg_sys::palloc(
+                    ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>(),
+                ) as *mut pg_sys::AttrNumber;
+                let operators = pg_sys::palloc(
+                    ncols as usize * std::mem::size_of::<pg_sys::Oid>(),
+                ) as *mut pg_sys::Oid;
+                let collations = pg_sys::palloc(
+                    ncols as usize * std::mem::size_of::<pg_sys::Oid>(),
+                ) as *mut pg_sys::Oid;
+
+                for i in 0..ncols as usize {
+                    *col_idx.add(i) = (i + 1) as pg_sys::AttrNumber;
+                    *operators.add(i) = pg_sys::InvalidOid; // will use default eq
+                    *collations.add(i) = pg_sys::InvalidOid;
+                }
+                (*unique).numCols = ncols;
+                (*unique).uniqColIdx = col_idx;
+                (*unique).uniqOperators = operators;
+                (*unique).uniqCollations = collations;
+            }
+
+            return Ok(&mut (*unique).plan as *mut pg_sys::Plan);
         }
 
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
@@ -960,6 +1169,7 @@ impl PlanBuilder {
 
     unsafe fn build_window_agg(
         &mut self,
+        functions: &[ra_core::algebra::WindowExpr],
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let child = self.build_plan(input)?;
@@ -971,25 +1181,124 @@ impl PlanBuilder {
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_WindowAgg;
         (*node).plan.lefttree = child;
-        // STUB: WindowAgg requires substantial metadata to execute:
-        //   - winref: index into the query's windowClause list
-        //   - partNumCols + partColIdx: partition-by column positions
-        //   - ordNumCols + ordColIdx: order-by column positions
-        //   - frameOptions: ROWS/RANGE/GROUPS + UNBOUNDED/CURRENT ROW/etc.
-        //   - startOffset/endOffset: frame boundary expressions
-        // Without these the executor cannot partition or order the window.
-        // The plan is structurally valid for cost estimation purposes.
-        debug!("WindowAgg: winref/partNumCols/ordNumCols/frameOptions not populated");
+
+        // Use the first window function's partition/order spec
+        // (PostgreSQL requires one WindowAgg node per distinct window spec)
+        if let Some(wf) = functions.first() {
+            let child_tlist = if child.is_null() {
+                std::ptr::null_mut()
+            } else {
+                (*child).targetlist
+            };
+            let rel_oid = self.first_rel_oid(input);
+
+            // Build PARTITION BY column arrays
+            if !wf.partition_by.is_empty() {
+                if let Some(part_arrays) = crate::sort_utils::build_group_arrays(
+                    &wf.partition_by, child_tlist, rel_oid,
+                ) {
+                    (*node).partNumCols = part_arrays.num_cols;
+                    (*node).partColIdx = part_arrays.col_idx;
+                    (*node).partOperators = part_arrays.operators;
+                    (*node).partCollations = part_arrays.collations;
+                }
+            }
+
+            // Build ORDER BY column arrays
+            if !wf.order_by.is_empty() {
+                if let Some(ord_arrays) = crate::sort_utils::build_sort_arrays(
+                    &wf.order_by, child_tlist, rel_oid,
+                ) {
+                    (*node).ordNumCols = ord_arrays.num_cols;
+                    (*node).ordColIdx = ord_arrays.col_idx;
+                    (*node).ordOperators = ord_arrays.operators;
+                    (*node).ordCollations = ord_arrays.collations;
+                    (*node).ordNullsFirst = ord_arrays.nulls_first;
+                }
+            }
+
+            // Set frame options from the window frame spec
+            (*node).frameOptions = self.translate_frame_options(&wf.frame);
+        }
+
+        // winref defaults to 0 (first window clause)
+        (*node).winref = 0;
+
         if !child.is_null() {
             (*node).plan.total_cost = (*child).total_cost + (*child).plan_rows * 0.01;
             (*node).plan.plan_rows = (*child).plan_rows;
+            (*node).plan.plan_width = (*child).plan_width;
         }
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
+    /// Translate a Ra `WindowFrame` to PostgreSQL's FRAMEOPTION bitmask.
+    fn translate_frame_options(
+        &self,
+        frame: &Option<ra_core::algebra::WindowFrame>,
+    ) -> i32 {
+        use ra_core::algebra::{WindowFrameBound, WindowFrameMode};
+
+        // PG frame option constants (from nodes.h)
+        const FRAMEOPTION_NONDEFAULT: i32 = 0x00001;
+        const FRAMEOPTION_RANGE: i32 = 0x00002;
+        const FRAMEOPTION_ROWS: i32 = 0x00004;
+        const FRAMEOPTION_GROUPS: i32 = 0x00008;
+        const FRAMEOPTION_BETWEEN: i32 = 0x00010;
+        const FRAMEOPTION_START_UNBOUNDED_PRECEDING: i32 = 0x00020;
+        const FRAMEOPTION_END_UNBOUNDED_PRECEDING: i32 = 0x00040;
+        const FRAMEOPTION_START_UNBOUNDED_FOLLOWING: i32 = 0x00080;
+        const FRAMEOPTION_END_UNBOUNDED_FOLLOWING: i32 = 0x00100;
+        const FRAMEOPTION_START_CURRENT_ROW: i32 = 0x00200;
+        const FRAMEOPTION_END_CURRENT_ROW: i32 = 0x00400;
+        const FRAMEOPTION_START_OFFSET_PRECEDING: i32 = 0x00800;
+        const FRAMEOPTION_END_OFFSET_PRECEDING: i32 = 0x01000;
+        const FRAMEOPTION_START_OFFSET_FOLLOWING: i32 = 0x02000;
+        const FRAMEOPTION_END_OFFSET_FOLLOWING: i32 = 0x04000;
+
+        let Some(frame) = frame else {
+            // Default: RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            return FRAMEOPTION_NONDEFAULT
+                | FRAMEOPTION_RANGE
+                | FRAMEOPTION_BETWEEN
+                | FRAMEOPTION_START_UNBOUNDED_PRECEDING
+                | FRAMEOPTION_END_CURRENT_ROW;
+        };
+
+        let mut opts = FRAMEOPTION_NONDEFAULT | FRAMEOPTION_BETWEEN;
+
+        // Mode
+        opts |= match frame.mode {
+            WindowFrameMode::Rows => FRAMEOPTION_ROWS,
+            WindowFrameMode::Range => FRAMEOPTION_RANGE,
+            WindowFrameMode::Groups => FRAMEOPTION_GROUPS,
+        };
+
+        // Start bound
+        opts |= match &frame.start {
+            WindowFrameBound::UnboundedPreceding => FRAMEOPTION_START_UNBOUNDED_PRECEDING,
+            WindowFrameBound::CurrentRow => FRAMEOPTION_START_CURRENT_ROW,
+            WindowFrameBound::Preceding(_) => FRAMEOPTION_START_OFFSET_PRECEDING,
+            WindowFrameBound::Following(_) => FRAMEOPTION_START_OFFSET_FOLLOWING,
+            WindowFrameBound::UnboundedFollowing => FRAMEOPTION_START_UNBOUNDED_FOLLOWING,
+        };
+
+        // End bound
+        opts |= match &frame.end {
+            WindowFrameBound::UnboundedFollowing => FRAMEOPTION_END_UNBOUNDED_FOLLOWING,
+            WindowFrameBound::CurrentRow => FRAMEOPTION_END_CURRENT_ROW,
+            WindowFrameBound::Preceding(_) => FRAMEOPTION_END_OFFSET_PRECEDING,
+            WindowFrameBound::Following(_) => FRAMEOPTION_END_OFFSET_FOLLOWING,
+            WindowFrameBound::UnboundedPreceding => FRAMEOPTION_END_UNBOUNDED_PRECEDING,
+        };
+
+        opts
+    }
+
     unsafe fn build_incremental_sort(
         &mut self,
-        _suffix_keys: &[SortKey],
+        prefix_keys: &[SortKey],
+        suffix_keys: &[SortKey],
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let child = self.build_plan(input)?;
@@ -1001,20 +1310,39 @@ impl PlanBuilder {
         }
         (*node).sort.plan.type_ = pg_sys::NodeTag::T_IncrementalSort;
         (*node).sort.plan.lefttree = child;
-        // Set numCols from suffix keys. nPresortedCols indicates how many
-        // leading columns are already sorted (from a prior Sort or index).
-        (*node).sort.numCols = _suffix_keys.len() as i32;
-        // STUB: nPresortedCols, sortColIdx, sortOperators, collations,
-        // nullsFirst arrays. Same requirements as Sort node (see above).
-        // IncrementalSort additionally needs nPresortedCols to know where
-        // the pre-sorted prefix ends and the suffix sort begins.
-        debug!(
-            num_suffix_keys = _suffix_keys.len(),
-            "IncrementalSort: sort arrays and nPresortedCols not populated"
-        );
+
+        // Total keys = prefix (already sorted) + suffix (to sort within groups)
+        let all_keys: Vec<SortKey> = prefix_keys.iter().chain(suffix_keys.iter()).cloned().collect();
+        (*node).nPresortedCols = prefix_keys.len() as i32;
+
+        // Build sort arrays for ALL keys (prefix + suffix)
+        let child_tlist = if child.is_null() {
+            std::ptr::null_mut()
+        } else {
+            (*child).targetlist
+        };
+        let rel_oid = self.first_rel_oid(input);
+
+        if let Some(arrays) = crate::sort_utils::build_sort_arrays(&all_keys, child_tlist, rel_oid)
+        {
+            (*node).sort.numCols = arrays.num_cols;
+            (*node).sort.sortColIdx = arrays.col_idx;
+            (*node).sort.sortOperators = arrays.operators;
+            (*node).sort.collations = arrays.collations;
+            (*node).sort.nullsFirst = arrays.nulls_first;
+        } else {
+            (*node).sort.numCols = all_keys.len() as i32;
+        }
+
+        // Cost: cheaper than full sort since prefix is pre-sorted
         if !child.is_null() {
-            (*node).sort.plan.total_cost = (*child).total_cost;
+            let n = (*child).plan_rows.max(1.0);
+            let group_size = (n / 100.0).max(2.0); // estimated group size
+            let sort_cost = n * group_size.ln().max(1.0) * 0.001;
+            (*node).sort.plan.startup_cost = (*child).total_cost + sort_cost;
+            (*node).sort.plan.total_cost = (*node).sort.plan.startup_cost;
             (*node).sort.plan.plan_rows = (*child).plan_rows;
+            (*node).sort.plan.plan_width = (*child).plan_width;
         }
         Ok(&mut (*node).sort.plan as *mut pg_sys::Plan)
     }
@@ -1025,7 +1353,7 @@ impl PlanBuilder {
 
     unsafe fn build_function_scan(
         &mut self,
-        _expr: &RelExpr,
+        expr: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let node = self.alloc_node::<pg_sys::FunctionScan>();
         if node.is_null() {
@@ -1034,18 +1362,41 @@ impl PlanBuilder {
             ));
         }
         (*node).scan.plan.type_ = pg_sys::NodeTag::T_FunctionScan;
-        // STUB: Building the functions list requires translating the
-        // Unnest/TableFunction expression into a RangeTblFunction node
-        // with the function call expression (FuncExpr) and column
-        // definitions. This depends on:
-        //   1. Resolving the function OID from its name and arg types
-        //   2. Building a FuncExpr via expr_translator
-        //   3. Wrapping in RangeTblFunction with proper coldeflist
-        //   4. Setting funcordinality for WITH ORDINALITY
-        // Without this the executor has no function to call, but the
-        // plan structure is valid for fallback detection.
-        debug!("FunctionScan: functions list not built from expression");
-        (*node).scan.plan.plan_rows = 100.0; // conservative estimate
+
+        // Extract function info from the RelExpr
+        match expr {
+            RelExpr::TableFunction { name, args, .. } => {
+                // Build a FuncExpr for the function call
+                let func_expr = Expr::Function {
+                    name: name.clone(),
+                    args: args.clone(),
+                };
+                let pg_expr = expr_translator::translate(&func_expr, &self.expr_ctx);
+                if !pg_expr.is_null() {
+                    // Wrap in a RangeTblFunction and attach to scan
+                    let rtfunc = pg_sys::palloc0(std::mem::size_of::<pg_sys::RangeTblFunction>())
+                        as *mut pg_sys::RangeTblFunction;
+                    (*rtfunc).type_ = pg_sys::NodeTag::T_RangeTblFunction;
+                    (*rtfunc).funcexpr = pg_expr as *mut pg_sys::Node;
+                    (*node).functions = pg_sys::list_make1(rtfunc as *mut _);
+                }
+                debug!(
+                    function = name.as_str(),
+                    "FunctionScan: built function call"
+                );
+            }
+            RelExpr::Unnest {
+                with_ordinality, ..
+            } => {
+                (*node).funcordinality = *with_ordinality;
+                debug!("FunctionScan: unnest expression");
+            }
+            _ => {
+                debug!("FunctionScan: unrecognized expression type");
+            }
+        }
+
+        (*node).scan.plan.plan_rows = 100.0;
         (*node).scan.plan.total_cost = 10.0;
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
@@ -1076,6 +1427,44 @@ impl PlanBuilder {
             .ok_or_else(|| PlanBuilderError::TableNotFound(table.to_string()))
     }
 
+    /// Look up the relation OID for a table by name.
+    fn rel_oid_for(&self, table: &str) -> Result<pg_sys::Oid, PlanBuilderError> {
+        self.expr_ctx
+            .rtoid_map
+            .get(&table.to_lowercase())
+            .copied()
+            .ok_or_else(|| PlanBuilderError::TableNotFound(table.to_string()))
+    }
+
+    /// Extract the first relation OID from an expression tree.
+    ///
+    /// Walks down the tree to find a Scan node and returns its OID.
+    /// Used for type resolution when building sort/group arrays.
+    fn first_rel_oid(&self, expr: &RelExpr) -> pg_sys::Oid {
+        match expr {
+            RelExpr::Scan { table, .. }
+            | RelExpr::IndexScan { table, .. }
+            | RelExpr::IndexOnlyScan { table, .. }
+            | RelExpr::BitmapIndexScan { table, .. }
+            | RelExpr::BitmapHeapScan { table, .. }
+            | RelExpr::ParallelScan { table, .. } => {
+                self.expr_ctx
+                    .rtoid_map
+                    .get(&table.to_lowercase())
+                    .copied()
+                    .unwrap_or(pg_sys::InvalidOid)
+            }
+            _ => {
+                // Recurse into first child
+                if let Some(child) = expr.children().first() {
+                    self.first_rel_oid(child)
+                } else {
+                    pg_sys::InvalidOid
+                }
+            }
+        }
+    }
+
     /// Set the targetlist on a plan node from Ra projection columns.
     unsafe fn set_targetlist(&self, plan: *mut pg_sys::Plan, columns: &[ProjectionColumn]) {
         if plan.is_null() {
@@ -1102,23 +1491,84 @@ impl PlanBuilder {
         }
     }
 
-    /// Set approximate cost estimates on a scan plan node.
+    /// Set cost estimates on a scan plan node from gathered catalog statistics.
     ///
-    /// Uses hardcoded defaults. A full implementation would query
-    /// `pg_class.reltuples` and `pg_class.relpages` for the given relation
-    /// to produce realistic row count and I/O cost estimates. The current
-    /// values are conservative placeholders that allow the executor to
-    /// proceed without crashing but may produce suboptimal resource
-    /// allocation decisions.
-    unsafe fn set_default_costs(&self, plan: &mut pg_sys::Plan, _table: &str) {
-        // STUB: To get real estimates, call:
-        //   pg_sys::get_relation_info() or open the relation and read
-        //   rd_rel->reltuples / rd_rel->relpages. This requires the
-        //   relation to be locked (AccessShareLock minimum).
-        plan.startup_cost = 0.0;
-        plan.total_cost = 100.0;
-        plan.plan_rows = 1000.0;
-        plan.plan_width = 100;
+    /// Uses the PostgreSQL cost model:
+    /// - SeqScan: `startup = 0`, `total = relpages * seq_page_cost + reltuples * cpu_tuple_cost`
+    /// - `plan_rows = reltuples`
+    /// - `plan_width = sum(avg_width)` across all columns
+    ///
+    /// Falls back to conservative defaults when statistics are unavailable.
+    unsafe fn set_costs_from_stats(&self, plan: &mut pg_sys::Plan, table: &str) {
+        // PostgreSQL cost constants (from GUC defaults)
+        const SEQ_PAGE_COST: f64 = 1.0;
+        const CPU_TUPLE_COST: f64 = 0.01;
+
+        let table_lower = table.to_lowercase();
+        if let Some(stats) = self.stats.get(&table_lower) {
+            let reltuples = stats.row_count.max(1.0);
+            let relpages = if stats.total_size > 0 {
+                (stats.total_size as f64 / 8192.0).max(1.0)
+            } else {
+                (reltuples / 50.0).max(1.0) // estimate ~50 tuples per page
+            };
+
+            plan.startup_cost = 0.0;
+            plan.total_cost = relpages * SEQ_PAGE_COST + reltuples * CPU_TUPLE_COST;
+            plan.plan_rows = reltuples;
+
+            // Sum avg_width from column stats, or default to 100
+            let width: i32 = if stats.columns.is_empty() {
+                100
+            } else {
+                stats
+                    .columns
+                    .values()
+                    .map(|c| c.avg_length.unwrap_or(8.0) as i32)
+                    .sum::<i32>()
+                    .max(1)
+            };
+            plan.plan_width = width;
+        } else {
+            // No statistics available — use conservative defaults
+            plan.startup_cost = 0.0;
+            plan.total_cost = 100.0;
+            plan.plan_rows = 1000.0;
+            plan.plan_width = 100;
+        }
+    }
+
+    /// Set cost estimates for an index scan using selectivity and random I/O.
+    ///
+    /// Index scans have higher per-page cost (random I/O) but read fewer pages.
+    unsafe fn set_index_costs(&self, plan: &mut pg_sys::Plan, table: &str, selectivity: f64) {
+        const RANDOM_PAGE_COST: f64 = 4.0;
+        const CPU_TUPLE_COST: f64 = 0.01;
+        const CPU_INDEX_TUPLE_COST: f64 = 0.005;
+
+        let table_lower = table.to_lowercase();
+        if let Some(stats) = self.stats.get(&table_lower) {
+            let reltuples = stats.row_count.max(1.0);
+            let relpages = if stats.total_size > 0 {
+                (stats.total_size as f64 / 8192.0).max(1.0)
+            } else {
+                (reltuples / 50.0).max(1.0)
+            };
+
+            let selected_tuples = (reltuples * selectivity).max(1.0);
+            let pages_fetched = (relpages * selectivity).max(1.0);
+
+            plan.startup_cost = 0.1; // Index startup cost
+            plan.total_cost = pages_fetched * RANDOM_PAGE_COST
+                + selected_tuples * (CPU_INDEX_TUPLE_COST + CPU_TUPLE_COST);
+            plan.plan_rows = selected_tuples;
+            plan.plan_width = 100;
+        } else {
+            plan.startup_cost = 0.1;
+            plan.total_cost = 50.0;
+            plan.plan_rows = 100.0;
+            plan.plan_width = 100;
+        }
     }
 
     /// Propagate costs from two child nodes to a join node.
@@ -1152,6 +1602,59 @@ impl PlanBuilder {
         plan.total_cost = left_cost + right_cost + left_rows * right_rows * 0.01;
         plan.plan_rows = (left_rows * right_rows * 0.1).max(1.0);
         plan.plan_width = 200;
+    }
+
+    // -----------------------------------------------------------------------
+    // DML plan nodes
+    // -----------------------------------------------------------------------
+
+    /// Build a `ModifyTable` plan node wrapping a subplan.
+    ///
+    /// `table` is the target relation name. `sub_expr` is the source
+    /// query (for INSERT) or the scan/join producing rows to modify
+    /// (for UPDATE/DELETE). `cmd_type` is CMD_INSERT, CMD_UPDATE, or
+    /// CMD_DELETE.
+    unsafe fn build_modify_table(
+        &mut self,
+        table: &str,
+        sub_expr: &RelExpr,
+        cmd_type: pg_sys::CmdType,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        // Build the subplan (source query or target scan).
+        let subplan = self.build_plan(sub_expr)?;
+
+        // Allocate ModifyTable node.
+        let mt = self.alloc_node::<pg_sys::ModifyTable>();
+        if mt.is_null() {
+            return Err(PlanBuilderError::NullPointer(
+                "ModifyTable allocation".to_string(),
+            ));
+        }
+
+        (*mt).plan.type_ = pg_sys::NodeTag::T_ModifyTable;
+        (*mt).operation = cmd_type;
+
+        // Resolve target relation OID and RT index.
+        let table_lower = table.to_lowercase();
+        if let Some(&(rtindex, _oid)) = self.expr_ctx.rtindex_map.get(&table_lower) {
+            (*mt).nominalRelation = rtindex as u32;
+            (*mt).rootRelation = rtindex as u32;
+            // resultRelations list with the single target.
+            (*mt).resultRelations = pg_sys::list_make1_int(rtindex as i32);
+        }
+
+        // Attach subplan.
+        (*mt).plan.lefttree = subplan;
+
+        // Propagate cost from subplan.
+        if !subplan.is_null() {
+            (*mt).plan.startup_cost = (*subplan).startup_cost;
+            (*mt).plan.total_cost = (*subplan).total_cost + 10.0; // ModifyTable overhead
+            (*mt).plan.plan_rows = (*subplan).plan_rows;
+            (*mt).plan.plan_width = (*subplan).plan_width;
+        }
+
+        Ok(mt.cast())
     }
 
     /// Allocate a zeroed PostgreSQL node of type `T` in the current memory context.

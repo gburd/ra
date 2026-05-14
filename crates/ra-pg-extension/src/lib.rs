@@ -13,13 +13,16 @@ use pgrx::prelude::*;
 pub mod ab_testing;
 mod expr_translator;
 mod extension_state;
+pub(crate) mod index_resolver;
 pub mod feedback_hook;
 mod metadata_cache;
 pub mod model_safety;
 pub mod monitor;
+pub(crate) mod parser_hook;
 mod plan_builder;
 mod planner_hook;
 mod query_parser;
+pub(crate) mod sort_utils;
 pub mod stats_bridge;
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -49,6 +52,9 @@ pub extern "C-unwind" fn _PG_init() {
 
     // Register relcache invalidation callback for metadata cache
     register_relcache_callback();
+
+    // Hook into PostgreSQL raw parser (requires patched PG)
+    parser_hook::register_parser_hook();
 
     // Hook into PostgreSQL planner
     planner_hook::register_hooks();

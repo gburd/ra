@@ -891,4 +891,233 @@ mod tests {
         // Should return top 2 regions per category where category total > 1000
         assert!(result.unwrap().unwrap() >= 1);
     }
+
+    // =========================================================================
+    // Correctness verification tests: compare Ra planner vs native PostgreSQL
+    // =========================================================================
+
+    /// Run a query with Ra enabled and disabled, compare results row-by-row.
+    /// When `ordered` is false, both result sets are sorted before comparison.
+    unsafe fn compare_ra_vs_native(sql: &str, ordered: bool) {
+        // Run with Ra
+        Spi::run("SET ra_planner.enabled = true").unwrap();
+        let ra_rows: Vec<String> = Spi::connect(|client| {
+            let table = client.select(sql, None, None).unwrap();
+            table
+                .map(|row| {
+                    let ncols = row.columns();
+                    (0..ncols)
+                        .map(|i| {
+                            row.get::<String>(i + 1)
+                                .ok()
+                                .flatten()
+                                .unwrap_or_else(|| "NULL".to_string())
+                        })
+                        .collect::<Vec<_>>()
+                        .join("|")
+                })
+                .collect()
+        });
+
+        // Run without Ra
+        Spi::run("SET ra_planner.enabled = false").unwrap();
+        let native_rows: Vec<String> = Spi::connect(|client| {
+            let table = client.select(sql, None, None).unwrap();
+            table
+                .map(|row| {
+                    let ncols = row.columns();
+                    (0..ncols)
+                        .map(|i| {
+                            row.get::<String>(i + 1)
+                                .ok()
+                                .flatten()
+                                .unwrap_or_else(|| "NULL".to_string())
+                        })
+                        .collect::<Vec<_>>()
+                        .join("|")
+                })
+                .collect()
+        });
+
+        // Compare
+        let (mut ra_sorted, mut native_sorted) =
+            (ra_rows.clone(), native_rows.clone());
+        if !ordered {
+            ra_sorted.sort();
+            native_sorted.sort();
+        }
+
+        assert_eq!(
+            ra_sorted.len(),
+            native_sorted.len(),
+            "Row count mismatch for query: {sql}\n\
+             Ra: {} rows, Native: {} rows",
+            ra_sorted.len(),
+            native_sorted.len()
+        );
+
+        for (i, (ra, native)) in
+            ra_sorted.iter().zip(native_sorted.iter()).enumerate()
+        {
+            assert_eq!(
+                ra, native,
+                "Row {i} differs for query: {sql}\nRa: {ra}\nNative: {native}"
+            );
+        }
+    }
+
+    #[pg_test]
+    fn test_correctness_simple_scan() {
+        unsafe {
+            Spi::run("CREATE TABLE test_scan (id int, name text)").unwrap();
+            Spi::run("INSERT INTO test_scan VALUES (1,'a'),(2,'b'),(3,'c')")
+                .unwrap();
+            Spi::run("ANALYZE test_scan").unwrap();
+            compare_ra_vs_native(
+                "SELECT * FROM test_scan ORDER BY id",
+                true,
+            );
+            Spi::run("DROP TABLE test_scan").unwrap();
+        }
+    }
+
+    #[pg_test]
+    fn test_correctness_filter() {
+        unsafe {
+            Spi::run("CREATE TABLE test_filter (id int, val int)").unwrap();
+            Spi::run(
+                "INSERT INTO test_filter \
+                 SELECT g, g*10 FROM generate_series(1,100) g",
+            )
+            .unwrap();
+            Spi::run("ANALYZE test_filter").unwrap();
+            compare_ra_vs_native(
+                "SELECT * FROM test_filter WHERE val > 500 ORDER BY id",
+                true,
+            );
+            Spi::run("DROP TABLE test_filter").unwrap();
+        }
+    }
+
+    #[pg_test]
+    fn test_correctness_join() {
+        unsafe {
+            Spi::run("CREATE TABLE test_left (id int, name text)").unwrap();
+            Spi::run("CREATE TABLE test_right (id int, value int)").unwrap();
+            Spi::run(
+                "INSERT INTO test_left VALUES (1,'a'),(2,'b'),(3,'c')",
+            )
+            .unwrap();
+            Spi::run(
+                "INSERT INTO test_right VALUES (1,10),(2,20),(4,40)",
+            )
+            .unwrap();
+            Spi::run("ANALYZE test_left").unwrap();
+            Spi::run("ANALYZE test_right").unwrap();
+            compare_ra_vs_native(
+                "SELECT l.id, l.name, r.value \
+                 FROM test_left l JOIN test_right r ON l.id = r.id \
+                 ORDER BY l.id",
+                true,
+            );
+            Spi::run("DROP TABLE test_left").unwrap();
+            Spi::run("DROP TABLE test_right").unwrap();
+        }
+    }
+
+    #[pg_test]
+    fn test_correctness_aggregate() {
+        unsafe {
+            Spi::run("CREATE TABLE test_agg (grp text, val int)").unwrap();
+            Spi::run(
+                "INSERT INTO test_agg VALUES \
+                 ('a',1),('a',2),('b',3),('b',4),('c',5)",
+            )
+            .unwrap();
+            Spi::run("ANALYZE test_agg").unwrap();
+            compare_ra_vs_native(
+                "SELECT grp, count(*), sum(val) \
+                 FROM test_agg GROUP BY grp ORDER BY grp",
+                true,
+            );
+            Spi::run("DROP TABLE test_agg").unwrap();
+        }
+    }
+
+    #[pg_test]
+    fn test_correctness_distinct() {
+        unsafe {
+            Spi::run("CREATE TABLE test_dist (val int)").unwrap();
+            Spi::run(
+                "INSERT INTO test_dist VALUES (1),(1),(2),(2),(3)",
+            )
+            .unwrap();
+            Spi::run("ANALYZE test_dist").unwrap();
+            compare_ra_vs_native(
+                "SELECT DISTINCT val FROM test_dist ORDER BY val",
+                true,
+            );
+            Spi::run("DROP TABLE test_dist").unwrap();
+        }
+    }
+
+    #[pg_test]
+    fn test_correctness_limit_offset() {
+        unsafe {
+            Spi::run("CREATE TABLE test_limit (id int)").unwrap();
+            Spi::run(
+                "INSERT INTO test_limit \
+                 SELECT g FROM generate_series(1,20) g",
+            )
+            .unwrap();
+            Spi::run("ANALYZE test_limit").unwrap();
+            compare_ra_vs_native(
+                "SELECT id FROM test_limit ORDER BY id LIMIT 5 OFFSET 10",
+                true,
+            );
+            Spi::run("DROP TABLE test_limit").unwrap();
+        }
+    }
+
+    #[pg_test]
+    fn test_correctness_subquery() {
+        unsafe {
+            Spi::run("CREATE TABLE test_sub (id int, val int)").unwrap();
+            Spi::run(
+                "INSERT INTO test_sub VALUES \
+                 (1,10),(2,20),(3,30),(4,40)",
+            )
+            .unwrap();
+            Spi::run("ANALYZE test_sub").unwrap();
+            compare_ra_vs_native(
+                "SELECT id, val FROM test_sub \
+                 WHERE val > (SELECT avg(val) FROM test_sub) \
+                 ORDER BY id",
+                true,
+            );
+            Spi::run("DROP TABLE test_sub").unwrap();
+        }
+    }
+
+    #[pg_test]
+    fn test_correctness_null_handling() {
+        unsafe {
+            Spi::run("CREATE TABLE test_null (id int, val text)").unwrap();
+            Spi::run(
+                "INSERT INTO test_null VALUES \
+                 (1,'a'),(2,NULL),(3,'c'),(4,NULL)",
+            )
+            .unwrap();
+            Spi::run("ANALYZE test_null").unwrap();
+            compare_ra_vs_native(
+                "SELECT * FROM test_null ORDER BY id",
+                true,
+            );
+            compare_ra_vs_native(
+                "SELECT * FROM test_null WHERE val IS NULL ORDER BY id",
+                true,
+            );
+            Spi::run("DROP TABLE test_null").unwrap();
+        }
+    }
 }
