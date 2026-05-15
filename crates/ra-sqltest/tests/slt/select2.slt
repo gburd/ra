@@ -104,9 +104,11 @@ SELECT * FROM nation n WHERE EXISTS (SELECT 1 FROM customer c JOIN orders o ON c
 ----
 ok
 
-# ANY/SOME quantified comparison (not supported by Ra parser)
-statement error
+# ANY/SOME quantified comparison
+query T
 SELECT * FROM orders WHERE o_totalprice > ANY (SELECT o_totalprice FROM orders WHERE o_orderstatus = 'F')
+----
+ok
 
 # ALL quantified comparison (supported by parser)
 query T

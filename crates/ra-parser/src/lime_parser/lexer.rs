@@ -140,6 +140,9 @@ pub mod token {
     pub const WITHIN: i32 = 110;
     pub const MATERIALIZED: i32 = 111;
     pub const TILDE: i32 = 112;
+
+    // SIMILAR TO operator
+    pub const SIMILAR: i32 = 113;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -304,6 +307,8 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "DO" => Some(token::DO),
         "NOTHING" => Some(token::NOTHING),
         "DEFAULT" => Some(token::DEFAULT),
+        // SIMILAR TO operator
+        "SIMILAR" => Some(token::SIMILAR),
         // Note: DATE, INTERVAL, and SUBSTRING are intentionally NOT keywords
         // — they are commonly used as column/function names. SUBSTRING is
         // handled via IDENT rules for FROM...FOR syntax.

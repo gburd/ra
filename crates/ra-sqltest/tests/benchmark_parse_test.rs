@@ -2,10 +2,6 @@
 //!
 //! Ensures every SELECT query in TPC-H, JOB, TPC-DS, and book-queries
 //! directories can be parsed and optimized by Ra with zero regressions.
-//!
-//! Known deferred failures:
-//! - TPC-DS q23, q44: subquery expressions not yet supported in e-graph
-//! - Book queries: 2 DML-in-CTE (WITH ... UPDATE/DELETE), 1 SIMILAR TO
 
 use ra_engine::Optimizer;
 use ra_parser::sql_to_relexpr;
@@ -133,37 +129,24 @@ fn job_all_queries_parse_and_optimize() {
 fn tpcds_all_queries_parse_and_optimize() {
     let dir = base_dir().join("benchmarks/tpcds/queries");
     let (pass, fail, errors) = test_sql_dir(&dir);
-    // 2 known failures: q23, q44 use subquery expressions not yet
-    // supported in the e-graph representation (separate effort).
-    let expected_failures = 2;
-    if fail > expected_failures {
+    if fail > 0 {
         eprintln!("TPC-DS failures ({fail}/{}):", pass + fail);
         for e in &errors {
             eprintln!("{e}");
         }
     }
-    assert!(
-        fail <= expected_failures,
-        "TPC-DS: {fail} failures (expected at most {expected_failures})"
-    );
+    assert_eq!(fail, 0, "TPC-DS: {fail} queries failed");
 }
 
 #[test]
 fn book_queries_parse_and_optimize() {
     let dir = base_dir().join("tests/book-queries");
     let (pass, fail, errors) = test_sql_dir(&dir);
-    // 3 known failures:
-    // - 2 DML-in-CTE (WITH ... UPDATE/DELETE) — requires planner changes
-    // - 1 SIMILAR TO operator — not yet implemented
-    let expected_failures = 3;
-    if fail > expected_failures {
+    if fail > 0 {
         eprintln!("Book query failures ({fail}/{}):", pass + fail);
         for e in &errors {
             eprintln!("{e}");
         }
     }
-    assert!(
-        fail <= expected_failures,
-        "Book queries: {fail} failures (expected at most {expected_failures})"
-    );
+    assert_eq!(fail, 0, "Book queries: {fail} queries failed");
 }

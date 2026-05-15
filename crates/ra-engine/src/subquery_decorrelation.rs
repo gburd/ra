@@ -268,10 +268,41 @@ fn try_decorrelate_predicate(predicate: &Expr, input: RelExpr) -> Option<RelExpr
             {
                 return decorrelate_scalar_comparison(*op, right, query, input);
             }
+
+            // Nested subquery: e.g., `agg > 0.95 * (SELECT scalar)`
+            // Use replace_subquery_in_expr to hoist into CrossJoin.
+            if contains_subquery(left) || contains_subquery(right) {
+                let mut counter = 0usize;
+                let (new_pred, new_input) = replace_subquery_in_expr(
+                    &Expr::BinOp {
+                        op: *op,
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                    input,
+                    &mut counter,
+                );
+                return Some(RelExpr::Filter {
+                    predicate: new_pred,
+                    input: Box::new(new_input),
+                });
+            }
             None
         }
 
-        _ => None,
+        other => {
+            if contains_subquery(other) {
+                let mut counter = 0usize;
+                let (new_pred, new_input) =
+                    replace_subquery_in_expr(other, input, &mut counter);
+                Some(RelExpr::Filter {
+                    predicate: new_pred,
+                    input: Box::new(new_input),
+                })
+            } else {
+                None
+            }
+        }
     }
 }
 

@@ -186,6 +186,9 @@ typedef struct RaToken {
 %token MATERIALIZED.
 %token TILDE.
 
+/* SIMILAR TO operator */
+%token SIMILAR.
+
 /* ================================================================== */
 /* Precedence (low to high)                                            */
 /* ================================================================== */
@@ -195,7 +198,7 @@ typedef struct RaToken {
 %left OR.
 %left AND.
 %right NOT.
-%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE BETWEEN AT_GT LT_AT AT_QUESTION AT_AT PLACEHOLDER JSONB_EXISTS JSONB_ANY_KEY JSONB_ALL_KEYS TILDE.
+%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE SIMILAR BETWEEN AT_GT LT_AT AT_QUESTION AT_AT PLACEHOLDER JSONB_EXISTS JSONB_ANY_KEY JSONB_ALL_KEYS TILDE.
 %left ARROW ARROW_TEXT JSONB_TEXT_PATH.
 %left PLUS MINUS CONCAT.
 %left STAR SLASH PERCENT.
@@ -260,6 +263,14 @@ with_rest(A) ::= IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPAREN COMMA
     A = ra_cte(pstate, B.text, C, D);
 }
 
+/* with_rest terminal rules ending in DML */
+with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN update_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN delete_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+
 /* MATERIALIZED / NOT MATERIALIZED CTE hints (parsed, hint ignored) */
 with_clause(A) ::= WITH IDENT(B) AS MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
@@ -273,6 +284,22 @@ with_clause(A) ::= WITH IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPARE
  * RecursiveCTE; otherwise it creates a regular CTE. */
 with_clause(A) ::= WITH RECURSIVE IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_recursive_cte_auto(pstate, B.text, strlen(B.text), C, D);
+}
+
+/* CTE with DML body: UPDATE */
+with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN update_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+with_clause(A) ::= WITH IDENT(B) LPAREN ident_list RPAREN AS LPAREN select_stmt(C) RPAREN update_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+
+/* CTE with DML body: DELETE */
+with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN delete_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+with_clause(A) ::= WITH IDENT(B) LPAREN ident_list RPAREN AS LPAREN select_stmt(C) RPAREN delete_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
 }
 
 /* -- SELECT statement with set operations -------------------------- */
@@ -1075,6 +1102,23 @@ expr(A) ::= expr(B) NOT ILIKE expr(C). [ILIKE] {
     l = ra_list_push(pstate, l, C);
     RaNode *ilike = ra_func(pstate, "__ilike", l);
     A = ra_unary_op(pstate, 0, ilike); /* NOT */
+}
+
+/* -- SIMILAR TO ---------------------------------------------------- */
+
+expr(A) ::= expr(B) SIMILAR IDENT expr(C). [SIMILAR] {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, B);
+    l = ra_list_push(pstate, l, C);
+    A = ra_func(pstate, "__similar_to", l);
+}
+
+expr(A) ::= expr(B) NOT SIMILAR IDENT expr(C). [SIMILAR] {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, B);
+    l = ra_list_push(pstate, l, C);
+    RaNode *sim = ra_func(pstate, "__similar_to", l);
+    A = ra_unary_op(pstate, 0, sim); /* NOT */
 }
 
 /* -- IN expression ------------------------------------------------- */

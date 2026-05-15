@@ -156,6 +156,8 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         b"WINDOW" => Some(token::WINDOW),
         b"WITHIN" => Some(token::WITHIN),
         b"MATERIALIZED" => Some(token::MATERIALIZED),
+        // SIMILAR TO operator
+        b"SIMILAR" => Some(token::SIMILAR),
         _ => None,
     }
 }

@@ -534,6 +534,18 @@ impl EmitContext {
                 let hi = self.emit_expr(&args[2])?;
                 Ok(Some(format!("{e} BETWEEN {lo} AND {hi}")))
             }
+            // SIMILAR TO operator
+            "__SIMILAR_TO" if args.len() == 2 => {
+                let l = self.emit_expr(&args[0])?;
+                let r = self.emit_expr(&args[1])?;
+                Ok(Some(format!("({l} SIMILAR TO {r})")))
+            }
+            // Regex match operator (~)
+            "__REGEX_MATCH" if args.len() == 2 => {
+                let l = self.emit_expr(&args[0])?;
+                let r = self.emit_expr(&args[1])?;
+                Ok(Some(format!("({l} ~ {r})")))
+            }
             _ => Ok(None),
         }
     }

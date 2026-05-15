@@ -463,6 +463,25 @@ impl Optimizer {
                     returning: returning.clone(),
                 }))
             }
+            // CTE with DML body: optimize definition through e-graph,
+            // handle DML body via DML fast-path recursion.
+            RelExpr::CTE {
+                name,
+                definition,
+                body,
+            } if matches!(
+                body.as_ref(),
+                RelExpr::Update { .. } | RelExpr::Delete { .. } | RelExpr::Insert { .. }
+            ) =>
+            {
+                let optimized_def = self.optimize(definition)?;
+                let optimized_body = self.optimize(body)?;
+                Ok(Some(RelExpr::CTE {
+                    name: name.clone(),
+                    definition: Box::new(optimized_def),
+                    body: Box::new(optimized_body),
+                }))
+            }
             _ => Ok(None),
         }
     }
