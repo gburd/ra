@@ -176,9 +176,11 @@ SELECT c.c_name, combined.total FROM customer c JOIN (SELECT o_custkey, SUM(o_to
 ----
 ok
 
-# Natural join (not supported by Ra parser)
-statement error
+# Natural join
+query T
 SELECT * FROM nation NATURAL JOIN region
+----
+ok
 
 # Left join with aggregate in subquery
 query T

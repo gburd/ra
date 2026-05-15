@@ -133,6 +133,13 @@ pub mod token {
     pub const DO: i32 = 105;
     pub const NOTHING: i32 = 106;
     pub const DEFAULT: i32 = 107;
+
+    // Parser gap fixes: NATURAL, WINDOW, WITHIN, MATERIALIZED, TILDE
+    pub const NATURAL: i32 = 108;
+    pub const WINDOW: i32 = 109;
+    pub const WITHIN: i32 = 110;
+    pub const MATERIALIZED: i32 = 111;
+    pub const TILDE: i32 = 112;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -360,6 +367,7 @@ fn match_single_char_op(byte: u8) -> Option<i32> {
         b'[' => Some(token::LBRACKET),
         b']' => Some(token::RBRACKET),
         b'?' => Some(token::PLACEHOLDER),
+        b'~' => Some(token::TILDE),
         _ => None,
     }
 }

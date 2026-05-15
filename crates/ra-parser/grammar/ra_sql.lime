@@ -179,16 +179,23 @@ typedef struct RaToken {
 %token NOTHING.
 %token DEFAULT.
 
+/* Parser gap fix tokens */
+%token NATURAL.
+%token WINDOW.
+%token WITHIN.
+%token MATERIALIZED.
+%token TILDE.
+
 /* ================================================================== */
 /* Precedence (low to high)                                            */
 /* ================================================================== */
 
-%left JOIN INNER LEFT RIGHT FULL CROSS.
+%left JOIN INNER LEFT RIGHT FULL CROSS NATURAL.
 %left UNION INTERSECT EXCEPT.
 %left OR.
 %left AND.
 %right NOT.
-%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE BETWEEN AT_GT LT_AT AT_QUESTION AT_AT PLACEHOLDER JSONB_EXISTS JSONB_ANY_KEY JSONB_ALL_KEYS.
+%nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE BETWEEN AT_GT LT_AT AT_QUESTION AT_AT PLACEHOLDER JSONB_EXISTS JSONB_ANY_KEY JSONB_ALL_KEYS TILDE.
 %left ARROW ARROW_TEXT JSONB_TEXT_PATH.
 %left PLUS MINUS CONCAT.
 %left STAR SLASH PERCENT.
@@ -240,6 +247,26 @@ with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
 with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+with_rest(A) ::= IDENT(B) AS MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+with_rest(A) ::= IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+with_rest(A) ::= IDENT(B) AS MATERIALIZED LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+with_rest(A) ::= IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+
+/* MATERIALIZED / NOT MATERIALIZED CTE hints (parsed, hint ignored) */
+with_clause(A) ::= WITH IDENT(B) AS MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
+with_clause(A) ::= WITH IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
+    A = ra_cte(pstate, B.text, C, D);
+}
 
 /* WITH RECURSIVE: body is select_stmt (may or may not include UNION ALL).
  * ra_recursive_cte_auto inspects the body: if it's a UNION ALL node it creates
@@ -251,6 +278,7 @@ with_clause(A) ::= WITH RECURSIVE IDENT(B) AS LPAREN select_stmt(C) RPAREN selec
 /* -- SELECT statement with set operations -------------------------- */
 
 select_stmt(A) ::= select_no_parens(B).     { A = B; }
+select_stmt(A) ::= LPAREN select_stmt(B) RPAREN. { A = B; }
 select_stmt(A) ::= select_no_parens(B) UNION ALL select_no_parens(C). {
     A = ra_union(pstate, B, C, 1);
 }
@@ -326,6 +354,43 @@ select_no_parens(A) ::= SELECT target_list(B) from_clause(C)
 
 select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
                          where_clause(D) group_clause(E) having_clause(H)
+                         order_clause(F) limit_clause(G). {
+    RaNode *base = C;
+    if (D) { base = ra_filter(pstate, base, D); }
+    if (E) { base = ra_aggregate(pstate, base, E, ra_list_new(pstate)); }
+    if (H) { base = ra_filter(pstate, base, H); }
+    base = ra_project(pstate, base, B);
+    base = ra_distinct(pstate, base);
+    if (F) { base = ra_sort(pstate, base, F); }
+    if (G.float_val != 0.0) {
+        base = ra_limit(pstate, base, (uint64_t)G.int_val, (uint64_t)G.location);
+    }
+    A = base;
+}
+
+/* Named WINDOW clause: SELECT ... WINDOW w AS (...) ORDER BY ... */
+/* The named window is parsed but the definition is ignored; window
+ * functions already inline their OVER spec. */
+
+select_no_parens(A) ::= SELECT target_list(B) from_clause(C)
+                         where_clause(D) group_clause(E) having_clause(H)
+                         WINDOW IDENT AS LPAREN opt_partition opt_window_order opt_window_frame RPAREN
+                         order_clause(F) limit_clause(G). {
+    RaNode *base = C;
+    if (D) { base = ra_filter(pstate, base, D); }
+    if (E) { base = ra_aggregate(pstate, base, E, ra_list_new(pstate)); }
+    if (H) { base = ra_filter(pstate, base, H); }
+    base = ra_project(pstate, base, B);
+    if (F) { base = ra_sort(pstate, base, F); }
+    if (G.float_val != 0.0) {
+        base = ra_limit(pstate, base, (uint64_t)G.int_val, (uint64_t)G.location);
+    }
+    A = base;
+}
+
+select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
+                         where_clause(D) group_clause(E) having_clause(H)
+                         WINDOW IDENT AS LPAREN opt_partition opt_window_order opt_window_frame RPAREN
                          order_clause(F) limit_clause(G). {
     RaNode *base = C;
     if (D) { base = ra_filter(pstate, base, D); }
@@ -419,6 +484,36 @@ table_ref(A) ::= table_ref(B) JOIN table_ref(C) ON expr(D). {
 table_ref(A) ::= table_ref(B) CROSS JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 4, B, C, cond); /* 4 = Cross */
+}
+
+/* NATURAL JOIN: inner join on all same-named columns (matching deferred to optimizer) */
+table_ref(A) ::= table_ref(B) NATURAL JOIN table_ref(C). {
+    RaNode *cond = ra_const_int(pstate, 1);
+    A = ra_join(pstate, 0, B, C, cond); /* 0 = Inner */
+}
+table_ref(A) ::= table_ref(B) NATURAL LEFT JOIN table_ref(C). {
+    RaNode *cond = ra_const_int(pstate, 1);
+    A = ra_join(pstate, 1, B, C, cond); /* 1 = Left */
+}
+table_ref(A) ::= table_ref(B) NATURAL LEFT OUTER JOIN table_ref(C). {
+    RaNode *cond = ra_const_int(pstate, 1);
+    A = ra_join(pstate, 1, B, C, cond);
+}
+table_ref(A) ::= table_ref(B) NATURAL RIGHT JOIN table_ref(C). {
+    RaNode *cond = ra_const_int(pstate, 1);
+    A = ra_join(pstate, 2, B, C, cond); /* 2 = Right */
+}
+table_ref(A) ::= table_ref(B) NATURAL RIGHT OUTER JOIN table_ref(C). {
+    RaNode *cond = ra_const_int(pstate, 1);
+    A = ra_join(pstate, 2, B, C, cond);
+}
+table_ref(A) ::= table_ref(B) NATURAL FULL JOIN table_ref(C). {
+    RaNode *cond = ra_const_int(pstate, 1);
+    A = ra_join(pstate, 3, B, C, cond); /* 3 = Full */
+}
+table_ref(A) ::= table_ref(B) NATURAL FULL OUTER JOIN table_ref(C). {
+    RaNode *cond = ra_const_int(pstate, 1);
+    A = ra_join(pstate, 3, B, C, cond);
 }
 
 /* Table function in FROM: func(args) AS alias or func(args) AS alias(cols) */
@@ -1063,6 +1158,14 @@ type_name(A) ::= IDENT(B) LPAREN ICONST RPAREN. {
     A.length = 0;
     A.float_val = 0;
 }
+type_name(A) ::= IDENT(B) LPAREN ICONST COMMA ICONST RPAREN. {
+    /* e.g. DECIMAL(15,4), NUMERIC(10,2) -- use just the base type name */
+    A.text = B.text;
+    A.int_val = (int64_t)strlen(B.text);
+    A.location = B.location;
+    A.length = 0;
+    A.float_val = 0;
+}
 
 /* -- Scalar subquery ----------------------------------------------- */
 
@@ -1130,6 +1233,14 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN. {
     A = ra_func(pstate, B.text, args);
 }
 
+/* -- WITHIN GROUP (ordered-set aggregates) ------------------------- */
+/* e.g. PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) */
+
+expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN WITHIN GROUP LPAREN ORDER BY sort_list(D) RPAREN. {
+    (void)D;
+    A = ra_func(pstate, B.text, C);
+}
+
 /* -- Window function ----------------------------------------------- */
 /* func(args) OVER (opt_partition opt_order)
  * The __window_ prefix marks this as a window expression so the
@@ -1153,6 +1264,19 @@ expr(A) ::= IDENT(B) LPAREN RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) opt_window_frame(E) RPAREN. {
     A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), C, D);
     (void)E;
+}
+
+/* Named window reference: func() OVER w — treated as empty window spec */
+expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER IDENT. {
+    A = ra_window_marker_full(pstate, B.text, C, 0, 0);
+}
+expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER IDENT. {
+    RaNode *l = ra_list_new(pstate);
+    l = ra_list_push(pstate, l, ra_column(pstate, "*"));
+    A = ra_window_marker_full(pstate, B.text, l, 0, 0);
+}
+expr(A) ::= IDENT(B) LPAREN RPAREN OVER IDENT. {
+    A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), 0, 0);
 }
 
 opt_partition(A) ::= PARTITION BY expr_list(B). { A = B; }
@@ -1250,6 +1374,15 @@ expr(A) ::= expr(B) LBRACKET expr(C) RBRACKET. [LBRACKET] {
 
 expr(A) ::= PLACEHOLDER. {
     A = ra_const_null(pstate); /* placeholder maps to NULL for now */
+}
+
+/* -- Regex match operator (~) -------------------------------------- */
+
+expr(A) ::= expr(B) TILDE expr(C). [TILDE] {
+    RaNode *args = ra_list_new(pstate);
+    args = ra_list_push(pstate, args, B);
+    args = ra_list_push(pstate, args, C);
+    A = ra_func(pstate, "__regex_match", args);
 }
 
 /* -- Parenthesized expression -------------------------------------- */

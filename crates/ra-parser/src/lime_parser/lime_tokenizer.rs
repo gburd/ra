@@ -67,12 +67,12 @@ fn map_c_code(code: i32) -> Option<i32> {
     }
 }
 
-/// Fast keyword lookup on raw bytes. Max keyword length is 10.
+/// Fast keyword lookup on raw bytes. Max keyword length is 12.
 fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
-    if bytes.len() > 10 {
+    if bytes.len() > 12 {
         return None;
     }
-    let mut buf = [0u8; 10];
+    let mut buf = [0u8; 12];
     for (i, &b) in bytes.iter().enumerate() {
         buf[i] = b.to_ascii_uppercase();
     }
@@ -151,6 +151,11 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         b"DO" => Some(token::DO),
         b"NOTHING" => Some(token::NOTHING),
         b"DEFAULT" => Some(token::DEFAULT),
+        // Parser gap fixes
+        b"NATURAL" => Some(token::NATURAL),
+        b"WINDOW" => Some(token::WINDOW),
+        b"WITHIN" => Some(token::WITHIN),
+        b"MATERIALIZED" => Some(token::MATERIALIZED),
         _ => None,
     }
 }

@@ -682,9 +682,16 @@ impl Optimizer {
         if joins.is_empty() {
             return Ok(None);
         }
-        let result = large_optimizer
-            .optimize(joins)
-            .map_err(|e| EGraphError::ExtractionError(e.to_string()))?;
+        let result = match large_optimizer.optimize(joins) {
+            Ok(r) => r,
+            Err(e) => {
+                use tracing::info;
+                info!(
+                    "Large-join optimizer unavailable ({e}), falling back to e-graph"
+                );
+                return Ok(None);
+            }
+        };
         self.insert_into_cache(fingerprint.as_ref(), &result);
         Ok(Some(result))
     }
