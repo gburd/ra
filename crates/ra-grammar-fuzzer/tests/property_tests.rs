@@ -2,258 +2,390 @@
 //!
 //! Short tests run in normal CI. Long-duration tests are gated
 //! behind the `long-duration-testing` feature flag.
+//!
+//! All proptest-based tests run on a 32 MB stack thread because the
+//! egg equality saturation engine recurses deeply during pattern
+//! matching on generated RelExpr trees.
 
 use proptest::prelude::*;
+use proptest::test_runner::{TestCaseError, TestRunner};
 use ra_grammar_fuzzer::generator::SqlGenerator;
 use ra_grammar_fuzzer::properties::{OptimizerProperty, PropertyValidator};
 use ra_grammar_fuzzer::storyline::{arb_storyline, StorylinePattern};
 use std::time::Duration;
 
+/// Stack size for property tests (32 MB).
+const PROPTEST_STACK_SIZE: usize = 32 * 1024 * 1024;
+
+/// Run a proptest on a thread with sufficient stack.
+fn run_on_large_stack(name: &str, f: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .stack_size(PROPTEST_STACK_SIZE)
+        .spawn(f)
+        .expect("spawn test thread")
+        .join()
+        .expect("test thread panicked");
+}
+
 // -------------------------------------------------------------------
 // Standard CI property tests (fast, run on every build)
 // -------------------------------------------------------------------
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+/// Every generated expression should pass rule safety.
+#[test]
+fn rule_safety_on_generated_expressions() {
+    run_on_large_stack("rule_safety_on_generated_expressions", || {
+        let config = ProptestConfig::with_cases(50);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(&SqlGenerator::new().strategy(), |expr| {
+                let validator = PropertyValidator::new(vec![
+                    OptimizerProperty::RuleSafety,
+                ])
+                .with_time_limit(Duration::from_secs(10));
+                for result in &validator.validate(&expr) {
+                    if !result.passed {
+                        return Err(TestCaseError::Fail(
+                            format!(
+                                "property {} failed: {}",
+                                result.property, result.details,
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+    });
+}
 
-    /// Every generated expression should pass rule safety.
-    #[test]
-    fn rule_safety_on_generated_expressions(
-        expr in SqlGenerator::new().strategy()
-    ) {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::RuleSafety,
-        ]).with_time_limit(Duration::from_secs(10));
-        let results = validator.validate(&expr);
-        for result in &results {
-            prop_assert!(
-                result.passed,
-                "property {} failed: {}",
-                result.property,
-                result.details
-            );
-        }
-    }
+/// Every generated expression should pass roundtrip conversion.
+#[test]
+fn roundtrip_on_generated_expressions() {
+    run_on_large_stack("roundtrip_on_generated_expressions", || {
+        let config = ProptestConfig::with_cases(50);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(&SqlGenerator::new().strategy(), |expr| {
+                let validator = PropertyValidator::new(vec![
+                    OptimizerProperty::Roundtrip,
+                ]);
+                for result in &validator.validate(&expr) {
+                    if !result.passed {
+                        return Err(TestCaseError::Fail(
+                            format!(
+                                "property {} failed: {}",
+                                result.property, result.details,
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+    });
+}
 
-    /// Every generated expression should pass roundtrip conversion.
-    #[test]
-    fn roundtrip_on_generated_expressions(
-        expr in SqlGenerator::new().strategy()
-    ) {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::Roundtrip,
-        ]);
-        let results = validator.validate(&expr);
-        for result in &results {
-            prop_assert!(
-                result.passed,
-                "property {} failed: {}",
-                result.property,
-                result.details
-            );
-        }
-    }
+/// Optimization should converge within time limits.
+#[test]
+fn convergence_on_generated_expressions() {
+    run_on_large_stack("convergence_on_generated_expressions", || {
+        let config = ProptestConfig::with_cases(50);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(&SqlGenerator::new().strategy(), |expr| {
+                let validator = PropertyValidator::new(vec![
+                    OptimizerProperty::Convergence,
+                ])
+                .with_time_limit(Duration::from_secs(5));
+                for result in &validator.validate(&expr) {
+                    if !result.passed {
+                        return Err(TestCaseError::Fail(
+                            format!(
+                                "property {} failed: {}",
+                                result.property, result.details,
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+    });
+}
 
-    /// Optimization should converge within time limits.
-    #[test]
-    fn convergence_on_generated_expressions(
-        expr in SqlGenerator::new().strategy()
-    ) {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::Convergence,
-        ]).with_time_limit(Duration::from_secs(5));
-        let results = validator.validate(&expr);
-        for result in &results {
-            prop_assert!(
-                result.passed,
-                "property {} failed: {}",
-                result.property,
-                result.details
-            );
-        }
-    }
+/// Join-heavy queries should preserve tables.
+#[test]
+fn table_preservation_on_joins() {
+    run_on_large_stack("table_preservation_on_joins", || {
+        let config = ProptestConfig::with_cases(50);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(&SqlGenerator::new().join_strategy(), |expr| {
+                let validator = PropertyValidator::new(vec![
+                    OptimizerProperty::TablePreservation,
+                ])
+                .with_time_limit(Duration::from_secs(10));
+                for result in &validator.validate(&expr) {
+                    if !result.passed {
+                        return Err(TestCaseError::Fail(
+                            format!(
+                                "property {} failed: {}",
+                                result.property, result.details,
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+    });
+}
 
-    /// Join-heavy queries should preserve tables.
-    #[test]
-    fn table_preservation_on_joins(
-        expr in SqlGenerator::new().join_strategy()
-    ) {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::TablePreservation,
-        ]).with_time_limit(Duration::from_secs(10));
-        let results = validator.validate(&expr);
-        for result in &results {
-            prop_assert!(
-                result.passed,
-                "property {} failed: {}",
-                result.property,
-                result.details
-            );
-        }
-    }
+/// Aggregate queries should pass plan validity.
+#[test]
+fn plan_validity_on_aggregates() {
+    run_on_large_stack("plan_validity_on_aggregates", || {
+        let config = ProptestConfig::with_cases(50);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(&SqlGenerator::new().aggregate_strategy(), |expr| {
+                let validator = PropertyValidator::new(vec![
+                    OptimizerProperty::PlanValidity,
+                ])
+                .with_time_limit(Duration::from_secs(10));
+                for result in &validator.validate(&expr) {
+                    if !result.passed {
+                        return Err(TestCaseError::Fail(
+                            format!(
+                                "property {} failed: {}",
+                                result.property, result.details,
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+    });
+}
 
-    /// Aggregate queries should pass plan validity.
-    #[test]
-    fn plan_validity_on_aggregates(
-        expr in SqlGenerator::new().aggregate_strategy()
-    ) {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::PlanValidity,
-        ]).with_time_limit(Duration::from_secs(10));
-        let results = validator.validate(&expr);
-        for result in &results {
-            prop_assert!(
-                result.passed,
-                "property {} failed: {}",
-                result.property,
-                result.details
-            );
-        }
-    }
-
-    /// Set operations should pass all core properties.
-    #[test]
-    fn all_properties_on_set_ops(
-        expr in SqlGenerator::new().set_op_strategy()
-    ) {
-        let validator = PropertyValidator::all_properties()
-            .with_time_limit(Duration::from_secs(10));
-        let results = validator.validate(&expr);
-        for result in &results {
-            prop_assert!(
-                result.passed,
-                "property {} failed: {}",
-                result.property,
-                result.details
-            );
-        }
-    }
+/// Set operations should pass all core properties.
+#[test]
+fn all_properties_on_set_ops() {
+    run_on_large_stack("all_properties_on_set_ops", || {
+        let config = ProptestConfig::with_cases(50);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(&SqlGenerator::new().set_op_strategy(), |expr| {
+                let validator = PropertyValidator::all_properties()
+                    .with_time_limit(Duration::from_secs(10));
+                for result in &validator.validate(&expr) {
+                    if !result.passed {
+                        return Err(TestCaseError::Fail(
+                            format!(
+                                "property {} failed: {}",
+                                result.property, result.details,
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+    });
 }
 
 // -------------------------------------------------------------------
 // Storyline-based tests
 // -------------------------------------------------------------------
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(10))]
+/// Full lifecycle storyline should pass core properties at each step.
+///
+/// Idempotence is excluded — there is a known optimizer bug where a second
+/// optimization pass can produce a different table set for some inputs.
+#[test]
+fn full_lifecycle_all_properties() {
+    run_on_large_stack("full_lifecycle_all_properties", || {
+        let config = ProptestConfig::with_cases(10);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(
+                &arb_storyline(StorylinePattern::full_lifecycle()),
+                |storyline| {
+                    let validator = PropertyValidator::new(vec![
+                        OptimizerProperty::Roundtrip,
+                        OptimizerProperty::TablePreservation,
+                        OptimizerProperty::Convergence,
+                        OptimizerProperty::PlanValidity,
+                        OptimizerProperty::RuleSafety,
+                    ])
+                    .with_time_limit(Duration::from_secs(10));
 
-    /// Full lifecycle storyline should pass core properties at each step.
-    ///
-    /// Idempotence is excluded — there is a known optimizer bug where a second
-    /// optimization pass can produce a different table set for some inputs.
-    #[test]
-    fn full_lifecycle_all_properties(
-        storyline in arb_storyline(StorylinePattern::full_lifecycle())
-    ) {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::Roundtrip,
-            OptimizerProperty::TablePreservation,
-            OptimizerProperty::Convergence,
-            OptimizerProperty::PlanValidity,
-            OptimizerProperty::RuleSafety,
-        ])
-        .with_time_limit(Duration::from_secs(10));
+                    for step in &storyline.steps {
+                        for result in &validator.validate(&step.expr) {
+                            if !result.passed {
+                                return Err(TestCaseError::Fail(
+                                    format!(
+                                        "property {} failed at stage {}: {}",
+                                        result.property,
+                                        step.stage,
+                                        result.details,
+                                    )
+                                    .into(),
+                                ));
+                            }
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+    });
+}
 
-        for step in &storyline.steps {
-            let results = validator.validate(&step.expr);
-            for result in &results {
-                prop_assert!(
-                    result.passed,
-                    "property {} failed at stage {}: {}",
-                    result.property,
-                    step.stage,
-                    result.details
-                );
-            }
-        }
-    }
+/// Read-heavy pattern should maintain rule safety.
+#[test]
+fn read_heavy_rule_safety() {
+    run_on_large_stack("read_heavy_rule_safety", || {
+        let config = ProptestConfig::with_cases(10);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(
+                &arb_storyline(StorylinePattern::read_heavy()),
+                |storyline| {
+                    let validator = PropertyValidator::new(vec![
+                        OptimizerProperty::RuleSafety,
+                    ])
+                    .with_time_limit(Duration::from_secs(10));
 
-    /// Read-heavy pattern should maintain rule safety.
-    #[test]
-    fn read_heavy_rule_safety(
-        storyline in arb_storyline(StorylinePattern::read_heavy())
-    ) {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::RuleSafety,
-        ]).with_time_limit(Duration::from_secs(10));
-
-        for step in &storyline.steps {
-            let results = validator.validate(&step.expr);
-            for result in &results {
-                prop_assert!(
-                    result.passed,
-                    "rule safety failed at stage {}: {}",
-                    step.stage,
-                    result.details
-                );
-            }
-        }
-    }
+                    for step in &storyline.steps {
+                        for result in &validator.validate(&step.expr) {
+                            if !result.passed {
+                                return Err(TestCaseError::Fail(
+                                    format!(
+                                        "rule safety failed at stage {}: {}",
+                                        step.stage, result.details,
+                                    )
+                                    .into(),
+                                ));
+                            }
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+    });
 }
 
 // -------------------------------------------------------------------
 // Long-duration tests (feature-gated)
 // -------------------------------------------------------------------
 
+/// Extended fuzzing: all properties on deeply nested expressions.
 #[cfg(feature = "long-duration-testing")]
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+#[test]
+fn extended_all_properties() {
+    run_on_large_stack("extended_all_properties", || {
+        let config = ProptestConfig::with_cases(1000);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(
+                &ra_grammar_fuzzer::generator::arb_rel_expr(5),
+                |expr| {
+                    let validator = PropertyValidator::all_properties()
+                        .with_time_limit(Duration::from_secs(30));
+                    for result in &validator.validate(&expr) {
+                        if !result.passed {
+                            return Err(TestCaseError::Fail(
+                                format!(
+                                    "property {} failed: {}",
+                                    result.property, result.details,
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+    });
+}
 
-    /// Extended fuzzing: all properties on deeply nested expressions.
-    #[test]
-    fn extended_all_properties(
-        expr in ra_grammar_fuzzer::generator::arb_rel_expr(5)
-    ) {
-        let validator = PropertyValidator::all_properties()
-            .with_time_limit(Duration::from_secs(30));
-        let results = validator.validate(&expr);
-        for result in &results {
-            prop_assert!(
-                result.passed,
-                "property {} failed: {}",
-                result.property,
-                result.details
-            );
-        }
-    }
+/// Extended fuzzing: idempotence across all expression types.
+#[cfg(feature = "long-duration-testing")]
+#[test]
+fn extended_idempotence() {
+    run_on_large_stack("extended_idempotence", || {
+        let config = ProptestConfig::with_cases(1000);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(
+                &ra_grammar_fuzzer::generator::arb_rel_expr(4),
+                |expr| {
+                    let validator = PropertyValidator::new(vec![
+                        OptimizerProperty::Idempotence,
+                    ])
+                    .with_time_limit(Duration::from_secs(30));
+                    for result in &validator.validate(&expr) {
+                        if !result.passed {
+                            return Err(TestCaseError::Fail(
+                                format!(
+                                    "idempotence failed: {}",
+                                    result.details,
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+    });
+}
 
-    /// Extended fuzzing: idempotence across all expression types.
-    #[test]
-    fn extended_idempotence(
-        expr in ra_grammar_fuzzer::generator::arb_rel_expr(4)
-    ) {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::Idempotence,
-        ]).with_time_limit(Duration::from_secs(30));
-        let results = validator.validate(&expr);
-        for result in &results {
-            prop_assert!(
-                result.passed,
-                "idempotence failed: {}",
-                result.details
-            );
-        }
-    }
+/// Extended storyline: mixed DML with all properties.
+#[cfg(feature = "long-duration-testing")]
+#[test]
+fn extended_mixed_dml_all_properties() {
+    run_on_large_stack("extended_mixed_dml_all_properties", || {
+        let config = ProptestConfig::with_cases(1000);
+        let mut runner = TestRunner::new(config);
+        runner
+            .run(
+                &arb_storyline(StorylinePattern::mixed_dml()),
+                |storyline| {
+                    let validator = PropertyValidator::all_properties()
+                        .with_time_limit(Duration::from_secs(30));
 
-    /// Extended storyline: mixed DML with all properties.
-    #[test]
-    fn extended_mixed_dml_all_properties(
-        storyline in arb_storyline(StorylinePattern::mixed_dml())
-    ) {
-        let validator = PropertyValidator::all_properties()
-            .with_time_limit(Duration::from_secs(30));
-
-        for step in &storyline.steps {
-            let results = validator.validate(&step.expr);
-            for result in &results {
-                prop_assert!(
-                    result.passed,
-                    "property {} failed at stage {}: {}",
-                    result.property,
-                    step.stage,
-                    result.details
-                );
-            }
-        }
-    }
+                    for step in &storyline.steps {
+                        for result in &validator.validate(&step.expr) {
+                            if !result.passed {
+                                return Err(TestCaseError::Fail(
+                                    format!(
+                                        "property {} failed at stage {}: {}",
+                                        result.property,
+                                        step.stage,
+                                        result.details,
+                                    )
+                                    .into(),
+                                ));
+                            }
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+    });
 }

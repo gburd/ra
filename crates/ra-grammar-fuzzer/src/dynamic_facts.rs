@@ -742,37 +742,42 @@ impl EnhancedPropertyValidator {
         }
     }
 
-    /// Extract all table names from a query expression.
-    #[expect(
-        clippy::self_only_used_in_recursion,
-        reason = "self is needed for method dispatch in recursive calls"
-    )]
-    fn collect_table_names(&self, expr: &ra_core::algebra::RelExpr) -> std::collections::HashSet<String> {
+    /// Extract all table names from a query expression (iterative).
+    fn collect_table_names(
+        &self,
+        expr: &ra_core::algebra::RelExpr,
+    ) -> std::collections::HashSet<String> {
         use ra_core::algebra::RelExpr;
         let mut tables = std::collections::HashSet::new();
+        let mut stack: Vec<&RelExpr> = vec![expr];
 
-        match expr {
-            RelExpr::Scan { table, .. } => {
-                tables.insert(table.clone());
-            }
-            RelExpr::Project { input, .. } |
-            RelExpr::Filter { input, .. } |
-            RelExpr::Sort { input, .. } |
-            RelExpr::Limit { input, .. } |
-            RelExpr::Distinct { input } |
-            RelExpr::Aggregate { input, .. } => {
-                tables.extend(self.collect_table_names(input));
-            }
-            RelExpr::Join { left, right, .. } |
-            RelExpr::Union { left, right, .. } |
-            RelExpr::Intersect { left, right, .. } |
-            RelExpr::Except { left, right, .. } => {
-                tables.extend(self.collect_table_names(left));
-                tables.extend(self.collect_table_names(right));
-            }
-            _ => {
-                // Handle other RelExpr variants that don't directly contain table references
-                // or are not yet implemented in the fuzzer
+        while let Some(node) = stack.pop() {
+            match node {
+                RelExpr::Scan { table, .. } => {
+                    tables.insert(table.clone());
+                }
+                RelExpr::Project { input, .. }
+                | RelExpr::Filter { input, .. }
+                | RelExpr::Sort { input, .. }
+                | RelExpr::Limit { input, .. }
+                | RelExpr::Distinct { input }
+                | RelExpr::Aggregate { input, .. } => {
+                    stack.push(input);
+                }
+                RelExpr::Join { left, right, .. }
+                | RelExpr::Union { left, right, .. }
+                | RelExpr::Intersect { left, right, .. }
+                | RelExpr::Except { left, right, .. } => {
+                    stack.push(left);
+                    stack.push(right);
+                }
+                RelExpr::CTE {
+                    body, definition, ..
+                } => {
+                    stack.push(body);
+                    stack.push(definition);
+                }
+                _ => {}
             }
         }
 
