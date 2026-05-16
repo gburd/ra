@@ -20,6 +20,8 @@ use ra_core::algebra::{
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
+use crate::correlation_analysis;
+
 /// Decorrelate subquery expressions in a `RelExpr` tree.
 ///
 /// Recursively walks the tree bottom-up. For each `Filter` node whose
@@ -664,16 +666,16 @@ fn try_decorrelate_correlated_scalar(
         _ => None,
     }?;
 
-    // Collect inner scan tables
-    let inner_tables = collect_scan_tables(inner_rel);
-    if inner_tables.is_empty() {
+    // Build inner scope from the subquery's inner relation
+    let inner_scope = correlation_analysis::build_scope(inner_rel);
+    if inner_scope.tables.is_empty() {
         return None;
     }
 
     // Split the filter predicate into correlation and local predicates
     let conjuncts = flatten_and(filter_pred);
     let (corr_preds, local_preds) =
-        split_correlation_predicates(&conjuncts, &inner_tables);
+        correlation_analysis::classify_predicates(&conjuncts, &inner_scope);
 
     // Must have at least one correlation predicate to qualify
     if corr_preds.is_empty() {
@@ -693,7 +695,7 @@ fn try_decorrelate_correlated_scalar(
         } = pred
         {
             let (inner_col, _outer_col) =
-                classify_eq_columns(left, right, &inner_tables)?;
+                correlation_analysis::classify_eq_sides(left, right, &inner_scope)?;
             group_by_exprs.push(Expr::Column(inner_col.clone()));
             // Keep the original equality as the join condition
             join_conditions.push(pred.clone());
@@ -765,32 +767,6 @@ fn try_decorrelate_correlated_scalar(
     })
 }
 
-/// Collect all table names and aliases from Scan nodes in a subtree.
-///
-/// Both the table name and any alias are included so that
-/// `column_belongs_to_tables` can match qualifiers against either.
-fn collect_scan_tables(expr: &RelExpr) -> Vec<String> {
-    let mut tables = Vec::new();
-    collect_scan_tables_inner(expr, &mut tables);
-    tables
-}
-
-fn collect_scan_tables_inner(expr: &RelExpr, tables: &mut Vec<String>) {
-    match expr {
-        RelExpr::Scan { table, alias } => {
-            tables.push(table.clone());
-            if let Some(a) = alias {
-                tables.push(a.clone());
-            }
-        }
-        _ => {
-            for child in expr.children() {
-                collect_scan_tables_inner(child, tables);
-            }
-        }
-    }
-}
-
 /// Flatten an AND-tree into a vector of conjuncts.
 fn flatten_and(expr: &Expr) -> Vec<Expr> {
     match expr {
@@ -814,126 +790,6 @@ fn and_together(preds: &[Expr]) -> Option<Expr> {
         left: Box::new(acc),
         right: Box::new(p),
     })
-}
-
-/// Split predicates into correlation predicates (equalities referencing
-/// both inner and outer columns) and local predicates (only inner columns).
-fn split_correlation_predicates(
-    predicates: &[Expr],
-    inner_tables: &[String],
-) -> (Vec<Expr>, Vec<Expr>) {
-    let mut correlation = Vec::new();
-    let mut local = Vec::new();
-
-    for pred in predicates {
-        if is_correlation_predicate(pred, inner_tables) {
-            correlation.push(pred.clone());
-        } else {
-            local.push(pred.clone());
-        }
-    }
-
-    (correlation, local)
-}
-
-/// Returns true if a predicate is an equality where one column belongs
-/// to the inner tables and the other does not (references an outer column).
-fn is_correlation_predicate(pred: &Expr, inner_tables: &[String]) -> bool {
-    if let Expr::BinOp {
-        op: BinOp::Eq,
-        left,
-        right,
-    } = pred
-    {
-        let left_col = extract_column_ref(left);
-        let right_col = extract_column_ref(right);
-
-        if let (Some(lc), Some(rc)) = (left_col, right_col) {
-            let l_inner = column_belongs_to_tables(lc, inner_tables);
-            let r_inner = column_belongs_to_tables(rc, inner_tables);
-            // Correlation: one inner, one outer
-            return l_inner != r_inner;
-        }
-    }
-    false
-}
-
-/// Given an equality's left and right expressions, classify which is
-/// the inner column and which is the outer column. Returns
-/// `Some((inner_col_ref, outer_col_ref))` or None if classification fails.
-fn classify_eq_columns<'a>(
-    left: &'a Expr,
-    right: &'a Expr,
-    inner_tables: &[String],
-) -> Option<(&'a ColumnRef, &'a ColumnRef)> {
-    let lc = extract_column_ref(left)?;
-    let rc = extract_column_ref(right)?;
-    let l_inner = column_belongs_to_tables(lc, inner_tables);
-    let r_inner = column_belongs_to_tables(rc, inner_tables);
-
-    if l_inner && !r_inner {
-        Some((lc, rc))
-    } else if r_inner && !l_inner {
-        Some((rc, lc))
-    } else {
-        None
-    }
-}
-
-/// Extract a `ColumnRef` from an expression if it's a simple column reference.
-fn extract_column_ref(expr: &Expr) -> Option<&ColumnRef> {
-    match expr {
-        Expr::Column(cr) => Some(cr),
-        _ => None,
-    }
-}
-
-/// Determine if a column likely belongs to one of the given tables.
-///
-/// Uses table qualifiers when available; otherwise uses TPC-H naming
-/// conventions where column prefixes map to table names.
-fn column_belongs_to_tables(col: &ColumnRef, tables: &[String]) -> bool {
-    // If qualified, check directly
-    if let Some(ref qualifier) = col.table {
-        return tables.iter().any(|t| t == qualifier);
-    }
-
-    // Unqualified: use prefix heuristic
-    let name = &col.column;
-    for table in tables {
-        if column_prefix_matches_table(name, table) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Check if a column name's prefix suggests it belongs to a given table.
-///
-/// Handles TPC-H conventions:
-///   lineitem → l_, part → p_, partsupp → ps_, supplier → s_,
-///   orders → o_, customer → c_, nation → n_, region → r_
-fn column_prefix_matches_table(column: &str, table: &str) -> bool {
-    // Try two-char prefix first (for "partsupp" → "ps_")
-    if table.len() >= 2 {
-        let two_char = &table[..2];
-        let prefix = format!("{two_char}_");
-        if column.starts_with(&prefix) {
-            return true;
-        }
-    }
-    // Single-char prefix (for "lineitem" → "l_", "part" → "p_", etc.)
-    if let Some(first) = table.chars().next() {
-        let prefix = format!("{first}_");
-        if column.starts_with(&prefix) {
-            // Disambiguate: "p_" matches "part" but not "partsupp"
-            // If two-char prefix already matched above, we won't get here
-            // for that table. Check that the two-char prefix doesn't
-            // match a DIFFERENT table (handled by caller trying all tables).
-            return true;
-        }
-    }
-    false
 }
 
 /// Replace aggregate function calls (SUM, COUNT, AVG, MIN, MAX) in an
@@ -1344,14 +1200,14 @@ fn try_correlated_project_subquery(
         _ => None,
     }?;
 
-    let inner_tables = collect_scan_tables(inner_rel);
-    if inner_tables.is_empty() {
+    let inner_scope = correlation_analysis::build_scope(inner_rel);
+    if inner_scope.tables.is_empty() {
         return None;
     }
 
     let conjuncts = flatten_and(filter_pred);
     let (corr_preds, local_preds) =
-        split_correlation_predicates(&conjuncts, &inner_tables);
+        correlation_analysis::classify_predicates(&conjuncts, &inner_scope);
 
     if corr_preds.is_empty() {
         return None;
@@ -1369,7 +1225,7 @@ fn try_correlated_project_subquery(
         } = pred
         {
             let (inner_col, _outer_col) =
-                classify_eq_columns(left, right, &inner_tables)?;
+                correlation_analysis::classify_eq_sides(left, right, &inner_scope)?;
             group_by_exprs.push(Expr::Column(inner_col.clone()));
             join_conditions.push(pred.clone());
         } else {

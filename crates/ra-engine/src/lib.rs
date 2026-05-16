@@ -45,6 +45,7 @@ pub mod cost_model;
 pub mod cardinality_cost;
 pub mod citus_optimizer;
 pub mod column_pruning;
+pub mod correlation_analysis;
 pub mod consensus_rules;
 #[cfg(feature = "metadata")]
 pub mod constraint_optimizer;
