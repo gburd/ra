@@ -787,6 +787,30 @@ impl Optimizer {
                 expr
             };
 
+        // Post-decorrelation budget adjustment.
+        // If decorrelation reduced the query complexity (e.g., EXISTS →
+        // semi-join), tighten the iteration budget to match the simpler
+        // structure.
+        let (effective_iter_limit, effective_table_count) = {
+            let post_table_count =
+                crate::large_join::LargeJoinOptimizer::count_tables(
+                    effective_expr,
+                );
+            if post_table_count < table_count {
+                let adjusted =
+                    default_iter_limit_for_tables(post_table_count)
+                        .min(iter_limit);
+                debug!(
+                    "Post-decorrelation budget adjustment: \
+                     tables {}->{}, iters {}->{}",
+                    table_count, post_table_count, iter_limit, adjusted
+                );
+                (adjusted, post_table_count)
+            } else {
+                (iter_limit, table_count)
+            }
+        };
+
         let rec_expr = to_rec_expr(effective_expr)?;
         let runner_start = Instant::now();
         let timeout = std::time::Duration::from_millis(timeout_ms);
@@ -812,8 +836,9 @@ impl Optimizer {
 
         let (actual_iterations, termination_reason, egraph) =
             self.run_saturation_loop(
-                egraph, root, &rules, iter_limit, timeout, runner_start,
-                convergence_behavior, table_count, expr,
+                egraph, root, &rules, effective_iter_limit, timeout,
+                runner_start, convergence_behavior,
+                effective_table_count, effective_expr,
                 &mut continuation_gate,
             );
 
