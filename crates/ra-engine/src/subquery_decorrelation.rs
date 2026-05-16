@@ -535,6 +535,10 @@ fn extract_correlation_predicate(query: &RelExpr) -> (RelExpr, Expr) {
             // The filter predicate is the correlation condition
             (*input.clone(), predicate.clone())
         }
+        // Look through Project nodes (e.g., SELECT 1 FROM ... WHERE corr)
+        RelExpr::Project { input, .. } => extract_correlation_predicate(input),
+        // Look through Limit nodes (e.g., SELECT ... LIMIT 1)
+        RelExpr::Limit { input, .. } => extract_correlation_predicate(input),
         _ => {
             // No correlation filter; uncorrelated EXISTS
             // SemiJoin with TRUE condition preserves all outer rows

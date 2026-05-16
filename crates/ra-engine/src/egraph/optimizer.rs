@@ -788,24 +788,26 @@ impl Optimizer {
             };
 
         // Post-decorrelation budget adjustment.
-        // If decorrelation reduced the query complexity (e.g., EXISTS →
-        // semi-join), tighten the iteration budget to match the simpler
-        // structure.
+        // When decorrelation converts EXISTS/IN subqueries into semi-joins,
+        // the subquery-driven routing (EGraphMedium = 8 iters) is no longer
+        // appropriate. Recompute the budget based on the actual table count
+        // of the decorrelated expression.
         let (effective_iter_limit, effective_table_count) = {
             let post_table_count =
                 crate::large_join::LargeJoinOptimizer::count_tables(
                     effective_expr,
                 );
-            if post_table_count < table_count {
-                let adjusted =
-                    default_iter_limit_for_tables(post_table_count)
-                        .min(iter_limit);
+            let table_based_limit =
+                default_iter_limit_for_tables(post_table_count);
+            if !std::ptr::eq(effective_expr, expr)
+                && table_based_limit < iter_limit
+            {
                 debug!(
                     "Post-decorrelation budget adjustment: \
                      tables {}->{}, iters {}->{}",
-                    table_count, post_table_count, iter_limit, adjusted
+                    table_count, post_table_count, iter_limit, table_based_limit
                 );
-                (adjusted, post_table_count)
+                (table_based_limit, post_table_count)
             } else {
                 (iter_limit, table_count)
             }

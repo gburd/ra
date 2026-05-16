@@ -566,10 +566,19 @@ impl FeatureExtractor {
 
     /// Classify a join as cross, equi, or non-equi.
     fn classify_join(&mut self, join_type: &JoinType, condition: &Expr) {
-        if matches!(join_type, JoinType::Cross)
-            || Self::is_trivial_condition(condition)
-        {
+        // Semi/Anti joins with trivial conditions are existence checks
+        // (e.g., decorrelated EXISTS), not cross products. Treat them as
+        // non-equi joins rather than inflating cross_join_count.
+        if matches!(join_type, JoinType::Cross) {
             self.cross_join_count += 1;
+            return;
+        }
+        if Self::is_trivial_condition(condition) {
+            if matches!(join_type, JoinType::Semi | JoinType::Anti) {
+                self.non_equi_join_count += 1;
+            } else {
+                self.cross_join_count += 1;
+            }
             return;
         }
 
