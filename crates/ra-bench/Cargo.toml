@@ -46,6 +46,10 @@ postgres = { workspace = true, optional = true }
 [dev-dependencies]
 criterion = { workspace = true }
 
+[[bin]]
+name = "ra_vs_pg"
+path = "src/ra_vs_pg.rs"
+
 [[bench]]
 name = "parse_optimize"
 harness = false
