@@ -149,29 +149,16 @@ pub fn parse_statement(sql: &str) -> Result<Statement, SqlConversionError> {
         }
 
         // DDL — classify and pass through.
-        "CREATE" | "ALTER" | "DROP" => classify_ddl(trimmed),
+        "CREATE" | "ALTER" | "DROP" => Ok(classify_ddl(trimmed)),
 
         // Utility statements.
-        "EXPLAIN" => Ok(Statement::Utility(
-            ra_core::algebra::UtilityStmt::Other {
-                sql: trimmed.to_owned(),
-            },
-        )),
-        "COPY" => Ok(Statement::Utility(
-            ra_core::algebra::UtilityStmt::Other {
-                sql: trimmed.to_owned(),
-            },
-        )),
-        "VACUUM" | "ANALYZE" | "ANALYSE" => Ok(Statement::Utility(
-            ra_core::algebra::UtilityStmt::Other {
-                sql: trimmed.to_owned(),
-            },
-        )),
-        "SET" | "RESET" | "SHOW" => Ok(Statement::Utility(
-            ra_core::algebra::UtilityStmt::Other {
-                sql: trimmed.to_owned(),
-            },
-        )),
+        "EXPLAIN" | "COPY" | "VACUUM" | "ANALYZE" | "ANALYSE" | "SET" | "RESET" | "SHOW" => {
+            Ok(Statement::Utility(
+                ra_core::algebra::UtilityStmt::Other {
+                    sql: trimmed.to_owned(),
+                },
+            ))
+        }
 
         // DML — parse through Lime and wrap as DML.
         "INSERT" | "UPDATE" | "DELETE" => {
@@ -200,16 +187,16 @@ fn extract_savepoint_name(sql: &str) -> String {
 }
 
 /// Classify a DDL statement into [`DdlStmt`].
-fn classify_ddl(sql: &str) -> Result<Statement, SqlConversionError> {
+fn classify_ddl(sql: &str) -> Statement {
     use ra_core::algebra::DdlStmt;
 
     let upper = sql.to_ascii_uppercase();
     let words: Vec<&str> = upper.split_whitespace().collect();
 
     if words.len() < 2 {
-        return Ok(Statement::Ddl(DdlStmt::Other {
+        return Statement::Ddl(DdlStmt::Other {
             sql: sql.to_owned(),
-        }));
+        });
     }
 
     match (words[0], words.get(1).copied().unwrap_or("")) {
@@ -217,46 +204,45 @@ fn classify_ddl(sql: &str) -> Result<Statement, SqlConversionError> {
             let object_type = words.get(1).unwrap_or(&"UNKNOWN").to_string();
             let if_exists = upper.contains("IF EXISTS");
             let cascade = upper.contains("CASCADE");
-            Ok(Statement::Ddl(DdlStmt::Drop {
+            Statement::Ddl(DdlStmt::Drop {
                 object_type,
                 names: vec![sql.to_owned()],
                 if_exists,
                 cascade,
-            }))
+            })
         }
-        ("CREATE", "TABLE") | ("CREATE", "TEMPORARY") | ("CREATE", "TEMP")
-        | ("CREATE", "UNLOGGED") => {
+        ("CREATE", "TABLE" | "TEMPORARY" | "TEMP" | "UNLOGGED") => {
             let if_not_exists = upper.contains("IF NOT EXISTS");
-            Ok(Statement::Ddl(DdlStmt::CreateTable {
+            Statement::Ddl(DdlStmt::CreateTable {
                 name: sql.to_owned(),
                 if_not_exists,
-            }))
+            })
         }
-        ("CREATE", "INDEX") | ("CREATE", "UNIQUE") => {
+        ("CREATE", "INDEX" | "UNIQUE") => {
             let unique = upper.contains("UNIQUE");
             let concurrently = upper.contains("CONCURRENTLY");
-            Ok(Statement::Ddl(DdlStmt::CreateIndex {
+            Statement::Ddl(DdlStmt::CreateIndex {
                 name: sql.to_owned(),
                 table: String::new(),
                 unique,
                 concurrently,
-            }))
+            })
         }
-        ("CREATE", "VIEW") | ("CREATE", "MATERIALIZED") => {
+        ("CREATE", "VIEW" | "MATERIALIZED") => {
             let or_replace = upper.contains("OR REPLACE");
-            Ok(Statement::Ddl(DdlStmt::CreateView {
+            Statement::Ddl(DdlStmt::CreateView {
                 name: sql.to_owned(),
                 or_replace,
-            }))
+            })
         }
-        ("CREATE", "SEQUENCE") => Ok(Statement::Ddl(DdlStmt::CreateSequence {
+        ("CREATE", "SEQUENCE") => Statement::Ddl(DdlStmt::CreateSequence {
             name: sql.to_owned(),
-        })),
-        ("ALTER", _) => Ok(Statement::Ddl(DdlStmt::AlterTable {
+        }),
+        ("ALTER", _) => Statement::Ddl(DdlStmt::AlterTable {
             name: sql.to_owned(),
-        })),
-        _ => Ok(Statement::Ddl(DdlStmt::Other {
+        }),
+        _ => Statement::Ddl(DdlStmt::Other {
             sql: sql.to_owned(),
-        })),
+        }),
     }
 }

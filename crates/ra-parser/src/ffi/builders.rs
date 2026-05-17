@@ -770,7 +770,7 @@ pub unsafe extern "C" fn ra_distinct(state: *mut RaParseState, input: *mut RaNod
 /// - `columns` is a list of column-reference expr indices (or null for all columns).
 /// - `source` is a Rel node (VALUES or SELECT).
 /// - `on_conflict` is null (no clause), an empty list (DO NOTHING), or a
-///   2-element list [target_cols_list_idx, assignments_list_idx] (DO UPDATE).
+///   2-element list [`target_cols_list_idx`, `assignments_list_idx`] (DO UPDATE).
 /// - `returning` is a list of expr indices (or null for no RETURNING).
 ///
 /// # Safety
@@ -820,7 +820,7 @@ pub unsafe extern "C" fn ra_insert(
 
 /// Build an `Update` node.
 ///
-/// - `assignments` is a list of 2-element sub-lists (col_expr_idx, val_expr_idx).
+/// - `assignments` is a list of 2-element sub-lists (`col_expr_idx`, `val_expr_idx`).
 /// - `filter` is an expr node (or null for no WHERE).
 /// - `from` is a Rel node (or null for no FROM).
 /// - `returning` is a list of expr indices (or null for no RETURNING).
@@ -933,7 +933,7 @@ pub unsafe extern "C" fn ra_on_conflict_nothing(state: *mut RaParseState) -> *mu
 
 /// Build an ON CONFLICT DO UPDATE marker.
 ///
-/// Stores a 2-element list: [target_cols_list_idx, assignments_list_idx].
+/// Stores a 2-element list: [`target_cols_list_idx`, `assignments_list_idx`].
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
@@ -964,7 +964,7 @@ pub unsafe extern "C" fn ra_on_conflict_update(
     list_ptr
 }
 
-/// Build an assignment node (a 2-element list: [col_name_expr, value_expr]).
+/// Build an assignment node (a 2-element list: [`col_name_expr`, `value_expr`]).
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
@@ -1033,7 +1033,7 @@ fn decode_column_names(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<Strin
     names
 }
 
-/// Decode an assignment list (list of 2-element sub-lists) into (column_name, Expr) pairs.
+/// Decode an assignment list (list of 2-element sub-lists) into (`column_name`, Expr) pairs.
 fn decode_assignments(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<(String, Expr)> {
     let Some(indices) = decode_list(state, list_ptr) else {
         return vec![];
@@ -1060,7 +1060,7 @@ fn decode_assignments(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<(Strin
     result
 }
 
-/// Decode an on_conflict pointer into an `Option<OnConflict>`.
+/// Decode an `on_conflict` pointer into an `Option<OnConflict>`.
 ///
 /// - null → None
 /// - empty list → Some(DoNothing)
@@ -1069,9 +1069,7 @@ fn decode_on_conflict(state: &RaParseState, ptr: *mut RaNode) -> Option<OnConfli
     if ptr.is_null() {
         return None;
     }
-    let Some(items) = decode_list(state, ptr) else {
-        return None;
-    };
+    let items = decode_list(state, ptr)?;
     if items.is_empty() {
         return Some(OnConflict::DoNothing);
     }

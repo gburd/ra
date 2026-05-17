@@ -118,13 +118,13 @@ pub enum Commands {
             Examples:\n  \
             ra-cli explain 'SELECT * FROM orders WHERE amount > 100'\n  \
             echo 'SELECT 1' | ra-cli explain --stdin\n  \
-            ra-cli explain 'SELECT ...' --hardware-profile server"
+            ra-cli explain 'SELECT ...' --hardware-profile gpu-server"
     )]
     Explain {
         /// SQL query to explain (ignored when --stdin is set).
         #[arg(default_value = "")]
         query: String,
-        /// Hardware profile for cost estimation (edge, mobile, laptop, desktop, server, gpu-server, auto).
+        /// Hardware profile for cost estimation (auto, cpu-only, gpu-server, fpga).
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
         /// Read SQL from stdin instead of the positional argument.
@@ -152,7 +152,7 @@ pub enum Commands {
         /// SQL query to optimize (ignored when --stdin is set).
         #[arg(default_value = "")]
         query: String,
-        /// Hardware profile for cost estimation (edge, mobile, laptop, desktop, server, gpu-server, auto).
+        /// Hardware profile for cost estimation (auto, cpu-only, gpu-server, fpga).
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
         /// Read SQL from stdin instead of the positional argument.

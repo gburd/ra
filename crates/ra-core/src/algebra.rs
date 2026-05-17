@@ -1372,11 +1372,20 @@ pub enum TxnStmt {
     /// ROLLBACK / ABORT.
     Rollback,
     /// SAVEPOINT name.
-    Savepoint { name: String },
+    Savepoint {
+        /// Savepoint identifier.
+        name: String,
+    },
     /// RELEASE SAVEPOINT name.
-    ReleaseSavepoint { name: String },
+    ReleaseSavepoint {
+        /// Savepoint identifier.
+        name: String,
+    },
     /// ROLLBACK TO SAVEPOINT name.
-    RollbackTo { name: String },
+    RollbackTo {
+        /// Savepoint identifier.
+        name: String,
+    },
 }
 
 #[expect(clippy::expect_used, reason = "test code")]
