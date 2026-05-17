@@ -70,6 +70,7 @@ pub mod functional_deps;
 pub mod genetic_fingerprint;
 pub mod incremental_sort;
 pub mod index_selection;
+pub mod ordering_pass;
 pub mod isolation_cost;
 pub mod join_graph;
 pub mod join_transformations;
@@ -213,6 +214,7 @@ pub use incremental_sort::{
     IncrementalSortCost, PrefixMatch,
 };
 pub use isolation_cost::{isolation_cost_adjustment, IsolationCostConfig, PlanEstimates};
+pub use ordering_pass::propagate_ordering;
 pub use join_graph::{JoinGraph, JoinGraphStats};
 pub use join_transformations::{
     apply_join_transformations, can_eliminate_self_join, detect_self_join, is_null_rejecting,

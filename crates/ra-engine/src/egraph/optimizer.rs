@@ -576,23 +576,29 @@ impl Optimizer {
         // 7. Extract result
         let extract_start = Instant::now();
         let hardware = self.hardware_profile();
-        let result = self.extract_with_hybrid_fallback(
+        let extracted = self.extract_with_hybrid_fallback(
             &sat.egraph, sat.root, sat.stats_cache.as_map(), &hardware,
         )?;
         debug!("extract_best: {:?}", extract_start.elapsed());
+
+        // 8. Post-extraction ordering pass: eliminate redundant sorts
+        let ordering_start = Instant::now();
+        let facts_provider = ra_core::facts::EmptyFactsProvider::new();
+        let result = crate::ordering_pass::propagate_ordering(extracted, &facts_provider);
+        debug!("ordering_pass: {:?}", ordering_start.elapsed());
 
         info!(
             "Total optimization: {:?} (egraph={:?}, extract={:?})",
             total_start.elapsed(), sat.runner_elapsed, extract_start.elapsed()
         );
 
-        // 8. Training feedback
+        // 9. Training feedback
         self.record_egraph_training_trace(
             expr, sat.actual_iterations, sat.termination_reason,
             sat.egraph_nodes, sat.runner_elapsed, sat.continuation_gate.as_ref(),
         );
 
-        // 9. Cache + return
+        // 10. Cache + return
         self.insert_into_cache(fingerprint.as_ref(), &result);
         Ok(result)
     }
@@ -629,7 +635,11 @@ impl Optimizer {
                     let builder =
                         crate::left_deep::LeftDeepBuilder::new(stats_provider);
                     match builder.build(expr) {
-                        Ok(optimized) => {
+                        Ok(built) => {
+                            let facts_provider = ra_core::facts::EmptyFactsProvider::new();
+                            let optimized = crate::ordering_pass::propagate_ordering(
+                                built, &facts_provider,
+                            );
                             info!(
                                 "Left-deep optimization completed in {:?}",
                                 total_start.elapsed()
@@ -701,7 +711,7 @@ impl Optimizer {
         if joins.is_empty() {
             return Ok(None);
         }
-        let result = match large_optimizer.optimize(joins) {
+        let extracted = match large_optimizer.optimize(joins) {
             Ok(r) => r,
             Err(e) => {
                 use tracing::info;
@@ -711,6 +721,8 @@ impl Optimizer {
                 return Ok(None);
             }
         };
+        let facts_provider = ra_core::facts::EmptyFactsProvider::new();
+        let result = crate::ordering_pass::propagate_ordering(extracted, &facts_provider);
         self.insert_into_cache(fingerprint.as_ref(), &result);
         Ok(Some(result))
     }
