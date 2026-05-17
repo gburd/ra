@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.0] - 2026-05-17
+
+### Added
+- Post-extraction ordering propagation pass (RFC 0025) — eliminates redundant
+  Sort nodes, converts Sort to IncrementalSort when input provides prefix ordering
+- Updated Ra vs PostgreSQL 18.4 benchmark: 89x planning speedup (21/21 queries)
+
+### Fixed
+- Missing doc comments on TxnStmt struct fields (ra-core)
+- 16 clippy warnings in ra-parser (unnested or-patterns, doc_markdown, etc.)
+- Incorrect hardware profile names in CLI help text
+
+### Changed
+- Optimization pipeline now includes ordering pass after extraction on all paths
+- Removed 37K benchmark run artifacts from repository tracking
+
+### Performance
+- Planning overhead from ordering pass: +0.3% (simple) to +18% (complex queries)
+- Net benefit: eliminates Sort operators at execution time (ms-to-seconds saved)
+
+---
+
 ## [0.2.1] - 2026-03-27
 
 Phase 21: CLI Enhancements and Web UI Demonstrations

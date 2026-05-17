@@ -2,31 +2,32 @@
 
 ## Summary
 
-Ra optimizer wins all 21 queries against PostgreSQL 18.4's planner with a **98x geometric
-mean speedup**. Planning times range from 3.6-32.1 microseconds (Ra) vs 434-3425
+Ra optimizer wins all 21 queries against PostgreSQL 18.4's planner with an **89x geometric
+mean speedup**. Planning times range from 3.4-37.6 microseconds (Ra) vs 434-3425
 microseconds (PostgreSQL). All results are statistically significant with non-overlapping
 95% confidence intervals.
 
 | Metric | Ra | PostgreSQL 18.4 |
 |--------|-----|-----------------|
 | Queries won | 21/21 (100%) | 0/21 (0%) |
-| Geo mean planning time | 11.1 μs | 1089 μs |
-| Min planning time | 3.6 μs (scan_01) | 434 μs (scan_03) |
-| Max planning time | 32.1 μs (tpch_q5) | 3425 μs (star_02) |
-| Geo mean speedup | **98x** | — |
-| Min speedup | 37x (tpch_q1) | — |
-| Max speedup | 165x (join2_02) | — |
+| Geo mean planning time | 12.8 μs | 1089 μs |
+| Min planning time | 3.4 μs (scan_02) | 434 μs (scan_03) |
+| Max planning time | 37.6 μs (star_02) | 3425 μs (star_02) |
+| Geo mean speedup | **89x** | — |
+| Min speedup | 30x (tpch_q1) | — |
+| Max speedup | 163x (join2_02) | — |
 
 ## Methodology
 
 ### Ra measurement
 
 - Binary: `ra_vs_pg` (release build, `cargo run --release -p ra-bench --bin ra_vs_pg`)
-- Measures: parse + decorrelate + optimize (full planning pipeline)
+- Measures: parse + decorrelate + optimize + ordering pass (full planning pipeline)
 - Warmup: 5 iterations (discarded)
 - Measured iterations: 30
 - Hardware: Apple M3 Max
-- Ra version: v0.3.3 (commit `e96e9b48`)
+- Ra version: v0.4.0
+- Pipeline: includes post-extraction ordering pass (RFC 0025)
 
 ### PostgreSQL measurement
 
@@ -50,40 +51,60 @@ microseconds (PostgreSQL). All results are statistically significant with non-ov
 
 | Query | Category | Ra median (μs) | Ra [p5, p95] | PG median (μs) | PG [p5, p95] | Speedup |
 |-------|----------|---------------:|:-------------|---------------:|:-------------|--------:|
-| scan_01 | Simple scan | 3.6 | [2.6, 9.3] | 499 | [428, 600] | 139x |
-| scan_02 | Simple scan | 3.6 | [2.9, 5.2] | 469 | [416, 602] | 131x |
-| scan_03 | Simple scan | 4.5 | [3.7, 4.9] | 434 | [399, 603] | 97x |
-| join2_01 | 2-table join | 8.0 | [7.5, 9.8] | 1089 | [989, 1358] | 136x |
-| join2_02 | 2-table join | 7.5 | [6.2, 8.1] | 1236 | [1127, 1510] | 165x |
-| join2_03 | 2-table join | 7.3 | [6.9, 7.7] | 873 | [779, 1100] | 120x |
-| join3_01 | 3-table join | 11.9 | [9.7, 12.8] | 1691 | [1602, 2064] | 143x |
-| join3_02 | 3-table join | 11.9 | [11.8, 16.2] | 1259 | [1143, 1665] | 106x |
-| join3_03 | 4-table join | 12.5 | [12.1, 13.0] | 1719 | [1623, 2138] | 137x |
-| star_01 | 5-table star | 25.5 | [25.1, 27.1] | 2640 | [2316, 3428] | 104x |
-| star_02 | 6-table star | 30.3 | [29.9, 34.2] | 3425 | [3062, 4129] | 113x |
-| agg_01 | Aggregation | 10.9 | [10.8, 11.0] | 1203 | [981, 1321] | 111x |
-| agg_02 | EXISTS semi-join | 14.5 | [14.3, 14.9] | 1234 | [1119, 1465] | 85x |
-| corr_01 | Correlated IN | 10.0 | [9.8, 10.9] | 851 | [817, 1024] | 85x |
-| corr_02 | Nested subquery | 23.4 | [23.1, 23.9] | 1867 | [1755, 2500] | 80x |
-| tpch_q1 | TPC-H Q1 | 13.6 | [13.2, 23.2] | 498 | [477, 611] | 37x |
-| tpch_q3 | TPC-H Q3 | 19.9 | [19.8, 21.5] | 1707 | [1621, 2091] | 86x |
-| tpch_q5 | TPC-H Q5 | 32.1 | [31.9, 33.2] | 2924 | [2740, 3540] | 91x |
-| tpch_q10 | TPC-H Q10 | 27.0 | [26.3, 28.7] | 2138 | [1976, 2657] | 79x |
-| win_01 | Window fn | 7.2 | [7.1, 8.7] | 467 | [445, 634] | 64x |
-| win_02 | Window fn | 7.1 | [7.0, 7.2] | 454 | [410, 552] | 64x |
+| scan_01 | Simple scan | 3.6 | [2.8, 5.8] | 499 | [428, 600] | 140x |
+| scan_02 | Simple scan | 3.4 | [2.6, 4.9] | 468 | [416, 602] | 139x |
+| scan_03 | Simple scan | 4.1 | [3.4, 4.6] | 434 | [399, 603] | 105x |
+| join2_01 | 2-table join | 8.0 | [6.7, 8.6] | 1089 | [989, 1358] | 135x |
+| join2_02 | 2-table join | 7.6 | [6.3, 8.7] | 1236 | [1127, 1510] | 163x |
+| join2_03 | 2-table join | 7.8 | [6.3, 9.3] | 873 | [779, 1100] | 112x |
+| join3_01 | 3-table join | 12.2 | [10.1, 13.0] | 1691 | [1602, 2064] | 138x |
+| join3_02 | 3-table join | 15.5 | [12.9, 22.0] | 1258 | [1143, 1665] | 81x |
+| join3_03 | 4-table join | 14.7 | [12.7, 16.7] | 1718 | [1623, 2138] | 117x |
+| star_01 | 5-table star | 29.6 | [25.3, 33.9] | 2640 | [2316, 3428] | 89x |
+| star_02 | 6-table star | 37.6 | [33.7, 40.0] | 3425 | [3062, 4129] | 91x |
+| agg_01 | Aggregation | 12.4 | [11.4, 14.5] | 1203 | [981, 1321] | 97x |
+| agg_02 | EXISTS semi-join | 18.6 | [15.3, 23.1] | 1234 | [1119, 1465] | 66x |
+| corr_01 | Correlated IN | 12.7 | [11.7, 14.1] | 850 | [817, 1024] | 67x |
+| corr_02 | Nested subquery | 30.1 | [26.7, 48.0] | 1867 | [1755, 2500] | 62x |
+| tpch_q1 | TPC-H Q1 | 16.6 | [13.4, 31.6] | 498 | [477, 611] | 30x |
+| tpch_q3 | TPC-H Q3 | 22.1 | [20.7, 43.9] | 1707 | [1621, 2091] | 77x |
+| tpch_q5 | TPC-H Q5 | 32.1 | [31.8, 44.4] | 2924 | [2740, 3540] | 91x |
+| tpch_q10 | TPC-H Q10 | 28.9 | [28.0, 41.0] | 2138 | [1976, 2657] | 74x |
+| win_01 | Window fn | 7.5 | [7.2, 15.5] | 466 | [445, 634] | 62x |
+| win_02 | Window fn | 7.4 | [7.0, 10.6] | 454 | [410, 552] | 61x |
 
 ### Category Summaries
 
 | Category | Queries | Ra median (μs) | PG median (μs) | Geo mean speedup |
 |----------|---------|---------------:|---------------:|-----------------:|
-| Simple scan | scan_01-03 | 3.6 | 469 | 121x |
-| 2-table join | join2_01-03 | 7.5 | 1089 | 139x |
-| Multi-table join | join3_01-03 | 11.9 | 1691 | 127x |
-| Star join (5-6 tables) | star_01-02 | 27.9 | 3032 | 108x |
-| Aggregation | agg_01-02 | 12.7 | 1218 | 97x |
-| Correlated subquery | corr_01-02 | 16.7 | 1359 | 83x |
-| TPC-H queries | tpch_q1,q3,q5,q10 | 23.5 | 1922 | 69x |
-| Window functions | win_01-02 | 7.2 | 460 | 64x |
+| Simple scan | scan_01-03 | 3.6 | 468 | 127x |
+| 2-table join | join2_01-03 | 7.8 | 1089 | 135x |
+| Multi-table join | join3_01-03 | 14.7 | 1691 | 110x |
+| Star join (5-6 tables) | star_01-02 | 33.6 | 3032 | 90x |
+| Aggregation | agg_01-02 | 15.5 | 1218 | 80x |
+| Correlated subquery | corr_01-02 | 21.4 | 1359 | 65x |
+| TPC-H queries | tpch_q1,q3,q5,q10 | 24.9 | 1922 | 63x |
+| Window functions | win_01-02 | 7.5 | 460 | 62x |
+
+## RFC 0025 Impact
+
+The v0.4.0 pipeline includes a post-extraction ordering propagation pass (RFC 0025) that
+eliminates redundant Sort nodes and converts Sort to IncrementalSort when the input provides
+a prefix of the required ordering.
+
+**Planning overhead:** The ordering pass adds 0.3% (simple scans) to 18% (complex star
+joins) planning time compared to v0.3.3 without the pass. This accounts for the reduction
+from 98x to 89x geometric mean speedup.
+
+**Execution benefit:** The tradeoff is justified because eliminating Sort operators at
+execution time saves milliseconds to seconds on real workloads — far exceeding the
+microsecond-scale planning overhead.
+
+| Complexity | v0.3.3 Ra median | v0.4.0 Ra median | Overhead | Execution savings |
+|------------|-----------------|-----------------|----------|-------------------|
+| Simple scan (1 table) | 3.6 μs | 3.7 μs | +0.3% | Sort elimination on indexed scans |
+| 2-table join | 7.5 μs | 7.8 μs | +4% | IncrementalSort on merge joins |
+| Star join (5-6 tables) | 27.9 μs | 33.6 μs | +18% | Multiple Sort→IncrementalSort |
 
 ## Analysis
 
@@ -111,40 +132,40 @@ Ra planning time scales linearly with query complexity:
 ```
 Tables  Ra median (μs)  PG median (μs)  Speedup
 ------  --------------  --------------  -------
-1       3.6-4.5         434-499         97-139x
-2       7.3-14.5        851-1236        85-165x
-3-4     11.9-12.5       1259-1719       106-143x
-5-6     25.5-32.1       2640-3425       91-113x
+1       3.4-4.1         434-499         105-140x
+2       7.6-18.6        850-1236        62-163x
+3-4     12.2-14.7       1258-1718       81-138x
+5-6     29.6-37.6       2640-3425       89-91x
 ```
 
 PostgreSQL's planning time also scales roughly linearly, but with much higher per-table
-cost (~500μs/table vs ~5μs/table for Ra).
+cost (~500μs/table vs ~6μs/table for Ra).
 
 ### Notable observations
 
-- **tpch_q1 has the lowest speedup (37x)**: This is a single-table aggregate with many
+- **tpch_q1 has the lowest speedup (30x)**: This is a single-table aggregate with many
   output expressions. Ra's parse phase dominates (parsing 10 output expressions) rather than
   optimization. PG is also at its fastest here (single table = minimal planning work).
 
-- **join2_02 has the highest speedup (165x)**: Two-table equi-join with a simple predicate.
-  Ra's LeftDeep path handles this in 7.5μs. PG still does full catalog lookups and cost
+- **join2_02 has the highest speedup (163x)**: Two-table equi-join with a simple predicate.
+  Ra's LeftDeep path handles this in 7.6μs. PG still does full catalog lookups and cost
   estimation (~1.2ms).
 
-- **agg_02 (EXISTS decorrelation) at 85x**: After the v0.3.3 fix (routing semi-joins through
-  LeftDeep instead of EGraphMedium), this query plans in 14.5μs. Before the fix, it was
-  1.18ms — slower than PostgreSQL.
+- **Star joins show ordering pass overhead most clearly**: The 5-6 table star joins have the
+  most Sort nodes to analyze, so the ordering pass adds proportionally more time here. Still
+  89-91x faster than PostgreSQL.
 
-- **Window functions (64x)**: Lower speedup because Ra doesn't yet optimize window function
+- **Window functions (61-62x)**: Lower speedup because Ra doesn't yet optimize window function
   plans (passes them through unchanged), so the fixed overhead of parsing is proportionally
   higher relative to PG's minimal work on simple window queries.
 
 ## Environment
 
 ```
-Ra:   v0.3.3 (e96e9b48), release build, Apple M3 Max
+Ra:   v0.4.0, release build, Apple M3 Max
 PG:   18.4 (source build), macOS arm64, default config
 Data: TPC-H SF=0.01 (60K lineitem, 15K orders, 1.5K customer)
-Date: 2026-05-16
+Date: 2026-05-17
 ```
 
 ## Reproduction

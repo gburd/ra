@@ -58,6 +58,12 @@ Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner
            │  │  Extract lowest-cost plan from e-graph               │
            │  └──────────────────────┬──────────────────────────────┘
            │                         │
+           │                         ▼
+           │  ┌─────────────────────────────────────────────────────┐
+           │  │  ORDERING PASS (RFC 0025)                            │
+           │  │  Eliminate redundant Sort, convert to IncrementalSort │
+           │  └──────────────────────┬──────────────────────────────┘
+           │                         │
            ▼                         ▼
 ┌───────────────────────────────────────────────────────────────────┐
 │  OPTIMIZED RelExpr                                                 │
@@ -185,8 +191,9 @@ rules/
    - SKIP: return RelExpr unchanged
    - LEFT_DEEP: cardinality-ordered join tree construction
    - EGRAPH: equality saturation with adaptive budget
-6. Plan builder: RelExpr → PostgreSQL PlannedStmt
-7. Return PlannedStmt to executor
+6. Ordering pass: eliminate redundant sorts, convert to IncrementalSort
+7. Plan builder: RelExpr → PostgreSQL PlannedStmt
+8. Return PlannedStmt to executor
 ```
 
 ### Statistics Flow
@@ -298,14 +305,16 @@ ra/
 
 ## Performance
 
-End-to-end comparison: Ra extension inside PostgreSQL 18.3 vs native PG planner (TPC-H SF0.01, median of 3 runs):
+Head-to-head planning time comparison: Ra v0.4.0 vs PostgreSQL 18.4 native planner (TPC-H SF=0.01, 21 queries, median of 30 runs):
 
-| Category | Ra Plan | PG Plan | Verdict |
-|----------|---------|---------|---------|
-| Simple queries (10) | 1.1-1.4ms | 1.0-1.4ms | Parity |
-| Join queries (15) | 1.2-3.5ms | 1.2-3.5ms | Parity |
+| Metric | Ra | PostgreSQL 18.4 |
+|--------|-----|-----------------|
+| Queries won | 21/21 (100%) | 0/21 (0%) |
+| Geo mean planning time | 12.8 μs | 1089 μs |
+| Geo mean speedup | **89x** | — |
+| Range | 3.4-37.6 μs | 434-3425 μs |
 
-Ra wins 15/25 queries, PG wins 9/25, 1 tie. Maximum planning time difference: 0.28ms. Execution times are identical (same PostgreSQL executor, equivalent plans).
+Ra wins all queries with speedups ranging from 30x (single-table aggregation) to 163x (2-table equi-join). Full results: [`benchmarks/ra-vs-pg18-head-to-head.md`](benchmarks/ra-vs-pg18-head-to-head.md).
 
 ## References
 

@@ -47,6 +47,14 @@ tla/states/
 /benchmarks/target/
 *_benchmark_results.json
 
+# Benchmark run artifacts (keep only analysis reports)
+benchmarks/results/*/raw_results/
+benchmarks/results/*/logs/
+benchmarks/results/*/postgres_plans/
+benchmarks/results/*/ra_plans/
+benchmarks/infrastructure_validation_*.txt
+*.pg_tmp
+
 # Stale root-level scratch files
 /test_feature_extraction.rs
 /debug_feature_extraction.rs

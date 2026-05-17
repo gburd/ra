@@ -126,6 +126,7 @@ The optimization engine:
 - **egraph.rs**: E-graph construction using `egg` library
 - **rewrite.rs**: Converts rules to egg rewrite rules
 - **extract.rs**: Cost-based plan extraction from e-graph
+- **ordering_pass.rs**: Post-extraction physical property propagation (RFC 0025)
 - **analysis.rs**: E-graph analysis passes
 - **differential.rs**: Differential dataflow for incremental updates
 - **timely_integration.rs**: Timely dataflow integration
@@ -142,6 +143,7 @@ Key algorithms:
 2. **Cost-Based Extraction**: Finds lowest-cost plan from e-graph
 3. **Incremental Maintenance**: Differential dataflow for efficient updates
 4. **Platform Detection**: Conditional rule loading based on database features
+5. **Physical Property Propagation**: Post-extraction ordering pass eliminates redundant sorts
 
 ### ra-codegen {#ra-codegen}
 
@@ -194,7 +196,8 @@ flowchart TD
     Parse --> EGraph[Build E-graph with rules]
     EGraph --> Saturate[Equality Saturation]
     Saturate --> Extract[Cost-based Extraction]
-    Extract --> Physical[Optimized Physical Plan]
+    Extract --> Ordering[Ordering Pass - RFC 0025]
+    Ordering --> Physical[Optimized Physical Plan]
     Physical --> Codegen[Code Generation]
     Codegen --> Exec[Executable Code]
 
