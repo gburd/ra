@@ -248,6 +248,6 @@ The `collect_pg_plans.sh` script (to be implemented) will:
 ## References
 
 - **BENCHMARK_PLAN.md** - Comprehensive benchmark framework specification
-- **benchmarks/tpch-ra-vs-pg.md** - TPC-H benchmark results
+- **benchmarks/ra-vs-pg18-head-to-head.md** - Ra vs PostgreSQL 18.4 head-to-head results
 - **benchmarks/job/benchmark_runner.rs** - JOB benchmark metrics framework
 - **crates/ra-engine/benches/tpch_all22.rs** - TPC-H benchmark implementation

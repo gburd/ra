@@ -229,7 +229,7 @@ Based on existing TPC-H benchmarks:
 ## References
 
 - **BENCHMARK_PLAN.md** - Complete specification
-- **benchmarks/tpch-ra-vs-pg.md** - Existing TPC-H results
+- **benchmarks/ra-vs-pg18-head-to-head.md** - Ra vs PostgreSQL 18.4 head-to-head results
 - **benchmarks/job/benchmark_runner.rs** - Metrics framework
 - **crates/ra-engine/benches/tpch_all22.rs** - TPC-H benchmark
 
