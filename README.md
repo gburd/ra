@@ -18,11 +18,11 @@ Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner
                                     ▼
 ┌───────────────────────────────────────────────────────────────────┐
 │  SPECULATIVE ROUTER  (~87ns BitNet forward pass)                  │
-│                                                                    │
+│                                                                   │
 │  Extract OptimizationFeatures (16D) from RelExpr                  │
-│  Predict: difficulty, iterations_needed, improvement_potential     │
-│                                                                    │
-│  Route decision:                                                   │
+│  Predict: difficulty, iterations_needed, improvement_potential    │
+│                                                                   │
+│  Route decision:                                                  │
 │    SKIP       → return unchanged (single-table, trivial)          │
 │    LEFT_DEEP  → heuristic join ordering (equi-join chains)        │
 │    EGRAPH_LOW → e-graph, 3 iterations, 5ms budget                 │
@@ -33,49 +33,49 @@ Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner
      (fast paths)         (e-graph path)
            │                    │
            │                    ▼
-           │  ┌─────────────────────────────────────────────────────┐
-           │  │  E-GRAPH EQUALITY SATURATION (egg library)          │
-           │  │                                                      │
-           │  │  ~170 rewrite rules applied simultaneously:          │
-           │  │    • Predicate pushdown (filter through joins)       │
-           │  │    • Join reordering (commutativity, associativity)  │
-           │  │    • Projection pruning (remove unused columns)      │
-           │  │    • Expression simplification (constant folding)    │
-           │  │    • Aggregate optimization (push through joins)     │
-           │  │    • CTE inlining (small CTEs materialized inline)   │
+           │  ┌───────────────────────────────────────────────────────┐
+           │  │  E-GRAPH EQUALITY SATURATION (egg library)            │
+           │  │                                                       │
+           │  │  ~170 rewrite rules applied simultaneously:           │
+           │  │    • Predicate pushdown (filter through joins)        │
+           │  │    • Join reordering (commutativity, associativity)   │
+           │  │    • Projection pruning (remove unused columns)       │
+           │  │    • Expression simplification (constant folding)     │
+           │  │    • Aggregate optimization (push through joins)      │
+           │  │    • CTE inlining (small CTEs materialized inline)    │
            │  │    • Semi-join reduction, redundant join elimination  │
-           │  │    • Functional dependency exploitation              │
-           │  │                                                      │
-           │  │  CONTINUATION GATE (every 2 iterations):             │
-           │  │    If cost improvement < 0.1% → stop early           │
-           │  │    If model predicts P(improve) < 30% → stop         │
-           │  └──────────────────────┬──────────────────────────────┘
+           │  │    • Functional dependency exploitation               │
+           │  │                                                       │
+           │  │  CONTINUATION GATE (every 2 iterations):              │
+           │  │    If cost improvement < 0.1% → stop early            │
+           │  │    If model predicts P(improve) < 30% → stop          │
+           │  └──────────────────────┬────────────────────────────────┘
            │                         │
            │                         ▼
            │  ┌─────────────────────────────────────────────────────┐
-           │  │  COST EXTRACTION                                     │
-           │  │  BitNet cost model scores all equivalent plans       │
-           │  │  Extract lowest-cost plan from e-graph               │
+           │  │  COST EXTRACTION                                    │
+           │  │  BitNet cost model scores all equivalent plans      │
+           │  │  Extract lowest-cost plan from e-graph              │
            │  └──────────────────────┬──────────────────────────────┘
            │                         │
            │                         ▼
-           │  ┌─────────────────────────────────────────────────────┐
-           │  │  ORDERING PASS (RFC 0025)                            │
+           │  ┌───────────────────────────────────────────────────────┐
+           │  │  ORDERING PASS (RFC 0025)                             │
            │  │  Eliminate redundant Sort, convert to IncrementalSort │
-           │  └──────────────────────┬──────────────────────────────┘
+           │  └──────────────────────┬────────────────────────────────┘
            │                         │
            ▼                         ▼
 ┌───────────────────────────────────────────────────────────────────┐
-│  OPTIMIZED RelExpr                                                 │
-│                                                                    │
+│  OPTIMIZED RelExpr                                                │
+│                                                                   │
 │  → Plan cache (template-based, 97.5% hit rate on OLTP)            │
-│  → Training coordinator (feeds back to BitNet model)               │
-│  → PostgreSQL PlannedStmt (via plan_builder)                       │
+│  → Training coordinator (feeds back to BitNet model)              │
+│  → PostgreSQL PlannedStmt (via plan_builder)                      │
 └───────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
                          ┌──────────────────────┐
-                         │  PostgreSQL Executor  │
+                         │  PostgreSQL Executor │
                          └──────────────────────┘
 ```
 
@@ -92,22 +92,22 @@ Lime is included as a git submodule at `crates/lime-sys/lime` and exposed to Rus
 ```
 Input: [f32; 12]  QueryFeatures
          │
-    ┌────┴────┐
-    │ Normalize│  x_norm = (x - μ) * σ⁻¹  (learned per-feature)
-    └────┬────┘
+    ┌────┴──────┐
+    │ Normalize │  x_norm = (x - μ) * σ⁻¹  (learned per-feature)
+    └────┬──────┘
          │
     ┌────┴────────────────────────────────────┐
-    │ Layer 1:  12 → 32                        │
+    │ Layer 1:  12 → 32                       │
     │ W₁: 384 ternary weights {-1, 0, +1}     │
-    │ h = ReLU(W₁ · x_norm · α₁ + b₁)        │
-    │ 96 bytes packed (2 bits per weight)       │
+    │ h = ReLU(W₁ · x_norm · α₁ + b₁)         │
+    │ 96 bytes packed (2 bits per weight)     │
     └────┬────────────────────────────────────┘
          │
     ┌────┴────────────────────────────────────┐
-    │ Layer 2:  32 → 16                        │
+    │ Layer 2:  32 → 16                       │
     │ W₂: 512 ternary weights {-1, 0, +1}     │
     │ y = softplus(W₂ · h · α₂ + b₂)          │
-    │ 128 bytes packed                          │
+    │ 128 bytes packed                        │
     └────┬────────────────────────────────────┘
          │
 Output: [f32; 16]  CostVector + routing signals
@@ -203,15 +203,15 @@ PostgreSQL catalogs (pg_statistic, pg_class)
          │
          ▼
 ┌─────────────────────────────────┐
-│  Metadata Cache                  │
+│  Metadata Cache                 │
 │  - Invalidated via relcache CB  │
 │  - Row counts, column stats     │
-│  - Index availability            │
+│  - Index availability           │
 └────────────┬────────────────────┘
              │
              ▼
 ┌─────────────────────────────────┐
-│  Optimizer                       │
+│  Optimizer                      │
 │  - Table stats → join ordering  │
 │  - Column NDV → selectivity     │
 │  - Index info → access paths    │
@@ -219,13 +219,13 @@ PostgreSQL catalogs (pg_statistic, pg_class)
              │
              ▼
 ┌─────────────────────────────────┐
-│  Execution Feedback              │
-│  (executor_end_hook)             │
+│  Execution Feedback             │
+│  (executor_end_hook)            │
 │  - Actual time, rows, buffers   │
 │  - Compared to predicted cost   │
-│  - Fed to FeedbackCollector      │
-│  - Updates MAPE tracker          │
-│  - Triggers model training       │
+│  - Fed to FeedbackCollector     │
+│  - Updates MAPE tracker         │
+│  - Triggers model training      │
 └─────────────────────────────────┘
 ```
 
@@ -329,5 +329,6 @@ Ra wins all queries with speedups ranging from 30x (single-table aggregation) to
 Licensed under either of:
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT License ([LICENSE-MIT](LICENSE-MIT))
+- ISC License ([LICENSE-ISC](LICENSE-ISC))
 
 at your option.
