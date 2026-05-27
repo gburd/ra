@@ -19,8 +19,11 @@ parser unchanged and vice versa.
 | Generate advice from a finished `RelExpr` plan | **Done** (`ra_engine::plan_advice_emit::emit_advice`) |
 | Honor advice in Ra's optimizer (`OptimizerConfig.plan_advice`) | **Done** for `JOIN_ORDER`; scan-method tags parsed but not gated (RelExpr is logical-only) |
 | Round-trip oracle test (parallel to PG's `test_plan_advice`) | **Done** (`crates/ra-engine/tests/plan_advice_round_trip.rs`) |
+| Validate produced plan and compute `FeedbackFlags` | **Done** (`ra_engine::plan_advice_validate::validate_advice`) |
 | PG extension GUCs (`ra_planner.plan_advice`, ...) | **Done** |
-| `EXPLAIN (PLAN_ADVICE)` custom-option registration | **Deferred** — pgrx 0.17 doesn't expose `RegisterExtensionExplainOption`; TODO documented in `planner_hook.rs` |
+| `pg_plan_advice.advice` GUC compatibility shim | **Done** (registers under both names; the upstream name wins when set) |
+| `EXPLAIN (PLAN_ADVICE)` registration via `RegisterExtensionExplainOption` | **Done** (raw FFI; renders supplied advice with feedback flags) |
+| `Generated Plan Advice:` block in EXPLAIN output | **Not yet** — requires plumbing `ra-emit-advice` output through `PlannedStmt::extension_state` |
 
 The first three rows are what shipped in
 [commit 8aef6a13](https://codeberg.org/gregburd/ra/commit/8aef6a13).
@@ -113,20 +116,20 @@ The
 [port plan](../research/pg-plan-advice-port.md)
 documents the remaining work:
 
+- **`Generated Plan Advice:` in EXPLAIN output.** Today's
+  EXPLAIN integration renders supplied advice; rendering
+  generated advice requires Ra's planner to stash the
+  emitted-from-`RelExpr` advice on `PlannedStmt::extension_state`
+  before returning, so the `explain_per_plan_hook` can read it
+  back. The `ra-engine` side already produces the value via
+  `plan_advice_emit::emit_advice`; the missing piece is the
+  pgrx FFI to set `extension_state`.
 - **Cost-extraction penalty for advice violations.** Today's
   honor layer demotes rule groups; a follow-up should add a
   `disable_cost`-style penalty in cost extraction so plans that
   still violate the advice (because no rule could honor it)
   surface as `Disabled: true`-equivalent, mirroring PG's
   fallback behavior exactly.
-- **`EXPLAIN (PLAN_ADVICE)` custom-option registration.** Needs
-  pgrx to expose `RegisterExtensionExplainOption` — currently
-  the GUCs are wired but EXPLAIN output is unchanged.
-- **Compatibility shim for `pg_plan_advice.advice` (the upstream
-  GUC name).** When ra-pg-extension is loaded standalone, it
-  could optionally also register `pg_plan_advice.advice` so
-  existing clients don't need to change their `SET` commands.
-  Today users use `ra_planner.plan_advice` instead.
 
 ## See also
 

@@ -313,12 +313,8 @@ fn optimize_relexpr(
     facts: &dyn ra_core::FactsProvider,
 ) -> Result<ra_core::algebra::RelExpr, String> {
     let mut config = ra_engine::OptimizerConfig::default();
-    if let Some(advice_cstr) = crate::extension_state::RA_PLAN_ADVICE.get() {
-        if let Ok(s) = advice_cstr.into_string() {
-            if !s.is_empty() {
-                config.plan_advice = Some(s);
-            }
-        }
+    if let Some(s) = crate::extension_state::effective_plan_advice() {
+        config.plan_advice = Some(s);
     }
     let optimizer = ra_engine::Optimizer::with_config(config);
     optimizer

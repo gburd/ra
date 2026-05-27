@@ -19,6 +19,7 @@ mod metadata_cache;
 pub mod model_safety;
 pub mod monitor;
 pub(crate) mod parser_hook;
+mod plan_advice_explain;
 mod plan_builder;
 mod planner_hook;
 mod query_parser;
@@ -52,6 +53,15 @@ pub extern "C-unwind" fn _PG_init() {
 
     // Initialize system fingerprint monitor for neural optimization
     monitor::init();
+
+    // Register the EXPLAIN(PLAN_ADVICE) option and chain the
+    // per-plan EXPLAIN hook so supplied plan advice is rendered
+    // with feedback flags. SAFETY: PG holds the extension-load
+    // mutex during _PG_init; mutating the global hook static is
+    // race-free here.
+    unsafe {
+        plan_advice_explain::install_explain_hooks();
+    }
 
     // Register relcache invalidation callback for metadata cache
     register_relcache_callback();
