@@ -408,11 +408,31 @@ apply, all documented in detail in
 - [Access Path Selection in System R](https://dl.acm.org/doi/10.1145/582095.582099) (Selinger et al.)
 - [The Volcano Optimizer Generator](https://dl.acm.org/doi/10.1109/69.273032) (Graefe)
 
-## License
+## Copyright and License
 
-Licensed under either of:
+As a US Citizen the Author (Greg Burd <greg@burd.me>) acknowledges that this project
+was a joint effort written using AI under his guidance.  The form of this work would
+not have naturally occured without the Author, the code would not have been possible
+without AI.  IANAL, so I don't know where this work sits on the spectrum of copyright
+law in the US as of today.  Here are resources for you to make your own informed
+decision.
+- https://legalclarity.org/can-you-copyright-ai-generated-content/
+- https://www.congress.gov/crs-product/LSB10922
+
+Assuming the Author(s) has the right to assert copyright, you may use this work under
+any of the following license's terms.
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT License ([LICENSE-MIT](LICENSE-MIT))
 - ISC License ([LICENSE-ISC](LICENSE-ISC))
+- or contact the Author as he's likely to allow a change.
 
-at your option.
+## Disclosure
+
+This work was created with an even blend of human and AI contributions. AI was
+used to make content edits, such as changes to scope, information, and ideas.
+AI was used to make new content, such as text, images, analysis, and ideas. AI
+was prompted for its contributions, or AI assistance was enabled. AI-generated
+content was reviewed and approved. The following model(s) or application(s)
+were used: claude-opus-4.7.  (AIA HAb CeNc Hin R claude-opus-4.7 v1.0)
+
+![Alt Text](ai-stmt.svg) 
