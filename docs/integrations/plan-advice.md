@@ -16,9 +16,11 @@ parser unchanged and vice versa.
 | `PGS_*` strategy-mask constants (bit-for-bit PG-compatible) | **Done** |
 | Trove lookup (scan / rel / join categories) | **Done** |
 | `PGPA_FB_*` feedback flags + exact PG output wording | **Done** |
-| Generate advice from a finished `RelExpr` plan | **Not yet** |
-| Honor advice in Ra's optimizer (rule advisor + cost penalty) | **Not yet** |
-| PG extension drop-in (custom EXPLAIN option, GUCs, advisor hook) | **Not yet** |
+| Generate advice from a finished `RelExpr` plan | **Done** (`ra_engine::plan_advice_emit::emit_advice`) |
+| Honor advice in Ra's optimizer (`OptimizerConfig.plan_advice`) | **Done** for `JOIN_ORDER`; scan-method tags parsed but not gated (RelExpr is logical-only) |
+| Round-trip oracle test (parallel to PG's `test_plan_advice`) | **Done** (`crates/ra-engine/tests/plan_advice_round_trip.rs`) |
+| PG extension GUCs (`ra_planner.plan_advice`, ...) | **Done** |
+| `EXPLAIN (PLAN_ADVICE)` custom-option registration | **Deferred** — pgrx 0.17 doesn't expose `RegisterExtensionExplainOption`; TODO documented in `planner_hook.rs` |
 
 The first three rows are what shipped in
 [commit 8aef6a13](https://codeberg.org/gregburd/ra/commit/8aef6a13).
@@ -109,23 +111,22 @@ cargo test -p ra-plan-advice
 
 The
 [port plan](../research/pg-plan-advice-port.md)
-documents the remaining phases:
+documents the remaining work:
 
-- **Phase 4** — honor advice in Ra's optimizer: thread a per-rel
-  `PgsMask` through the optimizer context, demote rule-advisor
-  rules that would violate it, and apply a `disable_cost`-style
-  penalty in cost extraction so violating plans are extracted only
-  as a fallback.
-- **Phase 5** — emit advice from a finished `RelExpr`: walk the
-  optimized plan and produce a string that, when fed back to Ra
-  (or PG), reproduces the same plan.
-- **Phase 6** — PG extension drop-in: register `EXPLAIN
-  (PLAN_ADVICE)` via `RegisterExtensionExplainOption`, expose
-  `ra.plan_advice` GUC, install advisor hooks compatible with
-  PG's own `pg_plan_advice` so existing clients keep working.
-- **Phase 7** — `test_plan_advice`-equivalent oracle: replan every
-  query in the corpus through generated advice and assert the
-  second plan equals the first.
+- **Cost-extraction penalty for advice violations.** Today's
+  honor layer demotes rule groups; a follow-up should add a
+  `disable_cost`-style penalty in cost extraction so plans that
+  still violate the advice (because no rule could honor it)
+  surface as `Disabled: true`-equivalent, mirroring PG's
+  fallback behavior exactly.
+- **`EXPLAIN (PLAN_ADVICE)` custom-option registration.** Needs
+  pgrx to expose `RegisterExtensionExplainOption` — currently
+  the GUCs are wired but EXPLAIN output is unchanged.
+- **Compatibility shim for `pg_plan_advice.advice` (the upstream
+  GUC name).** When ra-pg-extension is loaded standalone, it
+  could optionally also register `pg_plan_advice.advice` so
+  existing clients don't need to change their `SET` commands.
+  Today users use `ra_planner.plan_advice` instead.
 
 ## See also
 
