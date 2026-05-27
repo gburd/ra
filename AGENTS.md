@@ -81,7 +81,7 @@ The workspace is organized into three layers plus a compatibility shim, controll
 `ra-cli` (binary), `ra-adapters`, `ra-metadata`
 
 **Experimental (`--features experimental`):**
-`ra-ml`, `ra-cache-impl`, `ra-adaptive`, `ra-test-utils`, `ra-quel-parser`, `ra-grammar-fuzzer`, `ra-bench`, `ra-sqltest`, `ra-difftest`
+`ra-ml`, `ra-cache-impl`, `ra-adaptive`, `ra-test-utils`, `ra-quel-parser`, `ra-grammar-fuzzer`, `ra-bench`, `ra-sqltest`, `ra-difftest`, `ra-plan-advice`
 
 **Compatibility shim (in workspace, not in default-members):**
 `ra-config` — re-exports `ra_core::config::*` for downstream consumers that still import from the original path.
@@ -240,11 +240,11 @@ Cache functionality is split into two crates:
 - **`ra-cache-api`** (core layer) — trait definitions and interfaces
 - **`ra-cache-impl`** (experimental layer) — LRU/LFU/adaptive implementations
 
-## Workspace Quality (as of 2026-05-26)
+## Workspace Quality (as of 2026-05-27)
 
 - **0 clippy errors** (`cargo clippy --all-targets --all-features -- -D warnings`)
 - **0 compiler warnings** on `cargo build --workspace --all-features`
-- **157 test suites, 7659 tests passing, 0 failing, 66 ignored** (`cargo test --workspace --all-features`)
+- **161 test suites, 7723 tests passing, 0 failing, 66 ignored** (`cargo test --workspace --all-features`)
 - Known flaky test mitigations:
   - `saturation_terminates_quickly` skips Aggregate, self-ref-join, joins of the
     same base table, constant predicates, constant sort keys, and `UnaryOp` over
