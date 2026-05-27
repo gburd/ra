@@ -78,6 +78,18 @@ pub struct OptimizerConfig {
     /// before saturation. Purely advisory: removing these rules
     /// affects plan cost but not correctness.
     pub use_shape_aware_filtering: bool,
+    /// Plan-advice string honored during optimization, in
+    /// `PostgreSQL`'s `pg_plan_advice` mini-language. When
+    /// non-empty, the optimizer demotes rule categories that
+    /// would produce a plan inconsistent with the supplied
+    /// advice (currently: join-reorder rules when `JOIN_ORDER`
+    /// is supplied), and `OptimizationResult::provenance.plan_advice`
+    /// records what was supplied.
+    ///
+    /// `None` or `Some("")` means no advice. Invalid advice
+    /// strings cause `Optimizer::optimize_*` to log a warning
+    /// and proceed without advice; they don't fail the call.
+    pub plan_advice: Option<String>,
 }
 
 /// Configuration for parallel query execution.
@@ -137,6 +149,7 @@ impl Default for OptimizerConfig {
             // Shape-aware filtering is cheap (one O(n) walk of the
             // RelExpr) and purely advisory; default on.
             use_shape_aware_filtering: true,
+            plan_advice: None,
         }
     }
 }

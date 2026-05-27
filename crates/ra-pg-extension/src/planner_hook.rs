@@ -312,11 +312,29 @@ fn optimize_relexpr(
     rel_expr: &ra_core::algebra::RelExpr,
     facts: &dyn ra_core::FactsProvider,
 ) -> Result<ra_core::algebra::RelExpr, String> {
-    let optimizer = ra_engine::Optimizer::new();
+    let mut config = ra_engine::OptimizerConfig::default();
+    if let Some(advice_cstr) = crate::extension_state::RA_PLAN_ADVICE.get() {
+        if let Ok(s) = advice_cstr.into_string() {
+            if !s.is_empty() {
+                config.plan_advice = Some(s);
+            }
+        }
+    }
+    let optimizer = ra_engine::Optimizer::with_config(config);
     optimizer
         .optimize_with_facts(rel_expr, facts)
         .map_err(|e| format!("{e}"))
 }
+
+// TODO(plan-advice): when pgrx 0.18 (or whichever release adds
+// `RegisterExtensionExplainOption` bindings) lands, register
+// `EXPLAIN (PLAN_ADVICE)` here. The handler should call
+// `optimize_bounded` to capture an `OptimizationResult`, emit
+// generated advice via `ra_engine::plan_advice_emit::emit_advice`,
+// and render the "Generated Plan Advice:" / "Supplied Plan
+// Advice:" blocks identically to PG's pgpa_explain_per_plan_hook.
+// Until then, the supplied advice is honored at planning time
+// (via the RA_PLAN_ADVICE GUC) but EXPLAIN output is unchanged.
 
 // TODO(provenance): expose `PlanProvenance` via a custom `EXPLAIN
 // (RA_PROVENANCE)` option. Implementation outline:

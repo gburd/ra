@@ -75,6 +75,8 @@ pub mod ordering_pass;
 pub mod isolation_cost;
 pub mod join_graph;
 pub mod join_graph_shape;
+pub mod plan_advice_emit;
+pub mod plan_advice_honor;
 pub mod join_transformations;
 pub mod large_join;
 pub mod lazy_rules;

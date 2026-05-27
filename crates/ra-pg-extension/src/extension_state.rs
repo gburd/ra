@@ -26,6 +26,49 @@ pub static RA_LOG_DECISIONS: GucSetting<bool> = GucSetting::<bool>::new(false);
 pub static RA_MODEL_PATH: GucSetting<Option<CString>> =
     GucSetting::<Option<CString>>::new(Some(c"models/cost_model.bitnet.json"));
 
+/// GUC: plan-advice string (`ra_planner.plan_advice`).
+///
+/// Mirrors PostgreSQL's `pg_plan_advice.advice`. When non-empty,
+/// the optimizer parses the string in PG's plan-advice
+/// mini-language and demotes rule categories that would conflict
+/// with the supplied advice. See the `ra-plan-advice` crate for
+/// the full grammar and `ra_engine::plan_advice_honor` for the
+/// tag → rule-group mapping. Invalid advice strings emit a
+/// warning and the planner proceeds without advice.
+pub static RA_PLAN_ADVICE: GucSetting<Option<CString>> =
+    GucSetting::<Option<CString>>::new(None);
+
+/// GUC: always include "Supplied Plan Advice" in EXPLAIN output
+/// when advice was supplied (`ra_planner.always_explain_supplied_advice`).
+///
+/// Mirrors `pg_plan_advice.always_explain_supplied_advice`.
+/// Default true. When the EXPLAIN-extension hook is wired up
+/// (currently a TODO; pgrx 0.17 doesn't expose
+/// `RegisterExtensionExplainOption`), this controls whether
+/// supplied advice is rendered alongside the plan.
+pub static RA_ALWAYS_EXPLAIN_SUPPLIED_ADVICE: GucSetting<bool> =
+    GucSetting::<bool>::new(true);
+
+/// GUC: always store advice details on the produced plan
+/// (`ra_planner.always_store_advice_details`).
+///
+/// Mirrors `pg_plan_advice.always_store_advice_details`. Default
+/// false. When true, generated advice is computed and stored on
+/// the produced plan even when no EXPLAIN is in flight, so that
+/// `EXPLAIN EXECUTE` of a prepared statement can later display
+/// it.
+pub static RA_ALWAYS_STORE_ADVICE_DETAILS: GucSetting<bool> =
+    GucSetting::<bool>::new(false);
+
+/// GUC: warn when supplied advice does not apply cleanly
+/// (`ra_planner.plan_advice_feedback_warnings`).
+///
+/// Mirrors `pg_plan_advice.feedback_warnings`. Default false.
+/// When true, the planner emits a `WARNING` for each supplied
+/// advice item that ends up flagged `FAILED` or `CONFLICTING`.
+pub static RA_PLAN_ADVICE_FEEDBACK_WARNINGS: GucSetting<bool> =
+    GucSetting::<bool>::new(false);
+
 /// Hardware profile detected at extension initialization.
 ///
 /// Used to make hardware-aware planning decisions (SSD vs HDD,
@@ -149,6 +192,50 @@ pub fn register_gucs() {
           the RA_MODEL_PATH environment variable if unset.",
         &RA_MODEL_PATH,
         GucContext::Postmaster,
+        GucFlags::default(),
+    );
+
+    GucRegistry::define_string_guc(
+        c"ra_planner.plan_advice",
+        c"Plan-advice string honored during query planning.",
+        c"PostgreSQL plan-advice mini-language; mirrors \
+          pg_plan_advice.advice. Invalid advice emits a WARNING \
+          and the planner proceeds without advice.",
+        &RA_PLAN_ADVICE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    GucRegistry::define_bool_guc(
+        c"ra_planner.always_explain_supplied_advice",
+        c"Show supplied plan advice in EXPLAIN output.",
+        c"Mirrors pg_plan_advice.always_explain_supplied_advice. \
+          Default true. The full EXPLAIN(PLAN_ADVICE) option \
+          requires custom-EXPLAIN-option registration which \
+          pgrx 0.17 does not yet expose; for now this GUC \
+          controls log-level emission of supplied advice.",
+        &RA_ALWAYS_EXPLAIN_SUPPLIED_ADVICE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    GucRegistry::define_bool_guc(
+        c"ra_planner.always_store_advice_details",
+        c"Generate plan advice for every plan, not just \
+          plans that will be EXPLAINed.",
+        c"Mirrors pg_plan_advice.always_store_advice_details. \
+          Default false.",
+        &RA_ALWAYS_STORE_ADVICE_DETAILS,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    GucRegistry::define_bool_guc(
+        c"ra_planner.plan_advice_feedback_warnings",
+        c"Emit WARNINGs when supplied advice does not apply cleanly.",
+        c"Mirrors pg_plan_advice.feedback_warnings. Default false.",
+        &RA_PLAN_ADVICE_FEEDBACK_WARNINGS,
+        GucContext::Userset,
         GucFlags::default(),
     );
 }

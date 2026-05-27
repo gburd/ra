@@ -180,6 +180,7 @@ ra-test-utils = { path = "crates/ra-test-utils" }
 ra-quel-parser = { path = "crates/ra-quel-parser" }
 ra-cli = { path = "crates/ra-cli" }
 ra-bitnet = { path = "crates/ra-bitnet" }
+ra-plan-advice = { path = "crates/ra-plan-advice" }
 lime-sys = { path = "crates/lime-sys" }
 lime-rs = { path = "crates/lime-rs" }
 postgres = { version = "0.19", features = ["with-serde_json-1"] }

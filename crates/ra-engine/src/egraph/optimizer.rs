@@ -270,7 +270,8 @@ impl Optimizer {
             all_rules()
         };
 
-        self.apply_shape_filtering(expr, rules)
+        let rules = self.apply_shape_filtering(expr, rules);
+        self.apply_plan_advice_filtering(rules)
     }
 
     /// Apply [`JoinGraphShape`]-driven advisory filtering, when
@@ -321,6 +322,65 @@ impl Optimizer {
                 removed,
                 groups = ?redundant_groups,
                 "shape-aware filtering: demoted rules"
+            );
+        }
+        kept
+    }
+
+    /// Apply supplied-plan-advice filtering: when
+    /// `OptimizerConfig.plan_advice` is set, parse it and demote
+    /// rule groups that would conflict with the supplied advice.
+    ///
+    /// Today this honors `JOIN_ORDER(...)` by removing the
+    /// `join-reordering` rule group; other tags are parsed and
+    /// recorded on `PlanProvenance` but don't gate rules yet
+    /// (they require physical-plan distinctions Ra's `RelExpr`
+    /// doesn't carry). See
+    /// [`crate::plan_advice_honor::demoted_rule_groups`] for the
+    /// current tag → rule-group mapping.
+    fn apply_plan_advice_filtering(
+        &self,
+        rules: Vec<Rewrite<RelLang, RelAnalysis>>,
+    ) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+        let Some(advice_str) = self.config.plan_advice.as_deref() else {
+            return rules;
+        };
+        if advice_str.is_empty() {
+            return rules;
+        }
+        let advice = match ra_plan_advice::parse_advice(advice_str) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "ignoring unparseable plan_advice; optimizer continues without advice",
+                );
+                return rules;
+            }
+        };
+        let demoted = crate::plan_advice_honor::demoted_rule_groups(&advice);
+        if demoted.is_empty() {
+            return rules;
+        }
+        let demoted_names: std::collections::HashSet<String> = crate::rewrite::all_rules_annotated()
+            .into_iter()
+            .filter(|g| demoted.contains(g.label))
+            .flat_map(|g| g.rules.into_iter().map(|r| r.name.to_string()))
+            .collect();
+        if demoted_names.is_empty() {
+            return rules;
+        }
+        let before = rules.len();
+        let kept: Vec<_> = rules
+            .into_iter()
+            .filter(|r| !demoted_names.contains(r.name.as_str()))
+            .collect();
+        let removed = before - kept.len();
+        if removed > 0 {
+            tracing::debug!(
+                removed,
+                groups = ?demoted,
+                "plan-advice: demoted rules to honor supplied advice",
             );
         }
         kept

@@ -22,6 +22,7 @@ ra-hardware = { workspace = true }
 ra-metadata = { workspace = true, optional = true }
 ra-ml = { workspace = true, optional = true }
 ra-bitnet = { workspace = true }
+ra-plan-advice = { workspace = true }
 ra-stats = { workspace = true }
 egg = { workspace = true }
 serde = { workspace = true }
