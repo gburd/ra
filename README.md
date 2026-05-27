@@ -1,6 +1,6 @@
 # Ra
 
-Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner_hook` extension. It converts SQL into a relational algebra tree, runs equality saturation (e-graph rewrite rules) to explore equivalent plan forms, then extracts the lowest-cost plan using a 420-byte BitNet 1.58-bit neural cost model trained online from execution feedback. A speculative router makes an O(1) prediction (~87ns) about each query's optimization difficulty and routes trivial cases (equi-join chains, single-table scans) directly to heuristic construction, reserving the full e-graph search for queries that actually benefit from it.
+Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner_hook` extension. It converts SQL into a relational algebra tree, runs equality saturation (e-graph rewrite rules) to explore equivalent plan forms, then extracts the lowest-cost plan using a 452-byte BitNet 1.58-bit neural cost model trained online from execution feedback. A speculative router makes an O(1) prediction (~80 ns BitNet forward pass on Apple M3 Max, release build) about each query's optimization difficulty and routes trivial cases (equi-join chains, single-table scans) directly to heuristic construction, reserving the full e-graph search for queries that actually benefit from it.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner
                                     │
                                     ▼
 ┌───────────────────────────────────────────────────────────────────┐
-│  SPECULATIVE ROUTER  (~87ns BitNet forward pass)                  │
+│  SPECULATIVE ROUTER  (~80ns BitNet predict_all on M3 Max)         │
 │                                                                   │
 │  Extract OptimizationFeatures (16D) from RelExpr                  │
 │  Predict: difficulty, iterations_needed, improvement_potential    │
@@ -90,17 +90,17 @@ Lime is included as a git submodule at `crates/lime-sys/lime` and exposed to Rus
 ### Architecture
 
 ```
-Input: [f32; 12]  QueryFeatures
+Input: [f32; 16]  OptimizationFeatures (post-A4)
          │
     ┌────┴──────┐
     │ Normalize │  x_norm = (x - μ) * σ⁻¹  (learned per-feature)
     └────┬──────┘
          │
     ┌────┴────────────────────────────────────┐
-    │ Layer 1:  12 → 32                       │
-    │ W₁: 384 ternary weights {-1, 0, +1}     │
+    │ Layer 1:  16 → 32                       │
+    │ W₁: 512 ternary weights {-1, 0, +1}     │
     │ h = ReLU(W₁ · x_norm · α₁ + b₁)         │
-    │ 96 bytes packed (2 bits per weight)     │
+    │ 128 bytes packed (2 bits per weight)    │
     └────┬────────────────────────────────────┘
          │
     ┌────┴────────────────────────────────────┐
@@ -113,7 +113,16 @@ Input: [f32; 12]  QueryFeatures
 Output: [f32; 16]  CostVector + routing signals
 ```
 
-**Total model size: 420 bytes.** Inference: ~72ns (all 16 dims) or ~87ns (scalar CPU cost).
+**Weights-only footprint: 452 bytes** (W₁ 128 + W₂ 128 + biases 192 + α₁ 4) —
+see `BitNetCostModel::weights_only_bytes`. Including the second scale
+α₂ and the 128-byte per-feature normalization table that loads alongside
+the weights, the on-disk JSON footprint is **584 bytes**
+(`model_size_bytes`). Inference (`predict_all`, all 16 dims): ~80 ns
+median on Apple M3 Max release build (criterion, see `cargo bench -p
+ra-bitnet`). The single-dim `predict_cpu_ms` is slightly **slower**
+(~106 ns) because column-strided access to `w2_fast` defeats
+auto-vectorization; prefer `predict_all` for everything but
+single-output diagnostics.
 
 ### Quantization
 
@@ -146,7 +155,7 @@ Training happens online: every e-graph optimization run produces an `Optimizatio
 
 The optimizer uses [egg](https://arxiv.org/abs/2004.03082) (e-graphs good) for equality saturation. Instead of applying transformations sequentially (potentially missing better orderings), the e-graph represents ALL equivalent plans simultaneously and extracts the cheapest.
 
-### Rule Categories (~170 rules active)
+### Rule Categories (~298 rules active)
 
 | Category | Rules | Examples |
 |----------|-------|----------|
@@ -275,33 +284,73 @@ ra-cli explain  'SELECT ...'           # Show relational algebra tree
 ra-cli optimize 'SELECT ...'           # Optimize with rewrite rules
 ra-cli optimize 'SELECT ...' --diff    # Before/after diff
 ra-cli translate --from postgres --to mysql 'SELECT ...'
+
+# `ra-cli benchmark` compares Ra against a real PostgreSQL instance.
+# Set RA_BENCHMARK_PG_URL to a libpq-style URL and the command will run
+# `EXPLAIN (ANALYZE, FORMAT JSON)` on PG for each query. Without the
+# variable the command fails with a clear error rather than fabricating
+# output (the prior `simulate_native_*` helpers were removed in E1).
+RA_BENCHMARK_PG_URL='host=localhost user=postgres dbname=tpch' \
+    ra-cli benchmark --workload tpch
 ```
 
 ## Project Structure
 
 ```
 ra/
-├── models/                    # Trained BitNet model (committed)
+├── models/                       # Trained BitNet model (committed)
 │   └── cost_model.bitnet.json
 ├── crates/
-│   ├── ra-core/               # Types: RelExpr, Expr, Cost, Statistics
-│   ├── ra-parser/             # SQL → RelExpr (Lime LALR + sql_to_relexpr)
-│   ├── ra-engine/             # Optimizer: e-graph, speculative router, training
-│   ├── ra-bitnet/             # BitNet 1.58-bit model: inference + QAT training
-│   ├── ra-hardware/           # Hardware detection, cost calibration
-│   ├── ra-pg-extension/       # PostgreSQL planner_hook extension (pgrx)
-│   ├── ra-bench/              # Benchmarks: TPC-H, JOB, comparison harness
-│   ├── ra-cli/                # Command-line interface
-│   ├── ra-compiler/           # .rra rule file compilation
-│   ├── ra-dialect/            # SQL dialect translation (20+ dialects)
-│   ├── lime-sys/              # Lime parser generator (C, git submodule)
-│   └── lime-rs/               # Safe Rust bindings for Lime
-├── rules/                     # 1,387 optimization rules (.rra files)
-├── benchmarks/                # Benchmark suites and results
-├── tla/                       # TLA+ formal specifications
-├── rfcs/                      # Design documents
-└── docs/                      # Documentation
+│   ├── Core layer (cargo build):
+│   │   ├── ra-core/              # Types: RelExpr, Expr, Cost, Statistics, config
+│   │   ├── ra-parser/            # SQL → RelExpr (Lime LALR + sql_to_relexpr)
+│   │   ├── ra-compiler/          # .rra rule file compilation
+│   │   ├── ra-engine/            # Optimizer: e-graph, speculative router, training
+│   │   ├── ra-bitnet/            # BitNet 1.58-bit model: inference + QAT training
+│   │   ├── ra-dialect/           # SQL dialect translation (20+ dialects)
+│   │   ├── ra-hardware/          # Hardware detection, cost calibration
+│   │   ├── ra-stats-advanced/    # Advanced statistics (lib name: ra_stats)
+│   │   ├── ra-cache-api/         # Cache trait definitions
+│   │   ├── ra-sql-parser/        # SQL parser fork (lib name: sqlparser)
+│   │   ├── lime-sys/             # Lime parser generator (C, git submodule)
+│   │   └── lime-rs/              # Safe Rust bindings for Lime
+│   ├── CLI layer (--features cli):
+│   │   ├── ra-cli/               # Command-line interface
+│   │   ├── ra-adapters/          # DuckDB, MySQL, Stoolap connectors
+│   │   └── ra-metadata/          # Database metadata factory
+│   ├── Experimental layer (--features experimental):
+│   │   ├── ra-ml/                # Cost-model ML extras (legacy interface)
+│   │   ├── ra-cache-api/         # (re-exported)
+│   │   ├── ra-cache-impl/        # LRU/LFU/adaptive cache implementations
+│   │   ├── ra-adaptive/          # Adaptive optimization experiments
+│   │   ├── ra-test-utils/        # Shared test fixtures
+│   │   ├── ra-quel-parser/       # QUEL parser stub (1976 INGRES dialect)
+│   │   ├── ra-grammar-fuzzer/    # Property-based grammar fuzzer
+│   │   ├── ra-bench/             # Benchmarks: TPC-H, JOB, ra_vs_pg
+│   │   ├── ra-sqltest/           # Cross-engine SQL test runner
+│   │   └── ra-difftest/          # Differential testing harness
+│   ├── Out of workspace build (requires pg_config + PG headers):
+│   │   └── ra-pg-extension/      # PostgreSQL planner_hook extension (pgrx)
+│   └── Compatibility shims:
+│       └── ra-config/            # Re-export shim for ra_core::config
+├── rules/                        # 1,387 optimization rule sources (.rra files)
+├── benchmarks/                   # Benchmark suites and results
+├── tla/                          # TLA+ formal specifications
+├── rfcs/                         # Design documents
+└── docs/                         # Documentation
 ```
+
+> Note: Of the 1,387 `.rra` rule sources, ~94 currently compile to
+> active rewrite rules. Combined with the ~213 hand-coded rules in
+> `ra-engine`, `Optimizer::all_rules()` returns **307 active rewrite
+> rules** (verified via `cargo run --release -p ra-engine --example
+> count_rules`). The remaining .rra files are spec-only and require
+> additional condition functions or operator-mapping work to activate.
+> Pre-2026-05-26, two malformed `.rra` rules (`push-func-filter-to-left/right`)
+> contained metavariables in operator position and panicked the entire
+> generated batch via `catch_unwind`; the build script now rejects
+> such patterns and `all_generated_rules()` wraps each category
+> independently so a single bad rule cannot drop the rest.
 
 ## Performance
 
@@ -311,10 +360,45 @@ Head-to-head planning time comparison: Ra v0.4.0 vs PostgreSQL 18.4 native plann
 |--------|-----|-----------------|
 | Queries won | 21/21 (100%) | 0/21 (0%) |
 | Geo mean planning time | 12.8 μs | 1089 μs |
-| Geo mean speedup | **89x** | — |
+| Geo mean speedup | **89x**[^1] | — |
 | Range | 3.4-37.6 μs | 434-3425 μs |
 
+[^1]: Planning time only, asymmetric work — see [Methodology disclosure](#methodology-disclosure) below for the four caveats.
+
 Ra wins all queries with speedups ranging from 30x (single-table aggregation) to 163x (2-table equi-join). Full results: [`benchmarks/ra-vs-pg18-head-to-head.md`](benchmarks/ra-vs-pg18-head-to-head.md).
+
+### Methodology disclosure
+
+The "89x" headline measures **planning time only** — the time each
+optimizer takes to turn SQL into an executable plan. Several caveats
+apply, all documented in detail in
+[`benchmarks/ra-vs-pg18-head-to-head.md`](benchmarks/ra-vs-pg18-head-to-head.md):
+
+1. **Asymmetric work performed.** PostgreSQL's planner reads
+   `pg_statistic`, `pg_class`, and `pg_index` from the system catalogs
+   on every plan. The default Ra binary used in this benchmark
+   (`crates/ra-bench/src/ra_vs_pg.rs`) constructs an `Optimizer::new()`
+   *without* preloaded statistics or a cost model. The same binary now
+   accepts `--with-stats` to load TPC-H SF=0.01 statistics into the
+   optimizer (via `Optimizer::with_table_stats`), so the comparison is
+   methodologically symmetric. The 89× headline above was measured
+   without the flag; rerun with `cargo run --release -p ra-bench
+   --bin ra_vs_pg -- --with-stats` to compare apples-to-apples.
+2. **Parse vs plan boundary.** Ra's measurement includes parse time
+   (`sql_to_relexpr` + decorrelation + ordering pass + optimize). PG's
+   "Planning Time" (the `EXPLAIN ANALYZE` field) excludes parse and
+   measures only its own optimizer. The Ra side therefore carries
+   extra work the PG side doesn't, which slightly understates Ra's
+   advantage if anything.
+3. **Plan quality is not the metric.** This benchmark answers "how
+   fast does the optimizer terminate?", not "how good is the plan?".
+   The plan-quality answer requires running the produced plans
+   end-to-end against the same data; the
+   [`benchmarks/planner_comparison/`](benchmarks/planner_comparison/)
+   harness measures that separately and is not reflected in the 89x.
+4. **Synthetic OLTP plan-cache hit rate.** The README's plan-cache
+   "97.5% hit rate" claim derives from a fixed 5-template × 40-variation
+   integration test. Real-workload measurement is a follow-up item.
 
 ## References
 

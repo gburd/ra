@@ -72,18 +72,24 @@ SQL string
 
 ### Workspace Layers
 
-The workspace is organized into three layers, controlled by Cargo features on the root `ra` package.
+The workspace is organized into three layers plus a compatibility shim, controlled by Cargo features on the root `ra` package.
 
 **Core (default build — `cargo build`):**
-`lime-sys`, `lime-rs`, `ra-core`, `ra-parser`, `ra-compiler`, `ra-engine`, `ra-dialect`, `ra-hardware`, `ra-stats-advanced` (lib name `ra_stats`), `ra-cache-api`, `ra-sql-parser` (lib name `sqlparser`)
+`lime-sys`, `lime-rs`, `ra-core`, `ra-parser`, `ra-compiler`, `ra-engine`, `ra-bitnet`, `ra-dialect`, `ra-hardware`, `ra-stats-advanced` (lib name `ra_stats`), `ra-cache-api`, `ra-sql-parser` (lib name `sqlparser`)
 
 **CLI (`--features cli`):**
 `ra-cli` (binary), `ra-adapters`, `ra-metadata`
 
 **Experimental (`--features experimental`):**
-`ra-ml`, `ra-cache-impl`, `ra-adaptive`, `ra-test-utils`, `ra-quel-parser`
+`ra-ml`, `ra-cache-impl`, `ra-adaptive`, `ra-test-utils`, `ra-quel-parser`, `ra-grammar-fuzzer`, `ra-bench`, `ra-sqltest`, `ra-difftest`
 
-Use `--features all` to build everything.
+**Compatibility shim (in workspace, not in default-members):**
+`ra-config` — re-exports `ra_core::config::*` for downstream consumers that still import from the original path.
+
+**Out of workspace:**
+`ra-pg-extension` — PostgreSQL planner_hook extension built via pgrx (requires `pg_config` and PG headers). Excluded from the workspace.
+
+Use `--features all` to build everything in the root facade.
 
 ### Core Crate Dependency Layers
 
@@ -234,16 +240,28 @@ Cache functionality is split into two crates:
 - **`ra-cache-api`** (core layer) — trait definitions and interfaces
 - **`ra-cache-impl`** (experimental layer) — LRU/LFU/adaptive implementations
 
-## Workspace Quality (as of 2026-05-03)
+## Workspace Quality (as of 2026-05-26)
 
-- **0 clippy errors** (with `-D warnings`, all targets)
-- **136 test suites, 0 failures** (`cargo test --workspace`)
-- **0 compiler warnings** (excluding lime-sys ranlib noise)
+- **0 clippy errors** (`cargo clippy --all-targets --all-features -- -D warnings`)
+- **0 compiler warnings** on `cargo build --workspace --all-features`
+- **157 test suites, 7659 tests passing, 0 failing, 66 ignored** (`cargo test --workspace --all-features`)
 - Known flaky test mitigations:
-  - `saturation_terminates_quickly` skips Aggregate/self-ref-join/column-predicate expressions
-  - `full_lifecycle_all_properties` excludes Idempotence (known optimizer bug: second pass can change table sets)
-  - `render_colored_contains_ansi_on_changes` uses a Mutex to prevent parallel colored-crate interference
-  - Config loader test clears `RA_*` env vars to isolate from developer shell settings
+  - `saturation_terminates_quickly` skips Aggregate, self-ref-join, joins of the
+    same base table, constant predicates, constant sort keys, and `UnaryOp` over
+    constants — each documented inline with the rule-interaction reason
+  - `full_lifecycle_all_properties` and the `long-duration-testing`-gated
+    `extended_all_properties` / `extended_mixed_dml_all_properties` tests
+    explicitly omit the `Idempotence` property — the e-graph's second
+    extraction pass can drop a table reference that the first pass kept
+    (see proptest-regressions for canonical failing shapes:
+    `Filter(col_id, FullOuter(Scan, Scan))` and similar). The companion
+    `extended_idempotence` test is `#[ignore]`d as a regression signal.
+  - `plan_diff` tests that toggle the `colored` crate's process-global override
+    serialise on a module-static `COLOR_LOCK` + `ColorGuard` RAII helper
+  - Config loader test clears `RA_*` env vars to isolate from developer shell
+  - DuckDB adapter is pinned to API surfaces present in `duckdb-rs` ≥ 1.x:
+    no `enable_optimizer`, statement column metadata read after `query()`,
+    `Decimal` rendered via `rust_decimal::Display`
 
 ## Rust Version
 
