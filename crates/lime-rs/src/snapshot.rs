@@ -43,7 +43,7 @@ impl Snapshot {
 
         // SAFETY: c_path is a valid NUL-terminated string. error is a
         // valid out-parameter that receives a malloc'd string on failure.
-        let snap = unsafe { lime_sys::lemon_snapshot_create(c_path.as_ptr(), &raw mut error) };
+        let snap = unsafe { lime_sys::lime_snapshot_create(c_path.as_ptr(), &raw mut error) };
 
         if snap.is_null() {
             let message = if error.is_null() {
@@ -92,11 +92,11 @@ impl Snapshot {
 impl Clone for Snapshot {
     fn clone(&self) -> Self {
         // SAFETY: inner is a valid snapshot pointer that we hold a
-        // reference to. lemon_snapshot_acquire atomically increments the
+        // reference to. lime_snapshot_acquire atomically increments the
         // refcount and returns the same pointer.
-        let ptr = unsafe { lime_sys::lemon_snapshot_acquire(self.inner.as_ptr()) };
+        let ptr = unsafe { lime_sys::lime_snapshot_acquire(self.inner.as_ptr()) };
         Self {
-            // SAFETY: lemon_snapshot_acquire returns the same non-null
+            // SAFETY: lime_snapshot_acquire returns the same non-null
             // pointer passed in.
             inner: unsafe { NonNull::new_unchecked(ptr) },
         }
@@ -106,8 +106,8 @@ impl Clone for Snapshot {
 impl Drop for Snapshot {
     fn drop(&mut self) {
         // SAFETY: inner is a valid snapshot pointer with at least one
-        // reference (ours). lemon_snapshot_release atomically decrements
+        // reference (ours). lime_snapshot_release atomically decrements
         // the refcount and frees the snapshot when it reaches zero.
-        unsafe { lime_sys::lemon_snapshot_release(self.inner.as_ptr()) };
+        unsafe { lime_sys::lime_snapshot_release(self.inner.as_ptr()) };
     }
 }

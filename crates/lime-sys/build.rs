@@ -7,31 +7,53 @@ use std::path::PathBuf;
 fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
     let simd_sources = ["tokenize_simd.c"];
 
+    // JIT sources (Lime v0.6.0 removed jit_tokenizer.c). Mirror the
+    // canonical list in lime/src/meson.build.
     let jit_sources = [
         "jit_context.c",
         "jit_codegen.c",
         "jit_policy.c",
-        "jit_tokenizer.c",
     ];
 
+    // Core sources mirror the lib_sources list in lime/src/meson.build.
+    // Lime v0.6.0 split snapshot.c into snapshot/snapshot_build/snapshot_create
+    // and added parse_engine, parse_glr, conflict_detector, disambiguation,
+    // strategy_*, mod_serialize, parser_fork, execution_policy,
+    // extension_registry, grammar_context, context_switch, lime_error.
     let core_sources = [
         "version.c",
         "snapshot.c",
+        "snapshot_build.c",
+        "snapshot_create.c",
         "token_table.c",
         "tokenize.c",
         "parse_context.c",
+        "parse_engine.c",
+        "parse_glr.c",
+        "glr.c",
+        "lime_ast.c",
         "extension.c",
         "conflict.c",
+        "conflict_detector.c",
+        "disambiguation.c",
+        "strategy_priority.c",
+        "strategy_fork_resolve.c",
+        "strategy_bayesian.c",
         "snapshot_modify.c",
+        "mod_serialize.c",
         "dependency_resolver.c",
         "parser_manager.c",
         "parser_plugin.c",
         "parser_operations.c",
         "merkle_tree.c",
         "parser_composition.c",
+        "parser_fork.c",
         "utf8.c",
-        "lime_ast.c",
-        "glr.c",
+        "execution_policy.c",
+        "extension_registry.c",
+        "grammar_context.c",
+        "context_switch.c",
+        "lime_error.c",
     ];
 
     // --- Compile SIMD tokenizer as a separate unit ----------------------
@@ -149,11 +171,13 @@ fn generate_bindings(lime_inc: &std::path::Path, lime_src: &std::path::Path) {
         .allowlist_type("VersionConstraint")
         .allowlist_type("ParserModule")
         .allowlist_type("ParserDependency")
-        // Functions we want bound
-        .allowlist_function("lemon_snapshot_create")
-        .allowlist_function("lemon_snapshot_acquire")
-        .allowlist_function("lemon_snapshot_release")
-        .allowlist_function("lemon_parser_version")
+        // Functions we want bound.
+        // Lime v0.6.0 renamed `lemon_*` -> `lime_*`; some symbols
+        // also changed names (lemon_extension_registry_* dropped).
+        .allowlist_function("lime_snapshot_create")
+        .allowlist_function("lime_snapshot_acquire")
+        .allowlist_function("lime_snapshot_release")
+        .allowlist_function("lime_parser_version")
         .allowlist_function("snapshot_acquire")
         .allowlist_function("snapshot_release")
         .allowlist_function("create_base_snapshot")
@@ -187,8 +211,8 @@ fn generate_bindings(lime_inc: &std::path::Path, lime_src: &std::path::Path) {
         .allowlist_function("lime_error_free")
         .allowlist_function("lime_jit_available")
         .allowlist_function("lime_jit_compile")
-        .allowlist_function("lemon_extension_registry_init")
-        .allowlist_function("lemon_extension_registry_destroy")
+        .allowlist_function("lime_extension_registry_init")
+        .allowlist_function("lime_extension_registry_destroy")
         .allowlist_function("semver_parse")
         .allowlist_function("semver_compare")
         .allowlist_function("semver_satisfies")

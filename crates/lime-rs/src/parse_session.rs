@@ -49,16 +49,30 @@ impl<'s> ParseSession<'s> {
     ///
     /// # Safety
     ///
+    /// Feed one token to the parser.
+    ///
     /// `value` must be a valid pointer for the grammar's `%token_type`,
     /// or null if the grammar does not use token values.
+    ///
+    /// `location` is a grammar-defined location identifier (e.g. byte
+    /// offset or `-1` when location tracking is disabled). Lime's
+    /// in-process parsing API added this in v0.5.x; pass `-1` for
+    /// callers that do not track source locations.
     ///
     /// # Errors
     ///
     /// Returns `Error::ParseToken` if the parser rejects the token.
-    pub unsafe fn feed_token(&mut self, code: i32, value: *mut c_void) -> Result<(), Error> {
+    pub unsafe fn feed_token(
+        &mut self,
+        code: i32,
+        value: *mut c_void,
+        location: i32,
+    ) -> Result<(), Error> {
         // SAFETY: inner is a valid ParseContext. The caller guarantees
         // value is valid for the grammar's token type.
-        let rc = unsafe { lime_sys::parse_token(self.inner.as_ptr(), code, value) };
+        let rc = unsafe {
+            lime_sys::parse_token(self.inner.as_ptr(), code, value, location)
+        };
         if rc == 0 {
             Ok(())
         } else {
@@ -69,7 +83,7 @@ impl<'s> ParseSession<'s> {
     /// Signal end-of-input to the parser.
     ///
     /// Equivalent to feeding a token with code 0 (`TK_EOF`) and a null
-    /// value.
+    /// value, with `location = -1`.
     ///
     /// # Errors
     ///
@@ -78,7 +92,7 @@ impl<'s> ParseSession<'s> {
     pub fn feed_eof(&mut self) -> Result<(), Error> {
         // SAFETY: Feeding EOF (code=0, value=null) is always valid
         // regardless of the grammar's %token_type.
-        let rc = unsafe { lime_sys::parse_token(self.inner.as_ptr(), 0, std::ptr::null_mut()) };
+        let rc = unsafe { lime_sys::parse_token(self.inner.as_ptr(), 0, std::ptr::null_mut(), -1) };
         if rc == 0 {
             Ok(())
         } else {
