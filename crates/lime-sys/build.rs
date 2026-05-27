@@ -7,8 +7,7 @@ use std::path::PathBuf;
 fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
     let simd_sources = ["tokenize_simd.c"];
 
-    // JIT sources (Lime v0.6.0 removed jit_tokenizer.c). Mirror the
-    // canonical list in lime/src/meson.build.
+    // JIT sources mirror the canonical list in lime/src/meson.build.
     let jit_sources = [
         "jit_context.c",
         "jit_codegen.c",
@@ -16,10 +15,6 @@ fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
     ];
 
     // Core sources mirror the lib_sources list in lime/src/meson.build.
-    // Lime v0.6.0 split snapshot.c into snapshot/snapshot_build/snapshot_create
-    // and added parse_engine, parse_glr, conflict_detector, disambiguation,
-    // strategy_*, mod_serialize, parser_fork, execution_policy,
-    // extension_registry, grammar_context, context_switch, lime_error.
     let core_sources = [
         "version.c",
         "snapshot.c",
@@ -172,8 +167,6 @@ fn generate_bindings(lime_inc: &std::path::Path, lime_src: &std::path::Path) {
         .allowlist_type("ParserModule")
         .allowlist_type("ParserDependency")
         // Functions we want bound.
-        // Lime v0.6.0 renamed `lemon_*` -> `lime_*`; some symbols
-        // also changed names (lemon_extension_registry_* dropped).
         .allowlist_function("lime_snapshot_create")
         .allowlist_function("lime_snapshot_acquire")
         .allowlist_function("lime_snapshot_release")

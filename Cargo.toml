@@ -38,6 +38,7 @@ members = [
     "crates/ra-bench",
     "crates/ra-sqltest",
     "crates/ra-difftest",
+    "crates/ra-plan-advice",
     # Compatibility shims (preserved for downstream consumers)
     "crates/ra-config",
 ]
