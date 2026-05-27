@@ -343,6 +343,11 @@ impl Default for FingerprintReader {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::float_cmp,
+    clippy::field_reassign_with_default,
+    reason = "tests assert exact init values; tests progressively customize a default fingerprint"
+)]
 mod tests {
     use super::*;
 
@@ -405,7 +410,7 @@ mod tests {
         let fp = SystemFingerprint::default();
         let ctx = fp.compressed_context();
         for &v in &ctx {
-            assert!(v >= 0.0 && v <= 1.0, "context value {v} out of [0,1]");
+            assert!((0.0..=1.0).contains(&v), "context value {v} out of [0,1]");
         }
     }
 

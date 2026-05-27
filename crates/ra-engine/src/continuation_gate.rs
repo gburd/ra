@@ -138,7 +138,7 @@ impl ContinuationGate {
         current_cost: f64,
         improvement_rate: f64,
         egraph_nodes: usize,
-    ) -> [f32; 12] {
+    ) -> [f32; 16] {
         [
             self.base_features.table_count,
             self.base_features.join_count,
@@ -152,6 +152,14 @@ impl ContinuationGate {
             (egraph_nodes as f32).log2().max(0.0),  // log graph size
             self.base_features.avg_predicate_selectivity,
             self.base_features.has_limit,
+            // Trailing 4 dims: padding to match model F=16. The
+            // continuation gate doesn't have natural values here; leave
+            // them at zero so the trained model treats them as
+            // "unknown / use bias."
+            0.0,
+            0.0,
+            0.0,
+            0.0,
         ]
     }
 

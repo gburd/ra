@@ -19,6 +19,7 @@ pub fn cmd_explain(
     snapshot_index: usize,
     verbose: bool,
     quiet: bool,
+    show_provenance: bool,
 ) -> Result<()> {
     use ra_engine::TimelineConfig;
 
@@ -84,6 +85,53 @@ pub fn cmd_explain(
         eprintln!();
         eprintln!("{}", "Plan:".bold());
         eprintln!("{}", format_plan_tree(&plan));
+    }
+
+    if show_provenance {
+        // Run the optimizer to produce an OptimizationResult so we
+        // have a populated `PlanProvenance`. We use the bounded
+        // entry point with default budgets — for `--provenance`
+        // the user wants the metadata, not a different plan from
+        // the one they saw above.
+        use ra_engine::Optimizer;
+        let opt_result = Optimizer::new()
+            .optimize_bounded(&plan)
+            .context("optimization failed while collecting provenance")?;
+        if let Some(p) = opt_result.provenance.as_ref() {
+            eprintln!();
+            eprintln!("{}", "Provenance:".bold());
+            eprintln!(
+                "  {} {:#016x}_{:016x}_{:016x}",
+                "fingerprint:".bold(),
+                p.fingerprint.join_graph_hash,
+                p.fingerprint.predicate_hash,
+                p.fingerprint.aggregation_hash
+            );
+            eprintln!(
+                "  {} {}",
+                "cost_model_id:".bold(),
+                p.cost_model_id.as_deref().unwrap_or("(none)")
+            );
+            eprintln!(
+                "  {} {}",
+                "stats_version:".bold(),
+                p.stats_version
+                    .map_or_else(|| "(unset)".to_string(), |v| v.to_string())
+            );
+            eprintln!(
+                "  {} {:016x}",
+                "hardware_profile_hash:".bold(),
+                p.hardware_profile_hash
+            );
+            eprintln!(
+                "  {} {:016x}",
+                "active_rule_set_hash:".bold(),
+                p.active_rule_set_hash
+            );
+            eprintln!("  {} {}", "optimizer_version:".bold(), p.optimizer_version);
+            eprintln!("  {} {:?}", "route:".bold(), p.route);
+            eprintln!("  {} {}", "termination_reason:".bold(), p.termination_reason);
+        }
     }
 
     Ok(())

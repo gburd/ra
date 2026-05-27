@@ -1,7 +1,12 @@
+#![expect(
+    clippy::needless_range_loop,
+    clippy::semicolon_if_nothing_returned,
+    reason = "criterion benchmark: clarity over lint conformance"
+)]
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ra_bitnet::BitNetCostModel;
 
-fn sample_features() -> [f32; 12] {
+fn sample_features() -> [f32; 16] {
     [
         4.0,      // table_count
         3.0,      // join_count
@@ -15,14 +20,19 @@ fn sample_features() -> [f32; 12] {
         0.0,      // distinct_flag
         0.0,      // limit_present
         10_000.0, // max_join_cardinality
+        // OptimizationFeatures padding
+        0.0,
+        0.0,
+        0.0,
+        0.0,
     ]
 }
 
 fn create_test_model() -> BitNetCostModel {
-    let mut w1 = [[0.0f32; 32]; 12];
+    let mut w1 = [[0.0f32; 32]; 16];
     let mut w2 = [[0.0f32; 16]; 32];
 
-    for j in 0..12 {
+    for j in 0..16 {
         for i in 0..32 {
             w1[j][i] = if (j + i) % 3 == 0 {
                 0.5
@@ -44,8 +54,8 @@ fn create_test_model() -> BitNetCostModel {
         &[0.1; 32],
         &w2,
         &[0.05; 16],
-        [0.0; 12],
-        [1.0; 12],
+        [0.0; 16],
+        [1.0; 16],
         5000,
     )
 }

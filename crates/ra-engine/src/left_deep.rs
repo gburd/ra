@@ -181,10 +181,10 @@ impl LeftDeepBuilder {
             | RelExpr::IndexScan { table, .. }
             | RelExpr::IndexOnlyScan { table, .. }
             | RelExpr::ParallelScan { table, .. }
+            | RelExpr::BitmapHeapScan { table, .. }
             | RelExpr::MvScan {
                 view_name: table, ..
             } => Some(table.as_str()),
-            RelExpr::BitmapHeapScan { table, .. } => Some(table.as_str()),
             _ => None,
         };
         table_name.and_then(|t| self.stats_provider.get_statistics(t).map(|s| s.row_count))

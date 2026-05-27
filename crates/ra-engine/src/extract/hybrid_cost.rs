@@ -289,6 +289,10 @@ fn selectivity_for_op(enode: &RelLang) -> f32 {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::field_reassign_with_default,
+    reason = "tests progressively customize a default fingerprint"
+)]
 mod tests {
     use super::*;
 
@@ -362,6 +366,6 @@ mod tests {
     fn estimate_rows_in_range() {
         // All estimates should be in [0, 1] after normalization
         let scan_rows = estimate_rows_for_op(&RelLang::Symbol("x".into()));
-        assert!(scan_rows >= 0.0 && scan_rows <= 1.0);
+        assert!((0.0..=1.0).contains(&scan_rows));
     }
 }

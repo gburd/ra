@@ -14,7 +14,7 @@
 //! Update:   W_latent -= lr * ∂L/∂W_latent
 //! ```
 
-use crate::{BitNetCostModel, F, H, O};
+use crate::{default_scalar_head, BitNetCostModel, F, H, O};
 
 /// QAT trainer for the `BitNet` cost model.
 ///
@@ -40,6 +40,14 @@ pub struct BitNetTrainer {
     v_w2: [[f32; O]; H],
     m_b2: [f32; O],
     v_b2: [f32; O],
+
+    // Learnable scalar head (A5). Mirrored on BitNetCostModel; updated
+    // independently from the per-dim hidden layers via plain SGD on
+    // observed CPU time (the only feedback signal the PG executor
+    // actually emits). Initialized to the historical hand-tuned
+    // formula so first-snapshot behavior is backward-compatible.
+    scalar_head: [f32; O],
+    scalar_bias: f32,
 
     // Training state
     config: TrainerConfig,
@@ -121,6 +129,8 @@ impl BitNetTrainer {
             v_w2: [[0.0; O]; H],
             m_b2: [0.0; O],
             v_b2: [0.0; O],
+            scalar_head: default_scalar_head(),
+            scalar_bias: 0.0,
             config,
             step: 0,
             total_loss: 0.0,
@@ -152,6 +162,8 @@ impl BitNetTrainer {
             v_w2: [[0.0; O]; H],
             m_b2: [0.0; O],
             v_b2: [0.0; O],
+            scalar_head: default_scalar_head(),
+            scalar_bias: 0.0,
             config,
             step: 0,
             total_loss: 0.0,
@@ -167,22 +179,61 @@ impl BitNetTrainer {
 
     /// Train on a single `(features, target)` pair.
     ///
-    /// Returns the MSE loss for this sample.
+    /// Returns the MSE loss for this sample. Trains every output dimension
+    /// equally; for partial supervision (only some dims observed) use
+    /// [`Self::train_step_masked`].
     pub fn train_step(&mut self, features: &[f32; F], target: &[f32; O]) -> f32 {
+        self.train_step_masked(features, target, &[true; O])
+    }
+
+    /// Train on a single sample where only some target dimensions are observed.
+    ///
+    /// `mask[j] == true` means dim `j` of `target` is supervised; `false`
+    /// means the loss contribution from dim `j` is dropped (no gradient).
+    /// This avoids forcing unobserved dimensions toward zero during partial
+    /// feedback (e.g. when only CPU time is known but routing dims are not).
+    ///
+    /// The forward pass mirrors inference exactly, applying `softplus` to
+    /// the linear output before computing loss. The backward pass propagates
+    /// gradient through `softplus` via its derivative `sigmoid(pre)`.
+    ///
+    /// Returns the average MSE loss over the observed dimensions (0.0 if
+    /// none are observed).
+    pub fn train_step_masked(
+        &mut self,
+        features: &[f32; F],
+        target: &[f32; O],
+        mask: &[bool; O],
+    ) -> f32 {
+        let observed_count = mask.iter().filter(|m| **m).count();
+        if observed_count == 0 {
+            return 0.0;
+        }
+
         // --- Forward pass (with quantization) ---
         let x_norm = self.normalize(features);
         let (h_pre, h) = self.forward_hidden(&x_norm);
-        let y = self.forward_output(&h);
+        let y_pre = self.forward_output(&h); // linear pre-activation
+        let y = apply_softplus(&y_pre); // matches inference
 
-        // --- Compute MSE loss ---
+        // --- Compute masked MSE loss on post-activation ---
         let mut loss = 0.0f32;
-        let mut d_out = [0.0f32; O];
+        let mut d_y = [0.0f32; O]; // dL/dy (post-softplus)
+        let scale = 2.0 / observed_count as f32;
         for j in 0..O {
-            let diff = y[j] - target[j];
-            d_out[j] = 2.0 * diff / O as f32; // dL/d_y (MSE gradient)
-            loss += diff * diff;
+            if mask[j] {
+                let diff = y[j] - target[j];
+                d_y[j] = scale * diff;
+                loss += diff * diff;
+            }
         }
-        loss /= O as f32;
+        loss /= observed_count as f32;
+
+        // --- Backprop through softplus: d/dx softplus(x) = sigmoid(x) ---
+        let mut d_out = [0.0f32; O]; // dL/dy_pre (pre-softplus)
+        for j in 0..O {
+            d_out[j] = d_y[j] * sigmoid(y_pre[j]);
+        }
 
         // --- Backward pass (STE: gradients flow through quantization) ---
 
@@ -284,10 +335,32 @@ impl BitNetTrainer {
         total / batch.len() as f32
     }
 
+    /// Train on a batch of `(features, target, mask)` triples. Returns average loss.
+    ///
+    /// Each sample's `mask` controls which output dimensions contribute to
+    /// the loss for that sample. Samples with no observed dims are skipped.
+    pub fn train_batch_masked(
+        &mut self,
+        batch: &[([f32; F], [f32; O], [bool; O])],
+    ) -> f32 {
+        if batch.is_empty() {
+            return 0.0;
+        }
+        let mut total = 0.0f32;
+        let mut counted = 0usize;
+        for (features, target, mask) in batch {
+            if mask.iter().any(|m| *m) {
+                total += self.train_step_masked(features, target, mask);
+                counted += 1;
+            }
+        }
+        if counted == 0 { 0.0 } else { total / counted as f32 }
+    }
+
     /// Export the current latent weights as a quantized `BitNetCostModel`.
     #[must_use]
     pub fn to_model(&self) -> BitNetCostModel {
-        BitNetCostModel::from_f32_weights(
+        let mut model = BitNetCostModel::from_f32_weights(
             &self.w1,
             &self.b1,
             &self.w2,
@@ -295,7 +368,56 @@ impl BitNetTrainer {
             self.feature_mean,
             self.feature_inv_std,
             self.step,
-        )
+        );
+        // Propagate the trainer's scalar head into the snapshot. This
+        // preserves any updates made via `update_scalar_head`; without
+        // it, snapshots would always reset to the default formula.
+        model.set_scalar_head(self.scalar_head, self.scalar_bias);
+        model
+    }
+
+    /// Train the scalar head on a single observed CPU-time sample.
+    /// Mirrors [`BitNetCostModel::update_scalar_head`] but on the
+    /// trainer's mutable copy, so the next snapshot via [`Self::to_model`]
+    /// carries the update.
+    pub fn update_scalar_head(
+        &mut self,
+        features: &[f32; F],
+        target_cpu_ms: f32,
+        lr: f32,
+    ) -> f32 {
+        // Build a temporary model snapshot to read the per-dim outputs
+        // through the same softplus path inference uses, then apply
+        // the SGD step to OUR scalar_head (not the snapshot's).
+        let snap = BitNetCostModel::from_f32_weights(
+            &self.w1,
+            &self.b1,
+            &self.w2,
+            &self.b2,
+            self.feature_mean,
+            self.feature_inv_std,
+            self.step,
+        );
+        let out = snap.predict_all(features);
+
+        let mut pre = self.scalar_bias;
+        for (h, &o) in self.scalar_head.iter().zip(out.iter()) {
+            pre += h * o;
+        }
+        let pred = if pre > 20.0 { pre } else { (1.0 + pre.exp()).ln() };
+        let err = pred - target_cpu_ms;
+        let sigmoid = if pre >= 0.0 {
+            1.0 / (1.0 + (-pre).exp())
+        } else {
+            let z = pre.exp();
+            z / (1.0 + z)
+        };
+        let d_pre = err * sigmoid;
+        for (h, &o) in self.scalar_head.iter_mut().zip(out.iter()) {
+            *h -= lr * d_pre * o;
+        }
+        self.scalar_bias -= lr * d_pre;
+        err * err
     }
 
     /// Get average training loss since last reset.
@@ -344,7 +466,12 @@ impl BitNetTrainer {
         (pre, post)
     }
 
-    /// Forward through output layer (no activation — raw for MSE).
+    /// Forward through output layer, returning the linear pre-activation.
+    ///
+    /// Inference (`BitNetCostModel::predict_all`) applies `softplus` after
+    /// this. The training backward pass propagates gradient through that
+    /// `softplus` separately, so this function intentionally returns the
+    /// raw linear output.
     fn forward_output(&self, h: &[f32; H]) -> [f32; O] {
         let mut out = self.b2;
         for (i, &hi) in h.iter().enumerate() {
@@ -390,6 +517,39 @@ fn adam_update(
     }
 }
 
+/// Numerically-stable softplus: `ln(1 + e^x)`.
+///
+/// Matches the activation in [`super::BitNetCostModel::predict_all`]. For
+/// large `x` returns `x` (the limit), for very negative `x` returns ~0
+/// without overflow.
+#[inline]
+fn softplus(x: f32) -> f32 {
+    if x > 20.0 { x } else { (1.0 + x.exp()).ln() }
+}
+
+/// Apply softplus elementwise (training mirrors inference).
+#[inline]
+fn apply_softplus(pre: &[f32; O]) -> [f32; O] {
+    let mut out = [0.0f32; O];
+    for (i, &v) in pre.iter().enumerate() {
+        out[i] = softplus(v);
+    }
+    out
+}
+
+/// Numerically-stable sigmoid: `1 / (1 + e^-x)`. This is the derivative
+/// of softplus, used to backprop loss gradients through the activation.
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        let z = (-x).exp();
+        1.0 / (1.0 + z)
+    } else {
+        let z = x.exp();
+        z / (1.0 + z)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,6 +583,7 @@ mod tests {
                     (i % 2) as f32,     // group_by
                     0.0, 0.0,
                     ((i + 1) * 100) as f32, // cardinality
+                    0.0, 0.0, 0.0, 0.0, // optimization-features padding
                 ];
                 let target = make_target(&features);
                 (features, target)
@@ -452,7 +613,7 @@ mod tests {
     fn exported_model_predicts() {
         let mut trainer = BitNetTrainer::new(TrainerConfig::default());
 
-        let features = [4.0, 3.0, 5.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 10_000.0];
+        let features = [4.0, 3.0, 5.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 10_000.0, 0.0, 0.0, 0.0, 0.0];
         let target = [1.5f32; O];
 
         // Train a few steps
@@ -483,5 +644,98 @@ mod tests {
         assert!(loss >= 0.0);
         assert!(loss.is_finite());
         assert_eq!(trainer.steps(), 16);
+    }
+
+    /// Regression: training and inference must compute the same activation.
+    ///
+    /// Pre-A1, the trainer minimised MSE on the **linear** output but
+    /// inference applied softplus. The bug is most visible for small
+    /// targets in softplus's curved regime, e.g. target=0 ⇒ softplus(0) ≈
+    /// 0.69 ≠ 0. After A1, training also applies softplus, so the
+    /// prediction matches the target.
+    #[test]
+    fn training_targets_match_inference_after_convergence() {
+        let mut trainer = BitNetTrainer::new(TrainerConfig {
+            lr: 0.05,
+            weight_decay: 0.0,
+            ..Default::default()
+        });
+
+        // Bias-only constant prediction. target=0 means we want the model
+        // to learn "predict 0 for this query." Pre-A1 would converge
+        // y_pre → 0 and infer softplus(0) = ln(2) ≈ 0.69 — the canonical
+        // training/inference mismatch we are fixing.
+        let features = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let target = [0.0f32; O];
+
+        for _ in 0..3000 {
+            trainer.train_step(&features, &target);
+        }
+
+        let model = trainer.to_model();
+        let pred = model.predict_cpu_ms(&features);
+
+        // Post-A1 we expect pred → 0; pre-A1 it would have been ~0.69.
+        // Anything below 0.3 confirms training escapes the softplus floor.
+        assert!(
+            pred < 0.3,
+            "predict_cpu_ms={pred} should converge to 0 after A1; \
+             pre-A1 it would have stuck at ~0.69 (softplus floor)"
+        );
+    }
+
+    /// Masked training must not push unobserved dimensions toward zero.
+    /// Compares masked feedback (only dim 0 observed) against unmasked
+    /// feedback (dim 0 observed, dims 1..16 hard-zeroed). Masked must
+    /// preserve a previously-learned signal in dim 5.
+    #[test]
+    fn masked_training_preserves_unobserved_dims_better_than_zero_target() {
+        // Phase 1: pretrain both trainers identically so dim 5 ≈ 4.0.
+        let pretrain = || -> BitNetTrainer {
+            let mut t = BitNetTrainer::new(TrainerConfig {
+                lr: 0.05,
+                weight_decay: 0.0,
+                ..Default::default()
+            });
+            let features = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            let mut full = [0.0f32; O];
+            full[5] = 4.0;
+            for _ in 0..3000 {
+                t.train_step(&features, &full);
+            }
+            t
+        };
+        let mut t_masked = pretrain();
+        let mut t_zeroed = pretrain();
+
+        let features = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let pred_pre = t_masked.to_model().predict_all(&features)[5];
+        assert!(pred_pre > 1.5, "pretrain should set dim 5; got {pred_pre}");
+
+        // Phase 2a: masked feedback only on dim 0.
+        let mut mask = [false; O];
+        mask[0] = true;
+        let mut partial = [0.0f32; O];
+        partial[0] = 1.0;
+        for _ in 0..500 {
+            t_masked.train_step_masked(&features, &partial, &mask);
+        }
+
+        // Phase 2b: unmasked feedback that hard-zeros dims 1..16
+        // (simulates the pre-A2 record_feedback bug).
+        for _ in 0..500 {
+            t_zeroed.train_step(&features, &partial);
+        }
+
+        let pred_masked = t_masked.to_model().predict_all(&features)[5];
+        let pred_zeroed = t_zeroed.to_model().predict_all(&features)[5];
+
+        // Masking must preserve dim 5 strictly better than the zero-target
+        // bug ever could. If they're equal we've fixed nothing.
+        assert!(
+            pred_masked > pred_zeroed + 0.3,
+            "masked training did not preserve dim 5 better than zero-target: \
+             pre={pred_pre:.3} masked={pred_masked:.3} zeroed={pred_zeroed:.3}"
+        );
     }
 }

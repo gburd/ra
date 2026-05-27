@@ -83,6 +83,11 @@ pub fn reconstruction_rmse(original: &[f32], packed: &PackedTernary, alpha: f32)
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::float_cmp,
+    clippy::useless_vec,
+    reason = "test asserts exact numeric output of quantize-then-pack"
+)]
 mod tests {
     use super::*;
 

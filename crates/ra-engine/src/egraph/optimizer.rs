@@ -106,6 +106,59 @@ struct LoopContext {
     cost_improvement_stalled: u32,
 }
 
+/// Cumulative work budgets for the saturation loop.
+///
+/// Inspired by `PostgreSQL` GEQO's `pool_size × generations` cap on
+/// fitness evaluations, these budgets bound the total work done
+/// across all saturation iterations rather than capping each
+/// iteration independently. See
+/// [`docs/research/geqo-vs-ra.md`](../../../../docs/research/geqo-vs-ra.md)
+/// for background.
+///
+/// A zero value disables that particular check (useful for tests
+/// that explicitly want unbounded saturation).
+#[derive(Debug, Clone, Copy)]
+struct SaturationBudgets {
+    /// Maximum cumulative growth in `egraph.total_size()` across the
+    /// whole loop, measured against the initial size captured before
+    /// the first iteration.
+    max_node_growth: usize,
+    /// Maximum cumulative count of successful rule applications,
+    /// summed from `egg::Iteration.applied` across iterations.
+    max_rule_applications: usize,
+}
+
+impl SaturationBudgets {
+    /// Resolve the active budgets for an optimization. The route's
+    /// adaptive budget takes precedence when `use_adaptive_limits`
+    /// is set; otherwise the static `OptimizerConfig` values apply.
+    /// A budget of 0 in either source disables that check.
+    fn from_config(
+        config: &super::config::OptimizerConfig,
+        route: OptRoute,
+        initial_nodes: usize,
+    ) -> Self {
+        if config.use_adaptive_limits
+            && matches!(
+                route,
+                OptRoute::EGraphLow
+                    | OptRoute::EGraphMedium
+                    | OptRoute::EGraphHigh
+            )
+        {
+            Self {
+                max_node_growth: route.node_growth_budget(initial_nodes),
+                max_rule_applications: route.rule_application_budget(),
+            }
+        } else {
+            Self {
+                max_node_growth: config.max_node_growth,
+                max_rule_applications: config.max_rule_applications,
+            }
+        }
+    }
+}
+
 impl Optimizer {
     /// Create a new optimizer with default configuration.
     #[must_use]
@@ -200,7 +253,7 @@ impl Optimizer {
     /// set, passes it to the advisor so rule selection respects the
     /// budget's [`RuleSelectionBehavior`].
     fn load_rules(&self, expr: &RelExpr) -> Vec<Rewrite<RelLang, RelAnalysis>> {
-        if let Some(ref advisor_mutex) = self.rule_advisor {
+        let rules = if let Some(ref advisor_mutex) = self.rule_advisor {
             let mut advisor = advisor_mutex
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -215,7 +268,62 @@ impl Optimizer {
             compiler.compile(&pattern)
         } else {
             all_rules()
+        };
+
+        self.apply_shape_filtering(expr, rules)
+    }
+
+    /// Apply [`JoinGraphShape`]-driven advisory filtering, when
+    /// enabled by `use_shape_aware_filtering`. Removes rule groups
+    /// the shape predicate marks as redundant for this query — for
+    /// example, join-reordering rules on a query whose join graph
+    /// admits no reorderings.
+    ///
+    /// The filter is **purely advisory**: every removed rule has a
+    /// pure-rewrite-of-already-correct-plan semantics, so filtering
+    /// it out only changes plan cost, not correctness.
+    fn apply_shape_filtering(
+        &self,
+        expr: &RelExpr,
+        rules: Vec<Rewrite<RelLang, RelAnalysis>>,
+    ) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+        if !self.config.use_shape_aware_filtering {
+            return rules;
         }
+        let shape = crate::join_graph_shape::JoinGraphShape::from_expr(expr);
+        let redundant_groups = shape.redundant_rule_groups();
+        if redundant_groups.is_empty() {
+            return rules;
+        }
+
+        // Build the set of rule names belonging to the redundant
+        // groups by consulting the annotated rule listing. This
+        // lookup happens once per query, so the cost of building
+        // the annotated list is amortized.
+        let redundant_names: std::collections::HashSet<String> = crate::rewrite::all_rules_annotated()
+            .into_iter()
+            .filter(|g| redundant_groups.contains(&g.label))
+            .flat_map(|g| g.rules.into_iter().map(|r| r.name.to_string()))
+            .collect();
+
+        if redundant_names.is_empty() {
+            return rules;
+        }
+        let before = rules.len();
+        let kept: Vec<_> = rules
+            .into_iter()
+            .filter(|r| !redundant_names.contains(r.name.as_str()))
+            .collect();
+        let removed = before - kept.len();
+        if removed > 0 {
+            tracing::debug!(
+                ?shape,
+                removed,
+                groups = ?redundant_groups,
+                "shape-aware filtering: demoted rules"
+            );
+        }
+        kept
     }
 
     /// Set a resource budget for bounded optimization.
@@ -230,6 +338,25 @@ impl Optimizer {
         self
     }
 
+    /// Builder-style setter for table statistics.
+    ///
+    /// When provided, the optimizer uses these statistics for cost-based
+    /// decisions (cardinality estimation, join ordering, index selection).
+    /// Without this call, `Optimizer::new()` constructs an empty stats
+    /// map — useful for benchmarking the rule machinery in isolation but
+    /// unrepresentative of production behavior. The `--with-stats`
+    /// variant of the `ra_vs_pg` benchmark uses this entry point so the
+    /// comparison is methodologically symmetric with `PostgreSQL`'s
+    /// catalog-driven planner.
+    #[must_use]
+    pub fn with_table_stats(
+        mut self,
+        stats: HashMap<String, ra_core::statistics::Statistics>,
+    ) -> Self {
+        self.table_stats = Arc::new(stats);
+        self
+    }
+
     /// Set the hardware profile for cost-based optimization.
     pub fn set_hardware_profile(&mut self, profile: ra_hardware::HardwareProfile) {
         self.hardware_profile = Some(profile);
@@ -241,6 +368,32 @@ impl Optimizer {
         self.hardware_profile
             .clone()
             .unwrap_or_else(ra_hardware::detect_hardware)
+    }
+
+    /// Build a [`PlanProvenance`] record describing the inputs to
+    /// this optimization. Used by `optimize_bounded` and any future
+    /// caller that wants to attach provenance to an
+    /// [`OptimizationResult`].
+    fn build_provenance(
+        &self,
+        expr: &RelExpr,
+        rules: &[Rewrite<RelLang, RelAnalysis>],
+        hardware: &ra_hardware::HardwareProfile,
+        route: crate::speculative_router::OptRoute,
+        termination_reason: &'static str,
+    ) -> crate::PlanProvenance {
+        crate::PlanProvenance::new(
+            crate::QueryFingerprint::from_rel_expr(expr),
+            self.cost_model.as_ref().map(|m| m.snapshot_id()),
+            None, // stats_version: requires monotonic counter in
+                  // ra-stats; populate once that lands.
+            crate::PlanProvenance::hash_hardware_profile(hardware),
+            crate::PlanProvenance::hash_rule_names(
+                rules.iter().map(|r| r.name.as_str()),
+            ),
+            route,
+            termination_reason,
+        )
     }
 
     /// Register table statistics for cost estimation.
@@ -260,6 +413,29 @@ impl Optimizer {
             self.fingerprint_reader = Some(FingerprintReader::new());
         }
         self
+    }
+
+    /// Borrow the loaded cost model, if any.
+    ///
+    /// Returns `None` when no model has been loaded (e.g. `Optimizer::new()`
+    /// without calling [`Self::with_cost_model`] or [`Self::load_model`]).
+    /// Use this to predict cost from features without running optimization
+    /// (e.g. from the PG extension feedback hook).
+    #[must_use]
+    pub fn cost_model(&self) -> Option<&BitNetCostModel> {
+        self.cost_model.as_deref()
+    }
+
+    /// Predict the scalar CPU cost (ms) for a `RelExpr` using the loaded
+    /// `BitNet` cost model. Returns `None` if no model is loaded.
+    ///
+    /// This is the `predicted_cost` value the feedback loop compares
+    /// against actual execution time to compute MAPE.
+    #[must_use]
+    pub fn predict_cost_ms(&self, expr: &RelExpr) -> Option<f64> {
+        let model = self.cost_model.as_ref()?;
+        let features = crate::cost_model::extract_features(expr);
+        Some(f64::from(model.predict_cpu_ms(&features.as_array())))
     }
 
     /// Builder-style setter for the fingerprint reader.
@@ -393,8 +569,8 @@ impl Optimizer {
             }
             RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
-            | RelExpr::Distinct { input } => Self::is_trivial_query(input),
-            RelExpr::Aggregate { input, .. } => Self::is_trivial_query(input),
+            | RelExpr::Distinct { input }
+            | RelExpr::Aggregate { input, .. } => Self::is_trivial_query(input),
             // Joins, CTEs, window functions, set ops → not trivial
             _ => false,
         }
@@ -548,14 +724,14 @@ impl Optimizer {
         };
 
         if let Some(result) =
-            self.try_fast_route(expr, &mut route_prediction, &fingerprint, total_start)?
+            self.try_fast_route(expr, &mut route_prediction, fingerprint.as_ref(), total_start)?
         {
             return Ok(result);
         }
 
         // 4. Large join check
         let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
-        if let Some(result) = self.try_large_join(expr, table_count, &fingerprint)? {
+        if let Some(result) = self.try_large_join(expr, table_count, fingerprint.as_ref())? {
             return Ok(result);
         }
 
@@ -605,11 +781,15 @@ impl Optimizer {
 
     /// Attempt Skip or `LeftDeep` fast routes. Returns `Some(plan)` if
     /// handled, `None` if we should continue to e-graph.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "Result<Option<...>> matches the call-site flow with `?`"
+    )]
     fn try_fast_route(
         &self,
         expr: &RelExpr,
         route_prediction: &mut crate::speculative_router::RoutePrediction,
-        fingerprint: &Option<QueryFingerprint>,
+        fingerprint: Option<&QueryFingerprint>,
         total_start: std::time::Instant,
     ) -> Result<Option<RelExpr>, EGraphError> {
         use tracing::{debug, info};
@@ -649,7 +829,7 @@ impl Optimizer {
                                 "left_deep_success",
                                 total_start.elapsed().as_secs_f64() * 1000.0,
                             );
-                            self.insert_into_cache(fingerprint.as_ref(), &optimized);
+                            self.insert_into_cache(fingerprint, &optimized);
                             return Ok(Some(optimized));
                         }
                         Err(e) => {
@@ -680,11 +860,15 @@ impl Optimizer {
 
     /// Attempt large-join optimization. Returns `Some(plan)` if the
     /// large-join optimizer handled it, `None` otherwise.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "Result<Option<...>> matches the call-site flow with `?`"
+    )]
     fn try_large_join(
         &self,
         expr: &RelExpr,
         table_count: usize,
-        fingerprint: &Option<QueryFingerprint>,
+        fingerprint: Option<&QueryFingerprint>,
     ) -> Result<Option<RelExpr>, EGraphError> {
         if table_count < self.config.large_join_threshold {
             return Ok(None);
@@ -723,7 +907,7 @@ impl Optimizer {
         };
         let facts_provider = ra_core::facts::EmptyFactsProvider::new();
         let result = crate::ordering_pass::propagate_ordering(extracted, &facts_provider);
-        self.insert_into_cache(fingerprint.as_ref(), &result);
+        self.insert_into_cache(fingerprint, &result);
         Ok(Some(result))
     }
 
@@ -837,6 +1021,7 @@ impl Optimizer {
 
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
+        let initial_nodes = egraph.total_size();
 
         let mut continuation_gate = match route_prediction.route {
             OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => {
@@ -854,6 +1039,11 @@ impl Optimizer {
                 runner_start, convergence_behavior,
                 effective_table_count, effective_expr,
                 &mut continuation_gate,
+                SaturationBudgets::from_config(
+                    &self.config,
+                    route_prediction.route,
+                    initial_nodes,
+                ),
             );
 
         let runner_elapsed = runner_start.elapsed();
@@ -886,6 +1076,7 @@ impl Optimizer {
         table_count: usize,
         expr: &RelExpr,
         continuation_gate: &mut Option<ContinuationGate>,
+        budgets: SaturationBudgets,
     ) -> (usize, &'static str, EGraph<RelLang, RelAnalysis>) {
         let mut ctx = self.build_loop_context(
             expr, continuation_gate, convergence_behavior,
@@ -893,6 +1084,8 @@ impl Optimizer {
 
         let mut termination_reason: &'static str = "iteration_limit";
         let mut actual_iterations = 0;
+        let initial_nodes = egraph.total_size();
+        let mut cumulative_applications: usize = 0;
 
         for iteration in 0..iter_limit {
             if runner_start.elapsed() >= timeout {
@@ -902,16 +1095,95 @@ impl Optimizer {
 
             let prev_classes = egraph.number_of_classes();
 
-            let runner: Runner<RelLang, RelAnalysis> = Runner::default()
-                .with_egraph(egraph)
-                .with_node_limit(self.config.node_limit)
-                .with_iter_limit(1)
-                .with_time_limit(timeout.saturating_sub(runner_start.elapsed()))
-                .run(rules);
+            // Layer 3 of the failure-containment policy: wrap the
+            // egg Runner invocation in `catch_unwind`. The
+            // `SafeCondition` wrapper (layer 2) handles the common
+            // panic source (buggy conditions); this layer is the
+            // backstop for panics inside Applier::apply itself or
+            // panics in third-party crates we don't own. On panic
+            // we terminate saturation with whatever's in the
+            // current e-graph and let extraction proceed; future
+            // work can add a per-rule bisection blacklist if a
+            // panicking rule is identified to recur. The egraph
+            // is moved into the runner; on panic we lose access
+            // to the post-panic state and fall back to the
+            // pre-iteration egraph the closure cloned via Arc on
+            // the e-class table — egg's egraph::clone() is cheap
+            // because the underlying union-find shares storage.
+            let pre_iteration_egraph = egraph.clone();
+            let runner_result = std::panic::catch_unwind(
+                std::panic::AssertUnwindSafe(|| {
+                    Runner::<RelLang, RelAnalysis>::default()
+                        .with_egraph(egraph)
+                        .with_node_limit(self.config.node_limit)
+                        .with_iter_limit(1)
+                        .with_time_limit(timeout.saturating_sub(runner_start.elapsed()))
+                        .run(rules)
+                }),
+            );
+            let runner = match runner_result {
+                Ok(r) => r,
+                Err(payload) => {
+                    let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+                        (*s).to_string()
+                    } else if let Some(s) = payload.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "<non-string panic payload>".to_string()
+                    };
+                    tracing::error!(
+                        iteration,
+                        panic = %msg,
+                        "egg Runner panicked during apply; \
+                         terminating saturation and returning best plan so far"
+                    );
+                    egraph = pre_iteration_egraph;
+                    termination_reason = "panic_in_apply";
+                    actual_iterations = iteration;
+                    break;
+                }
+            };
 
             let stop_reason = runner.stop_reason.clone();
+            // Sum egg's per-iteration `applied` map across whatever
+            // sub-iterations the runner ran. Each entry counts one
+            // successful rule firing.
+            cumulative_applications = cumulative_applications.saturating_add(
+                runner
+                    .iterations
+                    .iter()
+                    .map(|it| it.applied.values().sum::<usize>())
+                    .sum::<usize>(),
+            );
             egraph = runner.egraph;
             actual_iterations = iteration + 1;
+
+            // Cumulative-budget checks (lesson (i) from GEQO comparison).
+            // A 0 budget disables the check, used by tests that want
+            // unbounded saturation.
+            let node_growth = egraph.total_size().saturating_sub(initial_nodes);
+            if budgets.max_node_growth > 0
+                && node_growth >= budgets.max_node_growth
+            {
+                tracing::debug!(
+                    "Saturation budget exhausted: node_growth={} >= cap={}",
+                    node_growth,
+                    budgets.max_node_growth
+                );
+                termination_reason = "node_growth_budget";
+                break;
+            }
+            if budgets.max_rule_applications > 0
+                && cumulative_applications >= budgets.max_rule_applications
+            {
+                tracing::debug!(
+                    "Saturation budget exhausted: applications={} >= cap={}",
+                    cumulative_applications,
+                    budgets.max_rule_applications
+                );
+                termination_reason = "application_budget";
+                break;
+            }
 
             if let Some(reason) = Self::check_iteration_termination(
                 &mut ctx, &egraph, root, iteration, actual_iterations,
@@ -932,6 +1204,10 @@ impl Optimizer {
     }
 
     /// Build the mutable context for the saturation loop.
+    #[expect(
+        clippy::ref_option,
+        reason = "downstream callers pass owned options whose ownership we don't take"
+    )]
     fn build_loop_context(
         &self,
         expr: &RelExpr,
@@ -997,6 +1273,11 @@ impl Optimizer {
     /// Returns `Some(reason)` if the loop should break.
     /// Check all termination conditions for one iteration.
     /// Returns `Some(reason)` if the loop should stop.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "consolidating these into a struct would just push the same params \
+                  into a builder; the call site is single and self-explanatory"
+    )]
     fn check_iteration_termination(
         ctx: &mut LoopContext,
         egraph: &EGraph<RelLang, RelAnalysis>,
@@ -1232,9 +1513,8 @@ impl Optimizer {
         runner_elapsed: std::time::Duration,
         continuation_gate: Option<&ContinuationGate>,
     ) {
-        let coordinator = match self.training_coordinator.as_ref() {
-            Some(c) => c,
-            None => return,
+        let Some(coordinator) = self.training_coordinator.as_ref() else {
+            return;
         };
 
         let cost_history: Vec<f64> = continuation_gate
@@ -1525,6 +1805,25 @@ impl Optimizer {
             OptimizationStatus::Incomplete
         };
 
+        // Build provenance once, using the rule list and hardware
+        // profile we already loaded above. The cost-model id is
+        // derived from the snapshot in `self.cost_model` if any.
+        let provenance = self.build_provenance(
+            expr,
+            &rules,
+            &hardware,
+            // optimize_bounded doesn't go through the speculative
+            // router, so report a route that reflects the actual
+            // path: full saturation up to iter_limit. EGraphHigh is
+            // the closest match.
+            crate::speculative_router::OptRoute::EGraphHigh,
+            if status == OptimizationStatus::Complete {
+                "iteration_limit"
+            } else {
+                "budget_overflow"
+            },
+        );
+
         match best_plan {
             Some(plan) => Ok(OptimizationResult {
                 plan,
@@ -1533,6 +1832,7 @@ impl Optimizer {
                 resource_usage: report,
                 applied_rules: None,
                 rule_tracking: None,
+                provenance: Some(provenance),
             }),
             None => Err(EGraphError::ExtractionError(
                 "no plan could be extracted".to_owned(),
@@ -1740,6 +2040,7 @@ impl Optimizer {
                 resource_usage: report,
                 applied_rules: None,
                 rule_tracking: Some(tracking),
+                provenance: None,
             }),
             None => Err(EGraphError::ExtractionError(
                 "no plan could be extracted".to_owned(),
@@ -1916,6 +2217,7 @@ fn handle_overflow_with_tracking(
                 resource_usage: report,
                 applied_rules: None,
                 rule_tracking,
+                provenance: None,
             }),
             None => Ok(OptimizationResult {
                 plan: original.clone(),
@@ -1924,6 +2226,7 @@ fn handle_overflow_with_tracking(
                 resource_usage: report,
                 applied_rules: None,
                 rule_tracking,
+                provenance: None,
             }),
         },
         OverflowStrategy::ReturnOriginal => Ok(OptimizationResult {
@@ -1933,6 +2236,7 @@ fn handle_overflow_with_tracking(
             resource_usage: report,
             applied_rules: None,
             rule_tracking,
+            provenance: None,
         }),
         OverflowStrategy::Fail => {
             let exceeded = report

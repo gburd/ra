@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test code"
+)]
 //! Integration tests for scope-based correlation analysis.
 //!
 //! Verifies that the decorrelation pass works correctly with non-TPC-H
@@ -21,7 +25,7 @@ use ra_parser::sql_to_relexpr;
 /// )
 /// ```
 ///
-/// Should decorrelate to LeftJoin + GroupBy aggregate without needing
+/// Should decorrelate to `LeftJoin` + `GroupBy` aggregate without needing
 /// prefix-based heuristics.
 #[test]
 fn non_tpch_correlated_aggregate_decorrelates() {
@@ -196,7 +200,7 @@ fn scope_analysis_unit_integration() {
         right: Box::new(Expr::Column(ColumnRef::qualified("e", "department_id"))),
     };
 
-    let (corr, local) = classify_predicates(&[pred.clone()], &scope);
+    let (corr, local) = classify_predicates(std::slice::from_ref(&pred), &scope);
     assert_eq!(corr.len(), 1, "should identify as correlation predicate");
     assert_eq!(local.len(), 0);
 

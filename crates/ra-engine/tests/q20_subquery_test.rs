@@ -1,3 +1,9 @@
+#![expect(
+    clippy::print_stderr,
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "diagnostic test: clarity over lint conformance"
+)]
 //! Diagnostic test for TPC-H Q20 nested correlated subquery.
 //!
 //! Q20 pattern: WHERE col IN (SELECT ... WHERE ... AND x > (SELECT agg FROM ... WHERE correlated))

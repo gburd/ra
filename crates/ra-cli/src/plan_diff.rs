@@ -601,6 +601,48 @@ mod tests {
     use super::*;
     use ra_core::algebra::{JoinType, ProjectionColumn};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    /// The `colored` crate stores its enable/disable state in a process-
+    /// global atomic. Any test that calls `colored::control::set_override`
+    /// must hold this lock first; otherwise parallel tests race and one
+    /// can disable colors mid-render in another. The lock is acquired by
+    /// [`hold_color_lock`] which also unsets the override on drop so we
+    /// don't leak state across tests.
+    static COLOR_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Acquire the color override lock and force colors on. Returns a
+    /// guard that, when dropped, unsets the override.
+    fn hold_color_lock_on() -> ColorGuard {
+        let guard = COLOR_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        colored::control::set_override(true);
+        ColorGuard { _guard: guard }
+    }
+
+    /// Acquire the color override lock without forcing colors on. Used
+    /// for tests that simply need to be serialized with respect to other
+    /// `colored` callers but want to inspect the natural output.
+    /// Currently unused — kept available so future tests that need
+    /// off-or-natural color state don't have to re-derive the helper.
+    #[allow(dead_code, reason = "available for future plan-diff tests")]
+    fn hold_color_lock() -> ColorGuard {
+        let guard = COLOR_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        ColorGuard { _guard: guard }
+    }
+
+    struct ColorGuard {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for ColorGuard {
+        fn drop(&mut self) {
+            colored::control::unset_override();
+        }
+    }
 
     fn simple_scan() -> RelExpr {
         RelExpr::scan("users")
@@ -898,17 +940,9 @@ mod tests {
 
     #[test]
     fn render_colored_contains_ansi_on_changes() {
-        // Serialize tests that modify colored's global override to prevent
-        // parallel test interference.
-        use std::sync::Mutex;
-        static COLORED_LOCK: Mutex<()> = Mutex::new(());
-        let _guard = COLORED_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-
-        colored::control::set_override(true);
+        let _g = hold_color_lock_on();
         let diff = compute_diff(&simple_scan(), &scan_with_filter());
         let output = render_colored(&diff);
-        colored::control::unset_override();
-
         // ANSI escape codes start with \x1b[
         assert!(
             output.contains("\x1b["),
@@ -947,16 +981,16 @@ mod tests {
 
     #[test]
     fn render_compact_with_changes() {
-        colored::control::set_override(true);
+        let _g = hold_color_lock_on();
         let diff = compute_diff(&simple_scan(), &scan_with_filter());
         let output = render_compact(&diff);
         assert!(output.contains("Diff"));
         assert!(output.contains("change"));
-        colored::control::unset_override();
     }
 
     #[test]
     fn render_diff_colored_format() {
+        let _g = hold_color_lock_on();
         let output = render_diff(&simple_scan(), &scan_with_filter(), DiffFormat::Colored);
         assert!(output.contains("Plan Diff"));
     }

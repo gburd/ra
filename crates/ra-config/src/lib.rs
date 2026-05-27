@@ -1,5 +1,14 @@
 //! Layered configuration system for the RA optimizer.
 //!
+//! # History
+//!
+//! `ra-config` was the original home of the configuration layer. It has
+//! since been merged into [`ra_core::config`] so a single dependency
+//! covers both the algebra types and the configuration model. This
+//! crate is preserved as a thin re-export shim for downstream consumers
+//! that depended on the `ra_config::*` import path; new code should
+//! import directly from [`ra_core::config`].
+//!
 //! Configuration is loaded from multiple sources in priority order
 //! (later sources override earlier ones):
 //!
@@ -8,22 +17,11 @@
 //! 3. User config: `~/.config/ra/config.toml`
 //! 4. Local config: `./.ra/config.toml`
 //! 5. Environment variables: `RA_*`
-//!
-//! The config format is TOML with sections for editor, SQL, TUI,
-//! hardware, and output settings.
 
 #![warn(missing_docs)]
-#![warn(clippy::pedantic)]
-#![allow(clippy::module_name_repetitions)]
-#![allow(clippy::similar_names)]
 
-mod error;
-mod loader;
-mod model;
-
-pub use error::ConfigError;
-pub use loader::{config_dir, config_path, ConfigLoader};
-pub use model::{
-    EditorConfig, EditorMode, HardwareConfig, IndentStyle, KeywordCase, OutputConfig, OutputFormat,
-    RaConfig, SqlConfig, SqlDialect, TuiConfig, TuiLayout,
+pub use ra_core::config::{
+    config_dir, config_path, ConfigError, ConfigLoader, ConfigSqlDialect as SqlDialect,
+    EditorConfig, EditorMode, HardwareConfig, IndentStyle, KeywordCase, OutputConfig,
+    OutputFormat, RaConfig, SqlConfig, TuiConfig, TuiLayout,
 };

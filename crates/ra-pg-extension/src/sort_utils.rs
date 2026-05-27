@@ -125,14 +125,31 @@ pub unsafe fn get_column_type_info(
     let natts = (*(*rel).rd_att).natts as usize;
     let mut result = None;
 
+    // Walk attributes by index. PG 18 reorganized `TupleDescData`:
+    // `attrs: [FormData_pg_attribute]` (≤ pg17) became
+    // `compact_attrs: [CompactAttribute]` (pg18), which doesn't carry
+    // attname/atttypid/attcollation. We resolve those via the
+    // ATTNUM syscache, which is stable across all supported PG
+    // versions, instead of indexing into the in-memory tupdesc.
     for i in 0..natts {
-        let attr = (*(*rel).rd_att).attrs.as_ptr().add(i);
-        if (*attr).attisdropped {
+        let attnum = (i + 1) as i16; // PG attnums are 1-indexed
+        let tup = pg_sys::SearchSysCache2(
+            pg_sys::SysCacheIdentifier::ATTNUM as _,
+            pg_sys::Datum::from(rel_oid),
+            pg_sys::Datum::from(attnum),
+        );
+        if tup.is_null() {
             continue;
         }
-        let name = CStr::from_ptr((*attr).attname.data.as_ptr()).to_string_lossy();
-        if name.eq_ignore_ascii_case(col_name) {
-            result = Some(((*attr).atttypid, (*attr).attcollation));
+        let form = pg_sys::GETSTRUCT(tup) as *mut pg_sys::FormData_pg_attribute;
+        let is_dropped = (*form).attisdropped;
+        let name = CStr::from_ptr((*form).attname.data.as_ptr()).to_string_lossy();
+        let matched = !is_dropped && name.eq_ignore_ascii_case(col_name);
+        if matched {
+            result = Some(((*form).atttypid, (*form).attcollation));
+        }
+        pg_sys::ReleaseSysCache(tup);
+        if matched {
             break;
         }
     }

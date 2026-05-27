@@ -68,11 +68,13 @@ pub mod fts_cost;
 pub mod fts_rules;
 pub mod functional_deps;
 pub mod genetic_fingerprint;
+pub mod provenance;
 pub mod incremental_sort;
 pub mod index_selection;
 pub mod ordering_pass;
 pub mod isolation_cost;
 pub mod join_graph;
+pub mod join_graph_shape;
 pub mod join_transformations;
 pub mod large_join;
 pub mod lazy_rules;
@@ -204,6 +206,7 @@ pub use fts_rules::{
     OptimizationDecision,
 };
 pub use genetic_fingerprint::QueryFingerprint;
+pub use provenance::PlanProvenance;
 pub use hybrid_search::{
     choose_hybrid_strategy, fuse_scores, hybrid_fts_first_cost_factor, hybrid_parallel_cost_factor,
     hybrid_scan_cost_factor, hybrid_search_rules, hybrid_vector_first_cost_factor, HybridStrategy,

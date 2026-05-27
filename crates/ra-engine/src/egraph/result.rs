@@ -1,5 +1,6 @@
 use ra_core::algebra::RelExpr;
 
+use crate::provenance::PlanProvenance;
 use crate::resource_budget::ResourceUsageReport;
 
 use super::tracking::RuleTrackingResult;
@@ -20,6 +21,13 @@ pub struct OptimizationResult {
     pub applied_rules: Option<crate::rule_registry::RuleSet>,
     /// Detailed rule tracking (only populated if tracking enabled).
     pub rule_tracking: Option<RuleTrackingResult>,
+    /// Per-query metadata identifying which inputs produced this
+    /// plan (cost-model snapshot, hardware profile, rule set,
+    /// route, termination reason). Useful for reproducibility
+    /// and debugging "this plan changed overnight" reports.
+    /// `None` when the optimization path didn't go through the
+    /// e-graph (e.g. `OptRoute::Skip`).
+    pub provenance: Option<PlanProvenance>,
 }
 
 /// Whether optimization completed within its budget.

@@ -51,6 +51,33 @@ pub struct OptimizerConfig {
     /// Configuration for the rule advisor (used when `use_rule_advisor`
     /// is true).
     pub rule_advisor_config: crate::rule_advisor::RuleAdvisorConfig,
+    /// Cumulative cap on e-graph node growth across all saturation
+    /// iterations. Unlike `node_limit` (which is a per-egg-runner-step
+    /// ceiling), this bounds the total number of nodes added to the
+    /// e-graph for the whole optimization. When `use_adaptive_limits`
+    /// is true the active [`crate::speculative_router::OptRoute`]
+    /// supplies a route-specific budget; this field is the fallback
+    /// hard cap.
+    ///
+    /// 0 disables the check; defaults to a large value sized for the
+    /// tail of analytical queries.
+    pub max_node_growth: usize,
+    /// Cumulative cap on the number of successful rewrite applications
+    /// across all saturation iterations. Each entry in egg's
+    /// `Iteration.applied` map contributes to this count.
+    ///
+    /// 0 disables the check; defaults to a large value sized for the
+    /// tail of analytical queries. Like `max_node_growth`, the
+    /// adaptive path overrides this with a route-specific budget.
+    pub max_rule_applications: usize,
+    /// Enable [`crate::join_graph_shape::JoinGraphShape`]-based
+    /// advisory rule filtering. When true, rule groups that the
+    /// shape predicate marks as "redundant for this query" (e.g.
+    /// join-reordering rules on a query whose join graph admits
+    /// no reorderings) are removed from the loaded rule set
+    /// before saturation. Purely advisory: removing these rules
+    /// affects plan cost but not correctness.
+    pub use_shape_aware_filtering: bool,
 }
 
 /// Configuration for parallel query execution.
@@ -102,6 +129,14 @@ impl Default for OptimizerConfig {
             use_lazy_rules: false,       // Disabled by default (opt-in for better compatibility)
             use_rule_advisor: false,     // Disabled by default (Phase 1 rollout)
             rule_advisor_config: crate::rule_advisor::RuleAdvisorConfig::default(),
+            // Generous defaults sized for analytical-query tail; the
+            // adaptive path narrows these per `OptRoute`. Set to 0 to
+            // disable cumulative budgeting entirely.
+            max_node_growth: 1_000_000,
+            max_rule_applications: 100_000,
+            // Shape-aware filtering is cheap (one O(n) walk of the
+            // RelExpr) and purely advisory; default on.
+            use_shape_aware_filtering: true,
         }
     }
 }

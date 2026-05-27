@@ -7,7 +7,7 @@
 #[cfg(feature = "duckdb")]
 use ra_adapters::{DatabaseAdapter, DuckDBAdapter};
 #[cfg(feature = "duckdb")]
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempDir};
 
 #[test]
 #[cfg(feature = "duckdb")]
@@ -28,12 +28,21 @@ fn test_connect_memory_database() {
 #[test]
 #[cfg(feature = "duckdb")]
 fn test_connect_file_database() {
-    let temp_file = NamedTempFile::new().unwrap();
-    let db_path = temp_file.path().to_str().unwrap();
+    // Newer duckdb versions validate the file header on open and reject
+    // zero-byte files, so we point at a non-existent path inside a fresh
+    // temp dir instead of using NamedTempFile (which pre-creates an
+    // empty file).
+    let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.duckdb");
+    let db_path_str = db_path.to_str().unwrap();
 
     let mut adapter = DuckDBAdapter::new();
-    let result = adapter.open(db_path);
-    assert!(result.is_ok(), "Failed to connect to file database");
+    let result = adapter.open(db_path_str);
+    assert!(
+        result.is_ok(),
+        "Failed to connect to file database: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -251,7 +260,11 @@ fn test_aggregate_query() {
         "SELECT customer_id, COUNT(*) as order_count, SUM(amount) as total
          FROM orders GROUP BY customer_id ORDER BY customer_id",
     );
-    assert!(result.is_ok(), "Aggregate query failed");
+    assert!(
+        result.is_ok(),
+        "Aggregate query failed: {:?}",
+        result.err()
+    );
 
     let query_result = result.unwrap();
     assert_eq!(query_result.row_count, 10);

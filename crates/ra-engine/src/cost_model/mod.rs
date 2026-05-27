@@ -48,6 +48,11 @@ pub struct QueryFeatures {
 impl QueryFeatures {
     /// Convert to fixed-size array for model input.
     #[must_use] 
+    /// Convert to a 12-element `Vec<f32>` for callers that only need
+    /// the structural counts (e.g. the `NeuralRuleSelector`, which
+    /// concatenates query features with system-fingerprint dimensions).
+    /// The fixed-size 16-element array used by `BitNetCostModel` is
+    /// available via [`Self::as_array`].
     pub fn to_vec(&self) -> Vec<f32> {
         vec![
             self.table_count,
@@ -65,8 +70,19 @@ impl QueryFeatures {
         ]
     }
 
+    /// Number of structural feature dimensions returned by [`Self::to_vec`].
+    /// Distinct from [`Self::FEATURE_DIM`] which sizes the array passed
+    /// to the `BitNet` inference model.
+    pub const STRUCTURAL_DIM: usize = 12;
+
     /// Convert to fixed-size array for `BitNet` model input.
-    #[must_use] 
+    ///
+    /// The first 12 slots are the canonical structural counts. The
+    /// trailing 4 slots are zero-padded — the speculative router fills
+    /// them via `OptimizationFeatures::as_array()`. Together this
+    /// matches the model's `F = 16` so cost-only callers and
+    /// router-aware callers share the same input shape.
+    #[must_use]
     pub fn as_array(&self) -> [f32; Self::FEATURE_DIM] {
         [
             self.table_count,
@@ -81,11 +97,18 @@ impl QueryFeatures {
             self.distinct_flag,
             self.limit_present,
             self.max_join_cardinality,
+            // Trailing 4 dims are router-only (topology / scale).
+            // Cost-only callers leave them at 0; they're filled by
+            // OptimizationFeatures::as_array.
+            0.0,
+            0.0,
+            0.0,
+            0.0,
         ]
     }
 
-    /// Number of features.
-    pub const FEATURE_DIM: usize = 12;
+    /// Number of features (matches `BitNetCostModel::F`).
+    pub const FEATURE_DIM: usize = 16;
 }
 
 /// Multi-dimensional cost prediction.

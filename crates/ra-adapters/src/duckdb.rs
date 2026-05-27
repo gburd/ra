@@ -165,11 +165,18 @@ impl DuckDBAdapter {
         }
         .map_err(|e| AdapterError::ConnectionError(format!("Failed to open DuckDB: {e}")))?;
 
-        // Configure for optimal analytical performance
+        // Configure for optimal analytical performance.
+        //
+        // Notes on DuckDB SET parameters:
+        // - The optimizer is enabled by default in modern DuckDB; the
+        //   legacy `enable_optimizer` parameter was removed (replaced by
+        //   `disabled_optimizers` for fine-grained control). We rely on
+        //   the default-on behavior.
+        // - `threads`, `enable_profiling`, and `enable_progress_bar` are
+        //   all still supported on duckdb >= 1.0.
         conn.execute_batch(
             "SET threads TO 8;
-             SET enable_optimizer TO true;
-             SET enable_profiling TO false;
+             SET enable_profiling TO 'no_output';
              SET enable_progress_bar TO false;",
         )
         .map_err(|e| AdapterError::ConnectionError(format!("Failed to configure DuckDB: {e}")))?;
@@ -205,26 +212,36 @@ impl DuckDBAdapter {
             .prepare(query)
             .map_err(|e| AdapterError::QueryError(format!("Failed to prepare statement: {e}")))?;
 
-        let column_count = stmt.column_count();
-        let column_names: Vec<String> = (0..column_count)
-            .map(|i| {
-                stmt.column_name(i)
-                    .map_or(String::new(), ToString::to_string)
-            })
-            .collect();
+        // duckdb-rs 1.x panics on `column_count()` / `column_name()` if
+        // called before the statement has been executed. We execute via
+        // `query([])` first, capture the column metadata from the row
+        // iterator, and only then materialize each row.
+        let mut row_iter = stmt
+            .query([])
+            .map_err(|e| AdapterError::QueryError(format!("Failed to execute query: {e}")))?;
 
-        let rows = stmt
-            .query_map([], |row| {
-                let mut map = HashMap::new();
-                for (i, name) in column_names.iter().enumerate() {
-                    let value = row_value_to_json(row, i)?;
-                    map.insert(name.clone(), value);
-                }
-                Ok(map)
+        let column_names: Vec<String> = row_iter
+            .as_ref()
+            .map(|s| {
+                (0..s.column_count())
+                    .map(|i| s.column_name(i).map_or(String::new(), ToString::to_string))
+                    .collect()
             })
-            .map_err(|e| AdapterError::QueryError(format!("Failed to execute query: {e}")))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AdapterError::QueryError(format!("Failed to collect results: {e}")))?;
+            .unwrap_or_default();
+
+        let mut rows: Vec<HashMap<String, serde_json::Value>> = Vec::new();
+        while let Some(row) = row_iter
+            .next()
+            .map_err(|e| AdapterError::QueryError(format!("Failed to fetch row: {e}")))?
+        {
+            let mut map = HashMap::new();
+            for (i, name) in column_names.iter().enumerate() {
+                let value = row_value_to_json(row, i)
+                    .map_err(|e| AdapterError::QueryError(format!("Failed to read column {i} ({name}): {e}")))?;
+                map.insert(name.clone(), value);
+            }
+            rows.push(map);
+        }
 
         let duration = start.elapsed();
         let row_count = rows.len();
@@ -423,10 +440,10 @@ fn row_value_to_json(row: &Row, idx: usize) -> Result<serde_json::Value, duckdb:
             .map_or(serde_json::Value::Null, serde_json::Value::Number)),
         ValueRef::Double(f) => Ok(serde_json::Number::from_f64(f)
             .map_or(serde_json::Value::Null, serde_json::Value::Number)),
-        ValueRef::Decimal(_) => {
-            // Convert decimal to string representation
-            let s: String = row.get(idx)?;
-            Ok(serde_json::Value::String(s))
+        ValueRef::Decimal(decimal) => {
+            // duckdb-rs's `get::<String>` on a Decimal column fails on
+            // 1.x — convert the inner rust_decimal value directly.
+            Ok(serde_json::Value::String(decimal.to_string()))
         }
         ValueRef::Timestamp(_, _) | ValueRef::Date32(_) | ValueRef::Time64(_, _) => {
             // Convert timestamp/date/time to string

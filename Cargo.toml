@@ -18,6 +18,7 @@ members = [
     "crates/ra-parser",
     "crates/ra-compiler",
     "crates/ra-engine",
+    "crates/ra-bitnet",
     "crates/ra-dialect",
     "crates/ra-hardware",
     "crates/ra-stats-advanced",
@@ -36,8 +37,9 @@ members = [
     "crates/ra-grammar-fuzzer",
     "crates/ra-bench",
     "crates/ra-sqltest",
-    "crates/ra-bitnet",
     "crates/ra-difftest",
+    # Compatibility shims (preserved for downstream consumers)
+    "crates/ra-config",
 ]
 default-members = [
     # Core layer: cargo build builds only these by default
@@ -47,6 +49,7 @@ default-members = [
     "crates/ra-parser",
     "crates/ra-compiler",
     "crates/ra-engine",
+    "crates/ra-bitnet",
     "crates/ra-dialect",
     "crates/ra-hardware",
     "crates/ra-stats-advanced",
@@ -87,6 +90,7 @@ ra-dialect = { workspace = true }
 ra-hardware = { workspace = true }
 ra-stats = { workspace = true }
 ra-cache-api = { workspace = true }
+ra-bitnet = { workspace = true }
 # CLI layer (optional — ra-cli is a binary, build with: cargo build -p ra-cli)
 ra-adapters = { workspace = true, optional = true }
 ra-metadata = { workspace = true, optional = true }

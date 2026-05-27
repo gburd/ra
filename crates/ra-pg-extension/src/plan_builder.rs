@@ -367,7 +367,7 @@ impl PlanBuilder {
             debug!(
                 table = table,
                 column = column,
-                index_oid = info.oid.as_u32(),
+                index_oid = info.oid.to_u32(),
                 "IndexScan: resolved index"
             );
         } else {
@@ -405,7 +405,7 @@ impl PlanBuilder {
             debug!(
                 table = table,
                 index = index,
-                index_oid = info.oid.as_u32(),
+                index_oid = info.oid.to_u32(),
                 "BitmapIndexScan: resolved index"
             );
         } else {
@@ -527,7 +527,7 @@ impl PlanBuilder {
             debug!(
                 table = table,
                 index = index,
-                index_oid = info.oid.as_u32(),
+                index_oid = info.oid.to_u32(),
                 "IndexOnlyScan: resolved index"
             );
         } else {
@@ -736,8 +736,9 @@ impl PlanBuilder {
         (*node).numGroups = if group_by.is_empty() {
             1
         } else {
-            // Conservative estimate: sqrt(input_rows), clamped
-            (input_rows.sqrt() as u64).clamp(10, 1_000_000)
+            // Conservative estimate: sqrt(input_rows), clamped.
+            // PG 18 changed `Result.numHashes` (and similar) from u64 to i64.
+            (input_rows.sqrt() as i64).clamp(10, 1_000_000)
         };
 
         // Cost: child cost + per-row hashing/comparison cost
@@ -1157,7 +1158,15 @@ impl PlanBuilder {
                     (*node).ordColIdx = ord_arrays.col_idx;
                     (*node).ordOperators = ord_arrays.operators;
                     (*node).ordCollations = ord_arrays.collations;
-                    (*node).ordNullsFirst = ord_arrays.nulls_first;
+                    // Note: PG 17/18 WindowAgg does NOT store per-key
+                    // nulls-first flags; those are encoded in the
+                    // SortGroupOperators by `get_sort_group_operators`
+                    // and applied by the upstream Sort node, not
+                    // re-applied here. The unused
+                    // `ord_arrays.nulls_first` field is retained for
+                    // diagnostics; suppress it explicitly so the
+                    // unused-field warning doesn't fire.
+                    let _ = ord_arrays.nulls_first;
                 }
             }
 
@@ -1323,7 +1332,10 @@ impl PlanBuilder {
                         as *mut pg_sys::RangeTblFunction;
                     (*rtfunc).type_ = pg_sys::NodeTag::T_RangeTblFunction;
                     (*rtfunc).funcexpr = pg_expr as *mut pg_sys::Node;
-                    (*node).functions = pg_sys::list_make1(rtfunc as *mut _);
+                    (*node).functions = pg_sys::lappend(
+                        std::ptr::null_mut(),
+                        rtfunc.cast::<core::ffi::c_void>(),
+                    );
                 }
                 debug!(
                     function = name.as_str(),
@@ -1621,7 +1633,7 @@ impl PlanBuilder {
         if let Some(ret_cols) = returning {
             let ret_list = self.build_returning_list(ret_cols);
             if !ret_list.is_null() {
-                (*mt).returningLists = pg_sys::list_make1(ret_list.cast());
+                (*mt).returningLists = pg_sys::lappend(std::ptr::null_mut(), ret_list.cast());
             }
         }
 
@@ -1662,7 +1674,7 @@ impl PlanBuilder {
         if let Some(ret_cols) = returning {
             let ret_list = self.build_returning_list(ret_cols);
             if !ret_list.is_null() {
-                (*mt).returningLists = pg_sys::list_make1(ret_list.cast());
+                (*mt).returningLists = pg_sys::lappend(std::ptr::null_mut(), ret_list.cast());
             }
         }
 
@@ -1699,7 +1711,7 @@ impl PlanBuilder {
         if let Some(ret_cols) = returning {
             let ret_list = self.build_returning_list(ret_cols);
             if !ret_list.is_null() {
-                (*mt).returningLists = pg_sys::list_make1(ret_list.cast());
+                (*mt).returningLists = pg_sys::lappend(std::ptr::null_mut(), ret_list.cast());
             }
         }
 
@@ -1710,7 +1722,7 @@ impl PlanBuilder {
     unsafe fn alloc_modify_table(
         &mut self,
         table: &str,
-        cmd_type: pg_sys::CmdType,
+        cmd_type: pg_sys::CmdType::Type,
         subplan: *mut pg_sys::Plan,
     ) -> Result<*mut pg_sys::ModifyTable, PlanBuilderError> {
         let mt = self.alloc_node::<pg_sys::ModifyTable>();
@@ -1728,7 +1740,7 @@ impl PlanBuilder {
         let rtindex = self.rtindex_for(table)?;
         (*mt).nominalRelation = rtindex as u32;
         (*mt).rootRelation = rtindex as u32;
-        (*mt).resultRelations = pg_sys::list_make1_int(rtindex as i32);
+        (*mt).resultRelations = pg_sys::lappend_int(std::ptr::null_mut(), rtindex as i32);
 
         // Attach subplan.
         (*mt).plan.lefttree = subplan;

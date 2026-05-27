@@ -1,4 +1,11 @@
-#![expect(clippy::unwrap_used, reason = "test code")]
+#![expect(
+    clippy::unwrap_used,
+    clippy::print_stderr,
+    clippy::uninlined_format_args,
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    reason = "test code"
+)]
 //! Integration test: end-to-end training loop with fuzzed queries.
 //!
 //! Generates 1000+ SQL queries from parameterized templates, parses them
@@ -448,7 +455,7 @@ fn create_training_optimizer(
 /// 2. The model was updated (samples_trained > 0)
 /// 3. Loss decreased from the initial random state
 #[test]
-#[ignore] // ~1s in release, may be slower in debug CI; run with: cargo test --test training_loop_test -- --ignored
+#[ignore = "~1s in release, may be slower in debug CI; run with: cargo test --test training_loop_test -- --ignored"]
 fn training_loop_converges_with_fuzzed_queries() {
     // 1. Bootstrap the model with synthetic heuristic data
     let initial_model = bootstrap_model();
@@ -669,7 +676,7 @@ fn create_measurement_optimizer() -> Optimizer {
 /// compares predicted routes/iterations against actual optimizer behavior.
 /// Also compares against the heuristic fallback for reference.
 #[test]
-#[ignore] // ~3s: run with cargo test --test training_loop_test -- --ignored
+#[ignore = "~3s: run with cargo test --test training_loop_test -- --ignored"]
 fn speculative_router_prediction_accuracy() {
     use ra_engine::{OptimizationFeatures, SpeculativeRouter};
 

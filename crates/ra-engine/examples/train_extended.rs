@@ -1,3 +1,14 @@
+#![expect(
+    clippy::unwrap_used,
+    clippy::print_stdout,
+    clippy::uninlined_format_args,
+    clippy::index_refutable_slice,
+    clippy::single_match,
+    clippy::vec_init_then_push,
+    clippy::cast_possible_truncation,
+    dead_code,
+    reason = "training example: clarity over lint conformance"
+)]
 //! Extended training pipeline for the `BitNet` cost model.
 //!
 //! Runs 10,000+ queries through the optimizer across 5 progressive training
@@ -19,8 +30,6 @@
 //! - Save checkpoint to `models/cost_model.round{N}.json`
 //!
 //! Final model saved to `models/cost_model.bitnet.json`.
-
-#![expect(clippy::unwrap_used, clippy::print_stdout, dead_code)]
 
 use std::sync::Arc;
 use std::time::Instant;

@@ -4,11 +4,28 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use postgres::{Client, NoTls};
 use serde::{Deserialize, Serialize};
 
 use ra_engine::Optimizer;
 use ra_parser::sql_to_relexpr;
+
+/// Connect to PostgreSQL using the `RA_BENCHMARK_PG_URL` environment
+/// variable. Returns an error (rather than fabricating output) when the
+/// variable is unset or the connection fails.
+fn connect_pg() -> Result<Client> {
+    let url = std::env::var("RA_BENCHMARK_PG_URL").map_err(|_| {
+        anyhow!(
+            "RA_BENCHMARK_PG_URL is not set. \
+             ra-cli's benchmark subcommand needs a real PostgreSQL connection \
+             to compare against (the prior `simulate_native_*` helpers were \
+             removed by E1 of the audit fix plan). Example: \
+             `RA_BENCHMARK_PG_URL='host=localhost user=postgres dbname=tpch'`"
+        )
+    })?;
+    Client::connect(&url, NoTls).map_err(|e| anyhow!("Failed to connect to PostgreSQL: {e}"))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DatabaseSystem {
@@ -378,11 +395,17 @@ impl BenchmarkRunner {
         workload: WorkloadType,
         query: &QueryBenchmark,
     ) -> Result<BenchmarkResult> {
-        let native_time = Self::simulate_native_execution(&query.sql)?;
+        // Open a real PostgreSQL connection. If RA_BENCHMARK_PG_URL is
+        // not set the helper returns a clear error explaining the
+        // requirement; we no longer fabricate output here.
+        let mut pg_client = connect_pg()
+            .context("benchmark requires a real PostgreSQL connection — see README §Benchmarks")?;
+
+        let native_time = Self::native_execution_time(&mut pg_client, &query.sql)?;
         let (ra_time, ra_plan) = self.benchmark_ra_execution(&query.sql)?;
 
-        let native_plan = Self::simulate_native_plan(&query.sql);
-        let native_rows = Self::estimate_native_rows_scanned(&native_plan);
+        let native_plan = Self::native_explain_plan(&mut pg_client, &query.sql)?;
+        let native_rows = Self::actual_native_rows_scanned(&native_plan);
         let ra_rows = Self::estimate_ra_rows_scanned(&ra_plan);
 
         let speedup = native_time / ra_time;
@@ -402,13 +425,26 @@ impl BenchmarkRunner {
         })
     }
 
-    fn simulate_native_execution(sql: &str) -> Result<f64> {
-        let base_time = 10.0;
-        let complexity_factor = sql.len() as f64 / 100.0;
-        let join_count = sql.matches("JOIN").count() as f64;
-        let subquery_count = sql.matches("SELECT").count().saturating_sub(1) as f64;
-
-        Ok(base_time + complexity_factor * 2.0 + join_count * 5.0 + subquery_count * 3.0)
+    /// Measure native execution time by running `EXPLAIN (ANALYZE)` and
+    /// reading the reported "Execution Time" field. Returns the value in
+    /// milliseconds. Pre-E1 this was `simulate_native_execution`, a
+    /// length-and-keyword heuristic that fabricated a number.
+    fn native_execution_time(client: &mut Client, sql: &str) -> Result<f64> {
+        let explain = format!("EXPLAIN (ANALYZE, FORMAT JSON) {sql}");
+        let rows = client
+            .query(&explain, &[])
+            .map_err(|e| anyhow!("EXPLAIN ANALYZE failed: {e}"))?;
+        let plan_json: serde_json::Value =
+            rows.first()
+                .map(|r| r.get::<_, serde_json::Value>(0))
+                .ok_or_else(|| anyhow!("EXPLAIN ANALYZE returned no rows"))?;
+        // EXPLAIN JSON is a one-element array; reach into [0]["Execution Time"].
+        plan_json
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|first| first.get("Execution Time"))
+            .and_then(serde_json::Value::as_f64)
+            .ok_or_else(|| anyhow!("EXPLAIN JSON missing 'Execution Time' field"))
     }
 
     fn benchmark_ra_execution(&mut self, sql: &str) -> Result<(f64, String)> {
@@ -419,35 +455,47 @@ impl BenchmarkRunner {
 
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
 
-        let plan_str = format!("{:?}", optimized);
+        let plan_str = format!("{optimized:?}");
 
         Ok((elapsed, plan_str))
     }
 
-    fn simulate_native_plan(sql: &str) -> String {
-        format!(
-            "Native Plan (simulated):\n\
-             Seq Scan on table\n\
-             Filter: {}\n\
-             Sort: ...\n\
-             Limit: ...",
-            sql.len()
-        )
+    /// Fetch the real PostgreSQL plan via `EXPLAIN (FORMAT TEXT)`.
+    /// Pre-E1 this was `simulate_native_plan` which built a fake plan
+    /// from `sql.len()`.
+    fn native_explain_plan(client: &mut Client, sql: &str) -> Result<String> {
+        let explain = format!("EXPLAIN {sql}");
+        let rows = client
+            .query(&explain, &[])
+            .map_err(|e| anyhow!("EXPLAIN failed: {e}"))?;
+        let mut lines = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let line: &str = row.get(0);
+            lines.push(line.to_owned());
+        }
+        Ok(lines.join("\n"))
     }
 
-    fn estimate_native_rows_scanned(plan: &str) -> u64 {
-        let has_seq_scan = plan.contains("Seq Scan");
-        let has_filter = plan.contains("Filter");
-
-        let mut rows = 100000;
-        if has_seq_scan {
-            rows *= 10;
+    /// Sum the `rows` estimate across all nodes in a textual EXPLAIN
+    /// output as a coarse proxy for "rows scanned." Pre-E1 this was
+    /// `estimate_native_rows_scanned`, which multiplied a magic
+    /// constant by `Seq Scan`/`Filter` substring presence.
+    fn actual_native_rows_scanned(plan: &str) -> u64 {
+        let mut total: u64 = 0;
+        for line in plan.lines() {
+            // PostgreSQL EXPLAIN lines look like:
+            //   ->  Seq Scan on customer  (cost=0.00..1875.00 rows=15000 width=80)
+            if let Some(rows_idx) = line.find("rows=") {
+                let after = &line[rows_idx + 5..];
+                let end = after
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(after.len());
+                if let Ok(n) = after[..end].parse::<u64>() {
+                    total = total.saturating_add(n);
+                }
+            }
         }
-        if !has_filter {
-            rows *= 2;
-        }
-
-        rows
+        total
     }
 
     fn estimate_ra_rows_scanned(plan: &str) -> u64 {

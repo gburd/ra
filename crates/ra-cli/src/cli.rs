@@ -136,6 +136,12 @@ pub enum Commands {
         /// Snapshot index from timeline to use (default: 0 = first snapshot).
         #[arg(long, default_value = "0")]
         snapshot: usize,
+        /// Show plan provenance (cost-model snapshot, hardware
+        /// hash, active rule-set hash, route, termination reason)
+        /// after the plan output. Useful for reproducibility
+        /// debugging — see `docs/research/geqo-vs-ra.md` lesson (ii).
+        #[arg(long)]
+        provenance: bool,
     },
     /// Optimize a SQL query using relational algebra rewrite rules.
     #[command(

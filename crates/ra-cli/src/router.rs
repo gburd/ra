@@ -44,6 +44,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             stdin: use_stdin,
             timeline,
             snapshot,
+            provenance,
         } => {
             let resolved = resolve_query(&query, use_stdin)?;
             commands::explain::cmd_explain(
@@ -53,6 +54,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 snapshot,
                 cli.verbose,
                 cli.quiet,
+                provenance,
             )
         }
         Commands::Optimize {

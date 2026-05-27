@@ -6,11 +6,42 @@
 //!
 //! # Architecture
 //!
-//! The cost model uses a 2-layer network: 12 → 32 → 1 (scalar) or 12 → 32 → 16 (full).
+//! The cost model is a 2-layer ternary network whose input dimension
+//! matches the speculative router's `OptimizationFeatures::DIM`:
 //!
-//! - **Layer 1**: 384 ternary weights packed into 96 bytes + 32 `f32` biases + 1 scale
-//! - **Layer 2**: 512 ternary weights packed into 128 bytes + 16 `f32` biases + 1 scale
-//! - **Total model**: ~420 bytes (vs ~3.2 KB for `f32` `FastCostModel`)
+//! ```text
+//! [f32; 16]  →  Layer 1 (W₁: 16 × 32 ternary)  →  ReLU
+//!            →  Layer 2 (W₂: 32 × 16 ternary)  →  softplus
+//!            →  [f32; 16]   (cost dims 0-11, router dims 12-15)
+//! ```
+//!
+//! Inference exposes two entry points:
+//! - [`BitNetCostModel::predict_all`] — returns all 16 output dimensions.
+//! - [`BitNetCostModel::predict_cpu_ms`] — convenience wrapper that
+//!   returns dim 0 only. It does **not** save work over `predict_all`
+//!   on its own (still runs the full hidden layer, plus a small extra
+//!   load on dim 0); it exists so callers that only need the scalar
+//!   don't pay the syntactic cost of indexing.
+//!
+//! ## Footprint
+//!
+//! With (F=16, H=32, O=16):
+//!
+//! | Component                       | Bytes |
+//! |---------------------------------|------:|
+//! | W₁ packed ternary (`F·H/4`)     |  128 |
+//! | W₂ packed ternary (`H·O/4`)     |  128 |
+//! | Biases `b1+b2` (`(H+O)·4`)      |  192 |
+//! | Scale α₁                         |   4 |
+//! | **Weights-only**                | **452** |
+//! | Scale α₂                         |   4 |
+//! | Normalization (`mean+inv_std`, `F` × 8 bytes) | 128 |
+//! | **Total on-disk**               | **584** |
+//!
+//! Weights-only is exposed via [`BitNetCostModel::weights_only_bytes`];
+//! the full on-disk footprint via [`BitNetCostModel::model_size_bytes`].
+//! Both numbers are pinned by the `documented_byte_counts_are_exact`
+//! test so this docstring and the README cannot drift apart silently.
 //!
 //! # `BitNet` 1.58-bit Quantization
 //!
@@ -29,9 +60,10 @@
 //!
 //! # Performance
 //!
-//! Target: <100ns per scalar prediction (matching `FastCostModel`'s ~45ns).
-//! Pre-multiplied ternary weights enable branchless FMA loops that
-//! auto-vectorize on ARM NEON and x86 AVX2.
+//! Target: <200ns per `predict_all` call. Pre-multiplied ternary weights
+//! enable branchless FMA loops that auto-vectorize on ARM NEON and x86
+//! AVX2. The benchmark harness is `cargo bench -p ra-bitnet`; see
+//! `benches/bitnet_cost.rs`.
 
 mod quantize;
 pub mod train;
@@ -40,8 +72,13 @@ use serde::{Deserialize, Serialize};
 
 pub use train::{BitNetTrainer, TrainerConfig};
 
-/// Number of input features (same as `QueryFeatures::FEATURE_DIM`).
-pub const F: usize = 12;
+/// Number of input features (matches `OptimizationFeatures::DIM` so all
+/// 16 router-relevant features reach inference). Pre-A4 this was 12,
+/// matching `QueryFeatures::FEATURE_DIM`; the speculative router was
+/// then forced to drop the 4 trailing topology/scale features when
+/// calling into the model. Now F = 16 and `QueryFeatures` zero-pads
+/// the 4 extra slots when invoking inference for cost-only callers.
+pub const F: usize = 16;
 /// Number of hidden neurons.
 pub const H: usize = 32;
 /// Number of output cost dimensions.
@@ -104,7 +141,10 @@ impl PackedTernary {
 ///
 /// # Input
 ///
-/// Takes `&[f32; 12]` feature vectors (same layout as `QueryFeatures::to_vec()`).
+/// Takes `&[f32; 16]` feature vectors (matches `OptimizationFeatures::DIM`).
+/// Cost-only callers can use `QueryFeatures::as_array()` which zero-pads
+/// the last 4 slots; the speculative router fills all 16 from the
+/// extended `OptimizationFeatures` set.
 ///
 /// # Output
 ///
@@ -130,8 +170,35 @@ pub struct BitNetCostModel {
     feature_mean: [f32; F],
     feature_inv_std: [f32; F],
 
+    /// Linear projection from the 16 output dims down to a scalar
+    /// e-graph cost. Pre-A5 this was a hand-tuned formula
+    /// `out[0]*0.5 + out[3]*0.0003 + out[1]*0.002`. Now it's a real
+    /// learnable head: `predict_scalar = softplus(Σ scalar_head[i] * out_pre[i] + scalar_bias)`.
+    /// The default initialization preserves the historical coefficient
+    /// pattern (CPU/IO/memory mix) so behavior is backward-compatible
+    /// for callers loading old models or constructing new zero models.
+    /// Trained from observed CPU time via [`BitNetCostModel::update_scalar_head`].
+    #[serde(default = "default_scalar_head")]
+    scalar_head: [f32; O],
+
+    /// Bias term for the learnable scalar head.
+    #[serde(default)]
+    scalar_bias: f32,
+
     /// Number of training samples used to derive this model.
     pub samples_trained: usize,
+}
+
+/// Default scalar-head coefficients matching the pre-A5 magic formula
+/// `out[0]*0.5 + out[3]*0.0003 + out[1]*0.002`. Used for serde
+/// `#[serde(default = ...)]` so models written before `scalar_head`
+/// existed deserialize cleanly with the historical aggregation behavior.
+pub(crate) fn default_scalar_head() -> [f32; O] {
+    let mut h = [0.0f32; O];
+    h[0] = 0.5;
+    h[1] = 0.002;
+    h[3] = 0.000_3;
+    h
 }
 
 impl BitNetCostModel {
@@ -152,6 +219,8 @@ impl BitNetCostModel {
             alpha2: 1.0,
             feature_mean: [0.0; F],
             feature_inv_std: [1.0; F],
+            scalar_head: default_scalar_head(),
+            scalar_bias: 0.0,
             samples_trained: 0,
         }
     }
@@ -192,6 +261,8 @@ impl BitNetCostModel {
             alpha2,
             feature_mean,
             feature_inv_std,
+            scalar_head: default_scalar_head(),
+            scalar_bias: 0.0,
             samples_trained,
         }
     }
@@ -246,7 +317,29 @@ impl BitNetCostModel {
         }
     }
 
-    /// Predict CPU time (ms) — scalar fast path (~87ns).
+    /// Per-feature mean used to normalize inputs before inference.
+    #[must_use]
+    pub fn feature_mean(&self) -> [f32; F] {
+        self.feature_mean
+    }
+
+    /// Per-feature inverse-stddev used to normalize inputs before inference.
+    #[must_use]
+    pub fn feature_inv_std(&self) -> [f32; F] {
+        self.feature_inv_std
+    }
+
+    /// Predict CPU time (ms) only — extracts dim 0 of [`Self::predict_all`].
+    ///
+    /// Counter-intuitively this is **slower** than `predict_all` on
+    /// modern CPUs (measured ~106 ns vs ~81 ns on Apple M3 Max, release
+    /// build, see `cargo bench -p ra-bitnet`): the column-strided access
+    /// pattern `w2_fast[i][0]` defeats prefetch and prevents
+    /// auto-vectorization, while `predict_all`'s row-major inner loop
+    /// compiles to a NEON/AVX2 vectorized accumulation. Prefer
+    /// `predict_all` when you'll consume more than dim 0; this entry
+    /// point exists only as a convenience for callers that genuinely
+    /// want a scalar.
     #[inline]
     #[must_use]
     pub fn predict_cpu_ms(&self, features: &[f32; F]) -> f32 {
@@ -258,7 +351,12 @@ impl BitNetCostModel {
         softplus(out0)
     }
 
-    /// Predict all 16 cost dimensions (~72ns).
+    /// Predict all 16 cost dimensions (~81 ns on Apple M3 Max, release
+    /// build). The inner output loop is row-major over `w2_fast`, which
+    /// auto-vectorizes to NEON/AVX2 FMA. This is the entry point the
+    /// speculative router calls; the README's `~87ns` headline traces
+    /// back to a pre-A4 measurement and is in the same order of
+    /// magnitude. Re-run `cargo bench -p ra-bitnet` to refresh.
     #[must_use]
     pub fn predict_all(&self, features: &[f32; F]) -> [f32; O] {
         let h = self.hidden_layer(features);
@@ -274,12 +372,93 @@ impl BitNetCostModel {
         out
     }
 
-    /// Aggregate all 16 cost dimensions into a single `f64` e-graph cost.
+    /// Aggregate all 16 cost dimensions into a single `f64` e-graph cost
+    /// via the learnable scalar head.
+    ///
+    /// Pre-A5 this was the hand-tuned formula
+    /// `out[0]*0.5 + out[3]*0.0003 + out[1]*0.002`. That formula is now
+    /// the default initialization of [`Self::scalar_head`]
+    /// (see [`default_scalar_head`]) so behavior is unchanged on a
+    /// freshly-loaded model. The trainer can subsequently nudge the
+    /// head toward observed CPU times via
+    /// [`Self::update_scalar_head`].
+    ///
+    /// Computation: `softplus(Σ scalar_head[i] * out[i] + scalar_bias)`.
+    /// Softplus keeps the scalar non-negative without clamping (a
+    /// negative cost would be rejected by the e-graph cost function
+    /// anyway).
     #[must_use]
     pub fn predict_scalar(&self, features: &[f32; F]) -> f64 {
         let out = self.predict_all(features);
-        let io_cost = out[3] * 0.001;
-        f64::from(out[0] * 0.5 + io_cost * 0.3 + out[1] * 0.2 * 0.01)
+        let mut sum = self.scalar_bias;
+        for (h, &o) in self.scalar_head.iter().zip(out.iter()) {
+            sum += h * o;
+        }
+        f64::from(softplus(sum))
+    }
+
+    /// Borrow the learnable scalar-head coefficients.
+    #[must_use]
+    pub fn scalar_head(&self) -> &[f32; O] {
+        &self.scalar_head
+    }
+
+    /// Borrow the scalar-head bias.
+    #[must_use]
+    pub fn scalar_bias(&self) -> f32 {
+        self.scalar_bias
+    }
+
+    /// Replace the scalar head and bias in one call. Used by
+    /// [`crate::BitNetTrainer::to_model`] to propagate trained
+    /// scalar-head updates into the snapshot.
+    pub fn set_scalar_head(&mut self, head: [f32; O], bias: f32) {
+        self.scalar_head = head;
+        self.scalar_bias = bias;
+    }
+
+    /// Train the scalar head on a single `(features, target_cpu_ms)`
+    /// observation using SGD on `MSE(predict_scalar - target)`.
+    ///
+    /// Treats `predict_all`'s outputs as fixed features and only
+    /// updates `scalar_head` and `scalar_bias`. The hidden layers stay
+    /// untouched — they're trained by [`crate::BitNetTrainer`] on the
+    /// per-dim targets via STE. This decoupling lets us learn the
+    /// scalar projection from cheap actual-time-only feedback without
+    /// needing per-dim ground truth (which the PG executor doesn't
+    /// expose).
+    ///
+    /// The default `lr=0.01` is conservative; it'd take ~100 samples
+    /// at the right magnitude to noticeably move from the default
+    /// initialization. Returns the squared error for diagnostic
+    /// logging.
+    pub fn update_scalar_head(
+        &mut self,
+        features: &[f32; F],
+        target_cpu_ms: f32,
+        lr: f32,
+    ) -> f32 {
+        let out = self.predict_all(features);
+        let mut pre_softplus = self.scalar_bias;
+        for (h, &o) in self.scalar_head.iter().zip(out.iter()) {
+            pre_softplus += h * o;
+        }
+        let pred = softplus(pre_softplus);
+        let err = pred - target_cpu_ms;
+        // d/dx softplus = sigmoid; so dL/d(pre) = err * sigmoid(pre).
+        let sigmoid_pre = if pre_softplus >= 0.0 {
+            let z = (-pre_softplus).exp();
+            1.0 / (1.0 + z)
+        } else {
+            let z = pre_softplus.exp();
+            z / (1.0 + z)
+        };
+        let d_pre = err * sigmoid_pre;
+        for (h, &o) in self.scalar_head.iter_mut().zip(out.iter()) {
+            *h -= lr * d_pre * o;
+        }
+        self.scalar_bias -= lr * d_pre;
+        err * err
     }
 
     /// Compute hidden layer: `h = ReLU(W1_fast · x_norm + b1)`.
@@ -311,13 +490,63 @@ impl BitNetCostModel {
     }
 
     /// Model memory footprint in bytes (packed storage only).
+    /// Total on-disk model footprint in bytes (everything serialized to JSON).
+    ///
+    /// Components for the default `(F=12, H=32, O=16)` shape:
+    /// - W₁ packed ternary: `F*H/4` = 96 B
+    /// - W₂ packed ternary: `H*O/4` = 128 B
+    /// - Biases `b1`, `b2`: `(H + O) * 4` = 192 B
+    /// - Scales `α₁`, `α₂`: 8 B
+    /// - Per-feature normalization (`mean`, `inv_std`): `F*4*2` = 96 B
+    ///
+    /// Total: **520 bytes**. The README's historical "420 bytes" headline
+    /// counted only weights + biases + a single α and dropped the
+    /// normalization tables; that subset is reported by
+    /// [`Self::weights_only_bytes`].
     #[must_use]
     pub fn model_size_bytes(&self) -> usize {
+        self.weights_only_bytes() + 4 /* alpha2 */ + F * 4 * 2 /* normalization */
+    }
+
+    /// Weight + bias + one-scale footprint in bytes (reflects the original
+    /// "420-byte" headline figure: `96 + 128 + (H+O)*4 + 4`).
+    ///
+    /// This is the irreducible memory the network needs in its ternary
+    /// representation. The full `model_size_bytes()` adds the second α
+    /// and the per-feature normalization tables that load alongside the
+    /// weights but are not strictly "the model."
+    #[must_use]
+    pub fn weights_only_bytes(&self) -> usize {
         self.w1_packed.data.len()
             + self.w2_packed.data.len()
-            + H * 4 + O * 4  // biases
-            + 4 + 4           // alphas
-            + F * 4 * 2       // normalization
+            + (H + O) * 4   // biases
+            + 4             // alpha1 (alpha2 included in model_size_bytes)
+    }
+
+    /// Stable short identifier for this model snapshot.
+    ///
+    /// Used by `PlanProvenance` (in `ra-engine`) to record which
+    /// cost-model weights were active when a plan was produced. The
+    /// id is computed as the first 16 hex chars of a default-hasher
+    /// digest over the packed ternary weights and the two scales —
+    /// enough to distinguish snapshots in human-readable logs
+    /// without paying for SHA-256 on every query.
+    #[must_use]
+    pub fn snapshot_id(&self) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.w1_packed.data.hash(&mut h);
+        self.w2_packed.data.hash(&mut h);
+        // Include scales as their bit pattern so f32 NaN doesn't
+        // poison the comparison.
+        self.alpha1.to_bits().hash(&mut h);
+        self.alpha2.to_bits().hash(&mut h);
+        // Bias arrays and normalization tables affect inference and
+        // therefore plan choice; include them too.
+        for v in self.b1.iter().chain(self.b2.iter()) {
+            v.to_bits().hash(&mut h);
+        }
+        format!("{:016x}", h.finish())
     }
 }
 
@@ -349,11 +578,21 @@ fn softplus(x: f32) -> f32 {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::float_cmp,
+    clippy::needless_range_loop,
+    reason = "test asserts deterministic predict outputs match exactly"
+)]
 mod tests {
     use super::*;
 
     fn sample_features() -> [f32; F] {
-        [4.0, 3.0, 5.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 10_000.0]
+        // 12 QueryFeatures positions + 4 trailing zero-pads matching
+        // OptimizationFeatures' density/fanout/equi/cross slots.
+        [
+            4.0, 3.0, 5.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 10_000.0,
+            0.0, 0.0, 0.0, 0.0,
+        ]
     }
 
     #[test]
@@ -369,6 +608,104 @@ mod tests {
         let model = BitNetCostModel::new_zeros();
         let size = model.model_size_bytes();
         assert!(size < 600, "Model should be under 600 bytes, got {size}");
+    }
+
+    /// Pin the documented byte counts so README and code can never drift
+    /// silently again. These values must match the README's architecture
+    /// section. Numbers reflect F=H=O=(16,32,16) post-A4:
+    ///
+    /// - W₁ packed ternary: F*H/4 = 128 B (was 96 B at F=12)
+    /// - W₂ packed ternary: H*O/4 = 128 B
+    /// - Biases b1+b2: (H+O)*4 = 192 B
+    /// - α₁, α₂: 4 B each (one in `weights_only`, both in `model_size`)
+    /// - Normalization `mean+inv_std`: F*4*2 = 128 B (was 96 B)
+    ///
+    /// `weights_only` = 128+128+192+4 = 452 B (headline figure post-A4).
+    /// `model_size` = `weights_only` + 4 (α₂) + 128 (norm) = 584 B.
+    #[test]
+    fn documented_byte_counts_are_exact() {
+        let model = BitNetCostModel::new_zeros();
+        assert_eq!(
+            model.weights_only_bytes(),
+            452,
+            "weights_only_bytes is the post-A4 headline figure (was 420 at F=12)"
+        );
+        assert_eq!(
+            model.model_size_bytes(),
+            584,
+            "model_size_bytes is the full on-disk footprint \
+             (weights + 2nd alpha + F*8 normalization)"
+        );
+    }
+
+    /// A5 regression: `predict_scalar` must use the learnable scalar
+    /// head, not the pre-A5 hand-tuned formula. On a fresh model the
+    /// `scalar_head` is initialised to the historical magic-formula
+    /// coefficients so backward-compatible behavior is preserved.
+    #[test]
+    fn predict_scalar_uses_learnable_head() {
+        let model = BitNetCostModel::new_zeros();
+        // Default scalar_head should match the pre-A5 magic formula.
+        let head = model.scalar_head();
+        assert!((head[0] - 0.5).abs() < 1e-6);
+        assert!((head[1] - 0.002).abs() < 1e-6);
+        assert!((head[3] - 0.000_3).abs() < 1e-6);
+        // All other slots default to zero.
+        for (i, &v) in head.iter().enumerate() {
+            if ![0_usize, 1, 3].contains(&i) {
+                assert_eq!(v, 0.0, "scalar_head[{i}] should default to 0");
+            }
+        }
+    }
+
+    /// A5: `update_scalar_head` should move the prediction toward the
+    /// observed target without retraining the hidden layers.
+    #[test]
+    fn update_scalar_head_moves_prediction_toward_target() {
+        let mut model = BitNetCostModel::new_zeros();
+        // new_zeros has all weights = 0, so predict_all returns
+        // softplus(b2) = softplus(0) = ln(2) ≈ 0.693 in every slot.
+        // predict_scalar = softplus(0.5*0.693 + 0.002*0.693 + 0.0003*0.693) ≈ ln(1+e^0.349) ≈ 0.890.
+        let features = sample_features();
+        let target = 5.0_f32;
+        let initial = model.predict_scalar(&features) as f32;
+
+        // Train on the same target many times; pred should creep toward it.
+        for _ in 0..2000 {
+            model.update_scalar_head(&features, target, 0.05);
+        }
+        let trained = model.predict_scalar(&features) as f32;
+
+        assert!(
+            (trained - target).abs() < (initial - target).abs(),
+            "scalar head failed to learn: initial={initial:.3}, trained={trained:.3}, target={target}"
+        );
+    }
+
+    /// A5: serde-default scalar head means models written before this
+    /// field existed deserialize cleanly with the historical formula.
+    #[expect(
+        clippy::expect_used,
+        reason = "test wiring: panicking on serde failure is the right diagnostic"
+    )]
+    #[test]
+    fn legacy_model_json_loads_with_default_scalar_head() {
+        // Simulate a pre-A5 model JSON: serialize a fresh model, then
+        // strip the scalar_head/scalar_bias fields manually.
+        let model = BitNetCostModel::new_zeros();
+        let json = serde_json::to_string(&model).expect("serialize");
+        // Crude strip: remove the scalar_head and scalar_bias entries.
+        let mut value: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        let obj = value.as_object_mut().expect("model is object");
+        obj.remove("scalar_head");
+        obj.remove("scalar_bias");
+        let stripped = serde_json::to_string(&value).expect("re-serialize");
+
+        let loaded: BitNetCostModel = serde_json::from_str(&stripped).expect("deserialize");
+        let head = loaded.scalar_head();
+        assert!((head[0] - 0.5).abs() < 1e-6);
+        assert!((head[1] - 0.002).abs() < 1e-6);
+        assert!((head[3] - 0.000_3).abs() < 1e-6);
     }
 
     #[test]

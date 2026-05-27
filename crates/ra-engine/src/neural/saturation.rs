@@ -243,6 +243,10 @@ impl Default for NeuralConvergenceDetector {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::float_cmp,
+    reason = "test asserts exact f64::MAX initialization"
+)]
 mod tests {
     use super::*;
 

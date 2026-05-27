@@ -526,7 +526,7 @@ fn run_collect_training(_args: CollectTrainingArgs) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn run_train(args: TrainArgs) -> Result<()> {
-    use ra_engine::cost_model::{BitNetTrainer, TrainerConfig, BitNetCostModel};
+    use ra_engine::cost_model::{BitNetTrainer, TrainerConfig};
     use crate::training_collector::TrainingCollector;
 
     println!("Loading training data from: {}", args.input.display());
@@ -549,7 +549,7 @@ fn run_train(args: TrainArgs) -> Result<()> {
     });
 
     // Compute normalization from training features
-    let feature_arrays: Vec<[f32; 12]> = train_samples
+    let feature_arrays: Vec<[f32; 16]> = train_samples
         .iter()
         .map(|s| s.features.as_array())
         .collect();
@@ -558,7 +558,7 @@ fn run_train(args: TrainArgs) -> Result<()> {
     trainer.set_normalization(mean, inv_std);
 
     // Convert training data to (features, target) pairs
-    let train_pairs: Vec<([f32; 12], [f32; 16])> = train_samples
+    let train_pairs: Vec<([f32; 16], [f32; 16])> = train_samples
         .iter()
         .map(|s| {
             let features = s.features.as_array();
@@ -604,9 +604,9 @@ fn run_train(args: TrainArgs) -> Result<()> {
     Ok(())
 }
 
-fn compute_feature_mean(samples: &[[f32; 12]]) -> [f32; 12] {
+fn compute_feature_mean(samples: &[[f32; 16]]) -> [f32; 16] {
     let n = samples.len() as f32;
-    let mut mean = [0.0f32; 12];
+    let mut mean = [0.0f32; 16];
     for s in samples {
         for (i, &x) in s.iter().enumerate() {
             mean[i] += x / n;
@@ -615,16 +615,16 @@ fn compute_feature_mean(samples: &[[f32; 12]]) -> [f32; 12] {
     mean
 }
 
-fn compute_feature_inv_std(samples: &[[f32; 12]], mean: &[f32; 12]) -> [f32; 12] {
+fn compute_feature_inv_std(samples: &[[f32; 16]], mean: &[f32; 16]) -> [f32; 16] {
     let n = samples.len() as f32;
-    let mut var = [0.0f32; 12];
+    let mut var = [0.0f32; 16];
     for s in samples {
         for (i, &x) in s.iter().enumerate() {
             let d = x - mean[i];
             var[i] += d * d / n;
         }
     }
-    let mut inv_std = [1.0f32; 12];
+    let mut inv_std = [1.0f32; 16];
     for (i, &v) in var.iter().enumerate() {
         let std = v.sqrt();
         inv_std[i] = if std > 1e-6 { 1.0 / std } else { 1.0 };

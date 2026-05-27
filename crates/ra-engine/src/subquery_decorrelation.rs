@@ -31,6 +31,10 @@ use crate::correlation_analysis;
 /// Returns the transformed tree. If no subqueries are present, the tree
 /// is returned unchanged (structurally identical clone).
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "single-pass walk over RelExpr; per-variant decorrelation is clearer inline"
+)]
 pub fn decorrelate(expr: &RelExpr) -> RelExpr {
     match expr {
         RelExpr::Filter { predicate, input } => {
@@ -165,7 +169,7 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
             returning,
         } => {
             let new_from = from.as_deref().map(|f| Box::new(decorrelate(f)));
-            let new_filter = filter.as_ref().map(|f| decorrelate_scalar_subqueries(f));
+            let new_filter = filter.as_ref().map(decorrelate_scalar_subqueries);
             let new_assignments = assignments
                 .iter()
                 .map(|(col, expr)| (col.clone(), decorrelate_scalar_subqueries(expr)))
@@ -185,7 +189,7 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
             returning,
         } => {
             let new_using = using.as_deref().map(|u| Box::new(decorrelate(u)));
-            let new_filter = filter.as_ref().map(|f| decorrelate_scalar_subqueries(f));
+            let new_filter = filter.as_ref().map(decorrelate_scalar_subqueries);
             RelExpr::Delete {
                 table: table.clone(),
                 filter: new_filter,
@@ -438,6 +442,10 @@ fn decorrelate_negated_subquery(
 /// For **correlated** scalar aggregate subqueries (e.g., TPC-H Q20):
 /// `x > (SELECT agg(...) FROM T WHERE t.a = outer.b AND local_preds)`
 /// becomes `Filter(x > __agg, LeftJoin(input, Aggregate(...), on correlation))`
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "Option<...> is the natural shape: the function may decline to rewrite"
+)]
 fn decorrelate_scalar_comparison(
     op: BinOp,
     other_side: &Expr,
@@ -535,10 +543,11 @@ fn extract_correlation_predicate(query: &RelExpr) -> (RelExpr, Expr) {
             // The filter predicate is the correlation condition
             (*input.clone(), predicate.clone())
         }
-        // Look through Project nodes (e.g., SELECT 1 FROM ... WHERE corr)
-        RelExpr::Project { input, .. } => extract_correlation_predicate(input),
-        // Look through Limit nodes (e.g., SELECT ... LIMIT 1)
-        RelExpr::Limit { input, .. } => extract_correlation_predicate(input),
+        // Look through Project and Limit nodes (e.g., SELECT 1 FROM ... WHERE corr,
+        // or SELECT ... LIMIT 1) — both look through to the inner correlation.
+        RelExpr::Project { input, .. } | RelExpr::Limit { input, .. } => {
+            extract_correlation_predicate(input)
+        }
         _ => {
             // No correlation filter; uncorrelated EXISTS
             // SemiJoin with TRUE condition preserves all outer rows
@@ -649,7 +658,7 @@ pub fn tree_contains_subquery(rel: &RelExpr) -> bool {
 /// where `pred` contains equality predicates referencing outer columns.
 ///
 /// Returns `None` if the subquery is not correlated or doesn't match
-/// the supported pattern (falls back to CrossJoin in caller).
+/// the supported pattern (falls back to `CrossJoin` in caller).
 fn try_decorrelate_correlated_scalar(
     op: BinOp,
     other_side: &Expr,
@@ -917,6 +926,10 @@ fn decorrelate_project_subqueries(
 /// joining the subquery's result into the input relation.
 ///
 /// Returns the rewritten expression and the new input (with join added).
+#[expect(
+    clippy::too_many_lines,
+    reason = "expression-tree walk with subquery rewriting; per-variant logic is clearer inline"
+)]
 fn replace_subquery_in_expr(
     expr: &Expr,
     input: RelExpr,
@@ -1184,7 +1197,7 @@ fn replace_subquery_in_expr(
 ///
 /// If the subquery matches:
 ///   `Project([agg_expr], Filter(corr_pred AND local, Scan(T)))`
-/// Converts to LeftJoin with aggregate, returns the joined input and col ref.
+/// Converts to `LeftJoin` with aggregate, returns the joined input and col ref.
 fn try_correlated_project_subquery(
     subquery: &RelExpr,
     input: &RelExpr,
@@ -1317,6 +1330,10 @@ fn add_existence_marker(rel: &RelExpr, marker_name: &str) -> RelExpr {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::panic,
+    reason = "test panics are diagnostics, not production failure modes"
+)]
 mod tests {
     use super::*;
     use ra_core::algebra::RelExpr;
@@ -1522,5 +1539,144 @@ mod tests {
             right: Box::new(Expr::Const(Const::Int(1))),
         };
         assert!(!contains_subquery(&without_sq));
+    }
+
+    // -- D1-D3 regression suite ----------------------------------
+
+    /// D1: `> ANY (SELECT ...)` lowers to a `SemiJoin`. Pre-D1 the audit
+    /// memory recorded that quantified comparisons stayed embedded as
+    /// `__gt_any` function calls and were never decorrelated; the
+    /// parser now emits proper `SubQueryType::Any` so this test pins
+    /// the expected shape.
+    #[test]
+    fn quantified_any_decorrelates_to_semi_join() {
+        let subquery = RelExpr::scan("orders");
+        let predicate = Expr::SubQuery {
+            subquery_type: SubQueryType::Any,
+            query: Box::new(subquery),
+            test_expr: Some(Box::new(Expr::Column(ColumnRef::new("price")))),
+        };
+        let input = RelExpr::scan("products").filter(predicate);
+
+        let result = decorrelate(&input);
+        assert!(
+            !tree_contains_subquery(&result),
+            "ANY subquery should be eliminated by decorrelation: {result:?}"
+        );
+        let has_semi = matches!(
+            &result,
+            RelExpr::Join {
+                join_type: JoinType::Semi,
+                ..
+            }
+        );
+        assert!(has_semi, "expected SemiJoin, got {result:?}");
+    }
+
+    /// D1: `< ALL (SELECT ...)` lowers to an `AntiJoin` (negated semi).
+    #[test]
+    fn quantified_all_decorrelates_to_anti_join() {
+        let subquery = RelExpr::scan("blacklist");
+        let predicate = Expr::SubQuery {
+            subquery_type: SubQueryType::All,
+            query: Box::new(subquery),
+            test_expr: Some(Box::new(Expr::Column(ColumnRef::new("id")))),
+        };
+        let input = RelExpr::scan("users").filter(predicate);
+
+        let result = decorrelate(&input);
+        assert!(
+            !tree_contains_subquery(&result),
+            "ALL subquery should be eliminated by decorrelation: {result:?}"
+        );
+        let has_anti = matches!(
+            &result,
+            RelExpr::Join {
+                join_type: JoinType::Anti,
+                ..
+            }
+        );
+        assert!(has_anti, "expected AntiJoin, got {result:?}");
+    }
+
+    /// D2: a subquery embedded in a JOIN's ON-condition must be
+    /// hoisted/decorrelated, not left in place. The current strategy
+    /// is to lift the subquery into a `CrossJoin` + Filter and then
+    /// re-decorrelate; the result must contain no subquery at all.
+    #[test]
+    fn subquery_inside_join_condition_is_decorrelated() {
+        let inner_sq = Expr::SubQuery {
+            subquery_type: SubQueryType::Scalar,
+            query: Box::new(RelExpr::scan("threshold_table")),
+            test_expr: None,
+        };
+        let join = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::qualified("a", "amount"))),
+                right: Box::new(inner_sq),
+            },
+            left: Box::new(RelExpr::scan("orders")),
+            right: Box::new(RelExpr::scan("customers")),
+        };
+
+        let result = decorrelate(&join);
+        assert!(
+            !tree_contains_subquery(&result),
+            "JOIN-condition subquery should be lifted: {result:?}"
+        );
+    }
+
+    /// D3: a subquery inside a CTE body must recurse through
+    /// `decorrelate(body)` and itself be lowered. Pre-D3 the audit
+    /// memory said CTE bodies weren't visited; the recursion at the
+    /// `RelExpr::CTE` arm of `decorrelate` covers that.
+    #[test]
+    fn subquery_inside_cte_body_is_decorrelated() {
+        // WITH active AS (SELECT * FROM users) SELECT * FROM active
+        //   WHERE id IN (SELECT user_id FROM orders)
+        let body_predicate = Expr::SubQuery {
+            subquery_type: SubQueryType::In,
+            query: Box::new(RelExpr::scan("orders")),
+            test_expr: Some(Box::new(Expr::Column(ColumnRef::new("id")))),
+        };
+        let body = RelExpr::scan("active").filter(body_predicate);
+        let cte = RelExpr::CTE {
+            name: "active".to_string(),
+            definition: Box::new(RelExpr::scan("users")),
+            body: Box::new(body),
+        };
+
+        let result = decorrelate(&cte);
+        assert!(
+            !tree_contains_subquery(&result),
+            "CTE body subquery should be eliminated: {result:?}"
+        );
+    }
+
+    /// D3: a subquery inside a CTE's *definition* must also be
+    /// decorrelated. Together with the body case, this covers both
+    /// halves of the audit's CTE finding.
+    #[test]
+    fn subquery_inside_cte_definition_is_decorrelated() {
+        // WITH x AS (SELECT * FROM t WHERE id IN (SELECT id FROM s)) SELECT * FROM x
+        let def_predicate = Expr::SubQuery {
+            subquery_type: SubQueryType::In,
+            query: Box::new(RelExpr::scan("s")),
+            test_expr: Some(Box::new(Expr::Column(ColumnRef::new("id")))),
+        };
+        let definition = RelExpr::scan("t").filter(def_predicate);
+        let cte = RelExpr::CTE {
+            name: "x".to_string(),
+            definition: Box::new(definition),
+            body: Box::new(RelExpr::scan("x")),
+        };
+
+        let result = decorrelate(&cte);
+        assert!(
+            !tree_contains_subquery(&result),
+            "CTE definition subquery should be eliminated: {result:?}"
+        );
     }
 }

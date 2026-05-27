@@ -21,8 +21,38 @@ use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
 use crate::query_features::QueryFeatureSet;
 
-// Include rules generated from .rra files at compile time
-include!(concat!(env!("OUT_DIR"), "/generated_rules.rs"));
+// Rules generated from .rra files at compile time. The build script
+// emits `#[allow(unused)]` on each helper because some are conditionally
+// empty; the workspace lint denies bare `#[allow]` so we sandbox the
+// generated content inside a child module that whitelists those
+// attributes via `expect`.
+#[expect(
+    clippy::allow_attributes,
+    reason = "build-script-generated code emits #[allow(unused)] which we cannot rewrite"
+)]
+mod generated {
+    use egg::{rewrite, Rewrite};
+
+    use crate::analysis::RelAnalysis;
+    #[expect(
+        unused_imports,
+        reason = "the set of conditions actually referenced by the .rra-derived rules \
+                  varies as the rule corpus grows; importing the full known set keeps \
+                  the build robust against future activations"
+    )]
+    use crate::conditions::{
+        is_canonical_scan, is_constant, is_deterministic, is_uncorrelated, not_nullable,
+        not_zero, pred_references_only, predicate_references_only, references_only,
+        single_reference,
+    };
+    use crate::egraph::RelLang;
+
+    include!(concat!(env!("OUT_DIR"), "/generated_rules.rs"));
+}
+pub(crate) use generated::all_generated_rules;
+#[cfg(test)]
+#[expect(unused_imports, reason = "test-only re-export")]
+pub(crate) use generated::{generated_rule_stats, GeneratedRuleStats};
 
 /// Return all optimization rewrite rules sorted by priority.
 ///

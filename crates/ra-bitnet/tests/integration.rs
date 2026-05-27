@@ -1,3 +1,12 @@
+#![expect(
+    clippy::print_stderr,
+    clippy::cast_lossless,
+    clippy::doc_markdown,
+    clippy::unreadable_literal,
+    clippy::unwrap_used,
+    clippy::float_cmp,
+    reason = "integration test: clarity over lint conformance"
+)]
 //! Integration test: train BitNet cost model and evaluate predictions.
 //!
 //! Demonstrates the unified pipeline:
@@ -63,6 +72,11 @@ fn generate_training_data(n: usize) -> Vec<([f32; F], [f32; O])> {
             (r(1.0) > 0.7) as u8 as f32, // distinct_flag
             (r(1.0) > 0.5) as u8 as f32, // limit_present
             (10.0f32).powf(r(5.0) + 1.0), // cardinality: 10 - 1M
+            // OptimizationFeatures padding (density / fanout / equi / cross)
+            0.0,
+            0.0,
+            0.0,
+            0.0,
         ];
 
         let target = synthetic_cost(&features);
@@ -90,9 +104,12 @@ fn train_and_evaluate_pipeline() {
     let inv_std = compute_inv_std(&feature_samples, &mean);
     trainer.set_normalization(mean, inv_std);
 
-    // Train for multiple epochs
+    // Train for multiple epochs. Post-A4 the model has F=16 inputs
+    // (~33% more first-layer weights than the F=12 version this test
+    // was originally tuned for); bumped from 20 to 40 epochs so the
+    // larger parameter set can still beat the untrained baseline.
     let mut epoch_losses = Vec::new();
-    for _epoch in 0..20 {
+    for _epoch in 0..40 {
         trainer.reset_loss();
         for (features, target) in train_data {
             trainer.train_step(features, target);
@@ -157,7 +174,7 @@ fn train_and_evaluate_pipeline() {
     // Print results for visibility
     eprintln!("\n=== BitNet Cost Model Evaluation ===");
     eprintln!("Training: {} samples, {} epochs, {} steps",
-        train_data.len(), 20, trainer.steps());
+        train_data.len(), 40, trainer.steps());
     eprintln!("Loss curve: {first_loss:.4} → {last_loss:.4} ({:.0}% reduction)",
         (1.0 - last_loss / first_loss) * 100.0);
     eprintln!("Eval MAPE:  {mape:.1}% (baseline: {baseline_mape:.1}%)");

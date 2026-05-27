@@ -28,7 +28,7 @@ use crate::lazy_rules::{LazyQueryPattern, LazyRuleCompiler, RuleCategory};
 use crate::state::SystemFingerprint;
 
 /// Number of input features: 12 (query) + 14 (fingerprint).
-const INPUT_DIM: usize = QueryFeatures::FEATURE_DIM + SystemFingerprint::NEURAL_DIM;
+const INPUT_DIM: usize = QueryFeatures::STRUCTURAL_DIM + SystemFingerprint::NEURAL_DIM;
 
 /// Number of rule groups the selector scores.
 /// Maps 1:1 to [`RuleCategory`] variants (14 total, but we score
@@ -305,11 +305,11 @@ impl NeuralRuleSelector {
 
         // First 12 dims: query features
         let fv = features.to_vec();
-        input[..QueryFeatures::FEATURE_DIM].copy_from_slice(&fv);
+        input[..QueryFeatures::STRUCTURAL_DIM].copy_from_slice(&fv);
 
         // Next 14 dims: system fingerprint
         let fp_vec = fingerprint.to_neural_vec();
-        input[QueryFeatures::FEATURE_DIM..].copy_from_slice(&fp_vec);
+        input[QueryFeatures::STRUCTURAL_DIM..].copy_from_slice(&fp_vec);
 
         input
     }

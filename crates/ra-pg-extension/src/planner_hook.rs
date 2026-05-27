@@ -192,7 +192,7 @@ unsafe fn ra_planner_hook_inner(
     }
 
     // Register feedback for executor end hook.
-    register_feedback(parse, &sql, &optimized);
+    register_feedback(parse, &sql, &rel_expr, &optimized);
 
     planned_stmt
 }
@@ -201,6 +201,7 @@ unsafe fn ra_planner_hook_inner(
 unsafe fn register_feedback(
     parse: *mut pg_sys::Query,
     sql: &str,
+    original: &ra_core::algebra::RelExpr,
     optimized: &ra_core::algebra::RelExpr,
 ) {
     let query_id = (*parse).queryId as u64;
@@ -218,6 +219,25 @@ unsafe fn register_feedback(
     let features = ra_engine::cost_model::extract_features(optimized);
     let fp = crate::monitor::fingerprint_reader().read();
 
+    // Predict CPU cost (ms) using the loaded BitNet model. Pre-A3 this
+    // was hard-coded to 0.0, which made MAPE always equal 1.0 (max error)
+    // and short-circuited the feedback loop. Now we feed real predictions
+    // so the MAPE tracker measures genuine model accuracy.
+    let predicted_cost = crate::extension_state::cost_model()
+        .map(|m| f64::from(m.predict_cpu_ms(&features.as_array())))
+        .unwrap_or(0.0);
+
+    // Approximate which rule categories fired by comparing structural
+    // counts of original vs optimized. Pre-A3 this was an empty Vec, so
+    // the rule selector had no training signal at all. The classification
+    // below is intentionally conservative — it labels a category as
+    // "fired" only when the optimization actually changed the relevant
+    // node count. For per-rule precision the planner_hook would need to
+    // call `optimize_with_tracking` (with budget overhead); we keep the
+    // fast path and accept category-level granularity here.
+    let rules_fired = classify_rules_fired(original, optimized);
+    let rules_enabled = 10; // matches NeuralRuleSelector group count
+
     crate::feedback_hook::register_pending(
         query_id,
         crate::feedback_hook::PendingFeedback {
@@ -225,12 +245,62 @@ unsafe fn register_feedback(
             plan_fingerprint: query_id,
             features,
             system_fingerprint: fp,
-            predicted_cost: 0.0,
-            rules_fired: Vec::new(),
-            rules_enabled: 0,
+            predicted_cost,
+            rules_fired,
+            rules_enabled,
             exec_start: Instant::now(),
         },
     );
+}
+
+/// Classify which rule-group indices fired by comparing structural
+/// counts of the pre- and post-optimization expressions.
+///
+/// Index → category mapping (matches `NeuralRuleSelector::GROUP_NAMES`):
+///   0 = predicate pushdown (filter count decreased near scans)
+///   1 = join reordering (join shape changed, count preserved)
+///   2 = projection pruning (project count decreased)
+///   3 = expression simplification (constant subexpressions removed)
+///   4 = aggregate optimization (aggregate moved/merged)
+///   5 = join elimination (join count decreased)
+///   6 = CTE optimization (cte count decreased)
+///   7 = semi-join reduction (semi join introduced)
+///   8 = column pruning (project columns reduced)
+///   9 = limit/sort optimization (sort eliminated or merged)
+fn classify_rules_fired(
+    original: &ra_core::algebra::RelExpr,
+    optimized: &ra_core::algebra::RelExpr,
+) -> Vec<u32> {
+    use ra_engine::cost_model::extract_features;
+
+    let f0 = extract_features(original);
+    let f1 = extract_features(optimized);
+    let mut fired = Vec::new();
+
+    if f1.filter_count < f0.filter_count {
+        fired.push(0); // predicate pushdown / filter merging
+    }
+    if f1.join_count < f0.join_count {
+        fired.push(5); // join elimination
+    } else if format!("{original:?}") != format!("{optimized:?}")
+        && (f1.join_count - f0.join_count).abs() < f32::EPSILON
+        && f0.join_count > 0.0
+    {
+        fired.push(1); // join reordering (shape changed, count preserved)
+    }
+    if f1.aggregate_count != f0.aggregate_count {
+        fired.push(4); // aggregate optimization
+    }
+    if f1.cte_count < f0.cte_count {
+        fired.push(6); // CTE optimization
+    }
+    if f1.subquery_count < f0.subquery_count {
+        fired.push(7); // semi-join reduction (decorrelation)
+    }
+    if f1.order_by_count < f0.order_by_count {
+        fired.push(9); // sort elimination
+    }
+    fired
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -247,6 +317,23 @@ fn optimize_relexpr(
         .optimize_with_facts(rel_expr, facts)
         .map_err(|e| format!("{e}"))
 }
+
+// TODO(provenance): expose `PlanProvenance` via a custom `EXPLAIN
+// (RA_PROVENANCE)` option. Implementation outline:
+//   1. Switch this helper to call `optimize_bounded` instead of
+//      `optimize_with_facts`, capturing the `OptimizationResult`
+//      and storing the resulting `Option<PlanProvenance>` on a
+//      session-local store keyed by query hash.
+//   2. Register a custom EXPLAIN option via
+//      `RegisterExplainOption` (PG ≥ 18) that adds a "Ra
+//      Provenance" block to JSON / text EXPLAIN output by
+//      reading from the session store.
+//   3. Mirror the CLI rendering (`crates/ra-cli/src/commands/
+//      explain.rs::cmd_explain`) so users see the same
+//      fingerprint / cost-model-id / hardware-hash /
+//      rule-set-hash / route / termination_reason fields.
+// Deferred: the EXPLAIN option machinery is PG-version-sensitive
+// and the work here would not change planning behavior.
 
 // ───────────────────────────────────────────────────────────────────────────
 // PostgreSQL helpers

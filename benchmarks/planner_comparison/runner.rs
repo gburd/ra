@@ -571,7 +571,7 @@ fn main() {
         let model_dir = PathBuf::from("models");
         fs::create_dir_all(&model_dir).ok();
         let model_path = model_dir.join("cost_model.bitnet.json");
-        if let Some(ref coord) = optimizer.training_coordinator_handle() {
+        if let Some(coord) = optimizer.training_coordinator_handle() {
             if let Ok(c) = coord.lock() {
                 match c.save_model(model_path.to_str().unwrap_or("models/cost_model.bitnet.json")) {
                     Ok(()) => println!("    Model saved to {}", model_path.display()),

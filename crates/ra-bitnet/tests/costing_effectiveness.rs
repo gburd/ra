@@ -1,3 +1,11 @@
+#![expect(
+    clippy::print_stderr,
+    clippy::uninlined_format_args,
+    clippy::cast_lossless,
+    clippy::doc_markdown,
+    clippy::unreadable_literal,
+    reason = "integration test: clarity over lint conformance"
+)]
 //! Evaluate BitNet cost model effectiveness in the actual plan costing pipeline.
 //!
 //! Tests whether a trained model improves plan selection when wired into
@@ -79,6 +87,11 @@ fn generate_data(n: usize, seed_start: u64) -> Vec<([f32; F], [f32; O])> {
             if r() > 0.7 { 1.0 } else { 0.0 },  // distinct
             if r() > 0.5 { 1.0 } else { 0.0 },  // limit
             (10.0f32).powf(r() * 6.0 + 1.0),    // cardinality: 10 - 10M
+            // OptimizationFeatures padding
+            0.0,
+            0.0,
+            0.0,
+            0.0,
         ];
 
         let raw_target = realistic_cost(&features);
@@ -110,9 +123,11 @@ fn training_with_more_data_improves_accuracy() {
     let inv_std = compute_inv_std(&features, &mean);
     trainer.set_normalization(mean, inv_std);
 
-    // Track loss per epoch
+    // Track loss per epoch. Post-A4 the model has F=16 inputs with 4
+    // training-time-zeroed dims; the extra parameters need more epochs
+    // than the F=12 schedule to converge to a useful rank ordering.
     let mut epoch_losses = Vec::new();
-    for epoch in 0..50 {
+    for epoch in 0..100 {
         trainer.reset_loss();
         // Mini-batch SGD: shuffle would be ideal but deterministic order is fine
         for (f, t) in &train_data {
@@ -131,14 +146,14 @@ fn training_with_more_data_improves_accuracy() {
     let (mape, rank_corr) = evaluate_model(&model, &eval_data);
 
     eprintln!("\n=== Training Results (2000 samples, 50 epochs) ===");
-    eprintln!("Loss:      {:.4} → {:.4}", epoch_losses[0], epoch_losses[49]);
+    eprintln!("Loss:      {:.4} → {:.4}", epoch_losses[0], epoch_losses[99]);
     eprintln!("Eval MAPE: {:.1}%", mape * 100.0);
     eprintln!("Rank corr: {:.3}", rank_corr);
     eprintln!("Steps:     {}", trainer.steps());
 
     // Accuracy assertions
-    assert!(epoch_losses[49] < epoch_losses[0] * 0.1,
-        "Loss should decrease >10x: {:.4} → {:.4}", epoch_losses[0], epoch_losses[49]);
+    assert!(epoch_losses[99] < epoch_losses[0] * 0.1,
+        "Loss should decrease >10x: {:.4} → {:.4}", epoch_losses[0], epoch_losses[99]);
     assert!(mape < 0.5,
         "MAPE should be under 50%: got {:.1}%", mape * 100.0);
     assert!(rank_corr > 0.3,
@@ -177,11 +192,13 @@ fn model_preserves_cost_ordering_for_plan_comparison() {
         let cheap = [
             2.0, 1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             100.0 + (i as f32) * 10.0,
+            0.0, 0.0, 0.0, 0.0,
         ];
         // "Expensive" query: many joins, high cardinality
         let expensive = [
             6.0, 5.0, 8.0, 2.0, 1.0, 0.0, 2.0, 2.0, 2.0, 1.0, 0.0,
             100_000.0 + (i as f32) * 1000.0,
+            0.0, 0.0, 0.0, 0.0,
         ];
 
         let cheap_pred = model.predict_cpu_ms(&cheap);

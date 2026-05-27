@@ -262,34 +262,112 @@ fn extract_conditions(code_blocks: &[String]) -> Vec<String> {
 /// Patterns that need special handling:
 /// - Multi-line `if condition(...)` (condition function)
 /// - Inline `if func("?var")` at end of rewrite
-/// - Custom Applier structs `{ StructName { ... } }` in the RHS
-fn has_condition_or_applier(rewrite_str: &str) -> bool {
-    // Multi-line conditions
-    if rewrite_str.contains("\n    if ")
-        || rewrite_str.contains("\n        if ")
-        || rewrite_str.contains("\n\tif ")
-    {
-        return true;
-    }
+// Conditions implemented in `crates/ra-engine/src/conditions.rs` that the
+// build script can pass through unchanged. Adding a new entry here lets
+// any `.rra` rule whose only blocker is one of these conditions compile
+// into the active rewrite set instead of being commented out as TODO.
+const KNOWN_CONDITIONS: &[&str] = &[
+    "single_reference",
+    "references_only",
+    "pred_references_only",
+    "predicate_references_only",
+    "is_deterministic",
+    "is_constant",
+    "not_nullable",
+    "not_zero",
+    "is_canonical_scan",
+    "is_uncorrelated",
+];
 
-    // Inline single-line condition: `"rhs" if func(...)` at end
-    // Look for `if ` followed by an identifier and `(` after `=>` or `<=>`
-    if let Some(arrow_pos) = rewrite_str.find("=>") {
-        let after_arrow = &rewrite_str[arrow_pos..];
-        // Find `if ` that's not inside a string literal
-        if let Some(if_pos) = after_arrow.rfind(" if ") {
-            let after_if = &after_arrow[if_pos + 4..];
-            let trimmed = after_if.trim();
-            // Check it looks like a function call (identifier + paren)
-            if trimmed
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphabetic() || c == '_')
-                && trimmed.contains('(')
-            {
-                return true;
+// Strip `if is_database("X")` lines from a rewrite block. The
+// `databases:` YAML frontmatter already scopes the rule to specific
+// engines, so the runtime check is redundant. Returns the cleaned
+// rewrite source.
+fn strip_is_database_condition(rewrite_str: &str) -> String {
+    rewrite_str
+        .lines()
+        .filter(|line| {
+            let t = line.trim_start();
+            !t.starts_with("if is_database(")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Extract every `if <ident>(...)` condition name from a rewrite block.
+/// Returns the set of condition function names mentioned.
+///
+/// Returns `None` if the rewrite contains a compound `if` expression
+/// (e.g. `if a(...) && !b(...)`) that egg's `rewrite!` macro cannot
+/// parse — those rules are inherently malformed and we can't extract
+/// a clean set of names from them.
+fn extract_condition_names(rewrite_str: &str) -> Option<Vec<String>> {
+    let mut names = Vec::new();
+    let Some(arrow_pos) = rewrite_str.find("=>") else {
+        return Some(names);
+    };
+    let after_arrow = &rewrite_str[arrow_pos..];
+
+    // Find each line that starts an `if` block. Lines that continue an
+    // `if` (e.g. `&& other(...)` on the next line) get joined into the
+    // current condition body.
+    let mut current: Option<String> = None;
+    let mut conditions: Vec<String> = Vec::new();
+    for line in after_arrow.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("if ") {
+            if let Some(prev) = current.take() {
+                conditions.push(prev);
+            }
+            current = Some(rest.to_owned());
+        } else if !trimmed.is_empty()
+            && (trimmed.starts_with("&&") || trimmed.starts_with("||"))
+        {
+            if let Some(c) = current.as_mut() {
+                c.push(' ');
+                c.push_str(trimmed);
             }
         }
+    }
+    if let Some(prev) = current.take() {
+        conditions.push(prev);
+    }
+
+    for body in &conditions {
+        // Reject compound expressions — egg's `if` clause expects a
+        // single Condition expression. Boolean operators between two
+        // conditions can't be lowered without a real combinator
+        // implementation.
+        if body.contains("&&") || body.contains("||") || body.trim_start().starts_with('!') {
+            return None;
+        }
+        // First identifier up to '(' is the condition name.
+        if let Some(paren) = body.find('(') {
+            let name = body[..paren].trim();
+            if !name.is_empty() {
+                names.push(name.to_owned());
+            }
+        }
+    }
+    Some(names)
+}
+
+/// Returns `true` if the rewrite has any condition or applier that the
+/// build script can't currently materialise. Used to decide whether to
+/// emit the rule as active or comment it out.
+///
+/// A condition is considered handleable if its name appears in
+/// [`KNOWN_CONDITIONS`]; the corresponding constructor function is
+/// imported by the wrapper module in `rewrite.rs`. `is_database(...)`
+/// gets special treatment via [`strip_is_database_condition`] before
+/// this check runs, so it never reaches here.
+fn has_condition_or_applier(rewrite_str: &str) -> bool {
+    let Some(names) = extract_condition_names(rewrite_str) else {
+        // Compound `if` expression that egg can't parse → block.
+        return true;
+    };
+    if names.iter().any(|n| !KNOWN_CONDITIONS.contains(&n.as_str())) {
+        return true;
     }
 
     // Custom Applier structs: `{ StructName { field: "?val" } }`
@@ -427,6 +505,9 @@ fn lookup_operator(name: &str) -> Option<Option<usize>> {
 /// Parses `(op_name child1 child2 ...)` tokens within string literals
 /// and validates against the `RELLANG_OPERATORS` whitelist.
 fn contains_unknown_operators(code: &str) -> bool {
+    if is_malformed_rule_pair(code) {
+        return true;
+    }
     // Extract operator usages from S-expression patterns in string literals.
     // We parse each `(op_name ...)` to check both name and arity.
     let chars: Vec<char> = code.chars().collect();
@@ -467,8 +548,21 @@ fn check_sexp_invalid(sexp: &str) -> bool {
             }
             if start < i {
                 let op_name: String = chars[start..i].iter().collect();
-                // Skip pattern variables and numeric literals
-                if op_name.starts_with('?') || op_name.parse::<f64>().is_ok() || op_name.is_empty() {
+                // Reject patterns with a metavariable in operator
+                // position — egg's `rewrite!` macro only accepts
+                // concrete operator names as the head of an
+                // s-expression, never `?var`. Such patterns parse
+                // syntactically but fail at runtime when the rule is
+                // constructed (`UnexpectedVar` error). Two .rra rules
+                // (push-func-filter-to-left/right) tripped this and
+                // panicked `all_generated_rules()`, dropping the
+                // entire generated batch via catch_unwind. We now
+                // reject them at build time so the whole rule set
+                // can load.
+                if op_name.starts_with('?') {
+                    return true;
+                }
+                if op_name.parse::<f64>().is_ok() || op_name.is_empty() {
                     continue;
                 }
                 match lookup_operator(&op_name) {
@@ -488,6 +582,115 @@ fn check_sexp_invalid(sexp: &str) -> bool {
         }
     }
     false
+}
+
+/// Build-time gate that rejects empty / no-op / unbound-metavar rules.
+///
+/// `code` is the body of a `rewrite!()` invocation, including the
+/// surrounding macro call. We extract the two adjacent string
+/// literals (the LHS pattern and the RHS pattern) and check three
+/// pathologies that egg either silently accepts or panics on at
+/// rule-construction time:
+///
+/// 1. Either pattern empty (egg parser would reject; better here).
+/// 2. LHS == RHS after whitespace normalisation — a rewrite-to-self
+///    is a no-op and adds load without ever firing usefully.
+/// 3. RHS references a `?metavar` that doesn't appear in LHS — egg
+///    raises `UnexpectedVar` at runtime when the rule is built,
+///    which (pre-audit-Item-6) panicked the whole batch.
+///
+/// Returns true when the rule is malformed and should be rejected.
+fn is_malformed_rule_pair(code: &str) -> bool {
+    let strings = extract_string_literals(code);
+    // The `rewrite!()` macro signature is
+    // `rewrite!("name"; "lhs" => "rhs")` — strings[0] is the rule
+    // name, strings[1] is the LHS pattern, strings[2] is the RHS.
+    // Check the LHS/RHS pair only; the name is just an identifier.
+    let Some((lhs, rhs)) = strings.get(1).zip(strings.get(2)) else {
+        // Couldn't find two patterns — leave the existing checks to
+        // do their work and treat this as not-malformed.
+        return false;
+    };
+
+    // Pathology 1: empty pattern.
+    if lhs.trim().is_empty() || rhs.trim().is_empty() {
+        println!(
+            "cargo:warning=rejecting rule with empty pattern: \
+             lhs={lhs:?} rhs={rhs:?}"
+        );
+        return true;
+    }
+
+    // Pathology 2: LHS == RHS modulo whitespace.
+    let norm = |s: &str| {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    if norm(lhs) == norm(rhs) {
+        println!(
+            "cargo:warning=rejecting no-op rule (LHS==RHS): \"{}\"",
+            norm(lhs)
+        );
+        return true;
+    }
+
+    // Pathology 3: RHS metavar not bound on LHS.
+    let lhs_vars = collect_metavars(lhs);
+    let rhs_vars = collect_metavars(rhs);
+    let unbound: Vec<_> = rhs_vars.iter().filter(|v| !lhs_vars.contains(*v)).collect();
+    if !unbound.is_empty() {
+        println!(
+            "cargo:warning=rejecting rule with unbound RHS metavars: \
+             rhs={rhs:?} unbound={unbound:?}"
+        );
+        return true;
+    }
+    false
+}
+
+/// Extract every double-quoted string literal in `code`. Naïve about
+/// escaping, but sufficient for the rule corpus where `"` does not
+/// appear inside a pattern.
+fn extract_string_literals(code: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut iter = code.chars().peekable();
+    while let Some(c) = iter.next() {
+        if c == '"' {
+            let mut buf = String::new();
+            for ch in iter.by_ref() {
+                if ch == '"' {
+                    break;
+                }
+                buf.push(ch);
+            }
+            out.push(buf);
+        }
+    }
+    out
+}
+
+/// Collect `?metavar` tokens from a pattern string. Returns names
+/// without the leading `?`.
+fn collect_metavars(s: &str) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '?' {
+            i += 1;
+            let start = i;
+            while i < chars.len()
+                && (chars[i].is_alphanumeric() || chars[i] == '_')
+            {
+                i += 1;
+            }
+            if start < i {
+                out.insert(chars[start..i].iter().collect::<String>());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Count the number of top-level children starting from position `pos`
@@ -570,6 +773,11 @@ fn normalize_rewrite_code(block: &str) -> Vec<ExtractedRule> {
             if rewrite_str.ends_with(',') {
                 rewrite_str.pop();
             }
+            // Strip `if is_database("X")` lines: the YAML `databases:`
+            // frontmatter already scopes the rule, so the runtime check
+            // is redundant. Without this, every database-specific rule
+            // is force-commented out even when no other blocker exists.
+            rewrite_str = strip_is_database_condition(&rewrite_str);
             // Check for condition functions or custom Appliers
             let has_condition = has_condition_or_applier(&rewrite_str);
             if has_condition {
@@ -738,8 +946,17 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
     // Generate master function that collects all categories
     output.push_str(&format!(
         "/// All generated rules from .rra files.\n\
+         ///\n\
          /// Total: {total_rules} active rules, {conditional_rules} conditional (awaiting condition functions).\n\
-         #[allow(unused)]\n\
+         ///\n\
+         /// Each category's rules are wrapped in `catch_unwind` so a\n\
+         /// single malformed rule (e.g. a pattern with a metavariable\n\
+         /// in operator position that survives the build-time\n\
+         /// validator) only drops its own category instead of the\n\
+         /// entire generated set. The build script's\n\
+         /// `check_sexp_invalid` rejects most such patterns; the\n\
+         /// `catch_unwind` here is defensive belt-and-suspenders.\n\
+         #[allow(unused, clippy::too_many_lines)]\n\
          pub(crate) fn all_generated_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {{\n\
          "
     ));
@@ -747,7 +964,12 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
         "    let mut rules = Vec::with_capacity({total_rules});\n"
     ));
     for fn_name in &category_fns {
-        output.push_str(&format!("    rules.extend({fn_name}());\n"));
+        output.push_str(&format!(
+            "    if let Ok(category) = std::panic::catch_unwind(\
+             std::panic::AssertUnwindSafe({fn_name})) {{\n\
+             \x20       rules.extend(category);\n\
+             \x20   }}\n"
+        ));
     }
     output.push_str("    rules\n}\n\n");
 

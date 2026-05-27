@@ -26,7 +26,7 @@ use ra_core::expr::{BinOp, Expr, UnaryOp};
 /// fingerprints. The fingerprint is cheap to compute (<1ms for
 /// typical queries) and cheap to compare (three integer comparisons
 /// for exact match, a handful of bit ops for similarity).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[expect(clippy::struct_excessive_bools, reason = "boolean flags represent independent query features")]
 pub struct QueryFingerprint {
     /// Hash of the join graph: tables involved and join topology.

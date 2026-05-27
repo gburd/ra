@@ -33,10 +33,14 @@ pub struct TrainingCoordinator {
 
 impl std::fmt::Debug for TrainingCoordinator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Surface only the high-signal fields. The trainer's internal
+        // weights and the trace buffer are intentionally elided to keep
+        // log lines readable and avoid leaking floating-point arrays.
         f.debug_struct("TrainingCoordinator")
             .field("total_traces", &self.total_traces)
             .field("total_train_steps", &self.total_train_steps)
-            .finish()
+            .field("buffer_pending", &self.trace_buffer.len())
+            .finish_non_exhaustive()
     }
 }
 
@@ -100,11 +104,56 @@ impl TrainingCoordinator {
     /// Record a simple feedback pair (features + actual cost).
     ///
     /// Used by the pg-extension feedback hook for execution feedback.
+    /// Only dim 0 (CPU time) is observed, so we use masked training to
+    /// avoid forcing the other 15 dimensions toward zero. Pre-A2, this
+    /// function set the entire 16-dim target to zero except dim 0, which
+    /// systematically destroyed the routing dims (12-15) every step.
     pub fn record_feedback(&mut self, features: &QueryFeatures, actual_time_ms: f64) {
-        // Build a minimal training target: actual CPU time in dim 0
+        self.record_feedback_partial(features, &[(0, actual_time_ms as f32)]);
+    }
+
+    /// Record partial feedback supplying values for specific output dims.
+    ///
+    /// `observed` is `(dim_index, value)` pairs. Unspecified dimensions
+    /// receive no gradient and are left untouched. Use this when more
+    /// than CPU time is known (e.g. memory dim 1, I/O dim 3).
+    ///
+    /// When dim 0 (CPU time) is observed, the scalar head is also
+    /// updated via SGD against the same target, so subsequent calls to
+    /// [`crate::cost_model::BitNetCostModel::predict_scalar`] reflect
+    /// the observed timing rather than the hand-tuned default formula.
+    pub fn record_feedback_partial(
+        &mut self,
+        features: &QueryFeatures,
+        observed: &[(usize, f32)],
+    ) {
         let mut target = [0.0f32; 16];
-        target[0] = actual_time_ms as f32;
-        self.trainer.train_step(&features.as_array(), &target);
+        let mut mask = [false; 16];
+        let mut cpu_target: Option<f32> = None;
+        for &(dim, value) in observed {
+            if dim < 16 {
+                target[dim] = value;
+                mask[dim] = true;
+                if dim == 0 {
+                    cpu_target = Some(value);
+                }
+            }
+        }
+        if !mask.iter().any(|m| *m) {
+            return;
+        }
+        let feature_array = features.as_array();
+        self.trainer
+            .train_step_masked(&feature_array, &target, &mask);
+        if let Some(cpu_ms) = cpu_target {
+            // Conservative LR: 0.01 means it'd take ~100 same-magnitude
+            // observations to noticeably move the head from defaults.
+            // The hidden layers are also being trained on the same
+            // sample so we don't want the scalar head to overfit
+            // before they catch up.
+            self.trainer
+                .update_scalar_head(&feature_array, cpu_ms, 0.01);
+        }
         self.total_train_steps += 1;
 
         if self.total_train_steps.is_multiple_of(SNAPSHOT_INTERVAL) {
@@ -141,11 +190,26 @@ impl TrainingCoordinator {
 
     /// Train directly on raw feature/target pairs (e.g., bootstrap samples).
     ///
-    /// Each pair is `([f32; 12], [f32; 16])` matching the model's input/output
-    /// dimensions. Snapshots the model after training.
-    pub fn train_on_samples(&mut self, samples: &[([f32; 12], [f32; 16])]) {
+    /// Each pair is `([f32; 16], [f32; 16])` matching the model's input/output
+    /// dimensions. Snapshots the model after training. Treats every target
+    /// dimension as observed; for partial supervision use
+    /// [`Self::train_on_samples_masked`].
+    pub fn train_on_samples(&mut self, samples: &[([f32; 16], [f32; 16])]) {
         if !samples.is_empty() {
             self.trainer.train_batch(samples);
+            self.total_train_steps += samples.len();
+            self.snapshot_model();
+        }
+    }
+
+    /// Train on `(features, target, mask)` triples — only mask-true dims
+    /// receive gradient. Snapshots the model after training.
+    pub fn train_on_samples_masked(
+        &mut self,
+        samples: &[([f32; 16], [f32; 16], [bool; 16])],
+    ) {
+        if !samples.is_empty() {
+            self.trainer.train_batch_masked(samples);
             self.total_train_steps += samples.len();
             self.snapshot_model();
         }
@@ -164,7 +228,10 @@ impl TrainingCoordinator {
         let batch = Self::traces_to_training_pairs(&traces);
 
         if !batch.is_empty() {
-            self.trainer.train_batch(&batch);
+            // Use masked batch training: each trace observes only specific
+            // dims (see `traces_to_training_pairs`). Pre-A2 we used
+            // `train_batch` here, which forced unobserved dims to zero.
+            self.trainer.train_batch_masked(&batch);
             self.total_train_steps += batch.len();
         }
 
@@ -174,43 +241,57 @@ impl TrainingCoordinator {
         }
     }
 
-    /// Convert optimization traces to training pairs.
+    /// Convert optimization traces to masked training samples.
     ///
-    /// Input: 12D query features
-    /// Target: 16D cost vector where:
+    /// Input: 12D query features.
+    /// Output: `(features, target, mask)` triples where each sample's
+    /// `mask[j] == true` for dims actually carried by the trace.
+    /// Observed dims are:
     ///   - dim 0: optimization time in ms
-    ///   - dim 1: final plan cost (log scale)
+    ///   - dim 1: final plan cost (log scale, when known)
     ///   - dim 12: difficulty score (`optimal_stop` / `iterations_run`)
     ///   - dim 13: normalized iterations needed
     ///   - dim 14: improvement percentage
     ///   - dim 15: confidence (1.0 for real data)
+    ///
+    /// Other dims (memory, I/O, locks, etc.) are unobserved and stay
+    /// untouched by training to avoid the pre-A2 zero-collapse bug.
     fn traces_to_training_pairs(
         traces: &[OptimizationTrace],
-    ) -> Vec<([f32; 12], [f32; 16])> {
+    ) -> Vec<([f32; 16], [f32; 16], [bool; 16])> {
         traces
             .iter()
             .map(|trace| {
                 let features = trace.features.as_array();
                 let mut target = [0.0f32; 16];
+                let mut mask = [false; 16];
 
-                // Core cost dimensions
+                // dim 0: optimization wall-clock time (always observed).
                 target[0] = trace.optimization_time_ms as f32;
+                mask[0] = true;
+
+                // dim 1: log-scale final plan cost (only if non-empty trace).
                 if let Some(&final_cost) = trace.cost_per_iteration.last() {
                     target[1] = (final_cost as f32).log2().max(0.0);
+                    mask[1] = true;
                 }
 
-                // Speculative router training signal (dims 12-15)
+                // Speculative router training signal (dims 12-15).
                 let difficulty = if trace.iterations_run > 0 {
                     trace.optimal_stop_point as f32 / trace.iterations_run as f32
                 } else {
                     0.0
                 };
                 target[12] = difficulty;
-                target[13] = trace.optimal_stop_point as f32 / 20.0; // normalized
+                target[13] = trace.optimal_stop_point as f32 / 20.0;
                 target[14] = trace.final_improvement_pct as f32;
-                target[15] = 1.0; // confidence: real observed data
+                target[15] = 1.0;
+                mask[12] = true;
+                mask[13] = true;
+                mask[14] = true;
+                mask[15] = true;
 
-                (features, target)
+                (features, target, mask)
             })
             .collect()
     }
@@ -241,58 +322,94 @@ pub fn shared_coordinator_from_model(model: BitNetCostModel) -> SharedTrainingCo
 
 /// Bootstrap the model with synthetic training data spanning the query space.
 ///
-/// This provides a reasonable initial model before real queries are observed.
-/// The synthetic data captures the known heuristic relationships:
-/// - Single tables are trivial (0ms optimization)
-/// - 2-7 table equi-joins need ~0.01ms (left-deep)
-/// - Complex queries with cross/theta joins need 5-200ms (e-graph)
-#[must_use] 
+/// Trains a freshly-initialized [`BitNetTrainer`] over several epochs on
+/// the [`generate_bootstrap_samples`] dataset, then exports the trained
+/// weights as a [`BitNetCostModel`]. The result is a genuinely
+/// "pre-trained" snapshot — `samples_trained` reflects the actual number
+/// of training steps performed, not a marketing constant.
+///
+/// The synthetic data captures known heuristic relationships:
+/// - Single tables are trivial (~10µs optimization, dim 0)
+/// - 2–7 table equi-joins need ~0.01ms (left-deep)
+/// - Complex queries with cross/theta joins need 5–200ms (e-graph)
+/// - Difficulty (dim 12) and predicted iterations (dim 13) for the
+///   speculative router
+///
+/// Pre-G9 this function bypassed the trainer entirely: it pseudo-randomly
+/// initialised the latent weights, hand-tuned eight specific entries,
+/// then declared `samples_trained = 10000` as a literal — the model had
+/// never seen any of the bootstrap targets. Now we run real training
+/// and report the real step count.
+///
+/// Trains via the masked path so dims 1, 11 (memory, vacuum) and similar
+/// unspecified outputs aren't pushed toward zero.
+#[must_use]
 pub fn bootstrap_model() -> BitNetCostModel {
-    // Create model with explicit weights that survive ternary quantization.
-    // Layer 1 (12→32): weights at ±0.5 with structure encoding known heuristics.
-    // Layer 2 (32→16): weights at ±0.3 for output mixing.
-    let mut w1 = [[0.0f32; 32]; 12];
-    let mut w2 = [[0.0f32; 16]; 32];
-    let b1 = [0.1f32; 32];
-    let b2 = [0.05f32; 16];
+    // 30 epochs is enough for the bias-driven targets to converge
+    // through ternary quantization without overfitting the noise from
+    // randomly-initialised hidden-layer weights. Pre-A4 this was 10
+    // epochs at F=12; the F=16 model has ~33% more first-layer weights
+    // and needs more passes to settle.
+    const EPOCHS: usize = 30;
 
-    // Encode known heuristic: table_count and join_count (dims 0,1)
-    // drive cost predictions (output dim 0) and difficulty (dim 12).
-    let mut seed: u64 = 12345;
-    for row in &mut w1 {
-        for v in row.iter_mut() {
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let u = (seed >> 33) as f32 / (u32::MAX >> 1) as f32;
-            *v = (u - 0.5) * 1.2; // Range [-0.6, 0.6] — above quantization threshold
-        }
+    let samples = generate_bootstrap_samples();
+    let masks = bootstrap_masks(&samples);
+
+    // Higher learning rate than the online default since we're training
+    // from scratch on a fixed synthetic distribution. weight_decay=0
+    // keeps the bias-driven baseline targets reachable through ternary
+    // quantization noise.
+    let mut trainer = BitNetTrainer::new(TrainerConfig {
+        lr: 0.02,
+        weight_decay: 0.0,
+        ..TrainerConfig::default()
+    });
+
+    // Fit feature normalization from the bootstrap distribution so
+    // cardinality and density signals don't dominate raw magnitudes.
+    let feature_array: Vec<[f32; 16]> = samples.iter().map(|(f, _)| *f).collect();
+    let mut tmp_model = BitNetCostModel::new_zeros();
+    tmp_model.fit_normalization(&feature_array);
+    // BitNetTrainer holds its own copy; sync them.
+    trainer.set_normalization(tmp_model.feature_mean(), tmp_model.feature_inv_std());
+
+    let batch: Vec<([f32; 16], [f32; 16], [bool; 16])> = samples
+        .iter()
+        .zip(masks.iter())
+        .map(|((f, t), m)| (*f, *t, *m))
+        .collect();
+    for _ in 0..EPOCHS {
+        trainer.train_batch_masked(&batch);
     }
-    // Strengthen key features → difficulty path
-    w1[0][0] = 0.8;  // table_count → hidden[0]
-    w1[1][0] = 0.6;  // join_count → hidden[0]
-    w1[9][1] = 0.9;  // cross_join_present → hidden[1]
-    w1[8][2] = -0.7; // equi_join_fraction → hidden[2] (high equi = low difficulty)
 
-    for row in &mut w2 {
-        for v in row.iter_mut() {
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let u = (seed >> 33) as f32 / (u32::MAX >> 1) as f32;
-            *v = (u - 0.5) * 0.8;
-        }
-    }
-    // Route hidden[0] (complexity) → output[12] (difficulty)
-    w2[0][12] = 0.7;
-    // Route hidden[1] (cross join) → output[12] (difficulty)
-    w2[1][12] = 0.8;
-    // Route hidden[2] (equi fraction) → output[12] (low = easy)
-    w2[2][12] = -0.6;
-    // Route complexity → output[0] (optimization time)
-    w2[0][0] = 0.5;
+    trainer.to_model()
+}
 
-    BitNetCostModel::from_f32_weights(
-        &w1, &b1, &w2, &b2,
-        [0.0; 12], [1.0; 12], // no normalization
-        10000, // mark as "pre-trained"
-    )
+/// Per-sample observation masks for [`generate_bootstrap_samples`].
+///
+/// The synthetic targets only fill specific dimensions (0, 12, 13, 14, 15
+/// in various combinations); marking unspecified dims as unobserved
+/// avoids pushing those outputs toward zero during bootstrap training.
+fn bootstrap_masks(samples: &[([f32; 16], [f32; 16])]) -> Vec<[bool; 16]> {
+    samples
+        .iter()
+        .map(|(_features, target)| {
+            let mut mask = [false; 16];
+            // Always observe dim 0 (optimization time) — every sample sets it.
+            mask[0] = true;
+            // Mark a dim observed if the synthetic generator wrote a non-zero
+            // value to it. The targets in `generate_bootstrap_samples` use
+            // 0.0 as a sentinel for "unspecified", so this round-trips
+            // cleanly even when zero is a legitimate prediction (we still
+            // train on dim 0 unconditionally).
+            for (i, &v) in target.iter().enumerate().skip(1) {
+                if v.abs() > f32::EPSILON {
+                    mask[i] = true;
+                }
+            }
+            mask
+        })
+        .collect()
 }
 
 /// Generate synthetic training samples spanning the query space.
@@ -300,12 +417,12 @@ pub fn bootstrap_model() -> BitNetCostModel {
 /// Used by the training harness to provide additional training signal
 /// alongside real query optimization traces.
 #[must_use]
-pub fn generate_bootstrap_samples() -> Vec<([f32; 12], [f32; 16])> {
+pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
     let mut samples = Vec::with_capacity(200);
 
     // Trivial queries: 1 table, no joins → skip (0ms)
     for i in 0..20 {
-        let features = [1.0, 0.0, (i % 3) as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let features = [1.0, 0.0, (i % 3) as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut target = [0.0f32; 16];
         target[0] = 0.01; // ~10µs optimization
         target[12] = 0.0; // difficulty: trivial
@@ -321,6 +438,7 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 12], [f32; 16])> {
                 0.0, 0.0, 0.0,
                 0.8, 2.0, 1.0, 0.0, // density, fan-out, equi-frac, no cross
                 0.01, 0.0,
+                0.0, 0.0, 0.0, 0.0,
             ];
             let mut target = [0.0f32; 16];
             target[0] = 0.01;
@@ -337,6 +455,7 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 12], [f32; 16])> {
             0.0, 0.0, 0.0,
             0.5, 3.0, 0.9, 0.0,
             0.001, 0.0,
+            0.0, 0.0, 0.0, 0.0,
         ];
         let mut target = [0.0f32; 16];
         target[0] = 0.02;
@@ -353,6 +472,7 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 12], [f32; 16])> {
                 0.0, 0.0, 0.0,
                 0.3, 2.0, 0.3, 1.0, // low density, cross joins present
                 0.1, 0.0,
+                0.0, 0.0, 0.0, 0.0,
             ];
             let mut target = [0.0f32; 16];
             target[0] = 5.0 + difficulty * 200.0; // 5-165ms
@@ -371,6 +491,7 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 12], [f32; 16])> {
             0.0, subq as f32, 0.0,
             0.4, 2.0, 0.8, 0.0,
             0.05, 0.0,
+            0.0, 0.0, 0.0, 0.0,
         ];
         let mut target = [0.0f32; 16];
         target[0] = 10.0 * subq as f32;
@@ -423,7 +544,7 @@ mod tests {
     fn coordinator_buffers_traces() {
         let mut coord = TrainingCoordinator::new();
         for i in 0..63 {
-            let trained = coord.record_trace(sample_trace(5, 10.0 + i as f64));
+            let trained = coord.record_trace(sample_trace(5, 10.0 + f64::from(i)));
             assert!(!trained, "Should not train before batch size");
         }
         assert_eq!(coord.stats().buffer_pending, 63);
@@ -433,7 +554,7 @@ mod tests {
     fn coordinator_trains_on_batch() {
         let mut coord = TrainingCoordinator::new();
         for i in 0..64 {
-            coord.record_trace(sample_trace(5, 10.0 + i as f64));
+            coord.record_trace(sample_trace(5, 10.0 + f64::from(i)));
         }
         assert_eq!(coord.stats().buffer_pending, 0);
         assert!(coord.stats().total_train_steps > 0);
@@ -444,7 +565,7 @@ mod tests {
         let mut coord = TrainingCoordinator::new();
         // Fill enough batches to trigger snapshot (256 steps)
         for i in 0..260 {
-            coord.record_trace(sample_trace(3, 5.0 + (i % 50) as f64));
+            coord.record_trace(sample_trace(3, 5.0 + f64::from(i % 50)));
         }
         let model = coord.current_model();
         assert!(model.samples_trained > 0);
@@ -454,7 +575,7 @@ mod tests {
     fn coordinator_flush_trains_partial_batch() {
         let mut coord = TrainingCoordinator::new();
         for i in 0..10 {
-            coord.record_trace(sample_trace(4, 8.0 + i as f64));
+            coord.record_trace(sample_trace(4, 8.0 + f64::from(i)));
         }
         assert_eq!(coord.stats().buffer_pending, 10);
         coord.flush();
@@ -481,5 +602,167 @@ mod tests {
         };
         coord.record_feedback(&features, 1.5);
         assert_eq!(coord.stats().total_train_steps, 1);
+    }
+
+    /// Regression for A2: repeated single-dim feedback must not collapse
+    /// the routing dimensions toward zero. We compare a masked
+    /// feedback stream (post-A2 behaviour) against an unmasked
+    /// hard-zeroing stream (pre-A2 behaviour) and assert masked is
+    /// strictly less destructive.
+    #[test]
+    fn record_feedback_preserves_routing_dims_better_than_unmasked() {
+        // Build a model with a deliberate non-zero signal on dim 12
+        // (router difficulty) by training a single-sample bias signal
+        // through the trace path which sets mask[12]=true.
+        let prep = || -> TrainingCoordinator {
+            let mut coord = TrainingCoordinator::new();
+            // Submit traces that deliberately encode dim-12 difficulty.
+            for _ in 0..200 {
+                coord.record_trace(sample_trace(8, 30.0));
+            }
+            coord.flush();
+            // Snapshot.
+            for _ in 0..2 { coord.record_trace(sample_trace(8, 30.0)); }
+            coord.flush();
+            coord
+        };
+
+        let features = QueryFeatures {
+            table_count: 3.0, join_count: 2.0, filter_count: 1.0,
+            aggregate_count: 0.0, subquery_count: 0.0, cte_count: 0.0,
+            window_function_count: 0.0, order_by_count: 0.0,
+            group_by_count: 0.0, distinct_flag: 0.0, limit_present: 0.0,
+            max_join_cardinality: 3.0,
+        };
+
+        let mut coord_masked = prep();
+        let dim12_pre = coord_masked.current_model().predict_all(&features.as_array())[12];
+
+        // Stream 256 masked feedbacks (only dim 0 supervised). Forces
+        // a snapshot at step 256.
+        for _ in 0..256 {
+            coord_masked.record_feedback(&features, 5.0);
+        }
+        let dim12_masked = coord_masked
+            .current_model()
+            .predict_all(&features.as_array())[12];
+
+        // Now do the same on a fresh coordinator using the pre-A2 path
+        // (full target with hard-zero on dim 12).
+        let mut coord_zeroed = prep();
+        for _ in 0..256 {
+            // Direct call to the underlying trainer mimicking pre-A2:
+            let mut target = [0.0f32; 16];
+            target[0] = 5.0;
+            coord_zeroed
+                .trainer
+                .train_step(&features.as_array(), &target);
+            coord_zeroed.total_train_steps += 1;
+        }
+        coord_zeroed.snapshot_model();
+        let dim12_zeroed = coord_zeroed
+            .current_model()
+            .predict_all(&features.as_array())[12];
+
+        // Masked feedback should preserve dim 12 strictly closer to
+        // pre-feedback than the zeroed (pre-A2) path.
+        let drift_masked = (dim12_masked - dim12_pre).abs();
+        let drift_zeroed = (dim12_zeroed - dim12_pre).abs();
+        assert!(
+            drift_masked < drift_zeroed,
+            "masked feedback did not preserve dim 12 better than zeroed: \
+             pre={dim12_pre:.3} masked={dim12_masked:.3} zeroed={dim12_zeroed:.3} \
+             drift_masked={drift_masked:.3} drift_zeroed={drift_zeroed:.3}"
+        );
+    }
+
+    /// Verify the masked partial-feedback API works as advertised.
+    #[test]
+    fn record_feedback_partial_only_trains_specified_dims() {
+        let mut coord = TrainingCoordinator::new();
+        let features = QueryFeatures {
+            table_count: 3.0,
+            join_count: 2.0,
+            filter_count: 1.0,
+            aggregate_count: 0.0,
+            subquery_count: 0.0,
+            cte_count: 0.0,
+            window_function_count: 0.0,
+            order_by_count: 0.0,
+            group_by_count: 0.0,
+            distinct_flag: 0.0,
+            limit_present: 0.0,
+            max_join_cardinality: 1000.0,
+        };
+        // Observe CPU and memory only.
+        coord.record_feedback_partial(&features, &[(0, 1.5), (1, 200.0)]);
+        assert_eq!(coord.stats().total_train_steps, 1);
+
+        // Empty observations must be a no-op.
+        coord.record_feedback_partial(&features, &[]);
+        assert_eq!(coord.stats().total_train_steps, 1);
+    }
+
+    /// Regression for G9: `bootstrap_model()` must run real training,
+    /// not just declare `samples_trained = 10000` while leaving weights
+    /// untrained. A genuinely-trained model should:
+    ///   1. Report a `samples_trained` count tied to the actual training
+    ///      run (not the pre-G9 marketing constant 10000).
+    ///   2. Produce different predictions than the all-zeros baseline.
+    ///   3. Distinguish trivial queries (low predicted cost) from
+    ///      complex queries (higher predicted cost).
+    #[test]
+    fn bootstrap_model_is_actually_trained() {
+        let model = bootstrap_model();
+
+        // (1) samples_trained reflects real training steps, not 10000.
+        assert_ne!(
+            model.samples_trained, 10_000,
+            "bootstrap_model should not declare the pre-G9 marketing constant"
+        );
+        assert!(
+            model.samples_trained > 0,
+            "bootstrap_model should report a real training step count, got {}",
+            model.samples_trained
+        );
+
+        // (2) Predictions differ from the all-zeros baseline. The
+        // feature layout matches `OptimizationFeatures::as_array()`,
+        // which is what the speculative router and `bootstrap_model`'s
+        // training samples use. Position legend (post-A4):
+        //   0-5 : table/join/filter/aggregate/subquery/window counts
+        //   6-9 : density / max_fan_out / equi_join_fraction / cross_join_present
+        //   10-12: selectivity / has_limit / has_distinct_or_group
+        //   13-15: log_estimated_rows / total_table_pages / index_coverage
+        let baseline = BitNetCostModel::new_zeros();
+        let trivial = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, // 1 table, no other structure
+            0.0, 0.0, 1.0, 0.0,           // density 0, equi-fraction 1
+            1.0, 0.0, 0.0,                // selectivity full, no limit/distinct
+            0.0, 0.0, 1.0,                // 0 rows estimated, full index coverage
+        ];
+        let complex = [
+            6.0, 5.0, 3.0, 1.0, 0.0, 0.0, // 6 tables, 5 joins
+            0.3, 4.0, 0.3, 1.0,           // sparse, high fan-out, cross joins
+            0.05, 0.0, 1.0,               // tight predicates, distinct
+            5.0, 1000.0, 0.0,             // 10^5 rows, no indexes
+        ];
+        assert!(
+            (model.predict_cpu_ms(&trivial) - baseline.predict_cpu_ms(&trivial)).abs()
+                + (model.predict_cpu_ms(&complex) - baseline.predict_cpu_ms(&complex)).abs()
+                > 0.1,
+            "bootstrap_model produces baseline predictions (training had no effect)"
+        );
+
+        // (3) Trivial queries should predict lower CPU cost than complex
+        //     ones. The training set explicitly encodes this gradient
+        //     (trivial → 0.01ms, complex → up to 165ms).
+        let p_trivial = model.predict_cpu_ms(&trivial);
+        let p_complex = model.predict_cpu_ms(&complex);
+        assert!(
+            p_complex >= p_trivial,
+            "bootstrap-trained model should rank complex >= trivial: \
+             trivial={p_trivial:.3}, complex={p_complex:.3}"
+        );
     }
 }

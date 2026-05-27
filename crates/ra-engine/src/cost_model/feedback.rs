@@ -203,11 +203,14 @@ pub fn compute_mape(predicted: f64, actual: f64) -> f64 {
 ///
 /// Maintains a running estimate of model prediction accuracy
 /// that the [`SystemFingerprint`] reports as `model_recent_mape`.
+///
+/// With β=0.99 the half-life is `ln(2)/ln(1/0.99) ≈ 69` samples — i.e.
+/// after 69 records the influence of the oldest observation is halved.
 #[derive(Debug, Clone)]
 pub struct MapeTracker {
     /// Exponential moving average of MAPE.
     ema: f64,
-    /// Decay factor (default 0.99 = slow decay, ~100 sample half-life).
+    /// Decay factor (default 0.99 = ~69-sample half-life).
     decay: f64,
     /// Total samples seen.
     count: u64,
@@ -373,6 +376,10 @@ impl Default for FeedbackCollector {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::float_cmp,
+    reason = "tests assert exact serialization/EMA round-trip"
+)]
 mod tests {
     use super::*;
 

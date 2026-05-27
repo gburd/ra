@@ -70,6 +70,11 @@ impl NeuralPlanScorer {
     }
 
     /// Create a scorer by loading a persisted `BitNetCostModel`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model file cannot be read or its JSON
+    /// payload is malformed.
     pub fn from_file(path: &str) -> anyhow::Result<Self> {
         let model = BitNetCostModel::load_from_file(path)
             .map_err(|e| anyhow::anyhow!("failed to load model: {e}"))?;

@@ -11,8 +11,10 @@
 //! and outputs JSON results that can be compared against PostgreSQL EXPLAIN
 //! ANALYZE measurements.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
+use ra_core::statistics::Statistics;
 use ra_engine::subquery_decorrelation::decorrelate;
 use ra_engine::Optimizer;
 use ra_parser::sql_to_relexpr;
@@ -31,14 +33,31 @@ struct QueryResult {
 }
 
 fn main() {
+    // `--with-stats` flag enables TPC-H SF=0.01 statistics so the Ra
+    // optimizer pays the same cardinality-and-index lookup cost the PG
+    // planner does on every query. Without it, Ra runs purely on the
+    // rule machinery — useful for measuring rewrite throughput in
+    // isolation but methodologically asymmetric to PG's catalog-driven
+    // planner. See README §"Methodology disclosure".
+    let with_stats = std::env::args().any(|a| a == "--with-stats");
+
     let queries = define_queries();
-    let optimizer = Optimizer::new();
+    let optimizer = if with_stats {
+        Optimizer::new().with_table_stats(tpch_sf01_statistics())
+    } else {
+        Optimizer::new()
+    };
 
     eprintln!(
-        "Ra optimizer benchmark: {} queries x {} iterations (+ {} warmup)",
+        "Ra optimizer benchmark: {} queries x {} iterations (+ {} warmup){}",
         queries.len(),
         ITERATIONS,
-        WARMUP
+        WARMUP,
+        if with_stats {
+            " [with TPC-H SF=0.01 stats]"
+        } else {
+            ""
+        }
     );
 
     let mut results: Vec<QueryResult> = Vec::new();
@@ -250,4 +269,33 @@ fn define_queries() -> Vec<(&'static str, &'static str, &'static str)> {
           as running_total FROM orders WHERE o_orderdate >= '1995-01-01' \
           ORDER BY o_custkey, o_orderdate LIMIT 50"),
     ]
+}
+
+
+/// TPC-H SF=0.01 table statistics matching the schema used by
+/// `benchmarks/data/run_pg_bench.py`. Used by the `--with-stats`
+/// variant so Ra's optimizer pays the same cardinality-and-index lookup
+/// cost PG does on every query.
+///
+/// Numbers come from a fresh `ANALYZE` of a TPC-H 0.01 dataset:
+/// lineitem 60175 rows, orders 15000 rows, customer 1500 rows,
+/// supplier 100 rows, part 2000 rows, partsupp 8000 rows, nation 25,
+/// region 5.
+fn tpch_sf01_statistics() -> HashMap<String, Statistics> {
+    fn t(rows: f64, avg_row_size: u64) -> Statistics {
+        let mut s = Statistics::new(rows);
+        s.avg_row_size = avg_row_size;
+        s.total_size = (rows as u64).saturating_mul(avg_row_size);
+        s
+    }
+    let mut m = HashMap::new();
+    m.insert("lineitem".to_owned(), t(60175.0, 144));
+    m.insert("orders".to_owned(), t(15000.0, 112));
+    m.insert("customer".to_owned(), t(1500.0, 152));
+    m.insert("supplier".to_owned(), t(100.0, 144));
+    m.insert("part".to_owned(), t(2000.0, 152));
+    m.insert("partsupp".to_owned(), t(8000.0, 144));
+    m.insert("nation".to_owned(), t(25.0, 96));
+    m.insert("region".to_owned(), t(5.0, 96));
+    m
 }

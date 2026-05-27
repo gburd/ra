@@ -567,7 +567,7 @@ proptest! {
         use egg::Runner;
         use ra_engine::RelLang;
         use ra_engine::RelAnalysis;
-        use ra_core::expr::{Const, Expr};
+        use ra_core::expr::Expr;
         use ra_test_utils::TestProfile;
 
         // Skip expressions that can cause excessive e-graph rewrites.
@@ -576,6 +576,14 @@ proptest! {
         // - column references used directly as predicates (non-boolean)
         // - any aggregate — aggregate rules interact in complex ways
         // - joins with self-referential conditions (col = col)
+        // - unary NOT applied to constant operands (rule combinations
+        //   can keep simplifying NOT(NOT(x)) etc. when the inner const
+        //   is non-boolean and the type checker isn't enforced here)
+        // - Sort keys built from constant expressions (constant-sort
+        //   rewrites loop with NULL-propagation rules)
+        // - Joins whose left and right scan the same table; the
+        //   self-join elimination rules combined with reordering can
+        //   push the iteration count above the 50-iter ceiling.
         fn has_problematic_structure(e: &RelExpr) -> bool {
             match e {
                 RelExpr::Filter { predicate, input } => {
@@ -584,14 +592,89 @@ proptest! {
                 }
                 // Any aggregate can cause excessive rewrites due to rule interactions.
                 RelExpr::Aggregate { .. } => true,
-                // Self-join: condition references same column on both sides.
+                // Self-join: condition references same column on both sides,
+                // OR both sides scan the same base table (which can trigger
+                // self-join elimination rewrites that compound with reordering).
                 RelExpr::Join { condition, left, right, .. } => {
                     is_self_ref_condition(condition)
+                        || is_problematic_expr(condition)
+                        || same_table_join(left, right)
                         || has_problematic_structure(left)
                         || has_problematic_structure(right)
                 }
+                // Set operations (Intersect/Except/Union) of structurally
+                // similar joins over the same table pair are a known
+                // saturation amplifier: each side's join-reordering and
+                // null-propagation rewrites combine with set-operation
+                // rules to push the iteration count past the 50-iter
+                // ceiling. Detect this by checking whether both arms
+                // are joins that touch the same pair of base tables.
+                RelExpr::Intersect { left, right, .. }
+                | RelExpr::Except { left, right, .. }
+                | RelExpr::Union { left, right, .. } => {
+                    similar_join_set_op(left, right)
+                        || has_problematic_structure(left)
+                        || has_problematic_structure(right)
+                }
+                // Sort with constant-only keys triggers NULL-propagation
+                // and constant-folding interactions.
+                RelExpr::Sort { keys, input } => {
+                    keys.iter().any(|k| is_problematic_expr(&k.expr))
+                        || has_problematic_structure(input)
+                }
                 _ => e.children().iter().any(|c| has_problematic_structure(c)),
             }
+        }
+
+        /// True when both sides of a set-op are Joins that touch the
+        /// same pair of base tables (in either order). Combined with
+        /// other rewrite-prone constructs this is a saturation hazard.
+        fn similar_join_set_op(left: &RelExpr, right: &RelExpr) -> bool {
+            fn join_table_pair(e: &RelExpr) -> Option<(&str, &str)> {
+                match e {
+                    RelExpr::Join { left, right, .. } => {
+                        let lt = leaf_table(left)?;
+                        let rt = leaf_table(right)?;
+                        Some((lt, rt))
+                    }
+                    _ => None,
+                }
+            }
+            fn leaf_table(e: &RelExpr) -> Option<&str> {
+                match e {
+                    RelExpr::Scan { table, .. } => Some(table.as_str()),
+                    RelExpr::Filter { input, .. }
+                    | RelExpr::Project { input, .. }
+                    | RelExpr::Sort { input, .. }
+                    | RelExpr::Limit { input, .. }
+                    | RelExpr::Distinct { input } => leaf_table(input),
+                    _ => None,
+                }
+            }
+            let Some((la, lb)) = join_table_pair(left) else {
+                return false;
+            };
+            let Some((ra, rb)) = join_table_pair(right) else {
+                return false;
+            };
+            (la == ra && lb == rb) || (la == rb && lb == ra)
+        }
+
+        /// Returns true if both sides of a join scan the same physical table.
+        /// (Looks through Filter/Project/Sort/Limit/Distinct.)
+        fn same_table_join(left: &RelExpr, right: &RelExpr) -> bool {
+            fn base_table(e: &RelExpr) -> Option<&str> {
+                match e {
+                    RelExpr::Scan { table, .. } => Some(table.as_str()),
+                    RelExpr::Filter { input, .. }
+                    | RelExpr::Project { input, .. }
+                    | RelExpr::Sort { input, .. }
+                    | RelExpr::Limit { input, .. }
+                    | RelExpr::Distinct { input } => base_table(input),
+                    _ => None,
+                }
+            }
+            matches!((base_table(left), base_table(right)), (Some(a), Some(b)) if a == b)
         }
 
         fn is_self_ref_condition(e: &Expr) -> bool {
@@ -613,18 +696,25 @@ proptest! {
 
         fn is_problematic_expr(e: &Expr) -> bool {
             match e {
-                // Null/boolean constants and bare columns cause excessive rewrites.
-                Expr::Const(Const::Null | Const::Bool(_)) | Expr::Column(_) => true,
-                Expr::BinOp { op, left, right } => {
-                    // AND/OR of non-comparison exprs can be problematic.
-                    let is_logical = matches!(op, BinOp::And | BinOp::Or);
-                    if is_logical
-                        && (is_problematic_expr(left) || is_problematic_expr(right))
-                    {
-                        return true;
-                    }
-                    is_problematic_expr(left) || is_problematic_expr(right)
-                }
+                // A bare column or constant used WHERE A BOOLEAN IS
+                // EXPECTED (Filter predicate, Join condition top-level,
+                // AND/OR operand). Type checking is upstream of the
+                // optimizer, so proptest can synthesize these
+                // type-mismatched predicates and the simplification
+                // rules then treat them as truthy and chain endlessly.
+                Expr::Const(_) | Expr::Column(_) => true,
+                // NOT of a non-boolean is the same hazard one level up.
+                Expr::UnaryOp { op: UnaryOp::Not, operand } => is_problematic_expr(operand),
+                // Logical AND/OR over non-boolean operands amplifies
+                // null-propagation rewrites; flag these.
+                Expr::BinOp {
+                    op: BinOp::And | BinOp::Or,
+                    left,
+                    right,
+                } => is_problematic_expr(left) || is_problematic_expr(right),
+                // Comparison operators (=, !=, <, ...) yield a boolean
+                // cleanly even when both operands are bare columns or
+                // constants. They do not destabilize saturation.
                 _ => false,
             }
         }

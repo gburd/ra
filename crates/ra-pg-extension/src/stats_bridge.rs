@@ -710,7 +710,7 @@ unsafe fn read_single_index(idx_oid: pg_sys::Oid) -> Option<(String, ra_core::In
     idx_stats.is_unique = is_unique;
     idx_stats.is_primary = is_primary;
     idx_stats.index_size = index_size;
-    idx_stats.oid = Some(u64::from(idx_oid));
+    idx_stats.oid = Some(u64::from(idx_oid.to_u32()));
 
     Some((idx_name, idx_stats))
 }

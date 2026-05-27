@@ -3,6 +3,11 @@
 //! Walks a relational algebra tree and extracts numerical features
 //! used by the simple cost model for prediction.
 
+#![expect(
+    clippy::match_same_arms,
+    reason = "match arms are kept separate for documentation of node-type semantics"
+)]
+
 use std::collections::HashMap;
 
 use ra_core::algebra::{JoinType, RelExpr, WindowExpr};
@@ -54,7 +59,11 @@ pub fn extract_features(expr: &RelExpr) -> QueryFeatures {
 ///   `log10(geometric_mean_rows × join_count_factor)` — a scale-aware estimate that
 ///   distinguishes a 3-table join over 1 M-row tables from one over 1 K-row tables.
 /// - Falls back to the structural heuristic when no matching stats are found.
-#[must_use] 
+#[must_use]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "callers always use the standard hasher; generic hasher would force public API churn"
+)]
 pub fn extract_features_with_stats(
     expr: &RelExpr,
     table_stats: &HashMap<String, Statistics>,
@@ -92,7 +101,7 @@ pub fn extract_features_with_stats(
     // Scale by join count: each join multiplies cardinality, but real predicates
     // reduce it.  Use join_count as a mild amplifier (cap at ×3).
     let join_factor = (1.0 + f64::from(base.join_count) * 0.5).min(3.0);
-    let cardinality_estimate = (log_mean + join_factor.log10()).min(12.0).max(0.0);
+    let cardinality_estimate = (log_mean + join_factor.log10()).clamp(0.0, 12.0);
 
     base.max_join_cardinality = cardinality_estimate as f32;
     base
@@ -126,7 +135,10 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::Distinct { input }
         | RelExpr::Window { input, .. }
         | RelExpr::Gather { input, .. }
-        | RelExpr::ParallelAggregate { input, .. } => collect_table_names_inner(input, out),
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. }
+        | RelExpr::IncrementalSort { input, .. } => collect_table_names_inner(input, out),
         RelExpr::Join { left, right, .. }
         | RelExpr::ParallelHashJoin { left, right, .. }
         | RelExpr::Union { left, right, .. }
@@ -149,9 +161,6 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_table_names_inner(i, out);
             }
         }
-        RelExpr::TopK { input, .. }
-        | RelExpr::VectorFilter { input, .. }
-        | RelExpr::IncrementalSort { input, .. } => collect_table_names_inner(input, out),
         RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_table_names_inner(inp, out);
@@ -231,6 +240,10 @@ impl FeatureExtractor {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "tree walk over RelExpr; per-variant logic is clearer inline than dispatched"
+    )]
     pub fn visit(&mut self, expr: &RelExpr) {
         match expr {
             RelExpr::Scan { .. }
@@ -565,6 +578,10 @@ impl FeatureExtractor {
     }
 
     /// Classify a join as cross, equi, or non-equi.
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "consistency with sibling methods that take refs to Expr"
+    )]
     fn classify_join(&mut self, join_type: &JoinType, condition: &Expr) {
         // Semi/Anti joins with trivial conditions are existence checks
         // (e.g., decorrelated EXISTS), not cross products. Treat them as
@@ -660,6 +677,10 @@ impl FeatureExtractor {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::float_cmp,
+    reason = "feature counts are integer-valued floats; exact equality is the right check"
+)]
 mod tests {
     use super::*;
     use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType};

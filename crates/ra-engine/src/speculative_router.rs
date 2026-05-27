@@ -15,18 +15,22 @@ use ra_core::algebra::RelExpr;
 use crate::cost_model::{BitNetCostModel, FeatureExtractor, StructuralCounts};
 use crate::join_graph::JoinGraph;
 
+/// `PostgreSQL` page size in bytes — used to convert `total_size` statistics
+/// into estimated page counts for the `total_table_pages` feature.
+const PAGE_SIZE: f64 = 8192.0;
+
 /// Optimization route predicted by the speculative model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OptRoute {
     /// Query is trivial — return unchanged (no optimization needed).
     Skip,
     /// Use heuristic left-deep join ordering (no e-graph).
     LeftDeep,
-    /// E-graph with low iteration budget (3 iters, ~1ms).
+    /// E-graph with low iteration budget (3 iters, ~5ms timeout).
     EGraphLow,
-    /// E-graph with medium budget (8 iters, ~5ms).
+    /// E-graph with medium budget (8 iters, ~15ms timeout).
     EGraphMedium,
-    /// E-graph with high budget (15 iters, ~15ms).
+    /// E-graph with high budget (15 iters, ~50ms timeout).
     EGraphHigh,
 }
 
@@ -50,6 +54,55 @@ impl OptRoute {
             Self::EGraphLow => 5,
             Self::EGraphMedium => 15,
             Self::EGraphHigh => 50,
+        }
+    }
+
+    /// Cumulative budget on e-graph node growth for this route.
+    ///
+    /// Returns the maximum number of nodes that may be added to the
+    /// e-graph across the whole optimization, expressed as a multiple
+    /// of the initial node count. This is the GEQO-inspired
+    /// "evaluation budget": once exhausted, saturation stops even if
+    /// the iteration count and timeout still permit more work.
+    ///
+    /// `Skip` and `LeftDeep` routes don't run the e-graph and return
+    /// 0; callers should treat 0 as "no budget" / disable the check.
+    #[must_use]
+    pub fn node_growth_budget(self, initial_nodes: usize) -> usize {
+        let multiplier = match self {
+            Self::Skip | Self::LeftDeep => return 0,
+            Self::EGraphLow => 4,
+            Self::EGraphMedium => 12,
+            Self::EGraphHigh => 40,
+        };
+        initial_nodes
+            .saturating_mul(multiplier)
+            // Hard floor in case the input is tiny: a 5-node expression
+            // with a 4× multiplier is 20 nodes — too small to make
+            // forward progress. The floor mirrors the route-specific
+            // iteration-budget shape.
+            .max(match self {
+                Self::EGraphLow => 200,
+                Self::EGraphMedium => 800,
+                Self::EGraphHigh => 4_000,
+                _ => 0,
+            })
+    }
+
+    /// Cumulative budget on the number of successful rewrite
+    /// applications for this route.
+    ///
+    /// Each rule that fires and produces a new e-class addition
+    /// counts as one application. Egg exposes per-iteration counts
+    /// via `Iteration.applied`; the saturation loop sums these
+    /// across iterations and stops on exhaustion.
+    #[must_use]
+    pub fn rule_application_budget(self) -> usize {
+        match self {
+            Self::Skip | Self::LeftDeep => 0,
+            Self::EGraphLow => 200,
+            Self::EGraphMedium => 800,
+            Self::EGraphHigh => 4_000,
         }
     }
 }
@@ -194,6 +247,7 @@ impl OptimizationFeatures {
 
     /// Update scale features with table statistics.
     #[must_use] 
+    /// Estimate pages from `total_size` / 8192 (`PostgreSQL` page size).
     pub fn with_table_stats(
         mut self,
         table_stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
@@ -206,8 +260,6 @@ impl OptimizationFeatures {
         let mut total_rows_log: f64 = 0.0;
         let mut table_count = 0u32;
 
-        // Estimate pages from total_size / 8192 (PostgreSQL page size)
-        const PAGE_SIZE: f64 = 8192.0;
         for stats in table_stats.values() {
             total_pages += stats.total_size as f64 / PAGE_SIZE;
             if stats.row_count > 0.0 {
@@ -259,22 +311,10 @@ impl SpeculativeRouter {
     /// - dim 15: confidence
     #[must_use]
     pub fn predict(&self, features: &OptimizationFeatures) -> RoutePrediction {
-        // The model expects 12D input; we pack the first 12 dims
-        // and use the topology signals to post-adjust.
-        let input: [f32; 12] = [
-            features.table_count,
-            features.join_count,
-            features.filter_count,
-            features.aggregate_count,
-            features.subquery_count,
-            features.window_count,
-            features.join_graph_density,
-            features.max_join_fan_out,
-            features.equi_join_fraction,
-            features.cross_join_present,
-            features.avg_predicate_selectivity,
-            features.has_limit,
-        ];
+        // Post-A4: the model accepts the full 16D OptimizationFeatures
+        // input directly. Pre-A4 the speculative router truncated to 12
+        // dims, dropping the four trailing topology/scale features.
+        let input = features.as_array();
 
         let output = self.model.predict_all(&input);
 
@@ -296,6 +336,10 @@ impl SpeculativeRouter {
     }
 
     /// Classify route using model output + topology heuristics.
+    #[expect(
+        clippy::unused_self,
+        reason = "method form mirrors `predict()` for the heuristic_fallback equivalent"
+    )]
     fn classify_route(
         &self,
         features: &OptimizationFeatures,
@@ -449,7 +493,7 @@ fn estimate_log_rows(counter: &StructuralCounts) -> f32 {
     if counter.has_limit {
         limit_cap
     } else {
-        (base - reduction).max(1.0).min(9.0)
+        (base - reduction).clamp(1.0, 9.0)
     }
 }
 
@@ -573,5 +617,59 @@ mod tests {
         assert_eq!(OptRoute::EGraphLow.iter_limit(), 3);
         assert_eq!(OptRoute::EGraphMedium.iter_limit(), 8);
         assert_eq!(OptRoute::EGraphHigh.iter_limit(), 15);
+    }
+
+    #[test]
+    fn route_node_growth_budget_scales_with_initial_size() {
+        // Multiplier × initial_nodes once that exceeds the floor.
+        assert_eq!(
+            OptRoute::EGraphLow.node_growth_budget(100),
+            400,
+            "low: 4× when above floor of 200"
+        );
+        assert_eq!(
+            OptRoute::EGraphMedium.node_growth_budget(100),
+            1_200,
+            "medium: 12× when above floor of 800"
+        );
+        assert_eq!(
+            OptRoute::EGraphHigh.node_growth_budget(100),
+            4_000,
+            "high: max(40×100, 4000) = 4000"
+        );
+    }
+
+    #[test]
+    fn route_node_growth_budget_respects_floor() {
+        // Tiny initial sizes get clamped to the floor so that
+        // forward progress is possible.
+        assert_eq!(
+            OptRoute::EGraphLow.node_growth_budget(10),
+            200,
+            "tiny inputs clamp up to 200 floor for low route"
+        );
+        assert_eq!(
+            OptRoute::EGraphMedium.node_growth_budget(10),
+            800,
+            "tiny inputs clamp up to 800 floor for medium route"
+        );
+    }
+
+    #[test]
+    fn skip_and_left_deep_have_zero_budgets() {
+        // These routes don't enter the e-graph; budgets are
+        // zero (which the saturation loop reads as "disabled").
+        assert_eq!(OptRoute::Skip.node_growth_budget(1_000), 0);
+        assert_eq!(OptRoute::LeftDeep.node_growth_budget(1_000), 0);
+        assert_eq!(OptRoute::Skip.rule_application_budget(), 0);
+        assert_eq!(OptRoute::LeftDeep.rule_application_budget(), 0);
+    }
+
+    #[test]
+    fn rule_application_budget_grows_with_route_aggressiveness() {
+        let low = OptRoute::EGraphLow.rule_application_budget();
+        let med = OptRoute::EGraphMedium.rule_application_budget();
+        let hi = OptRoute::EGraphHigh.rule_application_budget();
+        assert!(low < med && med < hi, "budget should increase: {low}<{med}<{hi}");
     }
 }
