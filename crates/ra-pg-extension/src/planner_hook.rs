@@ -178,6 +178,19 @@ unsafe fn ra_planner_hook_inner(
     };
     let translate_ms = t2.elapsed().as_secs_f64() * 1000.0;
 
+    // Stash generated plan advice keyed on the PlannedStmt
+    // pointer so the EXPLAIN(PLAN_ADVICE) hook can render it.
+    // ra_planner.always_store_advice_details widens this from
+    // EXPLAIN-driven to every-plan, mirroring PG's
+    // pg_plan_advice.always_store_advice_details GUC. We do this
+    // unconditionally for now because emit_advice is cheap; the
+    // EXPLAIN side decides whether to display.
+    let advice = ra_engine::plan_advice_emit::emit_advice(&optimized);
+    if !advice.is_empty() {
+        let rendered = ra_plan_advice::render_advice(&advice);
+        crate::plan_advice_explain::stash_generated_advice(planned_stmt, rendered);
+    }
+
     // ─── Timing log ───────────────────────────────────────────────────
     if log {
         pgrx::log!(

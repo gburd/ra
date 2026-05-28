@@ -31,16 +31,68 @@
 //!   per-plan stash that survives from the planner hook to the
 //!   EXPLAIN hook. Tracked as a follow-up.
 
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use pgrx::pg_sys;
 
 use ra_engine::plan_advice_validate::AdviceItemFeedback;
 use ra_plan_advice::feedback::{format_feedback, FeedbackFlags};
 use ra_plan_advice::{parse_advice, render_advice};
+
+/// Session-local stash of generated advice, keyed on the
+/// `PlannedStmt` pointer the planner produced.
+///
+/// pgrx-pg-sys 0.17's `PlannedStmt` binding doesn't yet
+/// include the `extension_state: List *` field PG uses for
+/// inter-extension data sharing (it was added to PG after the
+/// pgrx binding snapshot). We retain advice across the
+/// planner-hook -> explain-hook boundary by hashing on the
+/// `PlannedStmt` pointer instead, and clearing entries when
+/// the explain hook consumes them.
+///
+/// Entries that aren't consumed (because EXPLAIN was never
+/// run) accumulate, but each entry is a short String so the
+/// growth is bounded by query rate × plan-cache eviction
+/// rate. A long-running session could be swept with
+/// `clear_all_stashed_advice()` if needed; today we don't
+/// bother because typical session lifetimes are short.
+static GENERATED_ADVICE_STASH: OnceLock<Mutex<HashMap<usize, String>>> = OnceLock::new();
+
+fn stash() -> &'static Mutex<HashMap<usize, String>> {
+    GENERATED_ADVICE_STASH.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Stash a rendered advice string for `plannedstmt`. Called from
+/// the planner hook after optimization. Subsequent calls with the
+/// same pointer overwrite (a plan is re-planned only on cache
+/// invalidation, in which case the new advice supersedes).
+pub fn stash_generated_advice(
+    plannedstmt: *const pg_sys::PlannedStmt,
+    advice_string: String,
+) {
+    if plannedstmt.is_null() || advice_string.is_empty() {
+        return;
+    }
+    if let Ok(mut map) = stash().lock() {
+        map.insert(plannedstmt as usize, advice_string);
+    }
+}
+
+/// Pop the advice string previously stashed for `plannedstmt`.
+/// Returns `None` if nothing was stashed.
+fn take_generated_advice(plannedstmt: *const pg_sys::PlannedStmt) -> Option<String> {
+    if plannedstmt.is_null() {
+        return None;
+    }
+    stash()
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&(plannedstmt as usize)))
+}
 
 /// Cached extension id from `GetExplainExtensionId`. Set once at
 /// `_PG_init`, read in the EXPLAIN hooks.
@@ -210,6 +262,18 @@ unsafe extern "C-unwind" fn plan_advice_per_plan_hook(
         // ExplainPropertyText with a `\n`-joined value.
         let trimmed = buf.trim_end_matches('\n');
         emit_property("Supplied Plan Advice", trimmed, es);
+    }
+
+    // Generated Plan Advice — rendered when the user explicitly
+    // asks for it via EXPLAIN (PLAN_ADVICE) and the planner hook
+    // stashed something for this PlannedStmt. PG renders this
+    // unconditionally on EXPLAIN(PLAN_ADVICE); we mirror that.
+    if plan_advice_requested {
+        if let Some(generated) = take_generated_advice(plannedstmt) {
+            if !generated.is_empty() {
+                emit_property("Generated Plan Advice", &generated, es);
+            }
+        }
     }
 }
 

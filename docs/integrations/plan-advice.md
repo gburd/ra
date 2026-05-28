@@ -23,7 +23,7 @@ parser unchanged and vice versa.
 | PG extension GUCs (`ra_planner.plan_advice`, ...) | **Done** |
 | `pg_plan_advice.advice` GUC compatibility shim | **Done** (registers under both names; the upstream name wins when set) |
 | `EXPLAIN (PLAN_ADVICE)` registration via `RegisterExtensionExplainOption` | **Done** (raw FFI; renders supplied advice with feedback flags) |
-| `Generated Plan Advice:` block in EXPLAIN output | **Not yet** — requires plumbing `ra-emit-advice` output through `PlannedStmt::extension_state` |
+| `Generated Plan Advice:` block in EXPLAIN output | **Done** — `plan_advice_emit::emit_advice` runs in the planner hook and the rendered string is retrieved by the explain hook via a session-local pointer-keyed stash |
 
 The first three rows are what shipped in
 [commit 8aef6a13](https://codeberg.org/gregburd/ra/commit/8aef6a13).
@@ -116,20 +116,17 @@ The
 [port plan](../research/pg-plan-advice-port.md)
 documents the remaining work:
 
-- **`Generated Plan Advice:` in EXPLAIN output.** Today's
-  EXPLAIN integration renders supplied advice; rendering
-  generated advice requires Ra's planner to stash the
-  emitted-from-`RelExpr` advice on `PlannedStmt::extension_state`
-  before returning, so the `explain_per_plan_hook` can read it
-  back. The `ra-engine` side already produces the value via
-  `plan_advice_emit::emit_advice`; the missing piece is the
-  pgrx FFI to set `extension_state`.
 - **Cost-extraction penalty for advice violations.** Today's
   honor layer demotes rule groups; a follow-up should add a
   `disable_cost`-style penalty in cost extraction so plans that
   still violate the advice (because no rule could honor it)
   surface as `Disabled: true`-equivalent, mirroring PG's
   fallback behavior exactly.
+- **Physical operators in `RelExpr`.** Once Ra distinguishes
+  `IndexScan` from `SeqScan` (etc.), the existing scan-method
+  advice tags can be wired to gate rules and validate plans the
+  same way `JOIN_ORDER` already is. Today they're parsed and
+  stored on `PlanProvenance` but don't constrain extraction.
 
 ## See also
 
