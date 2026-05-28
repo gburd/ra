@@ -902,7 +902,7 @@ mod tests {
         // Run with Ra
         Spi::run("SET ra_planner.enabled = true").unwrap();
         let ra_rows: Vec<String> = Spi::connect(|client| {
-            let table = client.select(sql, None, None).unwrap();
+            let table = client.select(sql, None, &[]).unwrap();
             table
                 .map(|row| {
                     let ncols = row.columns();
@@ -922,7 +922,7 @@ mod tests {
         // Run without Ra
         Spi::run("SET ra_planner.enabled = false").unwrap();
         let native_rows: Vec<String> = Spi::connect(|client| {
-            let table = client.select(sql, None, None).unwrap();
+            let table = client.select(sql, None, &[]).unwrap();
             table
                 .map(|row| {
                     let ncols = row.columns();

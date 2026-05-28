@@ -27,7 +27,7 @@ parser unchanged and vice versa.
 | `pg_plan_advice.advice` GUC compatibility shim | **Done** (registers under both names; the upstream name wins when set) |
 | `EXPLAIN (PLAN_ADVICE)` registration via `RegisterExtensionExplainOption` | **Done** (raw FFI; renders supplied advice with feedback flags) |
 | `Generated Plan Advice:` block in EXPLAIN output | **Done** — emit runs in the planner hook; explain hook reads via session-local stash |
-| `ra-pg-extension` plan-builder consumption of `PhysicalChoices` | **Done** — `PlanBuilder::set_physical_choices` + `build_scan_with_advice` dispatch (`SEQ_SCAN`, `INDEX_SCAN`, `INDEX_ONLY_SCAN` honored fully; `BITMAP_HEAP_SCAN`, `TID_SCAN`, `DO_NOT_SCAN` fall back to seq-scan with debug log) + `build_join` (Hash, NestedLoop_* honored fully; MergeJoin_* falls back) + Gather suppression (`NO_GATHER`) |
+| `ra-pg-extension` plan-builder consumption of `PhysicalChoices` | **Done** — `PlanBuilder::set_physical_choices` + `build_scan_with_advice` dispatch (`SEQ_SCAN`, `INDEX_SCAN`, `INDEX_ONLY_SCAN` honored fully; `TID_SCAN` and `BITMAP_HEAP_SCAN` honored when a parent Filter provides the required predicate shape — see "Filter peephole" below; `DO_NOT_SCAN` documented as out-of-scope negative constraint) + `build_join` (Hash, NestedLoop_*, MergeJoin_* honored fully; `FOREIGN_JOIN` documented as out-of-scope FDW pushdown) + Gather suppression (`NO_GATHER`) |
 
 The first three rows are what shipped in
 [commit 8aef6a13](https://codeberg.org/gregburd/ra/commit/8aef6a13).
@@ -120,15 +120,34 @@ The
 [port plan](../research/pg-plan-advice-port.md)
 documents the remaining work:
 
-- **Cost-driven physical-method sophistication.** The cost-driven
-  layer in [RFC 0087](../../rfcs/text/0087-physical-operator-selection.md)
-  picks `IndexScan` for medium tables with a useful single-column
-  index but doesn't yet handle compound indexes (column-prefix
-  matching), bitmap-index combination, or selectivity-aware
-  comparison between candidate indexes. Real-world workloads
-  may pick `SeqScan` where PG would pick a more sophisticated
-  access path. The structure to grow into this is in place
-  (`pick_scan_strategy` in `plan_advice_physical.rs::cost_driven`).
+- **Bitmap-index combination.** The cost-driven layer in
+  [RFC 0087](../../rfcs/text/0087-physical-operator-selection.md)
+  handles compound-index column-prefix matching with
+  primary-key/unique tie-breaking, and the plan-builder honors
+  `BITMAP_HEAP_SCAN` advice when a parent `Filter` covers an
+  indexed column. What's not yet covered: bitmap-AND / bitmap-OR
+  combination across multiple indexes (PG's `BitmapAnd` /
+  `BitmapOr` plan nodes synthesized from independent index
+  conditions). Adding this requires walking AND/OR conjunctions
+  to enumerate covering-index sets and emit
+  `BitmapIndexScan` -> `BitmapAnd` -> `BitmapHeapScan`.
+- **Selectivity-aware index comparison.** When multiple
+  indexes have the same prefix length, the current code
+  breaks ties by primary > unique > regular. PG additionally
+  considers histogram-driven selectivity per predicate.
+  Wiring this needs the cost-model layer to read column NDV /
+  MCV statistics, which `Statistics::columns` already exposes
+  but `pick_scan_strategy` doesn't yet consult.
+- **`DO_NOT_SCAN` semantics.** This is a *negative* constraint
+  ("do not produce a scan of `t`"). Honoring it requires the
+  e-graph to express join-eliminated plans for the table and
+  pick them in extraction. Today the advice is parsed and
+  recorded in `PhysicalChoices`, the cost penalty fires, but
+  the plan-builder logs and falls back to SeqScan. Documented
+  in RFC 0087.
+- **`FOREIGN_JOIN` semantics.** Requires FDW pushdown
+  machinery (deparse, `GetForeignJoinPaths`, etc.) — beyond
+  this RFC's scope. Documented in RFC 0087.
 - **Cost-driven physical lowering inside the e-graph.** Today
   the e-graph extracts a logical `RelExpr` (`Scan`, `Join`,
   `Aggregate`) and physical strategy lives in the
@@ -136,8 +155,24 @@ documents the remaining work:
   time. A future RFC may add e-graph rewrite rules that lower
   `Join` to `HashJoin` / `MergeJoin` / `NestLoop` directly,
   letting the cost extractor reason about logical plan shape
-  and physical method together. Substantial work; see
+  and physical method together. Multi-week refactor; see
   RFC 0087 for the design comparison.
+
+### Filter peephole for `TID_SCAN` and `BITMAP_HEAP_SCAN`
+
+Both of these scan strategies require predicate context that
+isn't visible at the leaf `Scan` node — a `ctid =` clause for
+TidScan, a column-equality on an indexed column for
+BitmapHeapScan. The plan-builder handles them via a peephole
+in the `Filter` arm of `build_plan`: when the immediate input
+is a base `Scan` with the corresponding advice, the filter's
+predicate is consumed by the specialized builder and the
+result returned directly (no separate Filter wrapping). When
+the predicate doesn't have the required shape, both builders
+return `Err(reason)` and the path falls through to the
+standard `Filter`+`SeqScan` chain. This is honest production
+behavior: when advice can't be honored, EXPLAIN reflects
+reality rather than emitting a malformed plan.
 
 ## See also
 

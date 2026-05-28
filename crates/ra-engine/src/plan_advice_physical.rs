@@ -349,8 +349,12 @@ mod cost_driven {
     /// - If the table has fewer than `SMALL_TABLE_ROW_THRESHOLD`
     ///   rows, sequential scan wins (no index can beat a small
     ///   sequential read).
-    /// - If a predicate references a column that's the prefix
-    ///   of an available index, prefer that index.
+    /// - If a predicate has equality conditions on a prefix of
+    ///   an index's columns, that index is a candidate. The
+    ///   index with the longest matching prefix wins (more
+    ///   columns matched → better selectivity). Ties are broken
+    ///   by primary-key > unique > regular, matching PG's
+    ///   path-cost ordering for index selectivity heuristics.
     /// - Otherwise sequential scan.
     fn pick_scan_strategy(
         table: &str,
@@ -373,45 +377,106 @@ mod cost_driven {
             // with index-only scans.
             return ScanStrategy::Seq;
         };
-        // For each indexed column, see if the predicate
-        // references it via an equality test. The first such
-        // index wins.
+
+        // Collect all columns the predicate has an equality
+        // test on; an index column-prefix is "covered" if every
+        // column in the prefix appears here.
+        let mut eq_columns: Vec<String> = Vec::new();
+        collect_eq_columns(pred, &mut eq_columns);
+        if eq_columns.is_empty() {
+            return ScanStrategy::Seq;
+        }
+
+        // Find the index with the longest covered prefix. Each
+        // candidate is (index_name, prefix_len, tie_break_score).
+        // Higher prefix_len wins; on ties, higher tie_break_score
+        // wins (primary > unique > regular).
+        let mut best: Option<(&String, usize, u8)> = None;
         for (idx_name, idx_stats) in &stats.indexes {
-            if idx_stats.columns.is_empty() {
+            let prefix_len = covered_prefix_len(&idx_stats.columns, &eq_columns);
+            if prefix_len == 0 {
                 continue;
             }
-            let leading = &idx_stats.columns[0];
-            if predicate_references_column_eq(pred, leading) {
-                return ScanStrategy::Index {
-                    schema: None,
-                    name: idx_name.clone(),
-                };
-            }
+            let tie_break: u8 = if idx_stats.is_primary {
+                2
+            } else {
+                u8::from(idx_stats.is_unique)
+            };
+            let candidate = (idx_name, prefix_len, tie_break);
+            best = match best {
+                None => Some(candidate),
+                Some((_, cur_len, cur_tie)) => {
+                    if prefix_len > cur_len
+                        || (prefix_len == cur_len && tie_break > cur_tie)
+                    {
+                        Some(candidate)
+                    } else {
+                        best
+                    }
+                }
+            };
         }
-        ScanStrategy::Seq
+
+        match best {
+            Some((name, _, _)) => ScanStrategy::Index {
+                schema: None,
+                name: name.clone(),
+            },
+            None => ScanStrategy::Seq,
+        }
     }
 
-    /// True if `pred` contains an equality test on `column`. Walks
-    /// AND/OR conjunctions so the leading column appearing
-    /// anywhere counts.
-    fn predicate_references_column_eq(pred: &Expr, column: &str) -> bool {
+    /// Number of columns from the start of `index_columns` that
+    /// every appear in `eq_columns` (case-insensitive). Returns 0
+    /// when the leading column isn't covered.
+    fn covered_prefix_len(index_columns: &[String], eq_columns: &[String]) -> usize {
+        let mut covered = 0usize;
+        for idx_col in index_columns {
+            let hit = eq_columns
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(idx_col));
+            if hit {
+                covered += 1;
+            } else {
+                break;
+            }
+        }
+        covered
+    }
+
+    /// Walk `pred` collecting column names that appear in
+    /// equality tests against a non-column operand. Only
+    /// AND-conjunctions are descended — OR cannot guarantee
+    /// every disjunct constrains the same column. Equality of
+    /// two columns (`a.x = b.x`) is excluded since join
+    /// conditions don't constrain index access.
+    fn collect_eq_columns(pred: &Expr, out: &mut Vec<String>) {
         match pred {
             Expr::BinOp { op: BinOp::Eq, left, right } => {
-                column_name_eq(left, column) || column_name_eq(right, column)
+                let l_col = as_column_name(left);
+                let r_col = as_column_name(right);
+                match (l_col, r_col) {
+                    // Column = const: index-restricting. Either
+                    // orientation produces the same constraint.
+                    (Some(c), None) | (None, Some(c)) => out.push(c.to_string()),
+                    // Two columns or two non-columns: not an
+                    // index-restricting equality.
+                    _ => {}
+                }
             }
-            Expr::BinOp { op: BinOp::And | BinOp::Or, left, right } => {
-                predicate_references_column_eq(left, column)
-                    || predicate_references_column_eq(right, column)
+            Expr::BinOp { op: BinOp::And, left, right } => {
+                collect_eq_columns(left, out);
+                collect_eq_columns(right, out);
             }
-            _ => false,
+            _ => {}
         }
     }
 
-    fn column_name_eq(e: &Expr, column: &str) -> bool {
+    fn as_column_name(e: &Expr) -> Option<&str> {
         if let Expr::Column(c) = e {
-            c.column.eq_ignore_ascii_case(column)
+            Some(&c.column)
         } else {
-            false
+            None
         }
     }
 

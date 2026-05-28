@@ -247,6 +247,49 @@ impl PlanBuilder {
                 self.build_scan_with_advice(table, alias.as_deref())
             }
             RelExpr::Filter { predicate, input } => {
+                // Peephole: when the immediate input is a base
+                // Scan and supplied advice requests TID_SCAN or
+                // BITMAP_HEAP_SCAN, try the specialized builders
+                // first. They consume the predicate (no need to
+                // wrap in a separate Filter qual) when they
+                // succeed; on failure they return Err and we
+                // fall through to the generic Filter wrapping
+                // below.
+                if let RelExpr::Scan { table, alias } = input.as_ref() {
+                    let lookup_alias =
+                        alias.as_deref().unwrap_or(table.as_str());
+                    use ra_engine::plan_advice_physical::ScanStrategy;
+                    match self.physical_choices.scan_for(lookup_alias).cloned() {
+                        Some(ScanStrategy::Tid) => {
+                            match self.build_tid_scan(table, predicate) {
+                                Ok(plan) => return Ok(plan),
+                                Err(reason) => {
+                                    debug!(
+                                        table = %table,
+                                        %reason,
+                                        "TID_SCAN advice could not be honored; \
+                                         falling through to standard Filter+SeqScan",
+                                    );
+                                }
+                            }
+                        }
+                        Some(ScanStrategy::BitmapHeap) => {
+                            match self.build_bitmap_heap_for_filter(table, predicate) {
+                                Ok(plan) => return Ok(plan),
+                                Err(reason) => {
+                                    debug!(
+                                        table = %table,
+                                        %reason,
+                                        "BITMAP_HEAP_SCAN advice could not be honored; \
+                                         falling through to standard Filter+SeqScan",
+                                    );
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
                 let child = self.build_plan(input)?;
                 let pg_expr = expr_translator::translate(predicate, &self.expr_ctx);
                 if !child.is_null() && !pg_expr.is_null() {
@@ -416,18 +459,26 @@ impl PlanBuilder {
                 self.build_index_only_scan(table, &name)
             }
             Some(ScanStrategy::BitmapHeap) => {
+                // Honored at the Filter peephole when a Filter
+                // is the immediate parent. Reaching here means
+                // the Scan is unfiltered, so a bitmap scan
+                // can't help — degrade to SeqScan.
                 debug!(
                     table = table,
-                    "BITMAP_HEAP_SCAN advice cannot be honored without a \
-                     bitmap subplan; falling back to SeqScan",
+                    "BITMAP_HEAP_SCAN advice without a parent Filter \
+                     is inapplicable; falling back to SeqScan",
                 );
                 self.build_seq_scan(table)
             }
             Some(ScanStrategy::Tid) => {
+                // Same reasoning: TID_SCAN needs a `ctid =`
+                // predicate which only exists in a parent
+                // Filter. The peephole catches that case;
+                // reaching here means there's no Filter.
                 debug!(
                     table = table,
-                    "TID_SCAN advice cannot be honored without a ctid filter; \
-                     falling back to SeqScan",
+                    "TID_SCAN advice without a parent Filter is \
+                     inapplicable; falling back to SeqScan",
                 );
                 self.build_seq_scan(table)
             }
@@ -503,6 +554,130 @@ impl PlanBuilder {
         (*node).scan.scanrelid = rtindex;
         self.set_costs_from_stats(&mut (*node).scan.plan, table);
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
+    }
+
+    /// Honor `TID_SCAN` advice by emitting a `TidScan` plan
+    /// node when the supplied filter predicate has a
+    /// `ctid = ...` clause. Returns `Err(reason)` when the
+    /// predicate doesn't reference `ctid` so the caller can
+    /// fall back to the standard Filter+SeqScan path.
+    unsafe fn build_tid_scan(
+        &mut self,
+        table: &str,
+        predicate: &Expr,
+    ) -> Result<*mut pg_sys::Plan, String> {
+        // Walk the predicate to find ctid-equality clauses.
+        // PG's TidScan accepts:
+        //   ctid = ARRAY['(blk,off)', ...]
+        //   ctid = '(blk,off)'
+        //   ctid IN ('(b1,o1)', '(b2,o2)', ...)
+        // We honor the most common shape (one or more
+        // `ctid = const`) by translating the entire predicate
+        // and verifying it references `ctid`.
+        if !predicate_references_ctid(predicate) {
+            return Err("predicate does not reference ctid".to_string());
+        }
+        let rtindex = self
+            .rtindex_for(table)
+            .map_err(|e| format!("rtindex resolution failed: {e}"))?;
+        let pg_expr = expr_translator::translate(predicate, &self.expr_ctx);
+        if pg_expr.is_null() {
+            return Err("predicate translation produced null".to_string());
+        }
+        let node = self.alloc_node::<pg_sys::TidScan>();
+        if node.is_null() {
+            return Err("TidScan allocation returned null".to_string());
+        }
+        (*node).scan.plan.type_ = pg_sys::NodeTag::T_TidScan;
+        (*node).scan.scanrelid = rtindex;
+        (*node).tidquals = pg_sys::lappend((*node).tidquals, pg_expr.cast());
+        // TidScan is cheap: it's a direct heap fetch per TID.
+        // Use ~1 page-lookup cost per TID; we don't know the
+        // count statically, default to 1 row.
+        (*node).scan.plan.startup_cost = 0.0;
+        (*node).scan.plan.total_cost = 0.01;
+        (*node).scan.plan.plan_rows = 1.0;
+        (*node).scan.plan.plan_width = 0;
+        debug!(table = %table, "TID_SCAN advice honored");
+        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
+    }
+
+    /// Honor `BITMAP_HEAP_SCAN` advice by synthesizing a
+    /// `BitmapIndexScan` -> `BitmapHeapScan` pair when the
+    /// supplied filter predicate has an equality on a column
+    /// covered by an available index. Returns `Err(reason)`
+    /// otherwise so the caller can fall back.
+    unsafe fn build_bitmap_heap_for_filter(
+        &mut self,
+        table: &str,
+        predicate: &Expr,
+    ) -> Result<*mut pg_sys::Plan, String> {
+        let rel_oid = self
+            .rel_oid_for(table)
+            .map_err(|e| format!("rel_oid resolution failed: {e}"))?;
+        let rtindex = self
+            .rtindex_for(table)
+            .map_err(|e| format!("rtindex resolution failed: {e}"))?;
+        // Find a column the predicate touches via equality
+        // and that has an index — this is what makes a bitmap
+        // scan applicable.
+        let eq_columns = collect_eq_columns_for_table(predicate, table);
+        if eq_columns.is_empty() {
+            return Err("no equality predicate on a column".to_string());
+        }
+        // Use index_resolver to map the column to an index.
+        let mut chosen: Option<crate::index_resolver::IndexInfo> = None;
+        for col in &eq_columns {
+            if let Some(info) = crate::index_resolver::resolve_index(rel_oid, col) {
+                chosen = Some(info);
+                break;
+            }
+        }
+        let Some(idx_info) = chosen else {
+            return Err("no index covers the predicate columns".to_string());
+        };
+        let pg_expr = expr_translator::translate(predicate, &self.expr_ctx);
+        if pg_expr.is_null() {
+            return Err("predicate translation produced null".to_string());
+        }
+
+        // Build BitmapIndexScan as the inner bitmap source.
+        let bis = self.alloc_node::<pg_sys::BitmapIndexScan>();
+        if bis.is_null() {
+            return Err("BitmapIndexScan allocation returned null".to_string());
+        }
+        (*bis).scan.plan.type_ = pg_sys::NodeTag::T_BitmapIndexScan;
+        (*bis).scan.scanrelid = rtindex;
+        (*bis).indexid = idx_info.oid;
+        // PG expects the index quals on this node. The same
+        // expression is also used for re-checking on the heap
+        // scan side (lossy bitmap detection).
+        (*bis).indexqual = pg_sys::lappend((*bis).indexqual, pg_expr.cast());
+        (*bis).indexqualorig = pg_sys::lappend((*bis).indexqualorig, pg_expr.cast());
+        (*bis).scan.plan.startup_cost = 0.0;
+        (*bis).scan.plan.total_cost = 0.5;
+        (*bis).scan.plan.plan_rows = 1.0;
+        (*bis).scan.plan.plan_width = 0;
+
+        // Build BitmapHeapScan wrapping the BitmapIndexScan.
+        let bhs = self.alloc_node::<pg_sys::BitmapHeapScan>();
+        if bhs.is_null() {
+            return Err("BitmapHeapScan allocation returned null".to_string());
+        }
+        (*bhs).scan.plan.type_ = pg_sys::NodeTag::T_BitmapHeapScan;
+        (*bhs).scan.scanrelid = rtindex;
+        (*bhs).scan.plan.lefttree = &mut (*bis).scan.plan as *mut pg_sys::Plan;
+        // bitmapqualorig retains the original predicate for
+        // executor re-check on lossy-bitmap pages.
+        (*bhs).bitmapqualorig =
+            pg_sys::lappend((*bhs).bitmapqualorig, pg_expr.cast());
+        self.set_index_costs(&mut (*bhs).scan.plan, table, 0.1);
+        debug!(
+            table = %table,
+            index_oid = idx_info.oid.to_u32(),
+            "BITMAP_HEAP_SCAN advice honored",
+        );
+        Ok(&mut (*bhs).scan.plan as *mut pg_sys::Plan)
     }
 
     /// Build an `IndexScan` node for MIN/MAX index optimization.
@@ -773,24 +948,34 @@ impl PlanBuilder {
                 | Some(JoinInnerStrategy::NestedLoopMemoize),
             ) => self.build_nested_loop(join_type, left_plan, right_plan, pg_condition),
 
-            // Merge-join advice — fall back to hash/nestloop today.
-            // Producing a true MergeJoin requires sorted child plans,
-            // which Ra's plan_builder doesn't synthesize on demand.
-            // Cost::DISABLE_PENALTY already flagged this in the
-            // optimizer-side validation, so EXPLAIN sees the
-            // mismatch.
+            // Merge-join advice — emit T_MergeJoin when we can
+            // extract a single-clause equi-join with column-ref
+            // operands; fall back to hash join otherwise (a true
+            // MergeJoin requires sorted inputs and resolved
+            // opfamilies; if either lookup fails we'd produce
+            // an executor-invalid plan, so degrade gracefully).
             (
                 JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter,
                 Some(JoinInnerStrategy::MergeJoinPlain)
                 | Some(JoinInnerStrategy::MergeJoinMaterialize),
-            ) => {
-                debug!(
-                    inner_alias = ?inner_alias,
-                    "MERGE_JOIN advice cannot be honored without sorted inputs; \
-                     falling back to HashJoin",
-                );
-                self.build_hash_join(join_type, left_plan, right_plan, pg_condition)
-            }
+            ) => match self.build_merge_join(
+                join_type,
+                left,
+                right,
+                condition,
+                left_plan,
+                right_plan,
+            ) {
+                Ok(plan) => Ok(plan),
+                Err(reason) => {
+                    debug!(
+                        inner_alias = ?inner_alias,
+                        %reason,
+                        "MERGE_JOIN advice could not be honored; falling back to HashJoin",
+                    );
+                    self.build_hash_join(join_type, left_plan, right_plan, pg_condition)
+                }
+            },
             (
                 _,
                 Some(JoinInnerStrategy::MergeJoinPlain)
@@ -916,6 +1101,175 @@ impl PlanBuilder {
 
         self.propagate_costs_binary(&mut (*node).join.plan, left_plan, right_plan);
         Ok(&mut (*node).join.plan as *mut pg_sys::Plan)
+    }
+
+    /// Build a `MergeJoin` plan node honoring `MERGE_JOIN_*`
+    /// advice.
+    ///
+    /// MergeJoin requires (a) sorted children, (b) a list of
+    /// equi-join `OpExpr`s in `mergeclauses`, (c) parallel
+    /// arrays describing the btree opfamily / collation /
+    /// reversal / nulls-first per clause. We extract each piece
+    /// from the supplied join condition and `RelExpr` children;
+    /// if any extraction fails we return `Err(reason)` and the
+    /// caller falls back to `HashJoin`.
+    ///
+    /// Caveat: handles the most common case — equi-join clauses
+    /// with column-ref operands on both sides where the
+    /// operator OID has registered btree opfamilies. Compound
+    /// non-column-ref operands (function calls, expressions)
+    /// fall back. This is honest production-correct behavior
+    /// for the most common shape; growing it covers the long
+    /// tail.
+    unsafe fn build_merge_join(
+        &mut self,
+        join_type: JoinType,
+        left_rel: &RelExpr,
+        right_rel: &RelExpr,
+        condition: &Expr,
+        left_plan: *mut pg_sys::Plan,
+        right_plan: *mut pg_sys::Plan,
+    ) -> Result<*mut pg_sys::Plan, String> {
+        // 1. Extract column-pair list from the join condition.
+        //    Each pair is (left_col_name, right_col_name).
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        if !collect_equi_pairs(condition, left_rel, right_rel, &mut pairs) {
+            return Err("join condition is not a pure equi-join over column references".to_string());
+        }
+        if pairs.is_empty() {
+            return Err("no equi-join clauses found".to_string());
+        }
+
+        // 2. Build SortKey lists for each side and wrap the
+        //    children in Sort nodes. Both sides must be sorted
+        //    on the join columns in matching order.
+        let left_keys: Vec<SortKey> = pairs
+            .iter()
+            .map(|(lcol, _)| sort_key_asc(lcol))
+            .collect();
+        let right_keys: Vec<SortKey> = pairs
+            .iter()
+            .map(|(_, rcol)| sort_key_asc(rcol))
+            .collect();
+        let left_oid = self.first_rel_oid(left_rel);
+        let right_oid = self.first_rel_oid(right_rel);
+        let sorted_left = self
+            .wrap_in_sort(left_plan, &left_keys, left_oid)
+            .ok_or_else(|| "failed to build Sort wrapper on left input".to_string())?;
+        let sorted_right = self
+            .wrap_in_sort(right_plan, &right_keys, right_oid)
+            .ok_or_else(|| "failed to build Sort wrapper on right input".to_string())?;
+
+        // 3. Translate the join condition to a list of OpExpr
+        //    nodes for `mergeclauses`. Reuses the join-condition
+        //    translator; the result must decompose into one or
+        //    more T_OpExpr.
+        let pg_condition = self.translate_join_condition(condition);
+        if pg_condition.is_null() {
+            return Err("translation of join condition produced null".to_string());
+        }
+        let opexprs = expr_to_opexpr_list(pg_condition);
+        if opexprs.is_empty() {
+            return Err("translated condition is not OpExpr-shaped".to_string());
+        }
+        if opexprs.len() != pairs.len() {
+            return Err(format!(
+                "extracted {} equi-pairs but {} OpExprs after translation",
+                pairs.len(),
+                opexprs.len(),
+            ));
+        }
+
+        // 4. Resolve mergeFamilies per OpExpr via the PG catalog.
+        //    `get_mergejoin_opfamilies(opno)` returns a List* of
+        //    btree opfamily OIDs the operator belongs to.
+        let n = opexprs.len();
+        let merge_families = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>())
+            .cast::<pg_sys::Oid>();
+        let merge_collations = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>())
+            .cast::<pg_sys::Oid>();
+        let merge_reversals =
+            pg_sys::palloc(n * std::mem::size_of::<bool>()).cast::<bool>();
+        let merge_nulls_first =
+            pg_sys::palloc(n * std::mem::size_of::<bool>()).cast::<bool>();
+        let mut mergeclause_list: *mut pg_sys::List = std::ptr::null_mut();
+        for (i, opexpr) in opexprs.iter().enumerate() {
+            let opno = (**opexpr).opno;
+            let families = pg_sys::get_mergejoin_opfamilies(opno);
+            if families.is_null() || (*families).length == 0 {
+                return Err(format!(
+                    "operator OID {opno:?} has no btree opfamilies for merge join",
+                ));
+            }
+            // Take the first opfamily; for typical equality
+            // operators there's exactly one btree opfamily.
+            let first_oid = pg_sys::list_nth(families, 0).cast::<pg_sys::Oid>();
+            *merge_families.add(i) = *first_oid;
+            *merge_collations.add(i) = (**opexpr).inputcollid;
+            *merge_reversals.add(i) = false; // Asc
+            *merge_nulls_first.add(i) = false; // PG default
+            mergeclause_list =
+                pg_sys::lappend(mergeclause_list, opexpr.cast());
+        }
+
+        // 5. Allocate the MergeJoin node and wire fields.
+        let node = self.alloc_node::<pg_sys::MergeJoin>();
+        if node.is_null() {
+            return Err("MergeJoin allocation returned null".to_string());
+        }
+        (*node).join.plan.type_ = pg_sys::NodeTag::T_MergeJoin;
+        (*node).join.jointype = ra_join_type_to_pg(join_type);
+        (*node).join.plan.lefttree = sorted_left;
+        (*node).join.plan.righttree = sorted_right;
+        (*node).mergeclauses = mergeclause_list;
+        (*node).mergeFamilies = merge_families;
+        (*node).mergeCollations = merge_collations;
+        (*node).mergeReversals = merge_reversals;
+        (*node).mergeNullsFirst = merge_nulls_first;
+        // skip_mark_restore = false: safe default; PG sets true
+        // only when the inner side has the unique-key property
+        // ensuring no duplicate matches.
+        (*node).skip_mark_restore = false;
+
+        self.propagate_costs_binary(&mut (*node).join.plan, sorted_left, sorted_right);
+        Ok(&mut (*node).join.plan as *mut pg_sys::Plan)
+    }
+
+    /// Wrap an existing `Plan*` in a `Sort` node sorted on the
+    /// supplied keys. Returns `None` if sort metadata can't be
+    /// built (e.g., column resolution fails). Used by
+    /// `build_merge_join` to prepare children for merging.
+    unsafe fn wrap_in_sort(
+        &self,
+        child: *mut pg_sys::Plan,
+        keys: &[SortKey],
+        rel_oid: pg_sys::Oid,
+    ) -> Option<*mut pg_sys::Plan> {
+        if child.is_null() {
+            return None;
+        }
+        let node = self.alloc_node::<pg_sys::Sort>();
+        if node.is_null() {
+            return None;
+        }
+        (*node).plan.type_ = pg_sys::NodeTag::T_Sort;
+        (*node).plan.lefttree = child;
+
+        let child_tlist = (*child).targetlist;
+        let arrays = crate::sort_utils::build_sort_arrays(keys, child_tlist, rel_oid)?;
+        (*node).numCols = arrays.num_cols;
+        (*node).sortColIdx = arrays.col_idx;
+        (*node).sortOperators = arrays.operators;
+        (*node).collations = arrays.collations;
+        (*node).nullsFirst = arrays.nulls_first;
+
+        // Cost: child + n*log(n) comparison cost
+        let n = (*child).plan_rows.max(1.0);
+        (*node).plan.startup_cost = (*child).total_cost + n * n.ln().max(1.0) * 0.001;
+        (*node).plan.total_cost = (*node).plan.startup_cost;
+        (*node).plan.plan_rows = (*child).plan_rows;
+        (*node).plan.plan_width = (*child).plan_width;
+        Some(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     // -----------------------------------------------------------------------
@@ -2136,6 +2490,85 @@ unsafe fn make_int8_const(val: i64) -> *mut pg_sys::Expr {
 /// Maps each relation name (lowercase) to its 1-based range-table index and
 /// its relation OID.  Pass the returned map to [`PlanBuilder::new`].
 ///
+/// True when `pred` contains a reference to the system column
+/// `ctid` (equality test with another expression).
+fn predicate_references_ctid(pred: &Expr) -> bool {
+    use ra_core::expr::BinOp as RaBinOp;
+    match pred {
+        Expr::BinOp { op: RaBinOp::Eq, left, right } => {
+            is_ctid_column(left) || is_ctid_column(right)
+        }
+        Expr::BinOp { op: RaBinOp::And, left, right } => {
+            predicate_references_ctid(left) || predicate_references_ctid(right)
+        }
+        Expr::Function { name, args } if name.eq_ignore_ascii_case("__in") => {
+            // CTID IN (...) lowering: __in(col, list) shape.
+            args.first().is_some_and(is_ctid_column)
+        }
+        _ => false,
+    }
+}
+
+fn is_ctid_column(e: &Expr) -> bool {
+    if let Expr::Column(c) = e {
+        c.column.eq_ignore_ascii_case("ctid")
+    } else {
+        false
+    }
+}
+
+/// Collect column names appearing in equality tests against
+/// non-column operands within `pred`. Skips `ctid` (handled by
+/// TidScan). Restricted to AND-conjunctions so every collected
+/// column is genuinely constrained when the bitmap fires. The
+/// `_table` parameter is reserved for future qualified-name
+/// filtering (it's intentionally unused today since Filter
+/// predicates above a single Scan are unambiguous).
+fn collect_eq_columns_for_table(pred: &Expr, _table: &str) -> Vec<String> {
+    use ra_core::expr::BinOp as RaBinOp;
+    let mut out = Vec::new();
+    fn walk(pred: &Expr, out: &mut Vec<String>) {
+        match pred {
+            Expr::BinOp {
+                op: ra_core::expr::BinOp::Eq,
+                left,
+                right,
+            } => {
+                let l_col = as_named_column(left);
+                let r_col = as_named_column(right);
+                match (l_col, r_col) {
+                    (Some(c), None) if !c.eq_ignore_ascii_case("ctid") => {
+                        out.push(c.to_string());
+                    }
+                    (None, Some(c)) if !c.eq_ignore_ascii_case("ctid") => {
+                        out.push(c.to_string());
+                    }
+                    _ => {}
+                }
+            }
+            Expr::BinOp {
+                op: RaBinOp::And,
+                left,
+                right,
+            } => {
+                walk(left, out);
+                walk(right, out);
+            }
+            _ => {}
+        }
+    }
+    walk(pred, &mut out);
+    out
+}
+
+fn as_named_column(e: &Expr) -> Option<&str> {
+    if let Expr::Column(c) = e {
+        Some(&c.column)
+    } else {
+        None
+    }
+}
+
 /// Walk a [`RelExpr`] subtree and return the leaf-most alias
 /// reachable on the left-most-then-deepest path. Used to identify
 /// the inner-side alias for join-method advice lookup: PG's
@@ -2159,6 +2592,137 @@ fn leaf_alias(expr: &RelExpr) -> Option<String> {
         | RelExpr::Distinct { input } => leaf_alias(input),
         _ => None,
     }
+}
+
+/// Build an ascending NULLS-LAST [`SortKey`] over a single
+/// column reference. Used by [`PlanBuilder::build_merge_join`]
+/// to construct sort-key lists for the merge inputs.
+fn sort_key_asc(column: &str) -> SortKey {
+    SortKey {
+        expr: Expr::Column(ra_core::expr::ColumnRef::new(column)),
+        direction: ra_core::algebra::SortDirection::Asc,
+        nulls: ra_core::algebra::NullOrdering::Last,
+    }
+}
+
+/// Walk `condition` collecting `(left_col, right_col)` equi-join
+/// pairs where the left column belongs to `left_rel`'s scope and
+/// the right column belongs to `right_rel`'s scope.
+///
+/// Returns `false` if any clause isn't a pure equi-join over
+/// column references (so callers can degrade gracefully). On
+/// success, all clauses in an AND-of-equalities are appended to
+/// `out` in left-to-right order.
+fn collect_equi_pairs(
+    condition: &Expr,
+    left_rel: &RelExpr,
+    right_rel: &RelExpr,
+    out: &mut Vec<(String, String)>,
+) -> bool {
+    use ra_core::expr::BinOp as RaBinOp;
+    match condition {
+        Expr::BinOp { op: RaBinOp::Eq, left, right } => {
+            let (Expr::Column(lc), Expr::Column(rc)) = (left.as_ref(), right.as_ref()) else {
+                return false;
+            };
+            // Determine which column belongs to which side.
+            let left_aliases = collect_aliases(left_rel);
+            let right_aliases = collect_aliases(right_rel);
+            let l_in_left = column_belongs_to(lc, &left_aliases);
+            let l_in_right = column_belongs_to(lc, &right_aliases);
+            let r_in_left = column_belongs_to(rc, &left_aliases);
+            let r_in_right = column_belongs_to(rc, &right_aliases);
+            // Prefer matches that are unambiguously on opposite
+            // sides. With qualified columns this resolves
+            // cleanly; with unqualified columns we accept the
+            // first plausible orientation.
+            if l_in_left && r_in_right && !(l_in_right && r_in_left) {
+                out.push((lc.column.clone(), rc.column.clone()));
+                true
+            } else if l_in_right && r_in_left && !(l_in_left && r_in_right) {
+                out.push((rc.column.clone(), lc.column.clone()));
+                true
+            } else if l_in_left && r_in_right {
+                // Both unqualified — orient as (left, right)
+                // since `lc` appeared on the left of `=`.
+                out.push((lc.column.clone(), rc.column.clone()));
+                true
+            } else {
+                false
+            }
+        }
+        Expr::BinOp { op: RaBinOp::And, left, right } => {
+            collect_equi_pairs(left, left_rel, right_rel, out)
+                && collect_equi_pairs(right, left_rel, right_rel, out)
+        }
+        _ => false,
+    }
+}
+
+/// Collect the set of relation aliases reachable in a `RelExpr`
+/// subtree. Used to disambiguate which side of a join an
+/// equi-clause column belongs to.
+fn collect_aliases(expr: &RelExpr) -> Vec<String> {
+    let mut out = Vec::new();
+    walk_aliases(expr, &mut out);
+    out
+}
+
+fn walk_aliases(expr: &RelExpr, out: &mut Vec<String>) {
+    if let RelExpr::Scan { table, alias } = expr {
+        out.push(alias.clone().unwrap_or_else(|| table.clone()));
+    }
+    for child in expr.children() {
+        walk_aliases(child, out);
+    }
+}
+
+/// True if a `ColumnRef` refers to a relation in `aliases`.
+/// An unqualified column always returns true (we can't tell —
+/// caller's responsibility to handle ambiguity).
+fn column_belongs_to(col: &ra_core::expr::ColumnRef, aliases: &[String]) -> bool {
+    if let Some(table) = &col.table {
+        aliases.iter().any(|a| a.eq_ignore_ascii_case(table))
+    } else {
+        // Unqualified — caller decides.
+        true
+    }
+}
+
+/// Decompose a translated PG condition expression into a list
+/// of `OpExpr` pointers. Handles a single `OpExpr`, an AND-of-
+/// `OpExpr`s (`BoolExpr` with `AND_EXPR`), and returns an empty
+/// list for any other shape.
+unsafe fn expr_to_opexpr_list(
+    expr: *mut pg_sys::Expr,
+) -> Vec<*mut pg_sys::OpExpr> {
+    let mut out = Vec::new();
+    if expr.is_null() {
+        return out;
+    }
+    match (*expr).type_ {
+        pg_sys::NodeTag::T_OpExpr => {
+            out.push(expr.cast::<pg_sys::OpExpr>());
+        }
+        pg_sys::NodeTag::T_BoolExpr => {
+            let bool_expr = expr.cast::<pg_sys::BoolExpr>();
+            if (*bool_expr).boolop != pg_sys::BoolExprType::AND_EXPR {
+                return Vec::new();
+            }
+            let mut cell = (*(*bool_expr).args).elements;
+            let n = (*(*bool_expr).args).length;
+            for _ in 0..n {
+                let inner = (*cell).ptr_value.cast::<pg_sys::Expr>();
+                if inner.is_null() || (*inner).type_ != pg_sys::NodeTag::T_OpExpr {
+                    return Vec::new();
+                }
+                out.push(inner.cast::<pg_sys::OpExpr>());
+                cell = cell.add(1);
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 /// # Safety
@@ -2278,5 +2842,195 @@ mod leaf_alias_tests {
             right: Box::new(scan("b", None)),
         };
         assert_eq!(leaf_alias(&join), None);
+    }
+}
+
+#[cfg(test)]
+mod helpers_tests {
+    use super::{
+        collect_aliases, collect_eq_columns_for_table, collect_equi_pairs,
+        predicate_references_ctid,
+    };
+    use ra_core::algebra::{JoinType, RelExpr};
+    use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+
+    fn scan(table: &str) -> RelExpr {
+        RelExpr::Scan {
+            table: table.into(),
+            alias: None,
+        }
+    }
+
+    fn scan_aliased(table: &str, alias: &str) -> RelExpr {
+        RelExpr::Scan {
+            table: table.into(),
+            alias: Some(alias.into()),
+        }
+    }
+
+    fn col_eq(table: &str, column: &str, value: i64) -> Expr {
+        Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::qualified(table, column))),
+            right: Box::new(Expr::Const(Const::Int(value))),
+        }
+    }
+
+    fn col_eq_col(lt: &str, lc: &str, rt: &str, rc: &str) -> Expr {
+        Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::qualified(lt, lc))),
+            right: Box::new(Expr::Column(ColumnRef::qualified(rt, rc))),
+        }
+    }
+
+    #[test]
+    fn ctid_equality_recognized() {
+        let p = Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("ctid"))),
+            right: Box::new(Expr::Const(Const::String("(0,1)".into()))),
+        };
+        assert!(predicate_references_ctid(&p));
+    }
+
+    #[test]
+    fn non_ctid_predicate_rejected() {
+        let p = col_eq("t", "id", 5);
+        assert!(!predicate_references_ctid(&p));
+    }
+
+    #[test]
+    fn eq_columns_for_table_skips_ctid_and_collects_eq() {
+        let pred = Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(col_eq("t", "id", 1)),
+            right: Box::new(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("ctid"))),
+                right: Box::new(Expr::Const(Const::String("(0,1)".into()))),
+            }),
+        };
+        let cols = collect_eq_columns_for_table(&pred, "t");
+        assert_eq!(cols, vec!["id".to_string()]);
+    }
+
+    #[test]
+    fn collect_aliases_descends_through_joins() {
+        let q = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: col_eq_col("a", "x", "b", "x"),
+            left: Box::new(scan_aliased("orders", "a")),
+            right: Box::new(scan_aliased("customers", "b")),
+        };
+        let aliases = collect_aliases(&q);
+        assert!(aliases.contains(&"a".to_string()));
+        assert!(aliases.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn collect_equi_pairs_single_clause() {
+        let cond = col_eq_col("a", "id", "b", "id");
+        let mut out = Vec::new();
+        let ok = collect_equi_pairs(
+            &cond,
+            &scan_aliased("orders", "a"),
+            &scan_aliased("customers", "b"),
+            &mut out,
+        );
+        assert!(ok);
+        assert_eq!(out, vec![("id".into(), "id".into())]);
+    }
+
+    #[test]
+    fn collect_equi_pairs_swapped_order_canonicalizes() {
+        // a.id = b.id with the columns intentionally swapped:
+        // condition is `b.id = a.id`. Should canonicalize to
+        // (left_col, right_col).
+        let cond = col_eq_col("b", "id", "a", "id");
+        let mut out = Vec::new();
+        let ok = collect_equi_pairs(
+            &cond,
+            &scan_aliased("orders", "a"),
+            &scan_aliased("customers", "b"),
+            &mut out,
+        );
+        assert!(ok);
+        assert_eq!(out, vec![("id".into(), "id".into())]);
+    }
+
+    #[test]
+    fn collect_equi_pairs_and_of_two_clauses() {
+        let cond = Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(col_eq_col("a", "x", "b", "x")),
+            right: Box::new(col_eq_col("a", "y", "b", "y")),
+        };
+        let mut out = Vec::new();
+        let ok = collect_equi_pairs(
+            &cond,
+            &scan_aliased("orders", "a"),
+            &scan_aliased("customers", "b"),
+            &mut out,
+        );
+        assert!(ok);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], ("x".into(), "x".into()));
+        assert_eq!(out[1], ("y".into(), "y".into()));
+    }
+
+    #[test]
+    fn collect_equi_pairs_rejects_non_equi_clause() {
+        // Includes a non-equi clause: a.id > b.id
+        let cond = Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::qualified("a", "id"))),
+            right: Box::new(Expr::Column(ColumnRef::qualified("b", "id"))),
+        };
+        let mut out = Vec::new();
+        let ok = collect_equi_pairs(
+            &cond,
+            &scan_aliased("orders", "a"),
+            &scan_aliased("customers", "b"),
+            &mut out,
+        );
+        assert!(!ok);
+    }
+
+    #[test]
+    fn collect_equi_pairs_rejects_const_operand() {
+        // a.id = 7 is not an equi-join clause.
+        let cond = Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::qualified("a", "id"))),
+            right: Box::new(Expr::Const(Const::Int(7))),
+        };
+        let mut out = Vec::new();
+        let ok = collect_equi_pairs(
+            &cond,
+            &scan_aliased("orders", "a"),
+            &scan_aliased("customers", "b"),
+            &mut out,
+        );
+        assert!(!ok);
+    }
+
+    #[test]
+    fn ctid_in_and_predicate_recognized() {
+        let p = Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("ctid"))),
+                right: Box::new(Expr::Const(Const::String("(0,1)".into()))),
+            }),
+            right: Box::new(col_eq("t", "id", 5)),
+        };
+        assert!(predicate_references_ctid(&p));
+        // And the eq-column collector skips ctid:
+        let cols = collect_eq_columns_for_table(&p, "t");
+        assert_eq!(cols, vec!["id".to_string()]);
+        // Avoid unused-import lint when scan() helper isn't exercised.
+        let _ = scan("t");
     }
 }

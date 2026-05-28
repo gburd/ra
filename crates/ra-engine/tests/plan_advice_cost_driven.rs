@@ -166,6 +166,111 @@ fn cost_driven_scan_picks_seq_when_filter_doesnt_match_index() {
     );
 }
 
+fn filter_and_eq(input: RelExpr, table: &str, l_col: &str, l: i64, r_col: &str, r: i64) -> RelExpr {
+    RelExpr::Filter {
+        predicate: Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified(table, l_col))),
+                right: Box::new(Expr::Const(Const::Int(l))),
+            }),
+            right: Box::new(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified(table, r_col))),
+                right: Box::new(Expr::Const(Const::Int(r))),
+            }),
+        },
+        input: Box::new(input),
+    }
+}
+
+#[test]
+fn cost_driven_scan_picks_compound_index_when_full_prefix_matches() {
+    // Compound index on (a, b, c). Predicate touches a AND b.
+    // Should pick the compound index since 2-column prefix is
+    // covered.
+    let q = filter_and_eq(scan("t"), "t", "a", 1, "b", 2);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_btree_index(&mut stats, "t_abc", vec!["a", "b", "c"]);
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    match result.physical_choices.scan_for("t") {
+        Some(ScanStrategy::Index { name, .. }) => assert_eq!(name, "t_abc"),
+        other => panic!("expected compound index; got {other:?}"),
+    }
+}
+
+#[test]
+fn cost_driven_scan_prefers_longer_prefix_match() {
+    // Two indexes: t_a on (a) and t_ab on (a, b). Predicate
+    // touches a AND b → t_ab covers more, should win.
+    let q = filter_and_eq(scan("t"), "t", "a", 1, "b", 2);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_btree_index(&mut stats, "t_a", vec!["a"]);
+    add_btree_index(&mut stats, "t_ab", vec!["a", "b"]);
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    match result.physical_choices.scan_for("t") {
+        Some(ScanStrategy::Index { name, .. }) => assert_eq!(name, "t_ab"),
+        other => panic!("expected longer-prefix index; got {other:?}"),
+    }
+}
+
+#[test]
+fn cost_driven_scan_skips_compound_index_when_leading_column_missing() {
+    // Compound index on (a, b). Predicate only touches b
+    // (no equality on a). The leading column isn't covered —
+    // this index isn't useful for B-tree access.
+    let q = filter_eq(scan("t"), "t", "b", 5);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_btree_index(&mut stats, "t_ab", vec!["a", "b"]);
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    assert_eq!(
+        result.physical_choices.scan_for("t"),
+        Some(&ScanStrategy::Seq),
+        "compound index without leading-column coverage should be ignored",
+    );
+}
+
+#[test]
+fn cost_driven_scan_breaks_ties_with_primary_key() {
+    // Two single-column indexes on the same column. Primary key
+    // wins the tie.
+    let q = filter_eq(scan("t"), "t", "id", 42);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+
+    let mut pk = ra_core::statistics::IndexStats::new(
+        vec!["id".into()],
+        ra_core::facts::IndexType::BTree,
+    );
+    pk.is_primary = true;
+    pk.is_unique = true;
+    stats.indexes.insert("t_pkey".into(), pk);
+
+    let secondary = ra_core::statistics::IndexStats::new(
+        vec!["id".into()],
+        ra_core::facts::IndexType::BTree,
+    );
+    stats.indexes.insert("t_id_dup".into(), secondary);
+
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    match result.physical_choices.scan_for("t") {
+        Some(ScanStrategy::Index { name, .. }) => assert_eq!(name, "t_pkey"),
+        other => panic!("expected primary-key index; got {other:?}"),
+    }
+}
+
 #[test]
 fn supplied_index_advice_wins_over_cost_driven_seq() {
     // Tiny table — cost-driven would pick Seq. INDEX_SCAN advice

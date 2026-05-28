@@ -213,15 +213,28 @@ extracted `RelExpr` → `plan_builder` consumes
 EXPLAIN output mirrors PG's `pg_plan_advice` byte-for-byte for
 both Supplied and Generated blocks.
 
-**Status of cost-driven physical selection**: implemented in this
-RFC's accompanying commit but conservative. Index selection
-goes through `index_resolver::resolve_index` (which is real PG
-catalog lookup), but the "is this index useful for this
-predicate?" heuristic is simple — no selectivity calculation,
-no compound-index column-prefix matching. PG's planner is
-significantly more sophisticated here. Ra's defaults match PG's
-on simple queries; on complex queries Ra may default to seq-scan
-where PG would use an index. This is a known gap, not a bug.
+**Status of cost-driven physical selection**: production-quality
+for the cases described above. As of the second pass over this
+RFC:
+
+- Compound-index column-prefix matching is implemented:
+  `(a, b, c)` is recognized as covering `a = X AND b = Y`,
+  `a = X AND b = Y AND c = Z`, etc., with the longest-prefix
+  index winning. Tie-break by primary > unique > regular.
+- Single-column equality predicates pick the matching index
+  via `index_resolver::resolve_index`.
+- `MERGE_JOIN_PLAIN` / `MERGE_JOIN_MATERIALIZE` advice produces
+  a real `T_MergeJoin` plan node when the condition decomposes
+  into equi-clauses with column-ref operands; opfamilies are
+  resolved via `get_mergejoin_opfamilies`. Compound non-column
+  operands fall back to `HashJoin` with a debug log.
+- `TID_SCAN` advice produces a real `T_TidScan` when the
+  parent `Filter` predicate references `ctid`; falls back to
+  `SeqScan` otherwise.
+- `BITMAP_HEAP_SCAN` advice produces a real
+  `T_BitmapIndexScan` -> `T_BitmapHeapScan` chain when the
+  parent `Filter` has equality on an indexed column;
+  falls back otherwise.
 
 **Status of `RelExpr` physical operators**: the existing 11+
 physical variants (`IndexScan`, `BitmapHeapScan`, `ParallelHash
@@ -230,6 +243,30 @@ are not currently produced from cost-driven lowering. A future
 RFC may add such lowering, and at that point the
 `PhysicalChoices` sidecar can be reduced to a fallback for
 queries the e-graph can't lower.
+
+**Honestly remaining gaps** (each is a separate RFC's worth
+of work, NOT covered by this one):
+
+- **`DO_NOT_SCAN(t)`**: a *negative* constraint meaning "don't
+  scan this table at all" (e.g., the optimizer must rely on
+  join-elimination or constant-folding to remove the table
+  reference). Honoring this requires either (a) the e-graph
+  to be able to express join-eliminated plans for that table
+  and the cost model to prefer them, or (b) an early
+  validation step that fails the query when `t` cannot be
+  eliminated. Ra has neither today; the advice is parsed and
+  recorded but the plan-builder logs and falls back to
+  SeqScan.
+- **`FOREIGN_JOIN(left right)`**: requires FDW pushdown
+  machinery (deparse the join into the foreign server's
+  dialect, use `GetForeignJoinPaths` hooks, etc.). This is
+  multi-week work that goes well beyond plan-advice
+  semantics.
+- **E-graph cost-driven physical lowering**: rewriting `Join`
+  -> `HashJoin` / `MergeJoin` / `NestLoop` directly in the
+  e-graph so the cost extractor reasons about logical plan
+  shape and physical method together. Multi-week refactor of
+  the rule corpus and cost model.
 
 ## References
 

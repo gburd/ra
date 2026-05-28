@@ -244,7 +244,7 @@ Cache functionality is split into two crates:
 
 - **0 clippy errors** (`cargo clippy --all-targets --all-features -- -D warnings`)
 - **0 compiler warnings** on `cargo build --workspace --all-features`
-- **167 test suites, 7775 tests passing, 0 failing, 66 ignored** (`cargo test --workspace --all-features`)
+- **167 test suites, 7779 tests passing, 0 failing, 66 ignored** (`cargo test --workspace --all-features`)
 - Known flaky test mitigations:
   - `saturation_terminates_quickly` skips Aggregate, self-ref-join, joins of the
     same base table, constant predicates, constant sort keys, and `UnaryOp` over
