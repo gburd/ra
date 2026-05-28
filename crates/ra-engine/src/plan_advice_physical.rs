@@ -252,6 +252,258 @@ impl PhysicalChoices {
     pub fn len(&self) -> usize {
         self.scans.len() + self.joins.len() + self.parallel.len()
     }
+
+    /// Augment the choice map with cost-driven defaults for any
+    /// alias the supplied advice didn't already cover.
+    ///
+    /// Walks the optimized [`RelExpr`] and, for every base scan
+    /// without a recorded `ScanStrategy`, picks one based on the
+    /// table's statistics. For every join without a recorded
+    /// `JoinInnerStrategy`, picks `Hash` for equi-joins and
+    /// `NestedLoopPlain` for non-equi-joins, mirroring PG's
+    /// path-costing defaults.
+    ///
+    /// User-supplied advice always wins: this method only adds
+    /// entries for aliases that are not already in the map. So
+    /// `SET ra_planner.plan_advice = 'INDEX_SCAN(t i)'` followed
+    /// by `augment_from_stats` produces a map where `t` keeps
+    /// its `Index` strategy and any other tables get
+    /// cost-driven choices.
+    ///
+    /// Conservative by design: when the cost story is ambiguous
+    /// (e.g. table without statistics, predicate not covered by
+    /// any index), defaults to `SeqScan` / `NestedLoopPlain` so
+    /// behavior matches PG's defaults rather than introducing
+    /// novel decisions.
+    pub fn augment_from_stats(
+        &mut self,
+        expr: &ra_core::algebra::RelExpr,
+        table_stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
+    ) {
+        cost_driven::walk_for_scans(expr, table_stats, self);
+        cost_driven::walk_for_joins(expr, self);
+    }
+}
+
+/// Cost-driven helpers used by [`PhysicalChoices::augment_from_stats`].
+/// Kept in a private submodule so the heuristics can evolve
+/// without touching the public API.
+mod cost_driven {
+    use ra_core::algebra::RelExpr;
+    use ra_core::expr::{BinOp, Expr};
+    use ra_core::statistics::Statistics;
+    use std::collections::HashMap;
+
+    use super::{JoinInnerStrategy, PhysicalChoices, ScanStrategy};
+
+    /// Threshold below which we never pick an index scan even
+    /// if one is available. PG's default `random_page_cost = 4.0`
+    /// vs `seq_page_cost = 1.0` means the crossover for tiny
+    /// tables is around hundreds of rows; we pick the lower end
+    /// to be conservative (don't go behind PG's back to use an
+    /// index when seq-scan is the cheaper choice).
+    const SMALL_TABLE_ROW_THRESHOLD: f64 = 200.0;
+
+    /// Walk `expr` and assign `ScanStrategy` to every base scan
+    /// alias not already present in `choices.scans`.
+    pub(super) fn walk_for_scans(
+        expr: &RelExpr,
+        table_stats: &HashMap<String, Statistics>,
+        choices: &mut PhysicalChoices,
+    ) {
+        // Collect the list of (alias, table, predicate?) we'll
+        // need to make scan decisions for.
+        let mut scans: Vec<(String, String, Option<&Expr>)> = Vec::new();
+        collect_scans(expr, None, &mut scans);
+
+        for (alias, table, pred) in scans {
+            if choices.scans.contains_key(&alias) {
+                continue;
+            }
+            let strategy = pick_scan_strategy(&table, pred, table_stats);
+            choices.scans.insert(alias, strategy);
+        }
+    }
+
+    /// Walk `expr` and assign `JoinInnerStrategy` to every join's
+    /// inner-side alias not already present in `choices.joins`.
+    pub(super) fn walk_for_joins(expr: &RelExpr, choices: &mut PhysicalChoices) {
+        let mut joins: Vec<(String, bool)> = Vec::new();
+        collect_joins(expr, &mut joins);
+        for (inner_alias, is_equi) in joins {
+            if choices.joins.contains_key(&inner_alias) {
+                continue;
+            }
+            let strategy = if is_equi {
+                JoinInnerStrategy::Hash
+            } else {
+                JoinInnerStrategy::NestedLoopPlain
+            };
+            choices.joins.insert(inner_alias, strategy);
+        }
+    }
+
+    /// Pick the cost-driven scan strategy for a base relation.
+    ///
+    /// Heuristic:
+    /// - If the table has fewer than `SMALL_TABLE_ROW_THRESHOLD`
+    ///   rows, sequential scan wins (no index can beat a small
+    ///   sequential read).
+    /// - If a predicate references a column that's the prefix
+    ///   of an available index, prefer that index.
+    /// - Otherwise sequential scan.
+    fn pick_scan_strategy(
+        table: &str,
+        pred: Option<&Expr>,
+        table_stats: &HashMap<String, Statistics>,
+    ) -> ScanStrategy {
+        let stats_key = table.to_lowercase();
+        let Some(stats) = table_stats.get(&stats_key) else {
+            // No stats → can't reason about index utility.
+            // Default to seq-scan to match PG when stats are
+            // missing.
+            return ScanStrategy::Seq;
+        };
+        if stats.row_count < SMALL_TABLE_ROW_THRESHOLD {
+            return ScanStrategy::Seq;
+        }
+        let Some(pred) = pred else {
+            // No filter → seq-scan all rows is the only sensible
+            // choice for now. Future work: covered queries
+            // with index-only scans.
+            return ScanStrategy::Seq;
+        };
+        // For each indexed column, see if the predicate
+        // references it via an equality test. The first such
+        // index wins.
+        for (idx_name, idx_stats) in &stats.indexes {
+            if idx_stats.columns.is_empty() {
+                continue;
+            }
+            let leading = &idx_stats.columns[0];
+            if predicate_references_column_eq(pred, leading) {
+                return ScanStrategy::Index {
+                    schema: None,
+                    name: idx_name.clone(),
+                };
+            }
+        }
+        ScanStrategy::Seq
+    }
+
+    /// True if `pred` contains an equality test on `column`. Walks
+    /// AND/OR conjunctions so the leading column appearing
+    /// anywhere counts.
+    fn predicate_references_column_eq(pred: &Expr, column: &str) -> bool {
+        match pred {
+            Expr::BinOp { op: BinOp::Eq, left, right } => {
+                column_name_eq(left, column) || column_name_eq(right, column)
+            }
+            Expr::BinOp { op: BinOp::And | BinOp::Or, left, right } => {
+                predicate_references_column_eq(left, column)
+                    || predicate_references_column_eq(right, column)
+            }
+            _ => false,
+        }
+    }
+
+    fn column_name_eq(e: &Expr, column: &str) -> bool {
+        if let Expr::Column(c) = e {
+            c.column.eq_ignore_ascii_case(column)
+        } else {
+            false
+        }
+    }
+
+    /// Walk `expr` collecting `(alias, table, applicable_predicate)`
+    /// per base scan. The predicate is the parent Filter's
+    /// predicate when it's directly above the scan; otherwise
+    /// `None`.
+    fn collect_scans<'a>(
+        expr: &'a RelExpr,
+        parent_pred: Option<&'a Expr>,
+        out: &mut Vec<(String, String, Option<&'a Expr>)>,
+    ) {
+        match expr {
+            RelExpr::Scan { table, alias } => {
+                let alias_name = alias.clone().unwrap_or_else(|| table.clone());
+                out.push((alias_name, table.clone(), parent_pred));
+            }
+            RelExpr::Filter { predicate, input } => {
+                collect_scans(input, Some(predicate), out);
+            }
+            RelExpr::Project { input, .. }
+            | RelExpr::Sort { input, .. }
+            | RelExpr::Limit { input, .. }
+            | RelExpr::Aggregate { input, .. }
+            | RelExpr::Window { input, .. }
+            | RelExpr::Distinct { input } => collect_scans(input, parent_pred, out),
+            RelExpr::Join { left, right, .. } => {
+                // Filter doesn't pass through joins for column-
+                // scoping purposes; reset.
+                collect_scans(left, None, out);
+                collect_scans(right, None, out);
+            }
+            RelExpr::Union { left, right, .. }
+            | RelExpr::Intersect { left, right, .. }
+            | RelExpr::Except { left, right, .. } => {
+                collect_scans(left, None, out);
+                collect_scans(right, None, out);
+            }
+            RelExpr::CTE { definition, body, .. } => {
+                collect_scans(definition, None, out);
+                collect_scans(body, None, out);
+            }
+            other => {
+                for child in other.children() {
+                    collect_scans(child, None, out);
+                }
+            }
+        }
+    }
+
+    /// Walk `expr` collecting `(inner_alias, is_equi_join)` per
+    /// join.
+    fn collect_joins(expr: &RelExpr, out: &mut Vec<(String, bool)>) {
+        if let RelExpr::Join { condition, right, .. } = expr {
+            if let Some(alias) = leaf_alias(right) {
+                out.push((alias, is_equi_join(condition)));
+            }
+        }
+        for child in expr.children() {
+            collect_joins(child, out);
+        }
+    }
+
+    /// True if `cond` is or contains an equality of two column
+    /// references — the standard equi-join shape that hash
+    /// joins handle directly.
+    fn is_equi_join(cond: &Expr) -> bool {
+        match cond {
+            Expr::BinOp { op: BinOp::Eq, left, right } => {
+                matches!(left.as_ref(), Expr::Column(_))
+                    && matches!(right.as_ref(), Expr::Column(_))
+            }
+            Expr::BinOp { op: BinOp::And, left, right } => {
+                is_equi_join(left) || is_equi_join(right)
+            }
+            _ => false,
+        }
+    }
+
+    fn leaf_alias(expr: &RelExpr) -> Option<String> {
+        match expr {
+            RelExpr::Scan { table, alias } => {
+                Some(alias.clone().unwrap_or_else(|| table.clone()))
+            }
+            RelExpr::Filter { input, .. }
+            | RelExpr::Project { input, .. }
+            | RelExpr::Sort { input, .. }
+            | RelExpr::Limit { input, .. }
+            | RelExpr::Distinct { input } => leaf_alias(input),
+            _ => None,
+        }
+    }
 }
 
 /// Walk a list of advice targets and apply a scan-strategy

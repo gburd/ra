@@ -22,11 +22,12 @@ parser unchanged and vice versa.
 | Validate produced plan and compute `FeedbackFlags` | **Done** (`ra_engine::plan_advice_validate::validate_advice`) |
 | `Cost::DISABLE_PENALTY` for plans that violate supplied advice | **Done** (`ra_engine::Optimizer::apply_plan_advice_penalty`) — adds `1e10` per `FAILED` item to the produced cost, matching PG's `disable_cost` behavior |
 | Per-relation physical-strategy preferences (`PhysicalChoices`) | **Done** — scan-method, join-method, and parallelism advice compile to a typed map exposed on `OptimizationResult.physical_choices` |
+| Cost-driven population of `PhysicalChoices` when advice is absent | **Done** — `PhysicalChoices::augment_from_stats` picks SeqScan for tiny tables, IndexScan for medium tables with useful indexes, Hash for equi-joins, NestedLoopPlain for non-equi-joins ([RFC 0087](../../rfcs/text/0087-physical-operator-selection.md)) |
 | PG extension GUCs (`ra_planner.plan_advice`, ...) | **Done** |
 | `pg_plan_advice.advice` GUC compatibility shim | **Done** (registers under both names; the upstream name wins when set) |
 | `EXPLAIN (PLAN_ADVICE)` registration via `RegisterExtensionExplainOption` | **Done** (raw FFI; renders supplied advice with feedback flags) |
 | `Generated Plan Advice:` block in EXPLAIN output | **Done** — emit runs in the planner hook; explain hook reads via session-local stash |
-| `ra-pg-extension` plan-builder consumption of `PhysicalChoices` | **Not yet** — derived choices are logged but `plan_builder.rs` doesn't yet pick `IndexScan` vs `SeqScan` based on the map |
+| `ra-pg-extension` plan-builder consumption of `PhysicalChoices` | **Done** — `PlanBuilder::set_physical_choices` + `build_scan_with_advice` dispatch (`SEQ_SCAN`, `INDEX_SCAN`, `INDEX_ONLY_SCAN` honored fully; `BITMAP_HEAP_SCAN`, `TID_SCAN`, `DO_NOT_SCAN` fall back to seq-scan with debug log) + `build_join` (Hash, NestedLoop_* honored fully; MergeJoin_* falls back) + Gather suppression (`NO_GATHER`) |
 
 The first three rows are what shipped in
 [commit 8aef6a13](https://codeberg.org/gregburd/ra/commit/8aef6a13).
@@ -119,24 +120,31 @@ The
 [port plan](../research/pg-plan-advice-port.md)
 documents the remaining work:
 
-- **`ra-pg-extension` plan-builder consumption of `PhysicalChoices`.**
-  The optimizer now produces `OptimizationResult.physical_choices`
-  with per-relation preferences derived from supplied scan-method,
-  join-method, and parallelism advice. The PG plan-builder
-  (`crates/ra-pg-extension/src/plan_builder.rs`) doesn't yet read
-  this map; wiring it lets `INDEX_SCAN(t i)` actually steer the
-  produced PG `Plan` node toward `IndexScan` instead of `SeqScan`.
-  Today the choices are logged and available to the caller but
-  don't affect the produced plan tree.
-- **Physical operators in `RelExpr`.** Ra-side scan-method
-  honoring (without going through PG's plan_builder) requires
-  Ra to distinguish `IndexScan` from `SeqScan` etc. at the
-  `RelExpr` level. That's a multi-week refactor of `ra-core`.
+- **Cost-driven physical-method sophistication.** The cost-driven
+  layer in [RFC 0087](../../rfcs/text/0087-physical-operator-selection.md)
+  picks `IndexScan` for medium tables with a useful single-column
+  index but doesn't yet handle compound indexes (column-prefix
+  matching), bitmap-index combination, or selectivity-aware
+  comparison between candidate indexes. Real-world workloads
+  may pick `SeqScan` where PG would pick a more sophisticated
+  access path. The structure to grow into this is in place
+  (`pick_scan_strategy` in `plan_advice_physical.rs::cost_driven`).
+- **Cost-driven physical lowering inside the e-graph.** Today
+  the e-graph extracts a logical `RelExpr` (`Scan`, `Join`,
+  `Aggregate`) and physical strategy lives in the
+  `PhysicalChoices` sidecar map consumed at PG-Plan emission
+  time. A future RFC may add e-graph rewrite rules that lower
+  `Join` to `HashJoin` / `MergeJoin` / `NestLoop` directly,
+  letting the cost extractor reason about logical plan shape
+  and physical method together. Substantial work; see
+  RFC 0087 for the design comparison.
 
 ## See also
 
 - [`docs/research/pg-plan-advice-port.md`](../research/pg-plan-advice-port.md)
   — the full implementation plan.
+- [`rfcs/text/0087-physical-operator-selection.md`](../../rfcs/text/0087-physical-operator-selection.md)
+  — design for physical-operator selection.
 - [PostgreSQL plan-advice documentation](https://www.postgresql.org/docs/current/pgplanadvice.html)
   — upstream reference.
 - `~/src/postgres/contrib/pg_plan_advice/README` — the design

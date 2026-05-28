@@ -1960,7 +1960,11 @@ impl Optimizer {
                 // Compile per-relation physical-strategy
                 // preferences from the supplied advice. Empty
                 // when no advice or no scan/join-method tags.
-                let choices = self.compile_physical_choices();
+                let mut choices = self.compile_physical_choices();
+                // Augment with cost-driven defaults for any
+                // alias the supplied advice didn't constrain.
+                // See RFC 0087 for the design rationale.
+                choices.augment_from_stats(&plan, &self.table_stats);
                 Ok(OptimizationResult {
                     plan,
                     cost,

@@ -112,6 +112,7 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0076](text/0076-adaptive-mid-query-reoptimization.md) | Adaptive Mid-Query Re-Optimization | 2026-03-25 | Adaptive optimization |
 | [0077](text/0077-numa-aware-execution.md) | NUMA-Aware Execution | 2026-03-25 | Adaptive optimization |
 | [0086](text/0086-ballista-plan-emission.md) | Ballista Plan Emission | 2026-05-26 | Distributed-execution target |
+| [0087](text/0087-physical-operator-selection.md) | Physical-Operator Selection | 2026-05-28 | Plan-advice / physical layer |
 
 ## Rejected
 
@@ -121,7 +122,7 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 86
+- **Total RFCs**: 87
 - **Implemented**: 27 (31%)
 - **Underway**: 2 (2%)
 - **Accepted**: 12 (14%)

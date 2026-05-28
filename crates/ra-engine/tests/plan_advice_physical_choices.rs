@@ -36,12 +36,22 @@ fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
 }
 
 #[test]
-fn no_advice_yields_empty_physical_choices() {
+fn no_advice_yields_cost_driven_defaults() {
+    // After RFC 0087 the optimizer always populates
+    // physical_choices, falling back to cost-driven defaults
+    // when supplied advice is absent. For a single-table scan
+    // with no stats, the default is SeqScan.
     let q = scan("t");
     let result = Optimizer::new().optimize_bounded(&q).unwrap();
-    assert!(
-        result.physical_choices.is_empty(),
-        "no advice should yield empty physical choices",
+    assert_eq!(
+        result.physical_choices.scan_for("t"),
+        Some(&ScanStrategy::Seq),
+        "no advice + no stats → cost-driven default of SeqScan",
+    );
+    assert_eq!(
+        result.physical_choices.join_for("t"),
+        None,
+        "single-table scan has no joins to constrain",
     );
 }
 
@@ -145,9 +155,11 @@ fn mixed_advice_populates_each_category() {
 }
 
 #[test]
-fn join_order_alone_does_not_populate_physical_choices() {
+fn join_order_does_not_supply_scan_or_join_strategies() {
     // JOIN_ORDER constrains the rule advisor, not the physical
-    // choice map.
+    // choice map. With no further advice and no stats, the
+    // map is populated cost-driven: SeqScan for both relations,
+    // Hash for the inner-side equi-join.
     let q = eq_join(scan("a"), scan("b"), "a", "b");
     let config = OptimizerConfig {
         plan_advice: Some("JOIN_ORDER(a b)".into()),
@@ -156,5 +168,11 @@ fn join_order_alone_does_not_populate_physical_choices() {
     let result = Optimizer::with_config(config)
         .optimize_bounded(&q)
         .unwrap();
-    assert!(result.physical_choices.is_empty());
+    assert_eq!(result.physical_choices.scan_for("a"), Some(&ScanStrategy::Seq));
+    assert_eq!(result.physical_choices.scan_for("b"), Some(&ScanStrategy::Seq));
+    assert_eq!(
+        result.physical_choices.join_for("b"),
+        Some(&ra_engine::plan_advice_physical::JoinInnerStrategy::Hash),
+        "no JOIN_METHOD advice + equi-join → cost-driven Hash",
+    );
 }
