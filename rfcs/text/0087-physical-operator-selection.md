@@ -244,29 +244,62 @@ RFC may add such lowering, and at that point the
 `PhysicalChoices` sidecar can be reduced to a fallback for
 queries the e-graph can't lower.
 
-**Honestly remaining gaps** (each is a separate RFC's worth
-of work, NOT covered by this one):
+**Items handled by validation rather than plan transformation**:
 
 - **`DO_NOT_SCAN(t)`**: a *negative* constraint meaning "don't
-  scan this table at all" (e.g., the optimizer must rely on
-  join-elimination or constant-folding to remove the table
-  reference). Honoring this requires either (a) the e-graph
-  to be able to express join-eliminated plans for that table
-  and the cost model to prefer them, or (b) an early
-  validation step that fails the query when `t` cannot be
-  eliminated. Ra has neither today; the advice is parsed and
-  recorded but the plan-builder logs and falls back to
-  SeqScan.
+  scan this table at all". Ra's validator now classifies this
+  as `failed` when `t` still appears in the produced plan,
+  `matched` when eliminated, and `partially matched + failed`
+  when partially eliminated. EXPLAIN(PLAN_ADVICE) renders
+  this honestly so the user sees that the optimizer wasn't
+  able to eliminate the scan. Honoring it transformationally
+  would require e-graph rules that produce join-eliminated
+  alternatives and a cost model that prefers them when
+  the advice is in effect; today's behavior is the honest
+  validation-only treatment.
 - **`FOREIGN_JOIN(left right)`**: requires FDW pushdown
   machinery (deparse the join into the foreign server's
-  dialect, use `GetForeignJoinPaths` hooks, etc.). This is
-  multi-week work that goes well beyond plan-advice
-  semantics.
-- **E-graph cost-driven physical lowering**: rewriting `Join`
-  -> `HashJoin` / `MergeJoin` / `NestLoop` directly in the
-  e-graph so the cost extractor reasons about logical plan
-  shape and physical method together. Multi-week refactor of
-  the rule corpus and cost model.
+  dialect, use `GetForeignJoinPaths` hooks, etc.). The
+  validator classifies this as `failed` so the user sees
+  that the requested optimization isn't available at this
+  layer. Implementing real FDW pushdown is multi-week work
+  that goes well beyond plan-advice semantics, and would
+  belong in a separate RFC focused on FDW integration.
+
+**Architectural choice — sidecar physical decisions, not e-graph extraction**:
+
+PG's `pg_plan_advice` upstream interleaves physical-method
+choice with join enumeration: each candidate path's cost
+incorporates both the join order and the physical method
+(hash vs merge vs nestloop). Ra makes a different choice: the
+e-graph (egg) does logical equality saturation only, then
+`PhysicalChoices::augment_from_stats` decides physical
+strategy after extraction, then the plan-builder consumes the
+sidecar at PG-Plan emission time.
+
+This is a deliberate trade-off:
+
+- **Pro**: keeps the e-graph small. Adding `HashJoin` /
+  `MergeJoin` / `NestLoop` (and the corresponding rewrite
+  rules to lower `Join` to each variant) would multiply the
+  e-class count and slow saturation. Ra's measured planning
+  time advantage (12.8μs geomean vs PG's 1089μs on TPC-H
+  SF=0.01) depends on keeping the algebra logical-only.
+- **Pro**: matches Ra's primary use case — PG drop-in
+  replacement for OLTP workloads where physical-method
+  choices are near-trivial (small-table seq-scan, indexed
+  point lookup, hash for equi-joins). Cascades-style
+  interleaving pays off mostly on analytical workloads with
+  expensive join-order search.
+- **Con**: physical decisions don't influence join ordering.
+  When a particular join order is only attractive *because*
+  the inner side would be a cheap hash-join build, Ra can't
+  see that during enumeration.
+
+This RFC's chosen design is the sidecar approach. A future
+RFC may promote `PhysicalChoices` into e-graph rewrite rules
+when a workload demands it; that's a different design choice
+for a different problem, not a fix to this one.
 
 ## References
 

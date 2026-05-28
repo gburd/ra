@@ -387,11 +387,18 @@ mod cost_driven {
             return ScanStrategy::Seq;
         }
 
-        // Find the index with the longest covered prefix. Each
-        // candidate is (index_name, prefix_len, tie_break_score).
-        // Higher prefix_len wins; on ties, higher tie_break_score
-        // wins (primary > unique > regular).
-        let mut best: Option<(&String, usize, u8)> = None;
+        // Find the index with the longest covered prefix.
+        // Each candidate is (index_name, prefix_len, tie_break,
+        // selectivity). Ranking:
+        //   1. larger prefix_len wins
+        //   2. higher tie_break wins (primary > unique > regular)
+        //   3. smaller selectivity wins (more selective →
+        //      fewer rows per probe)
+        // Selectivity is computed from column NDV when stats
+        // are available; absent stats default to a neutral
+        // selectivity of 1.0 so we don't bias against
+        // un-analyzed indexes.
+        let mut best: Option<(&String, usize, u8, f64)> = None;
         for (idx_name, idx_stats) in &stats.indexes {
             let prefix_len = covered_prefix_len(&idx_stats.columns, &eq_columns);
             if prefix_len == 0 {
@@ -402,13 +409,20 @@ mod cost_driven {
             } else {
                 u8::from(idx_stats.is_unique)
             };
-            let candidate = (idx_name, prefix_len, tie_break);
+            let selectivity = covered_prefix_selectivity(
+                &idx_stats.columns[..prefix_len],
+                stats,
+            );
+            let candidate = (idx_name, prefix_len, tie_break, selectivity);
             best = match best {
                 None => Some(candidate),
-                Some((_, cur_len, cur_tie)) => {
-                    if prefix_len > cur_len
+                Some((_, cur_len, cur_tie, cur_sel)) => {
+                    let strictly_better = prefix_len > cur_len
                         || (prefix_len == cur_len && tie_break > cur_tie)
-                    {
+                        || (prefix_len == cur_len
+                            && tie_break == cur_tie
+                            && selectivity < cur_sel);
+                    if strictly_better {
                         Some(candidate)
                     } else {
                         best
@@ -418,12 +432,46 @@ mod cost_driven {
         }
 
         match best {
-            Some((name, _, _)) => ScanStrategy::Index {
+            Some((name, _, _, _)) => ScanStrategy::Index {
                 schema: None,
                 name: name.clone(),
             },
             None => ScanStrategy::Seq,
         }
+    }
+
+    /// Estimate the combined equality selectivity of every
+    /// column in `prefix`, using NDV from [`Statistics::columns`]
+    /// when present and assuming column independence (`AND` of
+    /// per-column selectivities is the product of selectivities).
+    /// Returns `1.0` for any column with missing or zero NDV
+    /// — neutral, so absent statistics never bias the
+    /// comparison incorrectly.
+    fn covered_prefix_selectivity(
+        prefix: &[String],
+        stats: &Statistics,
+    ) -> f64 {
+        let mut acc = 1.0_f64;
+        for col in prefix {
+            let col_sel = stats
+                .columns
+                .iter()
+                .find_map(|(name, cs)| {
+                    if name.eq_ignore_ascii_case(col)
+                        && cs.distinct_count > 0.0
+                    {
+                        // Equality selectivity ~ 1 / NDV
+                        // (adjusted for NULL fraction).
+                        let live = (1.0 - cs.null_fraction).max(0.0);
+                        Some(live / cs.distinct_count.max(1.0))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1.0);
+            acc *= col_sel;
+        }
+        acc
     }
 
     /// Number of columns from the start of `index_columns` that

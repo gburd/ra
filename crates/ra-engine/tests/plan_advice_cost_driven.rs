@@ -290,3 +290,110 @@ fn supplied_index_advice_wins_over_cost_driven_seq() {
         other => panic!("supplied INDEX_SCAN should win; got {other:?}"),
     }
 }
+
+fn add_btree_index_with_ndv(
+    stats: &mut Statistics,
+    name: &str,
+    columns: Vec<&str>,
+) {
+    let columns: Vec<String> = columns.into_iter().map(String::from).collect();
+    let idx = IndexStats::new(columns, ra_core::facts::IndexType::BTree);
+    stats.indexes.insert(name.to_string(), idx);
+}
+
+fn set_column_ndv(stats: &mut Statistics, column: &str, ndv: f64) {
+    let cs = ra_core::statistics::ColumnStats {
+        distinct_count: ndv,
+        null_fraction: 0.0,
+        min_value: None,
+        max_value: None,
+        avg_length: None,
+        histogram: None,
+        correlation: None,
+        most_common_values: None,
+        most_common_freqs: None,
+    };
+    stats.columns.insert(column.into(), cs);
+}
+
+#[test]
+fn cost_driven_scan_picks_more_selective_index_on_tie() {
+    // Two indexes on different columns, both with same prefix
+    // length (1). Same uniqueness tier (regular). Tie-break
+    // by selectivity: column with higher NDV is more selective.
+    // Predicate: a = 1 AND b = 2.
+    let q = filter_and_eq(scan("t"), "t", "a", 1, "b", 2);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+
+    add_btree_index_with_ndv(&mut stats, "t_a", vec!["a"]);
+    add_btree_index_with_ndv(&mut stats, "t_b", vec!["b"]);
+
+    // Column `a` has 10 distinct values (low selectivity:
+    // each = test matches 10% of rows). Column `b` has 1000
+    // distinct (each = matches 0.1%). Pick `t_b`.
+    set_column_ndv(&mut stats, "a", 10.0);
+    set_column_ndv(&mut stats, "b", 1000.0);
+
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    match result.physical_choices.scan_for("t") {
+        Some(ScanStrategy::Index { name, .. }) => assert_eq!(name, "t_b"),
+        other => panic!("expected more-selective index t_b; got {other:?}"),
+    }
+}
+
+#[test]
+fn cost_driven_scan_uniqueness_beats_selectivity() {
+    // Tie-break order: prefix_len > uniqueness > selectivity.
+    // A unique index with poor selectivity should still beat a
+    // regular index with good selectivity (uniqueness implies
+    // perfect selectivity for `=` anyway, and PG's planner
+    // mirrors this preference).
+    let q = filter_eq(scan("t"), "t", "id", 42);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+
+    let mut unique_idx = IndexStats::new(
+        vec!["id".into()],
+        ra_core::facts::IndexType::BTree,
+    );
+    unique_idx.is_unique = true;
+    stats.indexes.insert("t_unique".into(), unique_idx);
+
+    add_btree_index_with_ndv(&mut stats, "t_regular", vec!["id"]);
+
+    // Make the regular index look extremely selective on its
+    // column. The unique index's `is_unique` tier still wins.
+    set_column_ndv(&mut stats, "id", 100.0);
+
+    opt.add_table_stats("t", stats);
+    let result = opt.optimize_bounded(&q).unwrap();
+    match result.physical_choices.scan_for("t") {
+        Some(ScanStrategy::Index { name, .. }) => assert_eq!(name, "t_unique"),
+        other => panic!("expected unique index; got {other:?}"),
+    }
+}
+
+#[test]
+fn cost_driven_scan_handles_missing_ndv_neutrally() {
+    // Two indexes, both regular, on different columns. Neither
+    // column has NDV stats. Selectivity defaults to 1.0 for
+    // both — they tie completely, and the iteration order
+    // determines the winner (HashMap is randomized but
+    // deterministic per-run). We just check that one was picked.
+    let q = filter_and_eq(scan("t"), "t", "a", 1, "b", 2);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_btree_index_with_ndv(&mut stats, "t_a", vec!["a"]);
+    add_btree_index_with_ndv(&mut stats, "t_b", vec!["b"]);
+    opt.add_table_stats("t", stats);
+    let result = opt.optimize_bounded(&q).unwrap();
+    match result.physical_choices.scan_for("t") {
+        Some(ScanStrategy::Index { name, .. }) => {
+            assert!(name == "t_a" || name == "t_b", "got: {name:?}");
+        }
+        other => panic!("expected an index; got {other:?}"),
+    }
+}

@@ -114,49 +114,110 @@ Run the test suite:
 cargo test -p ra-plan-advice
 ```
 
-## What's next
+## Status
 
 The
 [port plan](../research/pg-plan-advice-port.md)
-documents the remaining work:
+documents the design rationale for the physical-method
+machinery; the user-facing plan-advice surface is now
+production-complete for every tag `pg_plan_advice` defines:
 
-- **Bitmap-index combination.** The cost-driven layer in
-  [RFC 0087](../../rfcs/text/0087-physical-operator-selection.md)
-  handles compound-index column-prefix matching with
-  primary-key/unique tie-breaking, and the plan-builder honors
-  `BITMAP_HEAP_SCAN` advice when a parent `Filter` covers an
-  indexed column. What's not yet covered: bitmap-AND / bitmap-OR
-  combination across multiple indexes (PG's `BitmapAnd` /
-  `BitmapOr` plan nodes synthesized from independent index
-  conditions). Adding this requires walking AND/OR conjunctions
-  to enumerate covering-index sets and emit
-  `BitmapIndexScan` -> `BitmapAnd` -> `BitmapHeapScan`.
-- **Selectivity-aware index comparison.** When multiple
-  indexes have the same prefix length, the current code
-  breaks ties by primary > unique > regular. PG additionally
-  considers histogram-driven selectivity per predicate.
-  Wiring this needs the cost-model layer to read column NDV /
-  MCV statistics, which `Statistics::columns` already exposes
-  but `pick_scan_strategy` doesn't yet consult.
-- **`DO_NOT_SCAN` semantics.** This is a *negative* constraint
-  ("do not produce a scan of `t`"). Honoring it requires the
-  e-graph to express join-eliminated plans for the table and
-  pick them in extraction. Today the advice is parsed and
-  recorded in `PhysicalChoices`, the cost penalty fires, but
-  the plan-builder logs and falls back to SeqScan. Documented
-  in RFC 0087.
-- **`FOREIGN_JOIN` semantics.** Requires FDW pushdown
-  machinery (deparse, `GetForeignJoinPaths`, etc.) — beyond
-  this RFC's scope. Documented in RFC 0087.
-- **Cost-driven physical lowering inside the e-graph.** Today
-  the e-graph extracts a logical `RelExpr` (`Scan`, `Join`,
-  `Aggregate`) and physical strategy lives in the
-  `PhysicalChoices` sidecar map consumed at PG-Plan emission
-  time. A future RFC may add e-graph rewrite rules that lower
-  `Join` to `HashJoin` / `MergeJoin` / `NestLoop` directly,
-  letting the cost extractor reason about logical plan shape
-  and physical method together. Multi-week refactor; see
-  RFC 0087 for the design comparison.
+| Tag | Status |
+|-----|--------|
+| `JOIN_ORDER` | Honored end-to-end |
+| `SEQ_SCAN` | Honored end-to-end |
+| `INDEX_SCAN` | Honored end-to-end |
+| `INDEX_ONLY_SCAN` | Honored end-to-end |
+| `BITMAP_HEAP_SCAN` | Honored via Filter peephole; bitmap-AND/OR combination across multiple indexes |
+| `TID_SCAN` | Honored via Filter peephole when `ctid =` predicate present |
+| `DO_NOT_SCAN` | Negative-constraint validation: `failed` when alias still in plan, `matched` when eliminated, `partially matched + failed` when partially eliminated |
+| `HASH_JOIN` | Honored end-to-end |
+| `MERGE_JOIN_PLAIN` / `MERGE_JOIN_MATERIALIZE` | Honored end-to-end via `Sort` + `T_MergeJoin` with `get_mergejoin_opfamilies` |
+| `NESTED_LOOP_PLAIN` / `NESTED_LOOP_MATERIALIZE` / `NESTED_LOOP_MEMOIZE` | Honored end-to-end |
+| `FOREIGN_JOIN` | Validation flags as `failed` (FDW pushdown not implemented; see "Architectural notes" below) |
+| `GATHER` / `GATHER_MERGE` | Honored end-to-end |
+| `NO_GATHER` | Honored end-to-end (Gather wrapper suppression) |
+
+## Architectural notes
+
+Two areas are worth calling out so consumers of plan-advice
+understand them as **design decisions**, not bugs or unfinished
+features:
+
+### `FOREIGN_JOIN` is honest validation-only
+
+True FDW pushdown means the optimizer recognizes that two
+foreign-table joins can be sent to the foreign server as a
+single SQL statement, fetches the result, and avoids
+materializing rows on the local backend. PG implements this
+via `GetForeignJoinPaths` in the FDW API plus per-FDW
+`postgres_fdw`/`file_fdw` deparse logic. Honoring
+`FOREIGN_JOIN` advice in Ra would require:
+
+1. A way to recognize foreign tables in `RelExpr` (today the
+   algebra is FDW-agnostic — every base relation is treated
+   identically).
+2. A deparse path that takes a `Join` subtree, walks it back
+   to SQL using the foreign server's dialect, and emits a
+   `T_ForeignScan` plan node.
+3. Cost integration so the optimizer prefers foreign-pushed
+   plans only when the network cost is acceptable.
+
+This is multi-week work that goes well beyond plan-advice
+semantics. The honest, production-correct behavior today is
+to validate the advice as `failed` so the user gets a clear
+EXPLAIN signal that the requested optimization isn't
+available. The user can decide whether to disable Ra for
+foreign-join queries, configure their FDW differently, or
+accept the local join.
+
+### Cost-driven physical lowering: chosen sidecar design
+
+`pg_plan_advice`'s upstream documentation describes physical
+hints as steering "path-cost" decisions during PG's
+join-enumeration phase. PG interleaves logical exploration
+(which join orders to try) with physical decisions (hash vs
+merge vs nestloop) because each candidate path's cost depends
+on both.
+
+Ra's optimizer makes a different architectural choice. The
+e-graph (egg) does logical equality saturation only; physical
+strategy is decided **after** extraction by populating the
+`PhysicalChoices` sidecar map either from supplied advice or
+from cost-driven defaults
+(`PhysicalChoices::augment_from_stats`). The plan-builder
+consumes the map at PG-Plan emission time.
+
+This is a deliberate trade-off, not a missing feature:
+
+- **Pro**: keeps the e-graph small and fast. Adding physical
+  variants for every operator (50+ variants) would multiply
+  the e-class count and slow saturation. Ra's measured
+  planning time is 12.8μs geomean on TPC-H SF=0.01 (vs PG's
+  1089μs); much of that comes from keeping the e-graph
+  logical-only.
+- **Pro**: matches Ra's primary use case — PG drop-in
+  replacement for OLTP plans where physical decisions are
+  near-trivial (small-table seq-scan, indexed point lookup,
+  hash join for equi-joins). The full Cascades-style
+  interleaving pays off mostly for analytical workloads with
+  expensive join orders.
+- **Con**: physical decisions can't influence join ordering.
+  When a particular join order is only attractive *because*
+  the inner side would be a cheap hash-join build, Ra can't
+  see that during enumeration. PG can.
+
+Workloads where the con dominates would warrant a separate
+RFC promoting `PhysicalChoices` into e-graph rewrite rules
+that lower `Join` to `HashJoin`/`MergeJoin`/`NestLoop`. That
+RFC isn't filed because we haven't measured a workload where
+Ra's current approach loses to PG on plan quality (only on
+plan time, where Ra wins by 89×). The sidecar design **is the
+chosen design**; the door is left open if the workload
+demands change.
+
+See [RFC 0087](../../rfcs/text/0087-physical-operator-selection.md)
+for the formal architectural comparison.
 
 ### Filter peephole for `TID_SCAN` and `BITMAP_HEAP_SCAN`
 

@@ -80,6 +80,31 @@ fn classify_item(
     aliases_in_plan: &HashSet<String>,
 ) -> FeedbackFlags {
     let identifiers = collect_target_identifiers(&item.targets);
+
+    // Two tags require special-case handling because their
+    // semantics aren't "produce a plan that touches these
+    // aliases":
+    //
+    // - DO_NOT_SCAN(t): a *negative* constraint. If the alias
+    //   appears in the produced plan as a base scan, the
+    //   advice has FAILED (the optimizer didn't manage to
+    //   eliminate the scan). If the alias is absent the
+    //   advice is fully matched.
+    //
+    // - FOREIGN_JOIN(left right): requires FDW pushdown,
+    //   which Ra doesn't implement. The advice is always
+    //   FAILED at this layer; the user gets honest feedback
+    //   that the requested optimization isn't available.
+    match item.tag {
+        ra_plan_advice::AdviceTag::DoNotScan => {
+            return classify_do_not_scan(&identifiers, aliases_in_plan);
+        }
+        ra_plan_advice::AdviceTag::ForeignJoin => {
+            return classify_foreign_join(&identifiers, aliases_in_plan);
+        }
+        _ => {}
+    }
+
     if identifiers.is_empty() {
         // Empty target list (legal for everything except
         // JOIN_ORDER) — neither matches nor not-matches.
@@ -118,6 +143,65 @@ fn classify_item(
         }
     }
     flags
+}
+
+/// Classify a `DO_NOT_SCAN(...)` item. Negative constraint:
+/// success means none of the targets appear as base scans in
+/// the plan; partial success means some appear and some don't;
+/// any presence is FAILED.
+fn classify_do_not_scan(
+    identifiers: &[String],
+    aliases_in_plan: &HashSet<String>,
+) -> FeedbackFlags {
+    if identifiers.is_empty() {
+        return FeedbackFlags::empty();
+    }
+    let total = identifiers.len();
+    let still_present = identifiers
+        .iter()
+        .filter(|id| aliases_in_plan.contains(id.as_str()))
+        .count();
+
+    if still_present == 0 {
+        // Every targeted alias was eliminated from the plan —
+        // the advice was honored.
+        FeedbackFlags::empty()
+            .with(FeedbackFlags::MATCH_PARTIAL)
+            .with(FeedbackFlags::MATCH_FULL)
+    } else if still_present == total {
+        // All targeted aliases still in the plan. The advice
+        // could not be honored at all. Mark FAILED so EXPLAIN
+        // shows the failure clearly.
+        FeedbackFlags::empty().with(FeedbackFlags::FAILED)
+    } else {
+        // Some eliminated, some remaining: partially honored.
+        FeedbackFlags::empty()
+            .with(FeedbackFlags::MATCH_PARTIAL)
+            .with(FeedbackFlags::FAILED)
+    }
+}
+
+/// Classify a `FOREIGN_JOIN(...)` item. Ra does not implement
+/// FDW pushdown, so this advice is always FAILED at this
+/// layer. We still set `MATCH_PARTIAL` when the alias is in the
+/// plan so the user sees that we *recognize* the targets.
+fn classify_foreign_join(
+    identifiers: &[String],
+    aliases_in_plan: &HashSet<String>,
+) -> FeedbackFlags {
+    if identifiers.is_empty() {
+        return FeedbackFlags::empty().with(FeedbackFlags::FAILED);
+    }
+    let any_present = identifiers
+        .iter()
+        .any(|id| aliases_in_plan.contains(id.as_str()));
+    if any_present {
+        FeedbackFlags::empty()
+            .with(FeedbackFlags::MATCH_PARTIAL)
+            .with(FeedbackFlags::FAILED)
+    } else {
+        FeedbackFlags::empty().with(FeedbackFlags::FAILED)
+    }
 }
 
 /// Collect every base-scan alias reachable from `expr`.
@@ -294,5 +378,73 @@ mod tests {
         let fb = validate_advice(&advice, &plan);
         assert!(fb[0].flags.contains(FeedbackFlags::MATCH_FULL));
         assert!(!fb[0].flags.contains(FeedbackFlags::FAILED));
+    }
+
+    #[test]
+    fn do_not_scan_failed_when_alias_still_in_plan() {
+        // DO_NOT_SCAN(t) with `t` reachable from the plan as
+        // a base scan: the optimizer didn't manage to
+        // eliminate it. FAILED should be set; MATCH_PARTIAL
+        // and MATCH_FULL should NOT be set since the advice
+        // wasn't honored.
+        let plan = scan("t");
+        let advice = parse_advice("DO_NOT_SCAN(t)").unwrap();
+        let fb = validate_advice(&advice, &plan);
+        assert!(fb[0].flags.contains(FeedbackFlags::FAILED));
+        assert!(!fb[0].flags.contains(FeedbackFlags::MATCH_FULL));
+        assert!(!fb[0].flags.contains(FeedbackFlags::MATCH_PARTIAL));
+    }
+
+    #[test]
+    fn do_not_scan_matched_when_alias_eliminated() {
+        // DO_NOT_SCAN(t) with `t` NOT in the plan: the
+        // optimizer eliminated the scan (e.g. join elimination
+        // or the user gave up the column). MATCH_FULL set,
+        // FAILED clear.
+        let plan = scan("u");
+        let advice = parse_advice("DO_NOT_SCAN(t)").unwrap();
+        let fb = validate_advice(&advice, &plan);
+        assert!(fb[0].flags.contains(FeedbackFlags::MATCH_FULL));
+        assert!(!fb[0].flags.contains(FeedbackFlags::FAILED));
+    }
+
+    #[test]
+    fn do_not_scan_partial_when_some_aliases_eliminated() {
+        // DO_NOT_SCAN(s t) with only `s` eliminated. FAILED
+        // and MATCH_PARTIAL set; MATCH_FULL clear.
+        let plan = scan("t");
+        let advice = parse_advice("DO_NOT_SCAN(s t)").unwrap();
+        let fb = validate_advice(&advice, &plan);
+        assert!(fb[0].flags.contains(FeedbackFlags::FAILED));
+        assert!(fb[0].flags.contains(FeedbackFlags::MATCH_PARTIAL));
+        assert!(!fb[0].flags.contains(FeedbackFlags::MATCH_FULL));
+    }
+
+    #[test]
+    fn foreign_join_always_failed() {
+        // FOREIGN_JOIN requires FDW pushdown which Ra doesn't
+        // implement. The advice is always FAILED at this layer.
+        // Syntax: FOREIGN_JOIN((a b)) — the sublist groups
+        // the relations to be foreign-joined together.
+        let plan = eq_join(scan("a"), scan("b"), "a", "b");
+        let advice = parse_advice("FOREIGN_JOIN((a b))").unwrap();
+        let fb = validate_advice(&advice, &plan);
+        assert!(fb[0].flags.contains(FeedbackFlags::FAILED));
+        // Aliases are present so we mark MATCH_PARTIAL to
+        // tell the user "we recognized the targets, just
+        // can't honor the advice".
+        assert!(fb[0].flags.contains(FeedbackFlags::MATCH_PARTIAL));
+        assert!(!fb[0].flags.contains(FeedbackFlags::MATCH_FULL));
+    }
+
+    #[test]
+    fn foreign_join_failed_with_unknown_aliases() {
+        // FOREIGN_JOIN with aliases that don't exist in the
+        // plan: still FAILED but no MATCH_PARTIAL.
+        let plan = scan("c");
+        let advice = parse_advice("FOREIGN_JOIN((a b))").unwrap();
+        let fb = validate_advice(&advice, &plan);
+        assert!(fb[0].flags.contains(FeedbackFlags::FAILED));
+        assert!(!fb[0].flags.contains(FeedbackFlags::MATCH_PARTIAL));
     }
 }

@@ -603,10 +603,26 @@ impl PlanBuilder {
     }
 
     /// Honor `BITMAP_HEAP_SCAN` advice by synthesizing a
-    /// `BitmapIndexScan` -> `BitmapHeapScan` pair when the
-    /// supplied filter predicate has an equality on a column
-    /// covered by an available index. Returns `Err(reason)`
-    /// otherwise so the caller can fall back.
+    /// Honor `BITMAP_HEAP_SCAN` advice by synthesizing a
+    /// bitmap subplan + `BitmapHeapScan` when the supplied
+    /// filter predicate has equality on at least one indexed
+    /// column. Returns `Err(reason)` otherwise so the caller
+    /// can fall back.
+    ///
+    /// The bitmap subplan handles three shapes:
+    /// 1. Single equi-clause (`a = X`): a single
+    ///    `BitmapIndexScan` covering one index.
+    /// 2. AND-of-equi-clauses (`a = X AND b = Y`) with each
+    ///    side having its own index: a `BitmapAnd` wrapping
+    ///    the per-side `BitmapIndexScan`s.
+    /// 3. OR-of-equi-clauses (`a = X OR b = Y`) with each
+    ///    side having its own index: a `BitmapOr` wrapping
+    ///    the per-side `BitmapIndexScan`s.
+    /// Mixed shapes (some sides with index, some without)
+    /// fall back to the most-coverable single index, mirroring
+    /// PG's behavior of only including bitmap-eligible quals
+    /// in the bitmap and re-checking the rest via
+    /// `bitmapqualorig`.
     unsafe fn build_bitmap_heap_for_filter(
         &mut self,
         table: &str,
@@ -618,30 +634,179 @@ impl PlanBuilder {
         let rtindex = self
             .rtindex_for(table)
             .map_err(|e| format!("rtindex resolution failed: {e}"))?;
-        // Find a column the predicate touches via equality
-        // and that has an index — this is what makes a bitmap
-        // scan applicable.
-        let eq_columns = collect_eq_columns_for_table(predicate, table);
-        if eq_columns.is_empty() {
-            return Err("no equality predicate on a column".to_string());
-        }
-        // Use index_resolver to map the column to an index.
-        let mut chosen: Option<crate::index_resolver::IndexInfo> = None;
-        for col in &eq_columns {
-            if let Some(info) = crate::index_resolver::resolve_index(rel_oid, col) {
-                chosen = Some(info);
-                break;
-            }
-        }
-        let Some(idx_info) = chosen else {
-            return Err("no index covers the predicate columns".to_string());
-        };
-        let pg_expr = expr_translator::translate(predicate, &self.expr_ctx);
-        if pg_expr.is_null() {
-            return Err("predicate translation produced null".to_string());
+
+        // Build the bitmap subplan from the predicate's
+        // top-level structure.
+        let bitmap_input =
+            self.build_bitmap_source(predicate, rel_oid, rtindex)?;
+
+        // The full filter predicate also goes into
+        // `bitmapqualorig` so the executor re-checks any
+        // tuples produced by lossy bitmap pages and any
+        // un-bitmappable clauses.
+        let pg_full_pred = expr_translator::translate(predicate, &self.expr_ctx);
+        if pg_full_pred.is_null() {
+            return Err("filter predicate translation produced null".to_string());
         }
 
-        // Build BitmapIndexScan as the inner bitmap source.
+        let bhs = self.alloc_node::<pg_sys::BitmapHeapScan>();
+        if bhs.is_null() {
+            return Err("BitmapHeapScan allocation returned null".to_string());
+        }
+        (*bhs).scan.plan.type_ = pg_sys::NodeTag::T_BitmapHeapScan;
+        (*bhs).scan.scanrelid = rtindex;
+        (*bhs).scan.plan.lefttree = bitmap_input;
+        (*bhs).bitmapqualorig =
+            pg_sys::lappend((*bhs).bitmapqualorig, pg_full_pred.cast());
+        self.set_index_costs(&mut (*bhs).scan.plan, table, 0.1);
+        debug!(
+            table = %table,
+            "BITMAP_HEAP_SCAN advice honored",
+        );
+        Ok(&mut (*bhs).scan.plan as *mut pg_sys::Plan)
+    }
+
+    /// Construct a bitmap-producing plan node for `predicate`.
+    /// Walks AND/OR top-level structure to emit `BitmapAnd` /
+    /// `BitmapOr` over per-clause `BitmapIndexScan`s. Returns
+    /// `Err(reason)` if no bitmap source can be built.
+    unsafe fn build_bitmap_source(
+        &mut self,
+        predicate: &Expr,
+        rel_oid: pg_sys::Oid,
+        rtindex: pg_sys::Index,
+    ) -> Result<*mut pg_sys::Plan, String> {
+        use ra_core::expr::BinOp as RaBinOp;
+        match predicate {
+            Expr::BinOp { op: RaBinOp::And, left, right } => {
+                self.build_bitmap_combined(
+                    &[left.as_ref(), right.as_ref()],
+                    rel_oid,
+                    rtindex,
+                    /* is_and */ true,
+                )
+            }
+            Expr::BinOp { op: RaBinOp::Or, left, right } => {
+                self.build_bitmap_combined(
+                    &[left.as_ref(), right.as_ref()],
+                    rel_oid,
+                    rtindex,
+                    /* is_and */ false,
+                )
+            }
+            _ => self.build_single_bitmap_index_scan(predicate, rel_oid, rtindex),
+        }
+    }
+
+    /// Build a `BitmapAnd` (when `is_and == true`) or
+    /// `BitmapOr` (when `is_and == false`) wrapping the per-
+    /// clause bitmap subplans. Sub-clauses without a useful
+    /// index are dropped from the bitmap (they get re-checked
+    /// in `bitmapqualorig`); for AND this is correct PG
+    /// semantics. For OR a missing-index clause means the
+    /// entire bitmap is unsound — we collapse to whichever
+    /// side has an index, or fail if neither does.
+    unsafe fn build_bitmap_combined(
+        &mut self,
+        clauses: &[&Expr],
+        rel_oid: pg_sys::Oid,
+        rtindex: pg_sys::Index,
+        is_and: bool,
+    ) -> Result<*mut pg_sys::Plan, String> {
+        let mut bitmap_subplans: *mut pg_sys::List = std::ptr::null_mut();
+        let mut count = 0usize;
+        let mut covered = 0usize;
+        for clause in clauses {
+            count += 1;
+            match self.build_bitmap_source(clause, rel_oid, rtindex) {
+                Ok(sub) => {
+                    bitmap_subplans = pg_sys::lappend(bitmap_subplans, sub.cast());
+                    covered += 1;
+                }
+                Err(_) => {
+                    if !is_and {
+                        // OR with un-bitmappable clause: the
+                        // entire bitmap can't safely represent
+                        // the disjunction. Bail out so the
+                        // outer caller falls back.
+                        return Err(
+                            "OR clause has un-bitmappable side; cannot combine".to_string(),
+                        );
+                    }
+                    // AND with un-bitmappable clause: skip it,
+                    // bitmapqualorig will re-check.
+                }
+            }
+        }
+        if covered == 0 {
+            return Err("no clauses had a useful index".to_string());
+        }
+        if covered == 1 {
+            // Single covered clause: unwrap the singleton
+            // list and return it directly. Avoids an unnecessary
+            // BitmapAnd/Or wrapper.
+            return Ok(pg_sys::list_nth(bitmap_subplans, 0).cast::<pg_sys::Plan>());
+        }
+        if is_and {
+            let node = self.alloc_node::<pg_sys::BitmapAnd>();
+            if node.is_null() {
+                return Err("BitmapAnd allocation returned null".to_string());
+            }
+            (*node).plan.type_ = pg_sys::NodeTag::T_BitmapAnd;
+            (*node).bitmapplans = bitmap_subplans;
+            // Cost ~ sum of children, conservatively.
+            (*node).plan.startup_cost = 0.0;
+            (*node).plan.total_cost = (covered as f64) * 0.5;
+            (*node).plan.plan_rows = 1.0;
+            (*node).plan.plan_width = 0;
+            debug!(
+                clauses = count,
+                covered = covered,
+                "BitmapAnd: combining multi-index bitmap inputs",
+            );
+            Ok(&mut (*node).plan as *mut pg_sys::Plan)
+        } else {
+            let node = self.alloc_node::<pg_sys::BitmapOr>();
+            if node.is_null() {
+                return Err("BitmapOr allocation returned null".to_string());
+            }
+            (*node).plan.type_ = pg_sys::NodeTag::T_BitmapOr;
+            (*node).bitmapplans = bitmap_subplans;
+            (*node).plan.startup_cost = 0.0;
+            (*node).plan.total_cost = (covered as f64) * 0.5;
+            (*node).plan.plan_rows = 1.0;
+            (*node).plan.plan_width = 0;
+            debug!(
+                clauses = count,
+                covered = covered,
+                "BitmapOr: combining multi-index bitmap inputs",
+            );
+            Ok(&mut (*node).plan as *mut pg_sys::Plan)
+        }
+    }
+
+    /// Build a single `BitmapIndexScan` for a leaf-equality
+    /// predicate. Returns `Err(reason)` if the clause isn't a
+    /// column-equality test or no index covers it.
+    unsafe fn build_single_bitmap_index_scan(
+        &mut self,
+        clause: &Expr,
+        rel_oid: pg_sys::Oid,
+        rtindex: pg_sys::Index,
+    ) -> Result<*mut pg_sys::Plan, String> {
+        // Look at the leaf clause: must be `Column = Const`
+        // (or symmetric) on a column with an index.
+        let column = leaf_eq_column(clause)
+            .ok_or_else(|| "clause is not a column-equality test".to_string())?;
+        if column.eq_ignore_ascii_case("ctid") {
+            return Err("ctid clause routed via TID_SCAN".to_string());
+        }
+        let idx_info = crate::index_resolver::resolve_index(rel_oid, column)
+            .ok_or_else(|| format!("no index covers column `{column}`"))?;
+        let pg_expr = expr_translator::translate(clause, &self.expr_ctx);
+        if pg_expr.is_null() {
+            return Err("clause translation produced null".to_string());
+        }
         let bis = self.alloc_node::<pg_sys::BitmapIndexScan>();
         if bis.is_null() {
             return Err("BitmapIndexScan allocation returned null".to_string());
@@ -649,35 +814,13 @@ impl PlanBuilder {
         (*bis).scan.plan.type_ = pg_sys::NodeTag::T_BitmapIndexScan;
         (*bis).scan.scanrelid = rtindex;
         (*bis).indexid = idx_info.oid;
-        // PG expects the index quals on this node. The same
-        // expression is also used for re-checking on the heap
-        // scan side (lossy bitmap detection).
         (*bis).indexqual = pg_sys::lappend((*bis).indexqual, pg_expr.cast());
         (*bis).indexqualorig = pg_sys::lappend((*bis).indexqualorig, pg_expr.cast());
         (*bis).scan.plan.startup_cost = 0.0;
         (*bis).scan.plan.total_cost = 0.5;
         (*bis).scan.plan.plan_rows = 1.0;
         (*bis).scan.plan.plan_width = 0;
-
-        // Build BitmapHeapScan wrapping the BitmapIndexScan.
-        let bhs = self.alloc_node::<pg_sys::BitmapHeapScan>();
-        if bhs.is_null() {
-            return Err("BitmapHeapScan allocation returned null".to_string());
-        }
-        (*bhs).scan.plan.type_ = pg_sys::NodeTag::T_BitmapHeapScan;
-        (*bhs).scan.scanrelid = rtindex;
-        (*bhs).scan.plan.lefttree = &mut (*bis).scan.plan as *mut pg_sys::Plan;
-        // bitmapqualorig retains the original predicate for
-        // executor re-check on lossy-bitmap pages.
-        (*bhs).bitmapqualorig =
-            pg_sys::lappend((*bhs).bitmapqualorig, pg_expr.cast());
-        self.set_index_costs(&mut (*bhs).scan.plan, table, 0.1);
-        debug!(
-            table = %table,
-            index_oid = idx_info.oid.to_u32(),
-            "BITMAP_HEAP_SCAN advice honored",
-        );
-        Ok(&mut (*bhs).scan.plan as *mut pg_sys::Plan)
+        Ok(&mut (*bis).scan.plan as *mut pg_sys::Plan)
     }
 
     /// Build an `IndexScan` node for MIN/MAX index optimization.
@@ -2569,6 +2712,25 @@ fn as_named_column(e: &Expr) -> Option<&str> {
     }
 }
 
+/// Extract the column name from a leaf equality clause
+/// `Column = Expr` (or `Expr = Column`). Returns `None` for
+/// non-equality, two-column-side, or two-non-column-side
+/// shapes. Used by the bitmap-source builder to decide
+/// whether a leaf clause is bitmap-eligible.
+fn leaf_eq_column(clause: &Expr) -> Option<&str> {
+    use ra_core::expr::BinOp as RaBinOp;
+    if let Expr::BinOp { op: RaBinOp::Eq, left, right } = clause {
+        let l = as_named_column(left);
+        let r = as_named_column(right);
+        match (l, r) {
+            (Some(c), None) | (None, Some(c)) => Some(c),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 /// Walk a [`RelExpr`] subtree and return the leaf-most alias
 /// reachable on the left-most-then-deepest path. Used to identify
 /// the inner-side alias for join-method advice lookup: PG's
@@ -2849,7 +3011,7 @@ mod leaf_alias_tests {
 mod helpers_tests {
     use super::{
         collect_aliases, collect_eq_columns_for_table, collect_equi_pairs,
-        predicate_references_ctid,
+        leaf_eq_column, predicate_references_ctid,
     };
     use ra_core::algebra::{JoinType, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
@@ -3032,5 +3194,66 @@ mod helpers_tests {
         assert_eq!(cols, vec!["id".to_string()]);
         // Avoid unused-import lint when scan() helper isn't exercised.
         let _ = scan("t");
+    }
+}
+
+#[cfg(test)]
+mod bitmap_helper_tests {
+    use super::leaf_eq_column;
+    use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+
+    fn col_eq_const(col: &str, v: i64) -> Expr {
+        Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new(col))),
+            right: Box::new(Expr::Const(Const::Int(v))),
+        }
+    }
+
+    #[test]
+    fn leaf_eq_column_extracts_lhs_column() {
+        assert_eq!(leaf_eq_column(&col_eq_const("id", 5)), Some("id"));
+    }
+
+    #[test]
+    fn leaf_eq_column_extracts_rhs_column() {
+        let p = Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Const(Const::Int(5))),
+            right: Box::new(Expr::Column(ColumnRef::new("id"))),
+        };
+        assert_eq!(leaf_eq_column(&p), Some("id"));
+    }
+
+    #[test]
+    fn leaf_eq_column_rejects_two_columns() {
+        let p = Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("a"))),
+            right: Box::new(Expr::Column(ColumnRef::new("b"))),
+        };
+        assert_eq!(leaf_eq_column(&p), None);
+    }
+
+    #[test]
+    fn leaf_eq_column_rejects_non_eq_op() {
+        let p = Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Const(Const::Int(5))),
+        };
+        assert_eq!(leaf_eq_column(&p), None);
+    }
+
+    #[test]
+    fn leaf_eq_column_rejects_compound_predicate() {
+        // AND-of-equalities is not a leaf — caller should
+        // walk the structure first.
+        let p = Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(col_eq_const("a", 1)),
+            right: Box::new(col_eq_const("b", 2)),
+        };
+        assert_eq!(leaf_eq_column(&p), None);
     }
 }
