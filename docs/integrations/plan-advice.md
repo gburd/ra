@@ -20,10 +20,13 @@ parser unchanged and vice versa.
 | Honor advice in Ra's optimizer (`OptimizerConfig.plan_advice`) | **Done** for `JOIN_ORDER`; scan-method tags parsed but not gated (RelExpr is logical-only) |
 | Round-trip oracle test (parallel to PG's `test_plan_advice`) | **Done** (`crates/ra-engine/tests/plan_advice_round_trip.rs`) |
 | Validate produced plan and compute `FeedbackFlags` | **Done** (`ra_engine::plan_advice_validate::validate_advice`) |
+| `Cost::DISABLE_PENALTY` for plans that violate supplied advice | **Done** (`ra_engine::Optimizer::apply_plan_advice_penalty`) — adds `1e10` per `FAILED` item to the produced cost, matching PG's `disable_cost` behavior |
+| Per-relation physical-strategy preferences (`PhysicalChoices`) | **Done** — scan-method, join-method, and parallelism advice compile to a typed map exposed on `OptimizationResult.physical_choices` |
 | PG extension GUCs (`ra_planner.plan_advice`, ...) | **Done** |
 | `pg_plan_advice.advice` GUC compatibility shim | **Done** (registers under both names; the upstream name wins when set) |
 | `EXPLAIN (PLAN_ADVICE)` registration via `RegisterExtensionExplainOption` | **Done** (raw FFI; renders supplied advice with feedback flags) |
-| `Generated Plan Advice:` block in EXPLAIN output | **Done** — `plan_advice_emit::emit_advice` runs in the planner hook and the rendered string is retrieved by the explain hook via a session-local pointer-keyed stash |
+| `Generated Plan Advice:` block in EXPLAIN output | **Done** — emit runs in the planner hook; explain hook reads via session-local stash |
+| `ra-pg-extension` plan-builder consumption of `PhysicalChoices` | **Not yet** — derived choices are logged but `plan_builder.rs` doesn't yet pick `IndexScan` vs `SeqScan` based on the map |
 
 The first three rows are what shipped in
 [commit 8aef6a13](https://codeberg.org/gregburd/ra/commit/8aef6a13).
@@ -116,17 +119,19 @@ The
 [port plan](../research/pg-plan-advice-port.md)
 documents the remaining work:
 
-- **Cost-extraction penalty for advice violations.** Today's
-  honor layer demotes rule groups; a follow-up should add a
-  `disable_cost`-style penalty in cost extraction so plans that
-  still violate the advice (because no rule could honor it)
-  surface as `Disabled: true`-equivalent, mirroring PG's
-  fallback behavior exactly.
-- **Physical operators in `RelExpr`.** Once Ra distinguishes
-  `IndexScan` from `SeqScan` (etc.), the existing scan-method
-  advice tags can be wired to gate rules and validate plans the
-  same way `JOIN_ORDER` already is. Today they're parsed and
-  stored on `PlanProvenance` but don't constrain extraction.
+- **`ra-pg-extension` plan-builder consumption of `PhysicalChoices`.**
+  The optimizer now produces `OptimizationResult.physical_choices`
+  with per-relation preferences derived from supplied scan-method,
+  join-method, and parallelism advice. The PG plan-builder
+  (`crates/ra-pg-extension/src/plan_builder.rs`) doesn't yet read
+  this map; wiring it lets `INDEX_SCAN(t i)` actually steer the
+  produced PG `Plan` node toward `IndexScan` instead of `SeqScan`.
+  Today the choices are logged and available to the caller but
+  don't affect the produced plan tree.
+- **Physical operators in `RelExpr`.** Ra-side scan-method
+  honoring (without going through PG's plan_builder) requires
+  Ra to distinguish `IndexScan` from `SeqScan` etc. at the
+  `RelExpr` level. That's a multi-week refactor of `ra-core`.
 
 ## See also
 

@@ -77,6 +77,7 @@ pub mod join_graph;
 pub mod join_graph_shape;
 pub mod plan_advice_emit;
 pub mod plan_advice_honor;
+pub mod plan_advice_physical;
 pub mod plan_advice_validate;
 pub mod join_transformations;
 pub mod large_join;

@@ -386,6 +386,70 @@ impl Optimizer {
         kept
     }
 
+    /// Validate the extracted plan against supplied advice and
+    /// add `Cost::DISABLE_PENALTY` per failed advice item.
+    ///
+    /// Mirrors `PostgreSQL`'s `disable_cost` accumulation in
+    /// `cost_*` functions: when an extracted plan can't honor
+    /// the user's request (e.g. they asked for `JOIN_ORDER(a b
+    /// c)` but the join graph forces a different order), the
+    /// plan still extracts but its cost is bumped by a large
+    /// constant, matching PG's `Disabled: true` pattern of
+    /// "valid but undesirable, retain as fallback only".
+    ///
+    /// Returns the input cost unchanged when no advice was
+    /// supplied or when the supplied advice parses but no item
+    /// fails validation.
+    fn apply_plan_advice_penalty(&self, plan: &RelExpr, cost: f64) -> f64 {
+        let Some(advice_str) = self.config.plan_advice.as_deref() else {
+            return cost;
+        };
+        if advice_str.is_empty() {
+            return cost;
+        }
+        let Ok(advice) = ra_plan_advice::parse_advice(advice_str) else {
+            // Already warned in the filter pass.
+            return cost;
+        };
+        let feedback = crate::plan_advice_validate::validate_advice(&advice, plan);
+        let n_failed = feedback
+            .iter()
+            .filter(|fb| {
+                fb.flags.contains(
+                    ra_plan_advice::feedback::FeedbackFlags::FAILED,
+                )
+            })
+            .count();
+        if n_failed == 0 {
+            return cost;
+        }
+        let penalty = (n_failed as f64) * ra_core::cost::Cost::DISABLE_PENALTY;
+        tracing::debug!(
+            n_failed,
+            penalty,
+            "plan-advice: applying disable penalty for failed items",
+        );
+        cost + penalty
+    }
+
+    /// Compile per-relation physical-strategy preferences from
+    /// supplied plan advice. Returns an empty
+    /// [`crate::plan_advice_physical::PhysicalChoices`] when no
+    /// advice was supplied or the advice doesn't contain any
+    /// scan-method, join-method, or parallelism tags.
+    fn compile_physical_choices(&self) -> crate::plan_advice_physical::PhysicalChoices {
+        let Some(advice_str) = self.config.plan_advice.as_deref() else {
+            return crate::plan_advice_physical::PhysicalChoices::new();
+        };
+        if advice_str.is_empty() {
+            return crate::plan_advice_physical::PhysicalChoices::new();
+        }
+        match ra_plan_advice::parse_advice(advice_str) {
+            Ok(advice) => crate::plan_advice_physical::PhysicalChoices::from_advice(&advice),
+            Err(_) => crate::plan_advice_physical::PhysicalChoices::new(),
+        }
+    }
+
     /// Set a resource budget for bounded optimization.
     pub fn set_resource_budget(&mut self, budget: ResourceBudget) {
         self.resource_budget = Some(budget);
@@ -1885,15 +1949,29 @@ impl Optimizer {
         );
 
         match best_plan {
-            Some(plan) => Ok(OptimizationResult {
-                plan,
-                cost: best_cost,
-                status,
-                resource_usage: report,
-                applied_rules: None,
-                rule_tracking: None,
-                provenance: Some(provenance),
-            }),
+            Some(plan) => {
+                // If supplied advice is in effect, validate the
+                // extracted plan against it and add
+                // [`Cost::DISABLE_PENALTY`] per FAILED item.
+                // Mirrors PostgreSQL's `disable_cost` accumulation
+                // for plans that the user wanted to constrain
+                // but no rule could honor.
+                let cost = self.apply_plan_advice_penalty(&plan, best_cost);
+                // Compile per-relation physical-strategy
+                // preferences from the supplied advice. Empty
+                // when no advice or no scan/join-method tags.
+                let choices = self.compile_physical_choices();
+                Ok(OptimizationResult {
+                    plan,
+                    cost,
+                    status,
+                    resource_usage: report,
+                    applied_rules: None,
+                    rule_tracking: None,
+                    provenance: Some(provenance),
+                    physical_choices: choices,
+                })
+            }
             None => Err(EGraphError::ExtractionError(
                 "no plan could be extracted".to_owned(),
             )),
@@ -2101,6 +2179,7 @@ impl Optimizer {
                 applied_rules: None,
                 rule_tracking: Some(tracking),
                 provenance: None,
+                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
             }),
             None => Err(EGraphError::ExtractionError(
                 "no plan could be extracted".to_owned(),
@@ -2278,6 +2357,7 @@ fn handle_overflow_with_tracking(
                 applied_rules: None,
                 rule_tracking,
                 provenance: None,
+                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
             }),
             None => Ok(OptimizationResult {
                 plan: original.clone(),
@@ -2287,6 +2367,7 @@ fn handle_overflow_with_tracking(
                 applied_rules: None,
                 rule_tracking,
                 provenance: None,
+                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
             }),
         },
         OverflowStrategy::ReturnOriginal => Ok(OptimizationResult {
@@ -2297,6 +2378,7 @@ fn handle_overflow_with_tracking(
             applied_rules: None,
             rule_tracking,
             provenance: None,
+                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
         }),
         OverflowStrategy::Fail => {
             let exceeded = report

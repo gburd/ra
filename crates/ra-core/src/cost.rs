@@ -58,6 +58,20 @@ impl Cost {
         startup_network: 0.0,
     };
 
+    /// Penalty added to the CPU component when a plan violates
+    /// supplied advice — the optimizer's "this plan should be a
+    /// last resort" signal.
+    ///
+    /// Mirrors `PostgreSQL`'s `disable_cost` constant
+    /// (`src/include/optimizer/cost.h`). The intent is the same:
+    /// when an extracted plan can't honor advice, mark it
+    /// effectively unattractive without removing it from the
+    /// search space — so a fallback exists when no compliant
+    /// plan can be produced. A query with multiple violations
+    /// adds the penalty per violation, mirroring how PG
+    /// accumulates the disabled-node count.
+    pub const DISABLE_PENALTY: f64 = 1.0e10;
+
     /// Create a new cost estimate with zero startup cost.
     ///
     /// This is the common case for pipelined operators (scans,

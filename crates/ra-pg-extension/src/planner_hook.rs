@@ -191,6 +191,24 @@ unsafe fn ra_planner_hook_inner(
         crate::plan_advice_explain::stash_generated_advice(planned_stmt, rendered);
     }
 
+    // Compile per-relation physical-strategy preferences from
+    // the supplied advice (if any). Today we log how many
+    // preferences were derived; future work in plan_builder
+    // will consume these to pick `IndexScan` vs `SeqScan` (etc.)
+    // when the user supplied a scan-method advice tag.
+    if let Some(advice_str) = crate::extension_state::effective_plan_advice() {
+        if let Ok(parsed) = ra_plan_advice::parse_advice(&advice_str) {
+            let choices = ra_engine::plan_advice_physical::PhysicalChoices::from_advice(&parsed);
+            if !choices.is_empty() {
+                tracing::debug!(
+                    n_choices = choices.len(),
+                    "ra-pg-extension: physical-strategy preferences derived from supplied advice; \
+                     plan_builder consumption is a follow-up",
+                );
+            }
+        }
+    }
+
     // ─── Timing log ───────────────────────────────────────────────────
     if log {
         pgrx::log!(

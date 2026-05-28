@@ -28,6 +28,16 @@ pub struct OptimizationResult {
     /// `None` when the optimization path didn't go through the
     /// e-graph (e.g. `OptRoute::Skip`).
     pub provenance: Option<PlanProvenance>,
+    /// Per-relation physical-strategy preferences derived from
+    /// supplied scan-method, join-method, and parallelism advice.
+    /// Empty when no such advice was supplied.
+    ///
+    /// Consumers (e.g. `ra-pg-extension`'s plan builder) read
+    /// this map at translation time to honor the user's
+    /// requested `INDEX_SCAN`/`HASH_JOIN`/`NO_GATHER`/etc. tags.
+    /// `RelExpr` itself is logical and doesn't carry physical
+    /// choices, so this sidecar is the canonical place for them.
+    pub physical_choices: crate::plan_advice_physical::PhysicalChoices,
 }
 
 /// Whether optimization completed within its budget.
