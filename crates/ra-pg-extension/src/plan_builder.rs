@@ -116,6 +116,14 @@ pub struct PlanBuilder {
     plan_rows: f64,
     /// Gathered catalog statistics per table, for realistic cost estimation.
     stats: HashMap<String, Statistics>,
+    /// Per-relation physical-strategy preferences derived from supplied
+    /// plan advice. Empty when no advice was supplied (or the supplied
+    /// advice contained no scan/join/parallel tags). Consulted in
+    /// [`Self::build_seq_scan`], [`Self::build_join`], and the
+    /// `Gather`-wrapping path so that `INDEX_SCAN(t i)` /
+    /// `HASH_JOIN(b)` / `NO_GATHER(t)` advice actually steers the
+    /// produced PG `Plan` tree.
+    physical_choices: ra_engine::plan_advice_physical::PhysicalChoices,
 }
 
 impl PlanBuilder {
@@ -157,7 +165,22 @@ impl PlanBuilder {
             total_cost: 0.0,
             plan_rows: 1.0,
             stats,
+            physical_choices: ra_engine::plan_advice_physical::PhysicalChoices::new(),
         }
+    }
+
+    /// Set the physical-strategy choices the builder should consult
+    /// when picking scan / join / parallelism methods. Must be set
+    /// before [`Self::build_planned_stmt`] is called.
+    ///
+    /// Pass an empty value (the default) to disable advice-driven
+    /// selection — the builder falls back to its default choices
+    /// (`SeqScan`, `HashJoin` for equi-joins, `NestLoop` otherwise).
+    pub fn set_physical_choices(
+        &mut self,
+        choices: ra_engine::plan_advice_physical::PhysicalChoices,
+    ) {
+        self.physical_choices = choices;
     }
 
     /// Build a complete `PlannedStmt` from an optimized `RelExpr` tree.
@@ -220,7 +243,9 @@ impl PlanBuilder {
     /// matching PostgreSQL's standard plan representation.
     unsafe fn build_plan(&mut self, expr: &RelExpr) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         match expr {
-            RelExpr::Scan { table, .. } => self.build_seq_scan(table),
+            RelExpr::Scan { table, alias } => {
+                self.build_scan_with_advice(table, alias.as_deref())
+            }
             RelExpr::Filter { predicate, input } => {
                 let child = self.build_plan(input)?;
                 let pg_expr = expr_translator::translate(predicate, &self.expr_ctx);
@@ -279,7 +304,26 @@ impl PlanBuilder {
                 input,
                 workers,
             } => self.build_parallel_aggregate(group_by, aggregates, input, *workers),
-            RelExpr::Gather { input, workers } => self.build_gather(input, *workers),
+            RelExpr::Gather { input, workers } => {
+                // Honor NO_GATHER advice on the input alias (if any):
+                // skip the Gather wrapper and return the inner plan
+                // directly, mirroring PG's behavior when
+                // pg_plan_advice's `NO_GATHER(t)` is in effect.
+                if let Some(alias) = leaf_alias(input) {
+                    use ra_engine::plan_advice_physical::ParallelStrategy;
+                    if matches!(
+                        self.physical_choices.parallel_for(&alias),
+                        Some(ParallelStrategy::NoGather)
+                    ) {
+                        debug!(
+                            alias = %alias,
+                            "NO_GATHER advice honored: skipping Gather wrapper",
+                        );
+                        return self.build_plan(input);
+                    }
+                }
+                self.build_gather(input, *workers)
+            }
             RelExpr::Distinct { input } => self.build_unique(input),
             RelExpr::Union { all, left, right } => self.build_set_op_union(*all, left, right),
             RelExpr::Intersect { all, left, right } => {
@@ -325,6 +369,123 @@ impl PlanBuilder {
     // -----------------------------------------------------------------------
     // Scan builders
     // -----------------------------------------------------------------------
+
+    /// Dispatch a `RelExpr::Scan` to the right scan-method based on
+    /// the supplied [`PhysicalChoices`][pc] map.
+    ///
+    /// Default behavior (no advice or alias not in the map) is
+    /// `SeqScan`. Advice tags drive the dispatch:
+    ///
+    /// | Advice for `alias` | Built node | Notes |
+    /// |---|---|---|
+    /// | `SEQ_SCAN(alias)` | `SeqScan` | Same as default |
+    /// | `INDEX_SCAN(alias name)` | `IndexScan` | Index resolved by name via [`crate::index_resolver::resolve_index_by_name`] |
+    /// | `INDEX_ONLY_SCAN(alias name)` | `IndexOnlyScan` | Index name passed through |
+    /// | `BITMAP_HEAP_SCAN(alias)` | `SeqScan` (fallback) | Bitmap heap scans need a bitmap subplan; supplying just the alias isn't enough to construct one. We log and fall back to seq-scan rather than synthesizing a bogus bitmap. |
+    /// | `TID_SCAN(alias)` | `SeqScan` (fallback) | TID scans require a `ctid` filter we don't have here. |
+    /// | `DO_NOT_SCAN(alias)` | `SeqScan` (fallback) | PG uses this for `AlternativeSubPlan` disambiguation Ra doesn't model. |
+    ///
+    /// [pc]: ra_engine::plan_advice_physical::PhysicalChoices
+    ///
+    /// When the advice asks for a scan method we can't currently
+    /// produce, we fall back to `SeqScan` so the query still runs.
+    /// The optimizer's [`Cost::DISABLE_PENALTY`] already applies in
+    /// `validate_advice` for these cases, so EXPLAIN output flags
+    /// the inapplicable advice.
+    unsafe fn build_scan_with_advice(
+        &mut self,
+        table: &str,
+        alias: Option<&str>,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        // Resolve the alias used in advice. Advice identifiers
+        // come from the SQL alias (or table name when no alias
+        // was provided), so we look up by alias first and fall
+        // back to the table name.
+        let lookup_alias = alias.unwrap_or(table);
+        // Clone the strategy to release the borrow on `self.physical_choices`
+        // before we recurse into other `&mut self` methods.
+        let strategy = self.physical_choices.scan_for(lookup_alias).cloned();
+
+        use ra_engine::plan_advice_physical::ScanStrategy;
+        match strategy {
+            None | Some(ScanStrategy::Seq) => self.build_seq_scan(table),
+            Some(ScanStrategy::Index { schema: _, name }) => {
+                self.build_index_scan_by_index_name(table, &name)
+            }
+            Some(ScanStrategy::IndexOnly { schema: _, name }) => {
+                self.build_index_only_scan(table, &name)
+            }
+            Some(ScanStrategy::BitmapHeap) => {
+                debug!(
+                    table = table,
+                    "BITMAP_HEAP_SCAN advice cannot be honored without a \
+                     bitmap subplan; falling back to SeqScan",
+                );
+                self.build_seq_scan(table)
+            }
+            Some(ScanStrategy::Tid) => {
+                debug!(
+                    table = table,
+                    "TID_SCAN advice cannot be honored without a ctid filter; \
+                     falling back to SeqScan",
+                );
+                self.build_seq_scan(table)
+            }
+            Some(ScanStrategy::DoNotScan) => {
+                debug!(
+                    table = table,
+                    "DO_NOT_SCAN advice cannot be honored at this layer; \
+                     falling back to SeqScan",
+                );
+                self.build_seq_scan(table)
+            }
+        }
+    }
+
+    /// Build an `IndexScan` node where the index is identified by
+    /// name (rather than by column, which is what
+    /// [`Self::build_index_scan`] takes). Used by the advice
+    /// dispatch path; if the named index doesn't exist on the
+    /// relation we fall back to `SeqScan` and log.
+    unsafe fn build_index_scan_by_index_name(
+        &mut self,
+        table: &str,
+        index_name: &str,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let rel_oid = self.rel_oid_for(table)?;
+        let info = crate::index_resolver::resolve_index_by_name(rel_oid, index_name);
+        match info {
+            Some(idx_info) => {
+                let rtindex = self.rtindex_for(table)?;
+                let node = self.alloc_node::<pg_sys::IndexScan>();
+                if node.is_null() {
+                    return Err(PlanBuilderError::NullPointer(
+                        "IndexScan allocation".to_string(),
+                    ));
+                }
+                (*node).scan.plan.type_ = pg_sys::NodeTag::T_IndexScan;
+                (*node).scan.scanrelid = rtindex;
+                (*node).indexid = idx_info.oid;
+                debug!(
+                    table = table,
+                    index = index_name,
+                    index_oid = idx_info.oid.to_u32(),
+                    "IndexScan: honored advice-supplied index name",
+                );
+                self.set_index_costs(&mut (*node).scan.plan, table, 0.1);
+                Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
+            }
+            None => {
+                debug!(
+                    table = table,
+                    index = index_name,
+                    "INDEX_SCAN advice references unknown index; \
+                     falling back to SeqScan",
+                );
+                self.build_seq_scan(table)
+            }
+        }
+    }
 
     /// Build a `SeqScan` plan node for the given relation name.
     unsafe fn build_seq_scan(
@@ -570,12 +731,86 @@ impl PlanBuilder {
         // which is correct — no qual means unconditional join.
         let pg_condition = self.translate_join_condition(condition);
 
-        match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+        // Honor join-method advice when the inner-side alias has
+        // a JoinInnerStrategy mapped in physical_choices. Cloned
+        // off the borrow so the recursion can re-borrow `self`.
+        use ra_engine::plan_advice_physical::JoinInnerStrategy;
+        let inner_alias = leaf_alias(right);
+        let join_strategy = inner_alias
+            .as_deref()
+            .and_then(|a| self.physical_choices.join_for(a))
+            .cloned();
+        match (join_type, join_strategy) {
+            // Hash join: explicit advice or default for inner / outer joins.
+            (
+                JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter,
+                Some(JoinInnerStrategy::Hash) | None,
+            ) => self.build_hash_join(join_type, left_plan, right_plan, pg_condition),
+
+            // Hash advice on a join type that defaults to nestloop.
+            // PG allows hash joins on cross/semi/anti when the
+            // condition is hashable; we honor the advice and emit
+            // a HashJoin.
+            (
+                JoinType::Cross | JoinType::Semi | JoinType::Anti,
+                Some(JoinInnerStrategy::Hash),
+            ) => self.build_hash_join(join_type, left_plan, right_plan, pg_condition),
+
+            // Nested-loop variants: explicit advice OR cross/semi/anti default.
+            (
+                JoinType::Cross | JoinType::Semi | JoinType::Anti,
+                None
+                | Some(JoinInnerStrategy::NestedLoopPlain)
+                | Some(JoinInnerStrategy::NestedLoopMaterialize)
+                | Some(JoinInnerStrategy::NestedLoopMemoize),
+            ) => self.build_nested_loop(join_type, left_plan, right_plan, pg_condition),
+
+            // Nested-loop advice on a join type that defaults to hash.
+            (
+                _,
+                Some(JoinInnerStrategy::NestedLoopPlain)
+                | Some(JoinInnerStrategy::NestedLoopMaterialize)
+                | Some(JoinInnerStrategy::NestedLoopMemoize),
+            ) => self.build_nested_loop(join_type, left_plan, right_plan, pg_condition),
+
+            // Merge-join advice — fall back to hash/nestloop today.
+            // Producing a true MergeJoin requires sorted child plans,
+            // which Ra's plan_builder doesn't synthesize on demand.
+            // Cost::DISABLE_PENALTY already flagged this in the
+            // optimizer-side validation, so EXPLAIN sees the
+            // mismatch.
+            (
+                JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter,
+                Some(JoinInnerStrategy::MergeJoinPlain)
+                | Some(JoinInnerStrategy::MergeJoinMaterialize),
+            ) => {
+                debug!(
+                    inner_alias = ?inner_alias,
+                    "MERGE_JOIN advice cannot be honored without sorted inputs; \
+                     falling back to HashJoin",
+                );
                 self.build_hash_join(join_type, left_plan, right_plan, pg_condition)
             }
-            JoinType::Cross | JoinType::Semi | JoinType::Anti => {
-                self.build_nested_loop(join_type, left_plan, right_plan, pg_condition)
+            (
+                _,
+                Some(JoinInnerStrategy::MergeJoinPlain)
+                | Some(JoinInnerStrategy::MergeJoinMaterialize),
+            ) => self.build_nested_loop(join_type, left_plan, right_plan, pg_condition),
+
+            // Foreign-join advice: requires FDW pushdown which the
+            // plan-builder doesn't synthesize today.
+            (_, Some(JoinInnerStrategy::ForeignJoin)) => {
+                debug!(
+                    inner_alias = ?inner_alias,
+                    "FOREIGN_JOIN advice cannot be honored at this layer; \
+                     falling back to HashJoin/NestLoop default",
+                );
+                match join_type {
+                    JoinType::Cross | JoinType::Semi | JoinType::Anti => {
+                        self.build_nested_loop(join_type, left_plan, right_plan, pg_condition)
+                    }
+                    _ => self.build_hash_join(join_type, left_plan, right_plan, pg_condition),
+                }
             }
         }
     }
@@ -1901,6 +2136,31 @@ unsafe fn make_int8_const(val: i64) -> *mut pg_sys::Expr {
 /// Maps each relation name (lowercase) to its 1-based range-table index and
 /// its relation OID.  Pass the returned map to [`PlanBuilder::new`].
 ///
+/// Walk a [`RelExpr`] subtree and return the leaf-most alias
+/// reachable on the left-most-then-deepest path. Used to identify
+/// the inner-side alias for join-method advice lookup: PG's
+/// `HASH_JOIN(b)` advice means "the join touching `b` should be
+/// a hash join with `b` on the inner side", so we look up the
+/// leaf alias of the right (inner) child.
+///
+/// Returns `None` for non-Scan inner subtrees we can't easily
+/// disambiguate (e.g. inner is itself a subquery). Callers
+/// fall back to default join-method selection in that case.
+fn leaf_alias(expr: &RelExpr) -> Option<String> {
+    match expr {
+        RelExpr::Scan { table, alias } => {
+            Some(alias.clone().unwrap_or_else(|| table.clone()))
+        }
+        // Pass-through wrappers: descend.
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input } => leaf_alias(input),
+        _ => None,
+    }
+}
+
 /// # Safety
 ///
 /// `query` must be a valid, non-null pointer to a PostgreSQL `Query` node.
@@ -1968,4 +2228,55 @@ pub unsafe fn resolve_table_oid(table_name: &str) -> pg_sys::Oid {
         None,
         std::ptr::null_mut(),
     )
+}
+
+
+#[cfg(test)]
+mod leaf_alias_tests {
+    use super::leaf_alias;
+    use ra_core::algebra::{JoinType, RelExpr};
+    use ra_core::expr::{BinOp, ColumnRef, Expr};
+
+    fn scan(table: &str, alias: Option<&str>) -> RelExpr {
+        RelExpr::Scan {
+            table: table.into(),
+            alias: alias.map(String::from),
+        }
+    }
+
+    #[test]
+    fn leaf_alias_picks_alias_over_table() {
+        assert_eq!(leaf_alias(&scan("orders", Some("o"))), Some("o".into()));
+    }
+
+    #[test]
+    fn leaf_alias_falls_back_to_table_when_no_alias() {
+        assert_eq!(leaf_alias(&scan("orders", None)), Some("orders".into()));
+    }
+
+    #[test]
+    fn leaf_alias_descends_through_filter() {
+        let inner = scan("t", Some("a"));
+        let pred = Expr::Const(ra_core::expr::Const::Bool(true));
+        let wrapped = RelExpr::Filter {
+            predicate: pred,
+            input: Box::new(inner),
+        };
+        assert_eq!(leaf_alias(&wrapped), Some("a".into()));
+    }
+
+    #[test]
+    fn leaf_alias_returns_none_for_join() {
+        let join = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified("a", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("b", "id"))),
+            },
+            left: Box::new(scan("a", None)),
+            right: Box::new(scan("b", None)),
+        };
+        assert_eq!(leaf_alias(&join), None);
+    }
 }

@@ -166,6 +166,18 @@ unsafe fn ra_planner_hook_inner(
     let table_map = plan_builder::build_table_map(parse);
     let mut builder = PlanBuilder::new(parse, table_map, &stats);
 
+    // If supplied advice produced per-relation physical-strategy
+    // preferences, hand them to the plan builder so scan/join/
+    // parallelism advice steers the produced PG Plan tree.
+    if let Some(advice_str) = crate::extension_state::effective_plan_advice() {
+        if let Ok(parsed) = ra_plan_advice::parse_advice(&advice_str) {
+            let choices = ra_engine::plan_advice_physical::PhysicalChoices::from_advice(&parsed);
+            if !choices.is_empty() {
+                builder.set_physical_choices(choices);
+            }
+        }
+    }
+
     let planned_stmt = match builder.build_planned_stmt(&optimized) {
         Ok(stmt) => stmt,
         Err(e) => {
