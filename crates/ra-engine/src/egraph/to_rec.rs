@@ -404,6 +404,28 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             ];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
+        RelExpr::Merge {
+            target,
+            source,
+            on,
+            when_clauses,
+            returning,
+        } => {
+            // MERGE is handled by the DML fast-path (try_optimize_dml)
+            // and never saturated, so this encoding only needs to be
+            // structurally valid; the WHEN clauses are opaque to the
+            // e-graph (recorded as a count marker).
+            let tag_id = add_symbol(rec, "merge");
+            let target_id = add_symbol(rec, target);
+            let on_id = add_scalar_expr(rec, on)?;
+            let source_id = add_rel_expr(rec, source)?;
+            let when_id = add_symbol(rec, &when_clauses.len().to_string());
+            let returning_id = add_optional_projection(rec, returning.as_deref())?;
+            let ids = vec![
+                tag_id, target_id, on_id, source_id, when_id, returning_id,
+            ];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
     }
 }
 

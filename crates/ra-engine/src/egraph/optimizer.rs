@@ -819,6 +819,22 @@ impl Optimizer {
                     returning: returning.clone(),
                 }))
             }
+            RelExpr::Merge {
+                target,
+                source,
+                on,
+                when_clauses,
+                returning,
+            } => {
+                let optimized_source = self.optimize(source)?;
+                Ok(Some(RelExpr::Merge {
+                    target: target.clone(),
+                    source: Box::new(optimized_source),
+                    on: on.clone(),
+                    when_clauses: when_clauses.clone(),
+                    returning: returning.clone(),
+                }))
+            }
             // CTE with DML body: optimize definition through e-graph,
             // handle DML body via DML fast-path recursion.
             RelExpr::CTE {

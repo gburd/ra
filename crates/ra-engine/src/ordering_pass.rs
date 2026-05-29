@@ -477,6 +477,24 @@ fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, Re
             (PropertySet::new(), node)
         }
 
+        RelExpr::Merge {
+            target,
+            source,
+            on,
+            when_clauses,
+            returning,
+        } => {
+            let (_sp, rewritten_source) = propagate_inner(*source, facts);
+            let node = RelExpr::Merge {
+                target,
+                source: Box::new(rewritten_source),
+                on,
+                when_clauses,
+                returning,
+            };
+            (PropertySet::new(), node)
+        }
+
         // Leaf nodes with no ordering: Scan, Values, MultiUnnest, etc.
         RelExpr::Scan { .. }
         | RelExpr::Values { .. }

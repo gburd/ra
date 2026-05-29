@@ -223,7 +223,8 @@ impl FederatedOptimizer {
             | RelExpr::VectorFilter { .. }
             | RelExpr::Insert { .. }
             | RelExpr::Update { .. }
-            | RelExpr::Delete { .. } => false,
+            | RelExpr::Delete { .. }
+            | RelExpr::Merge { .. } => false,
         }
     }
 

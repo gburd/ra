@@ -186,7 +186,9 @@ fn estimate_heuristic(expr: &RelExpr, stats: &dyn StatisticsProvider) -> f64 {
             estimate_heuristic(input, stats) * 0.1
         }
         // DML operators: estimate based on their source/affected rows
-        RelExpr::Insert { source, .. } => estimate_heuristic(source, stats),
+        RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => {
+            estimate_heuristic(source, stats)
+        }
         RelExpr::Update { filter, .. } => {
             // Without a source table scan, use a default
             if filter.is_some() {
@@ -371,7 +373,7 @@ fn collect_tables_recursive(
                 map.insert(view_name.clone(), s.clone());
             }
         }
-        RelExpr::Insert { source, .. } => {
+        RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => {
             collect_tables_recursive(source, provider, map);
         }
         RelExpr::Update { from, .. } => {
