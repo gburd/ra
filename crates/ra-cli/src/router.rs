@@ -45,6 +45,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             timeline,
             snapshot,
             provenance,
+            plan_advice,
         } => {
             let resolved = resolve_query(&query, use_stdin)?;
             commands::explain::cmd_explain(
@@ -55,6 +56,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 cli.verbose,
                 cli.quiet,
                 provenance,
+                plan_advice.as_deref(),
             )
         }
         Commands::Optimize {
@@ -84,6 +86,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             schema_json,
             schema_sql,
             db,
+            plan_advice,
         } => {
             let resolved = resolve_query(&query, use_stdin)?;
 
@@ -118,6 +121,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 rule_advisor,
                 rule_advisor_learn,
                 rule_advisor_db.as_deref(),
+                plan_advice.as_deref(),
             )
         }
         Commands::GatherMetadata { db, schema, output } => {

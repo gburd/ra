@@ -142,6 +142,10 @@ pub enum Commands {
         /// debugging — see `docs/research/geqo-vs-ra.md` lesson (ii).
         #[arg(long)]
         provenance: bool,
+        /// Plan-advice string steering scan / join / parallelism choices.
+        /// PG-compatible syntax (see ra-cli optimize --help for examples).
+        #[arg(long)]
+        plan_advice: Option<String>,
     },
     /// Optimize a SQL query using relational algebra rewrite rules.
     #[command(
@@ -239,6 +243,14 @@ pub enum Commands {
         /// Snapshot index from timeline to use (default: 0 = first snapshot).
         #[arg(long, default_value = "0")]
         snapshot: usize,
+        /// Plan-advice string steering scan / join / parallelism choices.
+        /// PG-compatible syntax. Examples:
+        ///   --plan-advice "JOIN_ORDER(orders customers)"
+        ///   --plan-advice "INDEX_SCAN(orders orders_pkey) HASH_JOIN(customers)"
+        ///   --plan-advice "SEQ_SCAN(t) NO_GATHER(t)"
+        /// See docs/integrations/plan-advice.md for the full grammar.
+        #[arg(long)]
+        plan_advice: Option<String>,
     },
     /// Gather database metadata and write to a JSON file.
     GatherMetadata {

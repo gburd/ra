@@ -20,6 +20,7 @@ pub fn cmd_explain(
     verbose: bool,
     quiet: bool,
     show_provenance: bool,
+    plan_advice: Option<&str>,
 ) -> Result<()> {
     use ra_engine::TimelineConfig;
 
@@ -94,7 +95,15 @@ pub fn cmd_explain(
         // the user wants the metadata, not a different plan from
         // the one they saw above.
         use ra_engine::Optimizer;
-        let opt_result = Optimizer::new()
+        let optimizer = if let Some(advice) = plan_advice {
+            Optimizer::with_config(ra_engine::OptimizerConfig {
+                plan_advice: Some(advice.to_string()),
+                ..ra_engine::OptimizerConfig::default()
+            })
+        } else {
+            Optimizer::new()
+        };
+        let opt_result = optimizer
             .optimize_bounded(&plan)
             .context("optimization failed while collecting provenance")?;
         if let Some(p) = opt_result.provenance.as_ref() {

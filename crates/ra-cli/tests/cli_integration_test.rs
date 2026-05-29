@@ -513,3 +513,41 @@ fn validate_subcommand_help() {
 fn unknown_subcommand_fails() {
     ra_cli().args(["nonexistent-command"]).assert().failure();
 }
+
+// ── Plan-advice CLI flag ───────────────────────────────────
+
+#[test]
+fn optimize_accepts_plan_advice_flag() {
+    ra_cli()
+        .arg("optimize")
+        .arg("SELECT * FROM users JOIN orders o ON users.id = o.user_id")
+        .arg("--plan-advice")
+        .arg("JOIN_ORDER(users o) HASH_JOIN(o)")
+        .assert()
+        .success();
+}
+
+#[test]
+fn explain_accepts_plan_advice_flag() {
+    ra_cli()
+        .arg("explain")
+        .arg("SELECT * FROM t")
+        .arg("--plan-advice")
+        .arg("SEQ_SCAN(t)")
+        .assert()
+        .success();
+}
+
+#[test]
+fn optimize_plan_advice_garbage_is_ignored() {
+    // PG-compatible behavior: unparseable advice is dropped
+    // silently rather than failing the query. The optimizer
+    // still produces a plan.
+    ra_cli()
+        .arg("optimize")
+        .arg("SELECT * FROM users")
+        .arg("--plan-advice")
+        .arg("BOGUS_TAG(no_such)")
+        .assert()
+        .success();
+}

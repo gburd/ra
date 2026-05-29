@@ -38,6 +38,13 @@ pub struct OptimizationResult {
     /// `RelExpr` itself is logical and doesn't carry physical
     /// choices, so this sidecar is the canonical place for them.
     pub physical_choices: crate::plan_advice_physical::PhysicalChoices,
+
+    /// Physical properties (ordering, partitioning, distribution)
+    /// of the optimized plan, computed by the
+    /// [`crate::physical_props`] sidecar (RFC 0025 MVP).
+    /// Today only `ordering` is populated; partitioning and
+    /// distribution are forward-compatibility placeholders.
+    pub physical_properties: crate::physical_props::PhysicalProperties,
 }
 
 /// Whether optimization completed within its budget.

@@ -1965,6 +1965,8 @@ impl Optimizer {
                 // alias the supplied advice didn't constrain.
                 // See RFC 0087 for the design rationale.
                 choices.augment_from_stats(&plan, &self.table_stats);
+                let physical_properties =
+                    crate::physical_props::PhysicalProperties::compute(&plan);
                 Ok(OptimizationResult {
                     plan,
                     cost,
@@ -1974,6 +1976,7 @@ impl Optimizer {
                     rule_tracking: None,
                     provenance: Some(provenance),
                     physical_choices: choices,
+                    physical_properties,
                 })
             }
             None => Err(EGraphError::ExtractionError(
@@ -2175,16 +2178,21 @@ impl Optimizer {
         );
 
         match best_plan {
-            Some(plan) => Ok(OptimizationResult {
-                plan,
-                cost: best_cost,
-                status,
-                resource_usage: report,
-                applied_rules: None,
-                rule_tracking: Some(tracking),
-                provenance: None,
-                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
-            }),
+            Some(plan) => {
+                let physical_properties =
+                    crate::physical_props::PhysicalProperties::compute(&plan);
+                Ok(OptimizationResult {
+                    plan,
+                    cost: best_cost,
+                    status,
+                    resource_usage: report,
+                    applied_rules: None,
+                    rule_tracking: Some(tracking),
+                    provenance: None,
+                    physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+                    physical_properties,
+                })
+            }
             None => Err(EGraphError::ExtractionError(
                 "no plan could be extracted".to_owned(),
             )),
@@ -2353,17 +2361,23 @@ fn handle_overflow_with_tracking(
     let report = tracker.report();
     match tracker.overflow_strategy() {
         OverflowStrategy::ReturnBestSoFar => match best_plan {
-            Some(plan) => Ok(OptimizationResult {
-                plan,
-                cost: best_cost,
-                status: OptimizationStatus::Incomplete,
-                resource_usage: report,
-                applied_rules: None,
-                rule_tracking,
-                provenance: None,
-                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
-            }),
+            Some(plan) => {
+                let physical_properties =
+                    crate::physical_props::PhysicalProperties::compute(&plan);
+                Ok(OptimizationResult {
+                    plan,
+                    cost: best_cost,
+                    status: OptimizationStatus::Incomplete,
+                    resource_usage: report,
+                    applied_rules: None,
+                    rule_tracking,
+                    provenance: None,
+                    physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+                    physical_properties,
+                })
+            }
             None => Ok(OptimizationResult {
+                physical_properties: crate::physical_props::PhysicalProperties::compute(original),
                 plan: original.clone(),
                 cost: f64::INFINITY,
                 status: OptimizationStatus::Incomplete,
@@ -2375,6 +2389,7 @@ fn handle_overflow_with_tracking(
             }),
         },
         OverflowStrategy::ReturnOriginal => Ok(OptimizationResult {
+            physical_properties: crate::physical_props::PhysicalProperties::compute(original),
             plan: original.clone(),
             cost: f64::INFINITY,
             status: OptimizationStatus::Incomplete,

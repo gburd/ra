@@ -120,6 +120,7 @@ pub fn cmd_optimize(
     use_rule_advisor: bool,
     use_rule_advisor_learn: bool,
     rule_advisor_db: Option<&str>,
+    plan_advice: Option<&str>,
 ) -> Result<()> {
     use ra_engine::{SnapshotFactsProvider, TimelineConfig};
 
@@ -211,6 +212,13 @@ pub fn cmd_optimize(
         let config = ra_engine::OptimizerConfig {
             use_rule_advisor: true,
             rule_advisor_config: advisor_config,
+            plan_advice: plan_advice.map(String::from),
+            ..ra_engine::OptimizerConfig::default()
+        };
+        Optimizer::with_config(config)
+    } else if let Some(advice) = plan_advice {
+        let config = ra_engine::OptimizerConfig {
+            plan_advice: Some(advice.to_string()),
             ..ra_engine::OptimizerConfig::default()
         };
         Optimizer::with_config(config)
