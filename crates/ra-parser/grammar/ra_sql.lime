@@ -189,6 +189,13 @@ typedef struct RaToken {
 /* SIMILAR TO operator */
 %token SIMILAR.
 
+/* MERGE statement (SQL:2008 / PostgreSQL 15+).
+ * SOURCE/TARGET are NOT reserved (they are common table names, e.g.
+ * the canonical `MERGE INTO target USING source`); the `BY
+ * SOURCE/TARGET` distinction is read from the identifier text. */
+%token MERGE.
+%token MATCHED.
+
 /* ================================================================== */
 /* Precedence (low to high)                                            */
 /* ================================================================== */
@@ -219,6 +226,7 @@ stmt(A) ::= with_clause(B).                 { A = B; }
 stmt(A) ::= insert_stmt(B).                 { A = B; }
 stmt(A) ::= update_stmt(B).                 { A = B; }
 stmt(A) ::= delete_stmt(B).                 { A = B; }
+stmt(A) ::= merge_stmt(B).                  { A = B; }
 
 /* -- WITH (CTE) clause --------------------------------------------- */
 
@@ -798,6 +806,79 @@ opt_using(A) ::= USING from_list(B).              { A = B; }
 
 opt_where(A) ::= .                                { A = NULL; }
 opt_where(A) ::= WHERE expr(B).                   { A = B; }
+
+/* -- MERGE --------------------------------------------------------- */
+
+merge_stmt(A) ::= MERGE INTO IDENT(T) USING table_ref(S) ON expr(O)
+                   merge_when_list(W) opt_returning(R). {
+    A = ra_merge(pstate, T.text, S, O, W, R);
+}
+merge_stmt(A) ::= MERGE INTO IDENT(T) AS IDENT USING table_ref(S) ON expr(O)
+                   merge_when_list(W) opt_returning(R). {
+    A = ra_merge(pstate, T.text, S, O, W, R);
+}
+merge_stmt(A) ::= MERGE INTO IDENT(T) IDENT USING table_ref(S) ON expr(O)
+                   merge_when_list(W) opt_returning(R). {
+    A = ra_merge(pstate, T.text, S, O, W, R);
+}
+
+merge_when_list(A) ::= merge_when(B). {
+    A = ra_list_push(pstate, ra_list_new(pstate), B);
+}
+merge_when_list(A) ::= merge_when_list(L) merge_when(B). {
+    A = ra_list_push(pstate, L, B);
+}
+
+opt_merge_and(A) ::= .                { A = NULL; }
+opt_merge_and(A) ::= AND expr(B).     { A = B; }
+
+/* WHEN MATCHED (kind 0) */
+merge_when(A) ::= WHEN MATCHED opt_merge_and(C) THEN UPDATE SET assignment_list(S). {
+    A = ra_merge_when_update(pstate, 0, C, S);
+}
+merge_when(A) ::= WHEN MATCHED opt_merge_and(C) THEN DELETE. {
+    A = ra_merge_when_delete(pstate, 0, C);
+}
+merge_when(A) ::= WHEN MATCHED opt_merge_and(C) THEN DO NOTHING. {
+    A = ra_merge_when_nothing(pstate, 0, C);
+}
+
+/* WHEN NOT MATCHED [BY TARGET] (kind 1) */
+merge_when(A) ::= WHEN NOT MATCHED opt_merge_and(C)
+                   THEN INSERT LPAREN ident_list(CO) RPAREN VALUES LPAREN expr_list(V) RPAREN. {
+    A = ra_merge_when_insert(pstate, 1, C, CO, V);
+}
+merge_when(A) ::= WHEN NOT MATCHED opt_merge_and(C)
+                   THEN INSERT VALUES LPAREN expr_list(V) RPAREN. {
+    A = ra_merge_when_insert(pstate, 1, C, NULL, V);
+}
+merge_when(A) ::= WHEN NOT MATCHED opt_merge_and(C) THEN DO NOTHING. {
+    A = ra_merge_when_nothing(pstate, 1, C);
+}
+
+/* WHEN NOT MATCHED BY SOURCE|TARGET. SOURCE/TARGET arrive as IDENT;
+ * ra_merge_kind_by maps "source" -> 2, anything else -> 1. The parser
+ * is permissive about which action follows which side (UPDATE/DELETE
+ * are only valid BY SOURCE; INSERT only BY TARGET) — invalid
+ * combinations are a semantic, not syntactic, error. */
+merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C)
+                   THEN UPDATE SET assignment_list(S). {
+    A = ra_merge_when_update(pstate, ra_merge_kind_by(D.text), C, S);
+}
+merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C) THEN DELETE. {
+    A = ra_merge_when_delete(pstate, ra_merge_kind_by(D.text), C);
+}
+merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C) THEN DO NOTHING. {
+    A = ra_merge_when_nothing(pstate, ra_merge_kind_by(D.text), C);
+}
+merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C)
+                   THEN INSERT LPAREN ident_list(CO) RPAREN VALUES LPAREN expr_list(V) RPAREN. {
+    A = ra_merge_when_insert(pstate, ra_merge_kind_by(D.text), C, CO, V);
+}
+merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C)
+                   THEN INSERT VALUES LPAREN expr_list(V) RPAREN. {
+    A = ra_merge_when_insert(pstate, ra_merge_kind_by(D.text), C, NULL, V);
+}
 
 /* ================================================================== */
 /* Expression rules                                                    */

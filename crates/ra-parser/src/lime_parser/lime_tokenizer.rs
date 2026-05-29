@@ -150,6 +150,8 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         b"CONFLICT" => Some(token::CONFLICT),
         b"DO" => Some(token::DO),
         b"NOTHING" => Some(token::NOTHING),
+        b"MERGE" => Some(token::MERGE),
+        b"MATCHED" => Some(token::MATCHED),
         b"DEFAULT" => Some(token::DEFAULT),
         // Parser gap fixes
         b"NATURAL" => Some(token::NATURAL),

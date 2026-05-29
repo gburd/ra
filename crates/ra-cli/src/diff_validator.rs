@@ -170,7 +170,8 @@ fn compare_node(
         | RelExpr::MvScan { .. }
         | RelExpr::Insert { .. }
         | RelExpr::Update { .. }
-        | RelExpr::Delete { .. } => {}
+        | RelExpr::Delete { .. }
+        | RelExpr::Merge { .. } => {}
     }
 }
 

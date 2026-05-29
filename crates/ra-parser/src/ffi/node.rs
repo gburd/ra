@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use ra_core::algebra::{AggregateExpr, RelExpr, SortKey, WindowExpr};
+use ra_core::algebra::{AggregateExpr, MergeWhen, RelExpr, SortKey, WindowExpr};
 use ra_core::expr::Expr;
 
 /// A structured syntax error captured from the Lime parser.
@@ -123,6 +123,8 @@ pub enum NodeTag {
     Agg = 0b100,
     /// A window expression node.
     Window = 0b101,
+    /// A `MERGE` `WHEN` clause node.
+    MergeWhen = 0b110,
 }
 
 /// Number of bits used for the tag.
@@ -179,6 +181,12 @@ pub fn encode_window(index: usize) -> *mut RaNode {
     encode(index, NodeTag::Window)
 }
 
+/// Encode a MERGE WHEN-clause arena index.
+#[must_use]
+pub fn encode_merge_when(index: usize) -> *mut RaNode {
+    encode(index, NodeTag::MergeWhen)
+}
+
 /// Decode a tagged pointer into its tag and arena index.
 ///
 /// Returns `None` if the pointer is null.
@@ -202,6 +210,7 @@ pub fn decode(ptr: *mut RaNode) -> Option<(NodeTag, usize)> {
         0b011 => NodeTag::SortKey,
         0b100 => NodeTag::Agg,
         0b101 => NodeTag::Window,
+        0b110 => NodeTag::MergeWhen,
         _ => return None,
     };
     Some((tag, index))
@@ -226,6 +235,8 @@ pub struct RaParseState {
     agg_exprs: Vec<AggregateExpr>,
     /// Arena for window expression nodes.
     window_exprs: Vec<WindowExpr>,
+    /// Arena for MERGE WHEN-clause nodes.
+    merge_whens: Vec<MergeWhen>,
     /// Accumulated parse errors (from builder/semantic actions).
     errors: Vec<String>,
     /// Structured syntax errors (from `%syntax_error` hook).
@@ -243,6 +254,7 @@ impl RaParseState {
             lists: Vec::new(),
             agg_exprs: Vec::new(),
             window_exprs: Vec::new(),
+            merge_whens: Vec::new(),
             errors: Vec::new(),
             structured_errors: Vec::new(),
         }
@@ -288,6 +300,19 @@ impl RaParseState {
         let index = self.window_exprs.len();
         self.window_exprs.push(win);
         encode_window(index)
+    }
+
+    /// Push a MERGE WHEN-clause and return its tagged pointer.
+    pub fn push_merge_when(&mut self, when: MergeWhen) -> *mut RaNode {
+        let index = self.merge_whens.len();
+        self.merge_whens.push(when);
+        encode_merge_when(index)
+    }
+
+    /// Take (clone) a MERGE WHEN-clause by arena index.
+    #[must_use]
+    pub fn take_merge_when(&self, index: usize) -> Option<MergeWhen> {
+        self.merge_whens.get(index).cloned()
     }
 
     /// Append an item index to an existing list.

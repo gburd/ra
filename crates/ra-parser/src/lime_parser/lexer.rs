@@ -143,6 +143,10 @@ pub mod token {
 
     // SIMILAR TO operator
     pub const SIMILAR: i32 = 113;
+
+    // MERGE statement (SQL:2008 / PostgreSQL 15+)
+    pub const MERGE: i32 = 114;
+    pub const MATCHED: i32 = 115;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -306,6 +310,8 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "CONFLICT" => Some(token::CONFLICT),
         "DO" => Some(token::DO),
         "NOTHING" => Some(token::NOTHING),
+        "MERGE" => Some(token::MERGE),
+        "MATCHED" => Some(token::MATCHED),
         "DEFAULT" => Some(token::DEFAULT),
         // SIMILAR TO operator
         "SIMILAR" => Some(token::SIMILAR),

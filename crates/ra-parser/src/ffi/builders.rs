@@ -15,8 +15,9 @@ use crate::lime_parser::diagnostics;
 use crate::lime_parser::lexer::RaToken;
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, CycleDetection, JoinType, NullOrdering, OnConflict,
-    ProjectionColumn, RelExpr, SortDirection, SortKey, WindowExpr, WindowFunction,
+    AggregateExpr, AggregateFunction, CycleDetection, JoinType, MergeAction, MergeMatchKind,
+    MergeWhen, NullOrdering, OnConflict, ProjectionColumn, RelExpr, SortDirection, SortKey,
+    WindowExpr, WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
@@ -916,6 +917,215 @@ pub unsafe extern "C" fn ra_delete(
         using: using_val,
         returning: returning_val,
     })
+}
+
+/// Determine the MERGE match kind from a `BY <ident>` clause: returns
+/// 2 (`NotMatchedBySource`) for "source" (case-insensitive), else 1
+/// (`NotMatched`, i.e. BY TARGET).
+///
+/// # Safety
+/// - `ident` must be null or a valid NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn ra_merge_kind_by(ident: *const c_char) -> c_int {
+    if ident.is_null() {
+        return 1;
+    }
+    let s = unsafe { c_str_to_string(ident) };
+    if s.eq_ignore_ascii_case("source") {
+        2
+    } else {
+        1
+    }
+}
+
+/// Map a kind code to a [`MergeMatchKind`] (0=matched, 1=not matched,
+/// 2=not matched by source).
+fn merge_kind(code: c_int) -> MergeMatchKind {
+    match code {
+        1 => MergeMatchKind::NotMatched,
+        2 => MergeMatchKind::NotMatchedBySource,
+        _ => MergeMatchKind::Matched,
+    }
+}
+
+/// Decode an optional `AND` condition for a MERGE WHEN clause.
+fn merge_cond(state: &RaParseState, cond: *mut RaNode) -> Option<Expr> {
+    if cond.is_null() {
+        None
+    } else {
+        decode_expr(state, cond)
+    }
+}
+
+/// Build a `WHEN [NOT] MATCHED ... THEN UPDATE SET ...` clause.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `cond` / `assignments` must be null or valid tagged pointers.
+#[no_mangle]
+pub unsafe extern "C" fn ra_merge_when_update(
+    state: *mut RaParseState,
+    kind: c_int,
+    cond: *mut RaNode,
+    assignments: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let condition = merge_cond(st, cond);
+    st.push_merge_when(MergeWhen {
+        kind: merge_kind(kind),
+        condition,
+        action: MergeAction::Update {
+            assignments: decode_assignments(st, assignments),
+        },
+    })
+}
+
+/// Build a `WHEN [NOT] MATCHED ... THEN DELETE` clause.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `cond` must be null or a valid tagged pointer.
+#[no_mangle]
+pub unsafe extern "C" fn ra_merge_when_delete(
+    state: *mut RaParseState,
+    kind: c_int,
+    cond: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let condition = merge_cond(st, cond);
+    st.push_merge_when(MergeWhen {
+        kind: merge_kind(kind),
+        condition,
+        action: MergeAction::Delete,
+    })
+}
+
+/// Build a `WHEN [NOT] MATCHED ... THEN DO NOTHING` clause.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `cond` must be null or a valid tagged pointer.
+#[no_mangle]
+pub unsafe extern "C" fn ra_merge_when_nothing(
+    state: *mut RaParseState,
+    kind: c_int,
+    cond: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let condition = merge_cond(st, cond);
+    st.push_merge_when(MergeWhen {
+        kind: merge_kind(kind),
+        condition,
+        action: MergeAction::DoNothing,
+    })
+}
+
+/// Build a `WHEN NOT MATCHED ... THEN INSERT [(cols)] VALUES (...)` clause.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `cond` / `columns` / `values` must be null or valid tagged pointers.
+#[no_mangle]
+pub unsafe extern "C" fn ra_merge_when_insert(
+    state: *mut RaParseState,
+    kind: c_int,
+    cond: *mut RaNode,
+    columns: *mut RaNode,
+    values: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let condition = merge_cond(st, cond);
+    let cols = if columns.is_null() {
+        vec![]
+    } else {
+        decode_column_names(st, columns)
+    };
+    let vals = decode_expr_list(st, values);
+    st.push_merge_when(MergeWhen {
+        kind: merge_kind(kind),
+        condition,
+        action: MergeAction::Insert {
+            columns: cols,
+            values: vals,
+        },
+    })
+}
+
+/// Build a `MERGE INTO target USING source ON cond WHEN ...` statement.
+///
+/// `when_clauses` is a list of MERGE-WHEN tagged node indices.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `source` / `on` / `when_clauses` / `returning` must be valid
+///   tagged pointers or null where optional.
+#[no_mangle]
+pub unsafe extern "C" fn ra_merge(
+    state: *mut RaParseState,
+    target: *const c_char,
+    source: *mut RaNode,
+    on: *mut RaNode,
+    when_clauses: *mut RaNode,
+    returning: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let target_name = unsafe { c_str_to_string(target) };
+    let Some(source_rel) = decode_rel(st, source) else {
+        st.push_error("ra_merge: invalid source node".to_owned());
+        return std::ptr::null_mut();
+    };
+    let Some(on_expr) = decode_expr(st, on) else {
+        st.push_error("ra_merge: invalid ON condition".to_owned());
+        return std::ptr::null_mut();
+    };
+    let whens = decode_merge_whens(st, when_clauses);
+    let returning_val = decode_returning(st, returning);
+
+    st.push_rel(RelExpr::Merge {
+        target: target_name,
+        source: Box::new(source_rel),
+        on: on_expr,
+        when_clauses: whens,
+        returning: returning_val,
+    })
+}
+
+/// Decode a list of expr indices into `Vec<Expr>`.
+fn decode_expr_list(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<Expr> {
+    let Some(indices) = decode_list(state, list_ptr) else {
+        return vec![];
+    };
+    let mut out = Vec::with_capacity(indices.len());
+    for idx in indices {
+        if let Some(e) = state.take_expr(idx) {
+            out.push(e);
+        }
+    }
+    out
+}
+
+/// Decode a list of MERGE-WHEN tagged nodes into `Vec<MergeWhen>`.
+fn decode_merge_whens(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<MergeWhen> {
+    let Some(indices) = decode_list(state, list_ptr) else {
+        return vec![];
+    };
+    let mut out = Vec::with_capacity(indices.len());
+    for idx in indices {
+        if let Some(w) = state.take_merge_when(idx) {
+            out.push(w);
+        }
+    }
+    out
 }
 
 /// Build an ON CONFLICT DO NOTHING marker (empty list).
