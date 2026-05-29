@@ -1847,6 +1847,27 @@ impl Optimizer {
         let convergence_behavior = budget.convergence;
         let mut tracker = ResourceTracker::start(budget);
 
+        // DML fast-path (same as optimize()): UPDATE/DELETE/INSERT
+        // envelopes are not representable in the e-graph, so we
+        // optimize their sub-relations and preserve the DML
+        // structure rather than dumping the whole statement into
+        // saturation (which fails with "no plan could be
+        // extracted" / "Subquery expressions not supported").
+        // This is why multi-table UPDATE/DELETE previously failed
+        // through this bounded entry point but worked via optimize().
+        if let Some(plan) = self.try_optimize_dml(expr)? {
+            return Ok(OptimizationResult {
+                plan,
+                cost: 0.0,
+                status: OptimizationStatus::Complete,
+                resource_usage: tracker.report(),
+                applied_rules: None,
+                rule_tracking: None,
+                provenance: None,
+                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+            });
+        }
+
         // Pre-optimization: decorrelate subqueries before e-graph conversion
         let decorrelated;
         let effective_expr =
