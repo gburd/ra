@@ -2,7 +2,6 @@
 
 pub mod extension;
 pub mod extensions;
-pub mod standards;
 pub mod vendors;
 
 pub use extension::GrammarExtension;
