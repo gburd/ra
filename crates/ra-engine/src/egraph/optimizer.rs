@@ -1883,13 +1883,39 @@ impl Optimizer {
         let hardware = self.hardware_profile();
         let rules = self.load_rules(effective_expr);
 
-        let iter_limit = self.config.iter_limit;
-        let node_limit = self.config.node_limit;
-        let time_limit_secs = self.config.time_limit_secs;
-
         // Table count for Adaptive convergence decisions
         let table_count =
             crate::large_join::LargeJoinOptimizer::count_tables(effective_expr);
+
+        // Adaptive iteration limit — the same lever optimize() uses.
+        // Without this, optimize_bounded ran the raw config.iter_limit
+        // (30) regardless of query difficulty, so a query whose
+        // e-graph grows unboundedly under saturation (e.g.
+        // ctes_01_simple: 57 -> 93 -> 230 -> 879 nodes across
+        // iterations, apply cost growing superlinearly) ran the full
+        // 30 iterations and blew up to 200-440ms. The speculative
+        // router caps trivial/low-difficulty queries at ~3 iterations
+        // (and compute_egraph_limits further honors any explicit
+        // budget.max_iterations), matching optimize()'s behaviour.
+        let opt_features = crate::speculative_router::OptimizationFeatures::from_expr(
+            effective_expr,
+        )
+        .with_table_stats(&self.table_stats);
+        let route_prediction = if let Some(ref router) = self.speculative_router {
+            router.predict(&opt_features)
+        } else {
+            crate::speculative_router::SpeculativeRouter::heuristic_fallback(&opt_features)
+        };
+        let (iter_limit, _timeout_ms) =
+            self.compute_egraph_limits(&route_prediction, table_count);
+        // Run at least one loop pass so the ResourceTracker can
+        // enforce the budget (e.g. max_iterations=0 with the Fail
+        // overflow strategy must return an error, not silently skip
+        // the loop and return the un-optimized plan). The tracker's
+        // check at the top of the first pass handles the overflow.
+        let iter_limit = iter_limit.max(1);
+        let node_limit = self.config.node_limit;
+        let time_limit_secs = self.config.time_limit_secs;
 
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
