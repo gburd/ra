@@ -182,6 +182,13 @@ fn benchmark_query(
     category: &str,
     sql_file: &str,
 ) -> QueryMetrics {
+    // Discarded warmup pass + minimum over N timed runs: the first
+    // optimization of a query shape pays one-time cold-start costs
+    // (lazy rule-category compilation, cost-model load, allocator
+    // warmup) that are not steady-state planning latency.
+    const WARMUP_RUNS: usize = 1;
+    const TIMED_RUNS: usize = 5;
+
     let mut metrics = QueryMetrics {
         query_id: query_id.to_owned(),
         category: category.to_owned(),
@@ -222,8 +229,6 @@ fn benchmark_query(
     // (~200ms) lands on whichever query happens to run first and floats
     // between runs. Min-of-N reports the representative planning floor;
     // e-graph node counts (the deterministic signal) are unaffected.
-    const WARMUP_RUNS: usize = 1;
-    const TIMED_RUNS: usize = 5;
     for _ in 0..WARMUP_RUNS {
         let _ = optimizer.optimize_bounded(&relexpr);
     }
