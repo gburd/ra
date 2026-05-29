@@ -207,10 +207,9 @@ fn all_properties_on_set_ops() {
 // Storyline-based tests
 // -------------------------------------------------------------------
 
-/// Full lifecycle storyline should pass core properties at each step.
-///
-/// Idempotence is excluded — there is a known optimizer bug where a second
-/// optimization pass can produce a different table set for some inputs.
+/// Full lifecycle storyline should pass core properties at each step,
+/// including idempotence (the historical `FullOuter` extraction bug
+/// that previously forced its exclusion is fixed).
 #[test]
 fn full_lifecycle_all_properties() {
     run_on_large_stack("full_lifecycle_all_properties", || {
@@ -226,6 +225,7 @@ fn full_lifecycle_all_properties() {
                         OptimizerProperty::Convergence,
                         OptimizerProperty::PlanValidity,
                         OptimizerProperty::RuleSafety,
+                        OptimizerProperty::Idempotence,
                     ])
                     .with_time_limit(Duration::from_secs(10));
 
@@ -292,12 +292,11 @@ fn read_heavy_rule_safety() {
 
 /// Extended fuzzing: all properties on deeply nested expressions.
 ///
-/// Excludes `Idempotence` — see the AGENTS.md "Workspace Quality"
-/// section: a second optimization pass can change the e-graph's
-/// extracted table set (most reliably reproducible on
-/// `Filter(col_id, FullOuter(...))` shapes saved in the proptest
-/// regression file). The remaining 5 properties cover correctness;
-/// idempotence is tracked as a known optimizer issue.
+/// Covers all six optimizer properties including idempotence.
+/// The historical `Filter(col_id, FullOuter(...))` extraction bug
+/// that previously forced idempotence exclusion is fixed; the
+/// dedicated `extended_idempotence` test plus the persisted
+/// regression seeds guard against recurrence.
 #[cfg(feature = "long-duration-testing")]
 #[test]
 fn extended_all_properties() {
@@ -314,6 +313,7 @@ fn extended_all_properties() {
                         OptimizerProperty::Convergence,
                         OptimizerProperty::PlanValidity,
                         OptimizerProperty::RuleSafety,
+                        OptimizerProperty::Idempotence,
                     ])
                     .with_time_limit(Duration::from_secs(30));
                     for result in &validator.validate(&expr) {
@@ -336,16 +336,18 @@ fn extended_all_properties() {
 
 /// Extended fuzzing: idempotence across all expression types.
 ///
-/// Idempotence is a known-failing property on a subset of
-/// `Filter(col_id, FullOuter(...))` shapes — the e-graph's second
-/// extraction pass can drop a table reference that the first pass
-/// retained. This test is `#[ignore]`d as a regression signal: when
-/// the optimizer is fixed, run it explicitly to confirm and remove
-/// the `#[ignore]`. See AGENTS.md "Workspace Quality" for the wider
-/// mitigation pattern.
+/// Idempotence — `optimize(optimize(x)) == optimize(x)` — was
+/// historically a known-failing property on a subset of
+/// `Filter(col_id, FullOuter(...))` shapes, where the e-graph's
+/// second extraction pass could drop a table reference the first
+/// pass retained. That bug is fixed (subquery-decorrelation and
+/// extraction work); this test runs 1000 random cases plus the
+/// persisted regression seeds to guard against recurrence. It
+/// stays gated behind `long-duration-testing` because, like its
+/// sibling `extended_all_properties`, it's a multi-second
+/// proptest sweep not suited to the fast inner-loop suite.
 #[cfg(feature = "long-duration-testing")]
 #[test]
-#[ignore = "Idempotence is a known-failing property; see test docstring"]
 fn extended_idempotence() {
     run_on_large_stack("extended_idempotence", || {
         let config = ProptestConfig::with_cases(1000);
@@ -376,7 +378,12 @@ fn extended_idempotence() {
     });
 }
 
-/// Extended storyline: mixed DML with all properties.
+/// Extended storyline: mixed DML across the five fast-to-check
+/// properties. Idempotence is intentionally NOT included here:
+/// it double-optimizes every expression, and across 1000
+/// multi-step storylines that pushes this sweep past several
+/// minutes with no coverage the dedicated `extended_idempotence`
+/// test (1000 cases over `arb_rel_expr`) doesn't already provide.
 #[cfg(feature = "long-duration-testing")]
 #[test]
 fn extended_mixed_dml_all_properties() {

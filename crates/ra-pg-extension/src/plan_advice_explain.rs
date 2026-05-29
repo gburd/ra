@@ -16,25 +16,25 @@
 //!    HASH_JOIN(b)    /* not matched */
 //! ```
 //!
-//! # What is and isn't rendered
+//! # What is rendered
 //!
 //! - **Supplied Plan Advice** is rendered whenever
 //!   `ra_planner.plan_advice` (or the compatibility-aliased
 //!   `pg_plan_advice.advice`) is non-empty AND either
 //!   `EXPLAIN (PLAN_ADVICE)` was specified or
 //!   `ra_planner.always_explain_supplied_advice` is true.
-//! - **Generated Plan Advice** is currently **not** rendered.
-//!   PG generates this from the finished plan in
-//!   `pgpa_planner_shutdown` and stashes it on
-//!   `PlannedStmt.extension_state`. Ra's planner doesn't yet
-//!   thread that state through; doing so requires adding a
-//!   per-plan stash that survives from the planner hook to the
-//!   EXPLAIN hook. Tracked as a follow-up.
+//! - **Generated Plan Advice** is rendered on
+//!   `EXPLAIN (PLAN_ADVICE)`. The planner hook stashes the
+//!   rendered advice for the produced `PlannedStmt` (see
+//!   [`stash_generated_advice`]); the per-plan EXPLAIN hook
+//!   pops it ([`take_generated_advice`]) and emits the block.
+//!   Because pgrx-pg-sys 0.17's `PlannedStmt` binding lacks the
+//!   `extension_state` field PG uses upstream, the stash is keyed
+//!   on the `PlannedStmt` pointer instead.
 
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
-use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 use pgrx::pg_sys;
@@ -419,6 +419,5 @@ fn collect_rtable_aliases(
             out.insert(s.to_string());
         }
     }
-    let _ = ptr::null::<u8>(); // suppress unused-import in some configs
     out
 }

@@ -596,9 +596,9 @@ pub fn identify_filter_opportunities(
 // This layer walks an optimized `RelExpr`, finds star-schema-shaped
 // equi-joins, pulls cardinality/NDV from `table_stats`, and
 // delegates to `identify_filter_opportunities` for the cost
-// gate. The result is exposed on
-// `OptimizationResult.runtime_filters` so EXPLAIN / plan-builder /
-// future executor work can act on it.
+// gate. [`RuntimeFilters::detect`] is the entry point, called on
+// demand by consumers (EXPLAIN / plan-builder / future executor
+// work) rather than eagerly stored on every optimization result.
 //
 // Status: detection + annotation only. Realising the filter at
 // execution time needs PG-executor cooperation that's a separate

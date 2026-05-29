@@ -244,24 +244,29 @@ Cache functionality is split into two crates:
 
 - **0 clippy errors** (`cargo clippy --all-targets --all-features -- -D warnings`)
 - **0 compiler warnings** on `cargo build --workspace --all-features`
-- **169 test suites, 7826 tests passing, 0 failing, 66 ignored** (`cargo test --workspace --all-features`)
+- **169 test suites, 7833 tests passing, 0 failing, 58 ignored** (`cargo test --workspace --all-features`)
 - Known flaky test mitigations:
   - `saturation_terminates_quickly` skips Aggregate, self-ref-join, joins of the
     same base table, constant predicates, constant sort keys, and `UnaryOp` over
     constants — each documented inline with the rule-interaction reason
-  - `full_lifecycle_all_properties` and the `long-duration-testing`-gated
-    `extended_all_properties` / `extended_mixed_dml_all_properties` tests
-    explicitly omit the `Idempotence` property — the e-graph's second
-    extraction pass can drop a table reference that the first pass kept
-    (see proptest-regressions for canonical failing shapes:
-    `Filter(col_id, FullOuter(Scan, Scan))` and similar). The companion
-    `extended_idempotence` test is `#[ignore]`d as a regression signal.
+  - `performance_framework_test` makes wall-clock latency assertions
+    (`*_under_Nms`, `*_performance`). They pass single-threaded
+    (`cargo test -p ra-engine --test performance_framework_test --
+    --test-threads=1`) but can flake under the parallel full-suite load
+    from CPU contention. Follow-up: convert the wall-clock assertions to
+    deterministic `ResourceUsageReport` iteration/node-count assertions
+    (the pattern `adaptive_limits_test::test_adaptive_limits_vs_fixed`
+    now uses).
   - `plan_diff` tests that toggle the `colored` crate's process-global override
     serialise on a module-static `COLOR_LOCK` + `ColorGuard` RAII helper
   - Config loader test clears `RA_*` env vars to isolate from developer shell
   - DuckDB adapter is pinned to API surfaces present in `duckdb-rs` ≥ 1.x:
     no `enable_optimizer`, statement column metadata read after `query()`,
     `Decimal` rendered via `rust_decimal::Display`
+- The optimizer's `Idempotence` property (`optimize(optimize(x)) ==
+  optimize(x)`) is now enforced: the historical `FullOuter` extraction bug
+  is fixed, and `extended_idempotence` plus `full_lifecycle_all_properties`
+  / `extended_all_properties` cover it.
 
 ## Rust Version
 

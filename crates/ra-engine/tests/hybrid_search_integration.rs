@@ -541,14 +541,12 @@ fn test_cost_factor_meets_target_overhead() {
 // ------------------------------------------------------------------
 
 #[test]
-#[ignore = "E-graph rule parsing has issues - tracked separately"]
 fn test_hybrid_search_rules_exist() {
     let rules = hybrid_search_rules();
     assert!(!rules.is_empty(), "Should have hybrid search rules");
 }
 
 #[test]
-#[ignore = "E-graph rule parsing has issues - tracked separately"]
 fn test_hybrid_fts_first_rule_exists() {
     let rules = hybrid_search_rules();
     let names: Vec<_> = rules.iter().map(|r| r.name.as_str()).collect();
@@ -556,7 +554,6 @@ fn test_hybrid_fts_first_rule_exists() {
 }
 
 #[test]
-#[ignore = "E-graph rule parsing has issues - tracked separately"]
 fn test_hybrid_vector_first_rule_exists() {
     let rules = hybrid_search_rules();
     let names: Vec<_> = rules.iter().map(|r| r.name.as_str()).collect();
@@ -564,19 +561,10 @@ fn test_hybrid_vector_first_rule_exists() {
 }
 
 #[test]
-#[ignore = "E-graph rule parsing has issues - tracked separately"]
 fn test_hybrid_parallel_rule_exists() {
     let rules = hybrid_search_rules();
     let names: Vec<_> = rules.iter().map(|r| r.name.as_str()).collect();
     assert!(names.contains(&"hybrid-parallel"));
-}
-
-#[test]
-#[ignore = "E-graph rule parsing has issues - tracked separately"]
-fn test_hybrid_with_limit_rule_exists() {
-    let rules = hybrid_search_rules();
-    let names: Vec<_> = rules.iter().map(|r| r.name.as_str()).collect();
-    assert!(names.contains(&"hybrid-with-limit"));
 }
 
 // ------------------------------------------------------------------

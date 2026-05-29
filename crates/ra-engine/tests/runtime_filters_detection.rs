@@ -1,9 +1,9 @@
 //! RFC 0027 (Runtime Filters) detection-layer tests.
 //!
-//! Exercises `RuntimeFilters::detect` end-to-end through the
-//! optimizer: an optimized plan with a star-schema equi-join and
-//! supplied statistics should surface a runtime-filter
-//! opportunity on `OptimizationResult.runtime_filters`.
+//! Exercises `RuntimeFilters::detect`: an optimized plan with a
+//! star-schema equi-join and supplied statistics should surface
+//! a runtime-filter opportunity. Detection is invoked on demand
+//! via `RuntimeFilters::detect(plan, stats)`.
 
 #![expect(
     clippy::unwrap_used,

@@ -1,6 +1,11 @@
 #![expect(clippy::print_stdout, reason = "test diagnostic output")]
 //! Tests for adaptive iteration limits (Task #246).
 
+#![expect(
+    clippy::expect_used,
+    reason = "test code; expect surfaces failures with a clear message"
+)]
+
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Expr};
 use ra_core::statistics::Statistics;
@@ -103,9 +108,15 @@ fn test_adaptive_limits_medium_query() {
 }
 
 #[test]
-#[ignore = "Performance test - timing assertions fail under coverage instrumentation"]
 fn test_adaptive_limits_vs_fixed() {
-    // Compare adaptive vs fixed 30 iterations
+    // Adaptive iteration limits should terminate in no more
+    // e-graph iterations than the fixed-30 baseline. We assert
+    // the deterministic iteration count rather than wall-clock
+    // time: the original timing-ratio assertion was inherently
+    // flaky (CI load, coverage instrumentation) and tested an
+    // environment-sensitive proxy. Iteration count is the
+    // actual invariant adaptive limits provide and is fully
+    // deterministic.
     let query = join(
         join(
             join(scan("t1"), scan("t2"), eq(col("t1.id"), col("t2.id"))),
@@ -118,20 +129,18 @@ fn test_adaptive_limits_vs_fixed() {
 
     let tables = ["t1", "t2", "t3", "t4", "t5"];
 
-    // Adaptive limits (default)
+    // Adaptive limits (default).
     let optimizer_adaptive = make_optimizer_with_stats(&tables);
-    let start_adaptive = Instant::now();
-    let result_adaptive = optimizer_adaptive.optimize(&query);
-    let elapsed_adaptive = start_adaptive.elapsed();
-    assert!(result_adaptive.is_ok());
+    let result_adaptive = optimizer_adaptive
+        .optimize_bounded(&query)
+        .expect("adaptive optimization should succeed");
 
-    // Fixed 30 iterations (old behavior)
+    // Fixed 30 iterations (old behavior).
     let config_fixed = OptimizerConfig {
         use_adaptive_limits: false,
         iter_limit: 30,
         ..OptimizerConfig::default()
     };
-
     let mut optimizer_fixed = Optimizer::with_config(config_fixed);
     for name in &tables {
         let mut stats = Statistics::new(10000.0);
@@ -139,28 +148,20 @@ fn test_adaptive_limits_vs_fixed() {
         stats.total_size = 1_000_000;
         optimizer_fixed.add_table_stats(*name, stats);
     }
+    let result_fixed = optimizer_fixed
+        .optimize_bounded(&query)
+        .expect("fixed optimization should succeed");
 
-    let start_fixed = Instant::now();
-    let result_fixed = optimizer_fixed.optimize(&query);
-    let elapsed_fixed = start_fixed.elapsed();
-    assert!(result_fixed.is_ok());
+    let adaptive_iters = result_adaptive.resource_usage.iterations_used;
+    let fixed_iters = result_fixed.resource_usage.iterations_used;
 
-    println!(
-        "Adaptive: {:?}, Fixed: {:?}, Speedup: {:.2}x",
-        elapsed_adaptive,
-        elapsed_fixed,
-        elapsed_fixed.as_secs_f64() / elapsed_adaptive.as_secs_f64()
-    );
-
-    // Adaptive should be significantly faster
+    // Adaptive must never use more iterations than the fixed
+    // baseline; on this 5-table join it converges in fewer.
     assert!(
-        elapsed_adaptive < elapsed_fixed,
-        "Adaptive ({elapsed_adaptive:?}) should be faster than fixed ({elapsed_fixed:?})",
+        adaptive_iters <= fixed_iters,
+        "adaptive used {adaptive_iters} iterations, fixed used {fixed_iters}; \
+         adaptive must not exceed fixed",
     );
-
-    // Should see at least 1.5x speedup
-    let speedup = elapsed_fixed.as_secs_f64() / elapsed_adaptive.as_secs_f64();
-    assert!(speedup > 1.5, "Expected >1.5x speedup, got {speedup:.2}x");
 }
 
 #[test]

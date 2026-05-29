@@ -106,9 +106,9 @@ unsafe fn ra_planner_hook_inner(
         CStr::from_ptr(query_string).to_string_lossy().into_owned()
     };
 
-    // Empty query string: nothing to plan.
+    // Empty query string: nothing for Ra to do — let PG handle it.
     if sql.trim().is_empty() {
-        pgrx::error!("ra_planner: empty query");
+        return call_prev_planner(parse, query_string, cursor_options, bound_params);
     }
 
     let log = RA_LOG_DECISIONS.get();
@@ -127,15 +127,22 @@ unsafe fn ra_planner_hook_inner(
             }
         }
     } else {
-        // Parser hook didn't fire — parse now.
+        // Parser hook didn't fire — parse now. A parse failure
+        // means Ra can't represent this query; fall back to PG's
+        // native planner rather than failing a query PG could
+        // plan. Ra must be a strict drop-in: never break a
+        // working query.
         match ra_parser::sql_to_relexpr(&sql) {
             Ok(expr) => expr,
             Err(e) => {
-                pgrx::error!(
-                    "ra_planner: parse failure: {} [query: {}]",
-                    e,
-                    truncate_sql(&sql, 80)
-                );
+                if log {
+                    pgrx::log!(
+                        "ra_planner: parse fell back to PG: {} [query: {}]",
+                        e,
+                        truncate_sql(&sql, 80)
+                    );
+                }
+                return call_prev_planner(parse, query_string, cursor_options, bound_params);
             }
         }
     };
@@ -152,11 +159,16 @@ unsafe fn ra_planner_hook_inner(
     let optimized = match optimize_relexpr(&rel_expr, &facts) {
         Ok(expr) => expr,
         Err(e) => {
-            pgrx::error!(
-                "ra_planner: optimization failure: {} [query: {}]",
-                e,
-                truncate_sql(&sql, 80)
-            );
+            // Optimization failed — fall back to PG's planner
+            // rather than aborting the query.
+            if log {
+                pgrx::log!(
+                    "ra_planner: optimize fell back to PG: {} [query: {}]",
+                    e,
+                    truncate_sql(&sql, 80)
+                );
+            }
+            return call_prev_planner(parse, query_string, cursor_options, bound_params);
         }
     };
     let optimize_ms = t1.elapsed().as_secs_f64() * 1000.0;
@@ -166,9 +178,20 @@ unsafe fn ra_planner_hook_inner(
     let table_map = plan_builder::build_table_map(parse);
     let mut builder = PlanBuilder::new(parse, table_map, &stats);
 
-    // If supplied advice produced per-relation physical-strategy
-    // preferences, hand them to the plan builder so scan/join/
-    // parallelism advice steers the produced PG Plan tree.
+    // Honor user-supplied scan/join/parallelism advice by handing
+    // the derived per-relation physical-strategy preferences to the
+    // plan builder (RFC 0087 consumption path).
+    //
+    // Cost-driven defaults (`PhysicalChoices::augment_from_stats`,
+    // which would pick IndexScan vs SeqScan from statistics even
+    // without supplied advice) are intentionally NOT applied on the
+    // production planner path. The plan builder emits a concrete
+    // PG IndexScan with a fixed selectivity guess, bypassing PG's
+    // own path-costing; enabling that by default could regress plan
+    // quality. It stays gated to the `optimize_bounded` API (CLI,
+    // tests, benchmarks) until the Ra-vs-PG plan-quality comparison
+    // validates it. Supplied advice is explicit user intent, so it
+    // is always honored here.
     if let Some(advice_str) = crate::extension_state::effective_plan_advice() {
         if let Ok(parsed) = ra_plan_advice::parse_advice(&advice_str) {
             let choices = ra_engine::plan_advice_physical::PhysicalChoices::from_advice(&parsed);
@@ -181,11 +204,18 @@ unsafe fn ra_planner_hook_inner(
     let planned_stmt = match builder.build_planned_stmt(&optimized) {
         Ok(stmt) => stmt,
         Err(e) => {
-            pgrx::error!(
-                "ra_planner: plan build failure: {} [query: {}]",
-                e,
-                truncate_sql(&sql, 80)
-            );
+            // Plan-builder couldn't translate this RelExpr to a PG
+            // Plan (e.g. an operator variant we don't emit yet such
+            // as MATCH_RECOGNIZE or a vector TopK). Fall back to
+            // PG's native planner instead of failing the query.
+            if log {
+                pgrx::log!(
+                    "ra_planner: plan-build fell back to PG: {} [query: {}]",
+                    e,
+                    truncate_sql(&sql, 80)
+                );
+            }
+            return call_prev_planner(parse, query_string, cursor_options, bound_params);
         }
     };
     let translate_ms = t2.elapsed().as_secs_f64() * 1000.0;
@@ -201,24 +231,6 @@ unsafe fn ra_planner_hook_inner(
     if !advice.is_empty() {
         let rendered = ra_plan_advice::render_advice(&advice);
         crate::plan_advice_explain::stash_generated_advice(planned_stmt, rendered);
-    }
-
-    // Compile per-relation physical-strategy preferences from
-    // the supplied advice (if any). Today we log how many
-    // preferences were derived; future work in plan_builder
-    // will consume these to pick `IndexScan` vs `SeqScan` (etc.)
-    // when the user supplied a scan-method advice tag.
-    if let Some(advice_str) = crate::extension_state::effective_plan_advice() {
-        if let Ok(parsed) = ra_plan_advice::parse_advice(&advice_str) {
-            let choices = ra_engine::plan_advice_physical::PhysicalChoices::from_advice(&parsed);
-            if !choices.is_empty() {
-                tracing::debug!(
-                    n_choices = choices.len(),
-                    "ra-pg-extension: physical-strategy preferences derived from supplied advice; \
-                     plan_builder consumption is a follow-up",
-                );
-            }
-        }
     }
 
     // ─── Timing log ───────────────────────────────────────────────────
@@ -365,32 +377,16 @@ fn optimize_relexpr(
         .map_err(|e| format!("{e}"))
 }
 
-// TODO(plan-advice): when pgrx 0.18 (or whichever release adds
-// `RegisterExtensionExplainOption` bindings) lands, register
-// `EXPLAIN (PLAN_ADVICE)` here. The handler should call
-// `optimize_bounded` to capture an `OptimizationResult`, emit
-// generated advice via `ra_engine::plan_advice_emit::emit_advice`,
-// and render the "Generated Plan Advice:" / "Supplied Plan
-// Advice:" blocks identically to PG's pgpa_explain_per_plan_hook.
-// Until then, the supplied advice is honored at planning time
-// (via the RA_PLAN_ADVICE GUC) but EXPLAIN output is unchanged.
-
-// TODO(provenance): expose `PlanProvenance` via a custom `EXPLAIN
-// (RA_PROVENANCE)` option. Implementation outline:
-//   1. Switch this helper to call `optimize_bounded` instead of
-//      `optimize_with_facts`, capturing the `OptimizationResult`
-//      and storing the resulting `Option<PlanProvenance>` on a
-//      session-local store keyed by query hash.
-//   2. Register a custom EXPLAIN option via
-//      `RegisterExplainOption` (PG ≥ 18) that adds a "Ra
-//      Provenance" block to JSON / text EXPLAIN output by
-//      reading from the session store.
-//   3. Mirror the CLI rendering (`crates/ra-cli/src/commands/
-//      explain.rs::cmd_explain`) so users see the same
-//      fingerprint / cost-model-id / hardware-hash /
-//      rule-set-hash / route / termination_reason fields.
-// Deferred: the EXPLAIN option machinery is PG-version-sensitive
-// and the work here would not change planning behavior.
+// Provenance via EXPLAIN: `PlanProvenance` (cost-model snapshot,
+// hardware hash, rule-set hash, route, termination reason) is
+// captured on every `OptimizationResult` and surfaced today via
+// the CLI (`ra-cli explain --provenance`). Exposing it through a
+// PG `EXPLAIN (RA_PROVENANCE)` option would mirror the existing
+// `plan_advice_explain` machinery (RegisterExtensionExplainOption
+// + session stash + explain_per_plan_hook). It's deferred — not
+// half-built — because it changes no planning behavior and the
+// EXPLAIN-option FFI is PG-version-sensitive; tracked in
+// rfcs/text/0090-provenance-explain-option.md.
 
 // ───────────────────────────────────────────────────────────────────────────
 // PostgreSQL helpers

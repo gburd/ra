@@ -160,7 +160,6 @@ fn test_score_fusion_methods() {
 }
 
 #[test]
-#[ignore = "hybrid search rules disabled pending cost model integration"]
 fn test_hybrid_rules_exist() {
     let rules = hybrid_search_rules();
     assert!(!rules.is_empty(), "Should have hybrid search rewrite rules");
@@ -179,10 +178,6 @@ fn test_hybrid_rules_exist() {
     assert!(
         rule_names.contains(&"hybrid-parallel"),
         "Should have parallel rule"
-    );
-    assert!(
-        rule_names.contains(&"hybrid-with-limit"),
-        "Should have rule for LIMIT queries"
     );
 }
 

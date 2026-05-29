@@ -115,6 +115,7 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0087](text/0087-physical-operator-selection.md) | Physical-Operator Selection | 2026-05-28 | Plan-advice / physical layer |
 | [0088](text/0088-fdw-pushdown-foreign-join.md) | FDW Pushdown for `FOREIGN_JOIN` Plan Advice | 2026-05-29 | Plan-advice / cross-database |
 | [0089](text/0089-egraph-cost-driven-physical-lowering.md) | E-Graph Cost-Driven Physical Lowering | 2026-05-29 | Plan-advice / physical layer |
+| [0090](text/0090-provenance-explain-option.md) | Provenance via `EXPLAIN (RA_PROVENANCE)` | 2026-05-29 | PG-extension diagnostics |
 
 ## Rejected
 
@@ -124,12 +125,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 90
-- **Implemented**: 33 (37%)
+- **Total RFCs**: 91
+- **Implemented**: 33 (36%)
 - **Underway**: 2 (2%)
 - **Accepted**: 8 (9%)
 - **Under Review**: 6 (7%)
-- **Proposed**: 40 (44%)
+- **Proposed**: 41 (45%)
 - **Rejected**: 1 (1%)
 
 ## Last Updated: 2026-05-29

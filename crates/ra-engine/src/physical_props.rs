@@ -15,12 +15,17 @@
 //! consumers should treat them as `None` / `Single` /
 //! `Singleton` defaults.
 //!
-//! Today's consumers:
-//! - [`crate::egraph::result::OptimizationResult::physical_properties`]
-//!   exposes the computed map so callers can ask "is this subtree
-//!   sorted on column X?".
+//! # Entry points
 //!
-//! Future consumers:
+//! [`PhysicalProperties::compute`] (whole plan) and
+//! [`PhysicalProperties::compute_for`] (arbitrary subtree) are
+//! the public API. They're called on demand at the point of use
+//! rather than eagerly stored on every `OptimizationResult` —
+//! the analysis is only needed by specific consumers, so paying
+//! for it unconditionally would be wasted work on the planning
+//! path.
+//!
+//! Intended consumers:
 //! - RFC 0089 (e-graph cost-driven physical lowering): merge-join
 //!   cost estimation needs to know whether children are
 //!   already sorted on the join keys.
@@ -36,8 +41,6 @@
 //! inside the e-graph's `RelAnalysis`. Same reasoning as the
 //! `PhysicalChoices` sidecar: keeps the e-graph small and fast
 //! while still letting downstream code reason about properties.
-
-use std::collections::HashMap;
 
 use ra_core::algebra::{NullOrdering, ProjectionColumn, RelExpr, SortDirection};
 use ra_core::expr::Expr;
@@ -96,13 +99,12 @@ pub struct ExprProperties {
     pub distribution: Distribution,
 }
 
-/// Per-subtree property map keyed by a structural hash of the
-/// `RelExpr`. The map is built once after extraction and cached
-/// on [`crate::egraph::result::OptimizationResult`].
+/// Physical properties of the root of a plan, computed on demand
+/// by [`PhysicalProperties::compute`].
 ///
-/// Lookup APIs (`for_subtree`, `is_sorted_on`) take a borrowed
-/// `RelExpr` reference and use pointer/structural identity so
-/// callers don't need to thread keys through their code.
+/// Lookup API [`PhysicalProperties::is_sorted_on`] answers
+/// "is the plan sorted such that these keys are an ordering
+/// prefix?" without the caller threading keys through its code.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PhysicalProperties {
     /// Properties for the root expression. Most consumers only
@@ -255,10 +257,6 @@ fn is_prefix(claimed: &[OrderingKey], wanted: &[OrderingKey]) -> bool {
             && a.nulls == b.nulls
     })
 }
-
-/// Re-export the per-subtree map type so consumers can build
-/// caches keyed on subtree pointer if needed.
-pub type SubtreePropertyMap = HashMap<*const RelExpr, ExprProperties>;
 
 #[cfg(test)]
 mod tests {
