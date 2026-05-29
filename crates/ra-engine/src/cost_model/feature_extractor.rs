@@ -185,6 +185,10 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_table_names_inner(u, out);
             }
         }
+        RelExpr::Merge { target, source, .. } => {
+            out.push(target.to_lowercase());
+            collect_table_names_inner(source, out);
+        }
     }
 }
 
@@ -439,6 +443,10 @@ impl FeatureExtractor {
                 if let Some(u) = using {
                     self.visit(u);
                 }
+            }
+            RelExpr::Merge { source, .. } => {
+                self.table_count += 1;
+                self.visit(source);
             }
         }
     }

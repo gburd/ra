@@ -265,7 +265,7 @@ impl FingerprintCollector {
             | RelExpr::MultiUnnest { .. }
             | RelExpr::RowPattern { .. }
             | RelExpr::MvScan { .. } => {}
-            RelExpr::Insert { source, .. } => {
+            RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => {
                 self.visit(source);
             }
             RelExpr::Update { from, .. } => {

@@ -349,6 +349,16 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
                 hash_rel_expr(u, hasher);
             }
         }
+        RelExpr::Merge {
+            target,
+            source,
+            when_clauses,
+            ..
+        } => {
+            target.hash(hasher);
+            when_clauses.len().hash(hasher);
+            hash_rel_expr(source, hasher);
+        }
     }
 }
 

@@ -239,7 +239,7 @@ impl FeatureSchema {
                 self.encode_expr(input, stats, features);
             }
             // DML operators: encode their sub-expressions
-            RelExpr::Insert { source, .. } => {
+            RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => {
                 features[OP_TYPE_OFFSET] = 1.0;
                 self.encode_expr(source, stats, features);
             }

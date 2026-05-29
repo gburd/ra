@@ -33,6 +33,50 @@ pub enum OnConflict {
     },
 }
 
+/// A `WHEN` clause of a `MERGE` statement, in source order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MergeWhen {
+    /// Which side the clause matches on.
+    pub kind: MergeMatchKind,
+    /// Optional extra `AND` predicate gating this clause.
+    pub condition: Option<Expr>,
+    /// Action to perform when this clause fires.
+    pub action: MergeAction,
+}
+
+/// The match side of a `MERGE` `WHEN` clause.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MergeMatchKind {
+    /// `WHEN MATCHED` — a source row matched a target row.
+    Matched,
+    /// `WHEN NOT MATCHED [BY TARGET]` — a source row with no target.
+    NotMatched,
+    /// `WHEN NOT MATCHED BY SOURCE` — a target row with no source
+    /// (PostgreSQL 17+).
+    NotMatchedBySource,
+}
+
+/// The action taken by a `MERGE` `WHEN` clause.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MergeAction {
+    /// `THEN UPDATE SET col = expr, ...`
+    Update {
+        /// SET assignments: (column_name, new_value_expr).
+        assignments: Vec<(String, Expr)>,
+    },
+    /// `THEN DELETE`
+    Delete,
+    /// `THEN INSERT [(cols)] VALUES (...)`
+    Insert {
+        /// Optional target column list.
+        columns: Vec<String>,
+        /// Row value expressions.
+        values: Vec<Expr>,
+    },
+    /// `THEN DO NOTHING`
+    DoNothing,
+}
+
 /// A relational expression (query plan node).
 ///
 /// Each variant wraps its children in `Box<RelExpr>` to form a tree.
@@ -436,6 +480,20 @@ pub enum RelExpr {
         /// Optional RETURNING clause.
         returning: Option<Vec<ProjectionColumn>>,
     },
+
+    /// MERGE INTO target USING source ON cond WHEN ... THEN ...
+    Merge {
+        /// Target table name.
+        target: String,
+        /// Source relation (table scan or subquery).
+        source: Box<RelExpr>,
+        /// The `ON` join condition.
+        on: Expr,
+        /// Ordered `WHEN [NOT] MATCHED ... THEN ...` clauses.
+        when_clauses: Vec<MergeWhen>,
+        /// Optional RETURNING clause (PostgreSQL 17+).
+        returning: Option<Vec<ProjectionColumn>>,
+    },
 }
 
 /// Configuration for cycle detection in recursive CTEs.
@@ -764,7 +822,7 @@ impl RelExpr {
                 inputs.iter().map(std::convert::AsRef::as_ref).collect()
             }
             Self::BitmapHeapScan { bitmap, .. } => vec![bitmap],
-            Self::Insert { source, .. } => vec![source],
+            Self::Insert { source, .. } | Self::Merge { source, .. } => vec![source],
             Self::Update { from, .. } => match from {
                 Some(f) => vec![f],
                 None => vec![],
@@ -1035,6 +1093,39 @@ impl RelExpr {
                     }
                 }
             }
+            Self::Merge {
+                source,
+                on,
+                when_clauses,
+                returning,
+                ..
+            } => {
+                source.collect_columns(out);
+                collect_expr_columns(on, out);
+                for when in when_clauses {
+                    if let Some(cond) = &when.condition {
+                        collect_expr_columns(cond, out);
+                    }
+                    match &when.action {
+                        MergeAction::Update { assignments } => {
+                            for (_, expr) in assignments {
+                                collect_expr_columns(expr, out);
+                            }
+                        }
+                        MergeAction::Insert { values, .. } => {
+                            for expr in values {
+                                collect_expr_columns(expr, out);
+                            }
+                        }
+                        MergeAction::Delete | MergeAction::DoNothing => {}
+                    }
+                }
+                if let Some(ret) = returning {
+                    for pc in ret {
+                        collect_expr_columns(&pc.expr, out);
+                    }
+                }
+            }
         }
     }
 }
@@ -1095,7 +1186,9 @@ impl RelExpr {
             Self::BitmapHeapScan { bitmap, table, .. } => {
                 table == cte_name || bitmap.references_cte(cte_name)
             }
-            Self::Insert { source, .. } => source.references_cte(cte_name),
+            Self::Insert { source, .. } | Self::Merge { source, .. } => {
+                source.references_cte(cte_name)
+            }
             Self::Update { from, .. } => {
                 from.as_ref().is_some_and(|f| f.references_cte(cte_name))
             }
