@@ -964,9 +964,9 @@ pub unsafe extern "C" fn ra_on_conflict_update(
     list_ptr
 }
 
-/// Build an ON CONFLICT DO SELECT marker (PostgreSQL 19).
+/// Build an ON CONFLICT DO SELECT marker (`PostgreSQL` 19).
 ///
-/// Stores a 1-element list `[target_cols_list_idx]`, distinguishing
+/// Stores a single-element list `[target_cols_list_idx]`, distinguishing
 /// it from DO NOTHING (0 elements) and DO UPDATE (2 elements).
 ///
 /// # Safety
@@ -985,15 +985,14 @@ pub unsafe extern "C" fn ra_on_conflict_select(
         return std::ptr::null_mut();
     };
     // Bare `ON CONFLICT DO SELECT` (no target) → empty target list.
-    let tc_idx = match decode(target_cols) {
-        Some((_tag, idx)) => idx,
-        None => {
-            let empty = st.push_list();
-            match decode(empty) {
-                Some((NodeTag::List, i)) => i,
-                _ => return std::ptr::null_mut(),
-            }
-        }
+    let tc_idx = if let Some((_tag, idx)) = decode(target_cols) {
+        idx
+    } else {
+        let empty = st.push_list();
+        let Some((NodeTag::List, i)) = decode(empty) else {
+            return std::ptr::null_mut();
+        };
+        i
     };
     st.list_push(list_idx, tc_idx);
     list_ptr
@@ -1115,7 +1114,7 @@ fn decode_target_columns(state: &RaParseState, list_idx: usize) -> Vec<String> {
 ///
 /// - null → None
 /// - empty list → Some(DoNothing)
-/// - 1-element list → Some(DoSelect { target })  (PostgreSQL 19)
+/// - single-element list → Some(DoSelect { target })  (`PostgreSQL` 19)
 /// - 2-element list → Some(DoUpdate { target, assignments })
 fn decode_on_conflict(state: &RaParseState, ptr: *mut RaNode) -> Option<OnConflict> {
     if ptr.is_null() {
