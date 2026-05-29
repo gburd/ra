@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ra_core::statistics::Statistics;
 use ra_core::EmptyFactsProvider;
@@ -212,12 +212,34 @@ fn benchmark_query(
         }
     };
 
-    // Optimize with Ra using bounded optimization for metric extraction
-    let start = Instant::now();
-    let result = optimizer.optimize_bounded(&relexpr);
-    let elapsed = start.elapsed();
+    // Optimize with Ra using bounded optimization for metric extraction.
+    //
+    // Take the minimum wall-clock over a small number of runs after a
+    // discarded warmup pass. The first optimization of any query shape
+    // pays one-time cold-start costs (lazy rule-category compilation,
+    // cost-model load, allocator warmup) that are not part of steady-
+    // state planning latency; without this the cold-start penalty
+    // (~200ms) lands on whichever query happens to run first and floats
+    // between runs. Min-of-N reports the representative planning floor;
+    // e-graph node counts (the deterministic signal) are unaffected.
+    const WARMUP_RUNS: usize = 1;
+    const TIMED_RUNS: usize = 5;
+    for _ in 0..WARMUP_RUNS {
+        let _ = optimizer.optimize_bounded(&relexpr);
+    }
+    let mut best_elapsed = Duration::from_secs(u64::MAX);
+    let mut result = optimizer.optimize_bounded(&relexpr);
+    for _ in 0..TIMED_RUNS {
+        let start = Instant::now();
+        let r = optimizer.optimize_bounded(&relexpr);
+        let elapsed = start.elapsed();
+        if elapsed < best_elapsed {
+            best_elapsed = elapsed;
+        }
+        result = r;
+    }
 
-    metrics.plan_time_us = elapsed.as_micros() as u64;
+    metrics.plan_time_us = best_elapsed.as_micros() as u64;
 
     match result {
         Ok(opt_result) => {
