@@ -2143,7 +2143,25 @@ impl Optimizer {
         let hardware = self.hardware_profile();
         let rules = self.load_rules(expr);
 
-        let iter_limit = self.config.iter_limit;
+        // Adaptive iteration limit (same fix as optimize_bounded /
+        // optimize): cap saturation by the speculative route so a
+        // query whose e-graph grows unboundedly doesn't run the raw
+        // config.iter_limit. Honors budget.max_iterations via
+        // compute_egraph_limits; clamped to >= 1 so the tracker can
+        // still enforce the budget on the first pass.
+        let table_count =
+            crate::large_join::LargeJoinOptimizer::count_tables(expr);
+        let opt_features =
+            crate::speculative_router::OptimizationFeatures::from_expr(expr)
+                .with_table_stats(&self.table_stats);
+        let route_prediction = if let Some(ref router) = self.speculative_router {
+            router.predict(&opt_features)
+        } else {
+            crate::speculative_router::SpeculativeRouter::heuristic_fallback(&opt_features)
+        };
+        let (iter_limit, _timeout_ms) =
+            self.compute_egraph_limits(&route_prediction, table_count);
+        let iter_limit = iter_limit.max(1);
         let node_limit = self.config.node_limit;
 
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
