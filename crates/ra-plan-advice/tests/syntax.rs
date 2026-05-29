@@ -262,3 +262,34 @@ fn foreign_join_requires_multiple_identifiers() {
 fn occurrence_must_be_positive() {
     parse_advice("SEQ_SCAN(x#0)").unwrap_err();
 }
+
+// ── Security: deeply-nested input must not overflow the stack ──
+
+#[test]
+fn deeply_nested_sublists_rejected_not_stack_overflow() {
+    // The plan-advice string is an untrusted GUC. A malicious
+    // value with thousands of nested parens previously recursed
+    // unboundedly (stack overflow -> backend crash). The parser
+    // now caps nesting depth and returns a parse error well
+    // before any stack risk. 5000 levels would overflow an
+    // unguarded recursive-descent parser.
+    let depth = 5000;
+    let s = format!(
+        "JOIN_ORDER({}{})",
+        "(".repeat(depth),
+        ")".repeat(depth),
+    );
+    // Must return an Err (not panic, not crash).
+    let result = parse_advice(&s);
+    assert!(
+        result.is_err(),
+        "deeply-nested advice should be rejected, not parsed",
+    );
+}
+
+#[test]
+fn legitimate_nesting_still_parses() {
+    // Real advice nests only a level or two; that must still work.
+    parse_advice("FOREIGN_JOIN((a b))").unwrap();
+    parse_advice("JOIN_ORDER((a b) c)").unwrap();
+}

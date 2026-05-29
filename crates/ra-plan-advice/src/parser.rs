@@ -102,14 +102,45 @@ pub fn parse_advice(input: &str) -> Result<Advice, ParseError> {
 struct Parser<'a> {
     src: &'a [u8],
     pos: usize,
+    /// Current sublist nesting depth, guarded against unbounded
+    /// recursion. The plan-advice string comes from an untrusted
+    /// GUC (`ra_planner.plan_advice`), so a malicious value like
+    /// `JOIN_ORDER(((((...)))))` with deep nesting could overflow
+    /// the stack and crash the backend (a stack overflow is not a
+    /// catchable panic). We cap nesting well below any legitimate
+    /// use.
+    depth: usize,
 }
+
+/// Maximum sublist nesting depth. Real advice nests at most a
+/// couple of levels (`FOREIGN_JOIN((a b))`); 64 is far beyond any
+/// legitimate input while keeping recursion safely shallow.
+const MAX_NESTING_DEPTH: usize = 64;
 
 impl<'a> Parser<'a> {
     fn new(input: &'a str) -> Self {
         Self {
             src: input.as_bytes(),
             pos: 0,
+            depth: 0,
         }
+    }
+
+    /// Enter a nested sublist, erroring if it would exceed
+    /// [`MAX_NESTING_DEPTH`]. Pair every successful call with
+    /// [`Self::exit_sublist`].
+    fn enter_sublist(&mut self) -> Result<(), ParseError> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING_DEPTH {
+            return Err(self.error(format!(
+                "plan advice nested too deeply (max {MAX_NESTING_DEPTH})"
+            )));
+        }
+        Ok(())
+    }
+
+    fn exit_sublist(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
     }
 
     /// Build a [`ParseError`] anchored at the current position.
@@ -402,7 +433,9 @@ impl<'a> Parser<'a> {
         while self.skip_whitespace_and_comments() && self.peek() != Some(b')') {
             if self.peek() == Some(b'(') {
                 self.pos += 1;
+                self.enter_sublist()?;
                 let children = self.parse_simple_target_list()?;
+                self.exit_sublist();
                 self.skip_whitespace_and_comments();
                 self.expect(b')')?;
                 out.push(AdviceTarget::ordered(children));
@@ -419,7 +452,9 @@ impl<'a> Parser<'a> {
         while self.skip_whitespace_and_comments() && self.peek() != Some(b')') {
             if self.peek() == Some(b'(') {
                 self.pos += 1;
+                self.enter_sublist()?;
                 let children = self.parse_join_order_target_list()?;
+                self.exit_sublist();
                 self.skip_whitespace_and_comments();
                 self.expect(b')')?;
                 out.push(AdviceTarget::ordered(children));

@@ -29,10 +29,10 @@ pub fn cmd_compare(
             eprintln!("Running EXPLAIN on {} database...", kind.cyan());
         }
         let mut connector =
-            ra_metadata::connect(url).with_context(|| format!("connecting to database: {url}"))?;
+            ra_metadata::connect(url).with_context(|| format!("connecting to database: {}", ra_metadata::redact_url(url)))?;
         connector
             .explain_query(sql)
-            .with_context(|| format!("running EXPLAIN on: {url}"))?
+            .with_context(|| format!("running EXPLAIN on: {}", ra_metadata::redact_url(url)))?
     } else if let Some(path) = explain_json_path {
         let explain_source = std::fs::read_to_string(path)
             .with_context(|| format!("reading EXPLAIN JSON: {path}"))?;

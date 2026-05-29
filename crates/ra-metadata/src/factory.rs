@@ -152,6 +152,50 @@ impl AnyConnector {
 ///   `sqlserver-support` feature)
 /// - `oracle://` -- Oracle (requires `oracle-support` feature)
 ///
+/// Redact the password component of a database connection URL so
+/// it is safe to embed in error messages and logs.
+///
+/// Connection strings routinely carry credentials
+/// (`postgresql://user:secret@host/db`). Echoing them verbatim
+/// into errors or logs discloses the password. This replaces the
+/// password with `****`, preserving the rest of the URL for
+/// diagnostics. URLs without credentials, bare file paths, and
+/// `:memory:` are returned unchanged.
+#[must_use]
+pub fn redact_url(url: &str) -> String {
+    // Locate the authority section after `scheme://`.
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let authority_start = scheme_end + 3;
+    // The authority ends at the first `/`, `?`, or end of string.
+    let authority_end = url[authority_start..]
+        .find(['/', '?'])
+        .map_or(url.len(), |i| authority_start + i);
+    let authority = &url[authority_start..authority_end];
+
+    // Credentials, if any, precede the last `@` in the authority.
+    let Some(at) = authority.rfind('@') else {
+        return url.to_string();
+    };
+    let creds = &authority[..at];
+    // Mask everything after the first `:` (the password).
+    let Some(colon) = creds.find(':') else {
+        // userinfo without a password — nothing to redact.
+        return url.to_string();
+    };
+    let user = &creds[..colon];
+    format!(
+        "{}{}:****@{}",
+        &url[..authority_start],
+        user,
+        &url[authority_start + at + 1..],
+    )
+}
+
+/// Detect the database backend from a connection URL and create
+/// the appropriate connector.
+///
 /// # Errors
 ///
 /// Returns `MetadataError::Connection` if the scheme is
@@ -288,6 +332,34 @@ fn has_duckdb_extension(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redact_url_masks_password() {
+        assert_eq!(
+            redact_url("postgresql://user:secret@localhost/db"),
+            "postgresql://user:****@localhost/db"
+        );
+        assert_eq!(
+            redact_url("mysql://admin:p@ss:word@host:3306/app?ssl=true"),
+            "mysql://admin:****@host:3306/app?ssl=true"
+        );
+    }
+
+    #[test]
+    fn redact_url_leaves_credential_free_urls_unchanged() {
+        assert_eq!(
+            redact_url("postgresql://localhost/db"),
+            "postgresql://localhost/db"
+        );
+        // userinfo without a password is not a secret.
+        assert_eq!(
+            redact_url("postgres://user@host/db"),
+            "postgres://user@host/db"
+        );
+        // bare file paths and :memory: have no authority.
+        assert_eq!(redact_url("/var/lib/db.sqlite"), "/var/lib/db.sqlite");
+        assert_eq!(redact_url(":memory:"), ":memory:");
+    }
 
     #[test]
     fn detect_postgres_url() {

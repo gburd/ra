@@ -19,10 +19,10 @@ pub fn cmd_gather_metadata(
             eprintln!("Connecting to {} database...", kind.cyan());
         }
         let mut connector =
-            ra_metadata::connect(url).with_context(|| format!("connecting to database: {url}"))?;
+            ra_metadata::connect(url).with_context(|| format!("connecting to database: {}", ra_metadata::redact_url(url)))?;
         connector
             .gather_schema()
-            .with_context(|| format!("gathering schema from: {url}"))?
+            .with_context(|| format!("gathering schema from: {}", ra_metadata::redact_url(url)))?
     } else if let Some(path) = schema_path {
         let source = std::fs::read_to_string(path)
             .with_context(|| format!("reading schema file: {path}"))?;

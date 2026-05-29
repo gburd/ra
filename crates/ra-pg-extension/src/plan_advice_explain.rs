@@ -194,6 +194,23 @@ unsafe extern "C-unwind" fn plan_advice_per_plan_hook(
         }
     }
 
+    // Our rendering runs inside catch_unwind: a panic here must
+    // not unwind into PostgreSQL's EXPLAIN C machinery (which
+    // would abort the backend). On panic we simply omit our
+    // advice block — EXPLAIN output is diagnostic, never worth
+    // crashing a session over.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        render_plan_advice_block(plannedstmt, es);
+    }));
+}
+
+/// Render the Supplied / Generated plan-advice blocks for
+/// `plannedstmt` into `es`. Separated from the hook entry so the
+/// panic guard wraps exactly our logic, not the chained prev hook.
+unsafe fn render_plan_advice_block(
+    plannedstmt: *mut pg_sys::PlannedStmt,
+    es: *mut pg_sys::ExplainState,
+) {
     // Decide whether to emit the block.
     let plan_advice_requested = explain_state_plan_advice_flag(es);
     let always_show =

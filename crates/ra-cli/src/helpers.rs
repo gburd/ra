@@ -263,7 +263,7 @@ pub fn load_schema_for_analysis(
 ) -> Result<ra_metadata::SchemaInfo> {
     if let Some(url) = database_url {
         let mut connector =
-            ra_metadata::connect(url).with_context(|| format!("connecting to database: {url}"))?;
+            ra_metadata::connect(url).with_context(|| format!("connecting to database: {}", ra_metadata::redact_url(url)))?;
         let schema = connector
             .gather_schema()
             .with_context(|| "gathering schema metadata from database")?;

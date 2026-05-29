@@ -66,21 +66,25 @@ pub unsafe extern "C-unwind" fn ra_raw_parser_hook(
 
     let sql = CStr::from_ptr(query_string).to_string_lossy();
 
-    // Parse with Ra's Lime parser.
-    match ra_parser::parse_statement(&sql) {
-        Ok(stmt) => {
-            // Store for the planner hook phase.
-            set_parsed(stmt);
-            // Return NULL — let PG parse too. We'll use our parsed
-            // statement in the planner hook where we have PG's Query
-            // tree for OID resolution.
-            std::ptr::null_mut()
-        }
-        Err(_) => {
-            // Fall through to PG's standard parser.
-            std::ptr::null_mut()
-        }
+    // Parse with Ra's Lime parser, catching any panic so it never
+    // unwinds into PostgreSQL's C frames (which would `abort()`
+    // the backend). On panic — or parse failure — return NULL so
+    // PG parses the query with its own parser. Ra must never crash
+    // a backend over a query PG can handle.
+    let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ra_parser::parse_statement(&sql).ok()
+    }))
+    .unwrap_or(None);
+
+    if let Some(stmt) = parsed {
+        // Store for the planner hook phase.
+        set_parsed(stmt);
     }
+    // Return NULL either way — let PG parse too. We use our parsed
+    // statement in the planner hook where we have PG's Query tree
+    // for OID resolution; on panic/failure PG's parser is the
+    // authoritative fallback.
+    std::ptr::null_mut()
 }
 
 /// Register the raw parser hook (requires patched PostgreSQL).

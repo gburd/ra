@@ -57,7 +57,7 @@ pub use explain::{
     ExplainPlan, JoinType, NodeType,
 };
 pub use explain_gen::{from_relexpr, DatabaseCostParams, ExplainFormat};
-pub use factory::{connect, detect_kind, AnyConnector};
+pub use factory::{connect, detect_kind, redact_url, AnyConnector};
 pub use schema::{
     ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo,
     SchemaInfo, TableInfo, TableStats, TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
