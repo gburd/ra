@@ -2,7 +2,7 @@
 
 - Start Date: 2026-03-20
 - Author: System
-- Status: Accepted
+- Status: Implemented (MVP, 2026-05-29) — see INDEX.md for scope boundaries
 
 ## Summary
 

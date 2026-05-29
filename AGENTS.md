@@ -240,11 +240,11 @@ Cache functionality is split into two crates:
 - **`ra-cache-api`** (core layer) — trait definitions and interfaces
 - **`ra-cache-impl`** (experimental layer) — LRU/LFU/adaptive implementations
 
-## Workspace Quality (as of 2026-05-28)
+## Workspace Quality (as of 2026-05-29)
 
 - **0 clippy errors** (`cargo clippy --all-targets --all-features -- -D warnings`)
 - **0 compiler warnings** on `cargo build --workspace --all-features`
-- **167 test suites, 7787 tests passing, 0 failing, 66 ignored** (`cargo test --workspace --all-features`)
+- **169 test suites, 7826 tests passing, 0 failing, 66 ignored** (`cargo test --workspace --all-features`)
 - Known flaky test mitigations:
   - `saturation_terminates_quickly` skips Aggregate, self-ref-join, joins of the
     same base table, constant predicates, constant sort keys, and `UnaryOp` over

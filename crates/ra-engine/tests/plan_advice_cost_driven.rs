@@ -397,3 +397,124 @@ fn cost_driven_scan_handles_missing_ndv_neutrally() {
         other => panic!("expected an index; got {other:?}"),
     }
 }
+
+fn add_index_typed(
+    stats: &mut Statistics,
+    name: &str,
+    columns: Vec<&str>,
+    index_type: ra_core::facts::IndexType,
+) {
+    let columns: Vec<String> = columns.into_iter().map(String::from).collect();
+    let idx = IndexStats::new(columns, index_type);
+    stats.indexes.insert(name.to_string(), idx);
+}
+
+#[test]
+fn cost_driven_scan_skips_gin_index_for_equality_predicate() {
+    // RFC 0039: GIN indexes don't support B-tree-style equality
+    // matching. Even if the index covers the predicate column,
+    // it should be skipped for an `=` filter.
+    let q = filter_eq(scan("t"), "t", "id", 42);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_index_typed(&mut stats, "t_gin", vec!["id"], ra_core::facts::IndexType::Gin);
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    assert_eq!(
+        result.physical_choices.scan_for("t"),
+        Some(&ScanStrategy::Seq),
+        "GIN index must not be selected for plain equality predicate",
+    );
+}
+
+#[test]
+fn cost_driven_scan_skips_gist_index_for_equality_predicate() {
+    let q = filter_eq(scan("t"), "t", "geom", 0);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_index_typed(
+        &mut stats,
+        "t_gist",
+        vec!["geom"],
+        ra_core::facts::IndexType::Gist,
+    );
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    assert_eq!(
+        result.physical_choices.scan_for("t"),
+        Some(&ScanStrategy::Seq),
+        "GiST index must not be selected for equality predicate",
+    );
+}
+
+#[test]
+fn cost_driven_scan_skips_brin_index_for_equality_predicate() {
+    let q = filter_eq(scan("t"), "t", "ts", 0);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_index_typed(
+        &mut stats,
+        "t_brin",
+        vec!["ts"],
+        ra_core::facts::IndexType::Brin,
+    );
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    assert_eq!(
+        result.physical_choices.scan_for("t"),
+        Some(&ScanStrategy::Seq),
+        "BRIN index must not be selected for equality predicate",
+    );
+}
+
+#[test]
+fn cost_driven_scan_picks_btree_when_btree_and_gin_both_match() {
+    // BTree on id, GIN on id — only the BTree should be picked.
+    let q = filter_eq(scan("t"), "t", "id", 42);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_index_typed(
+        &mut stats,
+        "t_btree",
+        vec!["id"],
+        ra_core::facts::IndexType::BTree,
+    );
+    add_index_typed(
+        &mut stats,
+        "t_gin_dup",
+        vec!["id"],
+        ra_core::facts::IndexType::Gin,
+    );
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    match result.physical_choices.scan_for("t") {
+        Some(ScanStrategy::Index { name, .. }) => assert_eq!(name, "t_btree"),
+        other => panic!("expected BTree index t_btree; got {other:?}"),
+    }
+}
+
+#[test]
+fn cost_driven_scan_picks_hash_index_for_equality() {
+    // Hash indexes support equality and are valid choices for
+    // `=` predicates.
+    let q = filter_eq(scan("t"), "t", "id", 42);
+    let mut opt = Optimizer::new();
+    let mut stats = medium_table_stats();
+    add_index_typed(
+        &mut stats,
+        "t_hash",
+        vec!["id"],
+        ra_core::facts::IndexType::Hash,
+    );
+    opt.add_table_stats("t", stats);
+
+    let result = opt.optimize_bounded(&q).unwrap();
+    match result.physical_choices.scan_for("t") {
+        Some(ScanStrategy::Index { name, .. }) => assert_eq!(name, "t_hash"),
+        other => panic!("expected Hash index t_hash; got {other:?}"),
+    }
+}

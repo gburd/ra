@@ -2,7 +2,7 @@
 
 - Start Date: 2026-03-21
 - Author: RA Contributors
-- Status: Accepted
+- Status: Implemented (MVP, 2026-05-29) — see INDEX.md for scope boundaries
 - Tracking Issue: TBD
 
 ## Summary

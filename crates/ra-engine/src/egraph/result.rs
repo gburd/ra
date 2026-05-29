@@ -45,6 +45,16 @@ pub struct OptimizationResult {
     /// Today only `ordering` is populated; partitioning and
     /// distribution are forward-compatibility placeholders.
     pub physical_properties: crate::physical_props::PhysicalProperties,
+
+    /// Runtime-filter opportunities detected in the plan
+    /// (RFC 0027 MVP). Each entry identifies a star-schema-
+    /// shaped equi-join where a bloom filter built on the
+    /// small (build) side could reduce the probe-side scan
+    /// output. This is **detection-only**: realising the
+    /// filter at execution time requires PG executor
+    /// cooperation that's a separate scope from this
+    /// optimizer-side surface.
+    pub runtime_filters: crate::runtime_filters::RuntimeFilters,
 }
 
 /// Whether optimization completed within its budget.

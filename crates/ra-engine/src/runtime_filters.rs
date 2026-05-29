@@ -588,6 +588,183 @@ pub fn identify_filter_opportunities(
     opportunities
 }
 
+// ---------------------------------------------------------------------------
+// RelExpr-level detection (RFC 0027 MVP)
+// ---------------------------------------------------------------------------
+//
+// The functions above operate on pre-extracted join-pair tuples.
+// This layer walks an optimized `RelExpr`, finds star-schema-shaped
+// equi-joins, pulls cardinality/NDV from `table_stats`, and
+// delegates to `identify_filter_opportunities` for the cost
+// gate. The result is exposed on
+// `OptimizationResult.runtime_filters` so EXPLAIN / plan-builder /
+// future executor work can act on it.
+//
+// Status: detection + annotation only. Realising the filter at
+// execution time needs PG-executor cooperation that's a separate
+// scope (PG's executor doesn't accept arbitrary optimizer-supplied
+// filter nodes). Today this map answers "which joins WOULD benefit
+// from a runtime filter".
+
+/// Per-query collection of detected runtime-filter opportunities.
+///
+/// Wraps the existing [`FilterOpportunity`] cost analysis with the
+/// alias bookkeeping needed to walk a `RelExpr`.
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeFilters {
+    /// One entry per beneficial (build, probe) join pair.
+    pub opportunities: Vec<FilterOpportunity>,
+}
+
+/// `(build, probe, build_col, probe_col, build_rows, probe_rows,
+/// build_ndv, probe_ndv)` tuple in the shape
+/// [`identify_filter_opportunities`] consumes.
+type JoinPairTuple = (String, String, String, String, f64, f64, f64, f64);
+
+impl RuntimeFilters {
+    /// Detect runtime-filter opportunities in `expr` using
+    /// `table_stats` for cardinality/NDV. Only inner and
+    /// left/right outer equi-joins are considered (a bloom
+    /// filter on a full-outer join would drop NULL-extended
+    /// rows the join must preserve).
+    #[must_use]
+    pub fn detect(
+        expr: &ra_core::algebra::RelExpr,
+        table_stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
+    ) -> Self {
+        let mut join_pairs: Vec<JoinPairTuple> = Vec::new();
+        collect_join_pairs(expr, table_stats, &mut join_pairs);
+        // Use a conservative per-row scan cost; the cost gate in
+        // `identify_filter_opportunities` only flags clear wins.
+        let opportunities = identify_filter_opportunities(&join_pairs, 1.0);
+        Self { opportunities }
+    }
+
+    /// First opportunity whose probe side matches `alias`.
+    #[must_use]
+    pub fn probe_for(&self, alias: &str) -> Option<&FilterOpportunity> {
+        self.opportunities
+            .iter()
+            .find(|o| o.probe_table.eq_ignore_ascii_case(alias))
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.opportunities.is_empty()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.opportunities.len()
+    }
+}
+
+/// Walk `expr` collecting `(build, probe, build_col, probe_col,
+/// build_rows, probe_rows, build_ndv, probe_ndv)` tuples for each
+/// eligible equi-join. The smaller side becomes the build side.
+fn collect_join_pairs(
+    expr: &ra_core::algebra::RelExpr,
+    stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
+    out: &mut Vec<JoinPairTuple>,
+) {
+    use ra_core::algebra::{JoinType, RelExpr};
+    if let RelExpr::Join {
+        join_type,
+        condition,
+        left,
+        right,
+    } = expr
+    {
+        if matches!(
+            join_type,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter
+        ) {
+            if let Some(pair) = join_pair_for(condition, left, right, stats) {
+                out.push(pair);
+            }
+        }
+    }
+    for child in expr.children() {
+        collect_join_pairs(child, stats, out);
+    }
+}
+
+/// Build a single join-pair tuple if the join is an equi-join over
+/// columns of two base scans that both have statistics.
+fn join_pair_for(
+    condition: &ra_core::expr::Expr,
+    left: &ra_core::algebra::RelExpr,
+    right: &ra_core::algebra::RelExpr,
+    stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
+) -> Option<JoinPairTuple> {
+    let (l_col, r_col) = equi_columns(condition)?;
+    let l_alias = scan_alias(left)?;
+    let r_alias = scan_alias(right)?;
+    let (l_rows, l_ndv) = rows_and_ndv(&l_alias, &l_col, stats)?;
+    let (r_rows, r_ndv) = rows_and_ndv(&r_alias, &r_col, stats)?;
+
+    // Smaller side is the build side.
+    if l_rows <= r_rows {
+        Some((l_alias, r_alias, l_col, r_col, l_rows, r_rows, l_ndv, r_ndv))
+    } else {
+        Some((r_alias, l_alias, r_col, l_col, r_rows, l_rows, r_ndv, l_ndv))
+    }
+}
+
+/// Extract `(left_col, right_col)` from an equi-join condition.
+fn equi_columns(condition: &ra_core::expr::Expr) -> Option<(String, String)> {
+    use ra_core::expr::{BinOp, Expr};
+    let Expr::BinOp {
+        op: BinOp::Eq,
+        left,
+        right,
+    } = condition
+    else {
+        return None;
+    };
+    let (Expr::Column(lc), Expr::Column(rc)) = (left.as_ref(), right.as_ref()) else {
+        return None;
+    };
+    Some((lc.column.clone(), rc.column.clone()))
+}
+
+/// Leaf-most scan alias of `expr`, descending through pass-through
+/// wrappers. `None` for non-scan inputs.
+fn scan_alias(expr: &ra_core::algebra::RelExpr) -> Option<String> {
+    use ra_core::algebra::RelExpr;
+    match expr {
+        RelExpr::Scan { table, alias } => {
+            Some(alias.clone().unwrap_or_else(|| table.clone()))
+        }
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input } => scan_alias(input),
+        _ => None,
+    }
+}
+
+/// Look up `(row_count, ndv)` for `alias`.`column`. NDV falls back
+/// to `row_count` when the column has no distinct-count stat.
+fn rows_and_ndv(
+    alias: &str,
+    column: &str,
+    stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
+) -> Option<(f64, f64)> {
+    let s = stats
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(alias))
+        .map(|(_, s)| s)?;
+    let rows = s.row_count;
+    let ndv = s
+        .columns
+        .iter()
+        .find(|(c, _)| c.eq_ignore_ascii_case(column))
+        .map_or(rows, |(_, cs)| cs.distinct_count);
+    Some((rows, ndv))
+}
+
 #[cfg(test)]
 #[expect(clippy::float_cmp, reason = "legacy allow")]
 mod tests {

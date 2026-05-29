@@ -80,6 +80,7 @@ pub mod plan_advice_honor;
 pub mod plan_advice_physical;
 pub mod plan_advice_validate;
 pub mod physical_props;
+pub mod partition_pruning;
 pub mod join_transformations;
 pub mod large_join;
 pub mod lazy_rules;

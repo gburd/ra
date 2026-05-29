@@ -82,6 +82,14 @@ pub struct Optimizer {
     fingerprint_reader: Option<FingerprintReader>,
     speculative_router: Option<SpeculativeRouter>,
     training_coordinator: Option<SharedTrainingCoordinator>,
+    /// Adaptive cost calibrator (RFC 0026). When present, its
+    /// per-operator correction factors are exposed to consumers
+    /// via [`Optimizer::correction_factor`] so cost-driven
+    /// physical selection can adjust estimates from execution
+    /// feedback. Wrapped in `Arc` so the calibrator can be
+    /// shared across optimizer instances (e.g., one calibrator
+    /// per database that survives optimizer recreation).
+    calibrator: Option<Arc<std::sync::RwLock<crate::AdaptiveCalibrator>>>,
 }
 
 /// Result of running e-graph equality saturation.
@@ -174,6 +182,7 @@ impl Optimizer {
             fingerprint_reader: None,
             speculative_router: None,
             training_coordinator: None,
+            calibrator: None,
         }
     }
 
@@ -203,6 +212,7 @@ impl Optimizer {
             fingerprint_reader: None,
             speculative_router: None,
             training_coordinator: None,
+            calibrator: None,
         }
     }
 
@@ -484,6 +494,52 @@ impl Optimizer {
     /// Set the hardware profile for cost-based optimization.
     pub fn set_hardware_profile(&mut self, profile: ra_hardware::HardwareProfile) {
         self.hardware_profile = Some(profile);
+    }
+
+    /// Attach an adaptive cost calibrator (RFC 0026).
+    ///
+    /// Once attached, the calibrator's correction factors are
+    /// available via [`Self::correction_factor`] and
+    /// [`Self::adjust_cost`]. The optimizer itself does not yet
+    /// fold corrections into its internal cost function — that
+    /// integration is the next phase. Today the calibrator is
+    /// available for downstream consumers (cost-driven
+    /// physical selection, plan-builder cost adjustments) to
+    /// query directly.
+    pub fn set_calibrator(
+        &mut self,
+        calibrator: Arc<std::sync::RwLock<crate::AdaptiveCalibrator>>,
+    ) {
+        self.calibrator = Some(calibrator);
+    }
+
+    /// Return the per-operator correction factor from the
+    /// attached calibrator, or 1.0 (no correction) when none
+    /// is attached or when the calibrator hasn't yet detected
+    /// systematic bias for this operator.
+    #[must_use]
+    pub fn correction_factor(&self, operator: crate::OperatorKind) -> f64 {
+        self.calibrator
+            .as_ref()
+            .and_then(|c| c.read().ok().map(|c| c.correction_factor(operator)))
+            .unwrap_or(1.0)
+    }
+
+    /// Apply the calibrator's correction factor to a base cost.
+    /// Equivalent to `base_cost * self.correction_factor(operator)`.
+    #[must_use]
+    pub fn adjust_cost(&self, operator: crate::OperatorKind, base_cost: f64) -> f64 {
+        base_cost * self.correction_factor(operator)
+    }
+
+    /// Ingest execution feedback into the attached calibrator.
+    /// No-op when no calibrator is attached.
+    pub fn ingest_calibration_feedback(&self, feedback: &[crate::CostFeedback]) {
+        if let Some(calibrator) = self.calibrator.as_ref() {
+            if let Ok(mut cal) = calibrator.write() {
+                cal.ingest(feedback);
+            }
+        }
     }
 
     /// Get the current hardware profile, or auto-detect if not set.
@@ -1967,6 +2023,8 @@ impl Optimizer {
                 choices.augment_from_stats(&plan, &self.table_stats);
                 let physical_properties =
                     crate::physical_props::PhysicalProperties::compute(&plan);
+                let runtime_filters =
+                    crate::runtime_filters::RuntimeFilters::detect(&plan, &self.table_stats);
                 Ok(OptimizationResult {
                     plan,
                     cost,
@@ -1977,6 +2035,7 @@ impl Optimizer {
                     provenance: Some(provenance),
                     physical_choices: choices,
                     physical_properties,
+                    runtime_filters,
                 })
             }
             None => Err(EGraphError::ExtractionError(
@@ -2181,6 +2240,8 @@ impl Optimizer {
             Some(plan) => {
                 let physical_properties =
                     crate::physical_props::PhysicalProperties::compute(&plan);
+                let runtime_filters =
+                    crate::runtime_filters::RuntimeFilters::detect(&plan, &self.table_stats);
                 Ok(OptimizationResult {
                     plan,
                     cost: best_cost,
@@ -2191,6 +2252,7 @@ impl Optimizer {
                     provenance: None,
                     physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
                     physical_properties,
+                    runtime_filters,
                 })
             }
             None => Err(EGraphError::ExtractionError(
@@ -2364,6 +2426,12 @@ fn handle_overflow_with_tracking(
             Some(plan) => {
                 let physical_properties =
                     crate::physical_props::PhysicalProperties::compute(&plan);
+                // Overflow path is a free function without access
+                // to table_stats; runtime-filter detection needs
+                // stats, so we return an empty set here. The
+                // primary (non-overflow) paths populate it fully.
+                let runtime_filters =
+                    crate::runtime_filters::RuntimeFilters::default();
                 Ok(OptimizationResult {
                     plan,
                     cost: best_cost,
@@ -2374,10 +2442,12 @@ fn handle_overflow_with_tracking(
                     provenance: None,
                     physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
                     physical_properties,
+                    runtime_filters,
                 })
             }
             None => Ok(OptimizationResult {
                 physical_properties: crate::physical_props::PhysicalProperties::compute(original),
+                runtime_filters: crate::runtime_filters::RuntimeFilters::default(),
                 plan: original.clone(),
                 cost: f64::INFINITY,
                 status: OptimizationStatus::Incomplete,
@@ -2390,6 +2460,7 @@ fn handle_overflow_with_tracking(
         },
         OverflowStrategy::ReturnOriginal => Ok(OptimizationResult {
             physical_properties: crate::physical_props::PhysicalProperties::compute(original),
+            runtime_filters: crate::runtime_filters::RuntimeFilters::default(),
             plan: original.clone(),
             cost: f64::INFINITY,
             status: OptimizationStatus::Incomplete,

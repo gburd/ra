@@ -34,6 +34,11 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0083](text/0083-xpath-xquery-optimization.md) | XPath/XQuery Optimization | 2026-03-25 | `xml_optimizer.rs` |
 | [0084](text/0084-oracle-json-relational-duality-optimization.md) | Oracle JSON Relational Duality Optimization | 2026-03-25 | `oracle_json_duality.rs` |
 | [0085](text/0085-platform-specific-rule-architecture.md) | Platform-Specific Rule Architecture | 2026-03-25 | Platform module design |
+| [0019](0019-partition-pruning.md) | Partition Pruning (MVP) | 2026-05-29 | `partition_pruning.rs` (pruning only; partition-wise joins deferred) |
+| [0025](0025-physical-property-tracking.md) | Physical Property Tracking (ordering MVP) | 2026-05-29 | `physical_props.rs` (ordering only; partitioning/distribution deferred) |
+| [0026](0026-adaptive-cost-calibration.md) | Adaptive Cost Calibration (optimizer surface) | 2026-05-29 | `Optimizer::set_calibrator`/`correction_factor`/`ingest_calibration_feedback` |
+| [0027](0027-runtime-filters.md) | Runtime Filters (detection MVP) | 2026-05-29 | `runtime_filters.rs::RuntimeFilters::detect` (detection only; execution deferred) |
+| [0039](0039-operator-class-aware-indexing.md) | Operator Class Aware Index Selection (MVP) | 2026-05-29 | `plan_advice_physical.rs` index-type gating |
 
 ## Underway (In Development)
 
@@ -48,10 +53,6 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 |-----|-------|------|
 | [0003](text/0003-plan-advice-integration.md) | pg_plan_advice Integration | 2026-03-20 |
 | [0012](text/0012-monitoring-system.md) | Monitoring and Advisory System | 2026-03-20 |
-| [0019](text/0019-partition-pruning.md) | Partition Pruning and Partition-Wise Operations | 2026-03-20 |
-| [0025](text/0025-physical-property-tracking.md) | Physical Property Tracking Framework | 2026-03-21 |
-| [0026](text/0026-adaptive-cost-calibration.md) | Adaptive Cost Model Calibration | 2026-03-21 |
-| [0027](text/0027-runtime-filters.md) | Runtime Filters and Sideways Information Passing | 2026-03-21 |
 | [0028](text/0028-incremental-sort-reordering.md) | Incremental Sort and Key Reordering | 2026-03-21 |
 | [0029](text/0029-self-join-elimination.md) | Self-Join Elimination and Outer-to-Inner Conversion | 2026-03-21 |
 | [0030](text/0030-cardinality-estimation-enhancement.md) | Cardinality Estimation Enhancement | 2026-03-21 |
@@ -78,7 +79,6 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0036](text/0036-multi-query-optimization.md) | Multi-Query Optimization | 2026-03-21 | CMU research |
 | [0037](text/0037-interesting-orders-framework.md) | Interesting Orders Framework | 2026-03-21 | CMU research |
 | [0038](text/0038-loose-index-scan.md) | Loose Index Scan (Skip Scan) | 2026-03-21 | CMU research |
-| [0039](text/0039-operator-class-aware-indexing.md) | Operator Class Aware Index Selection | 2026-03-21 | CMU research |
 | [0040](text/0040-predicate-inference.md) | Predicate Inference and Transitivity Closure | 2026-03-21 | CMU research |
 | [0041](text/0041-query-compilation.md) | Query Compilation and Code Generation | 2026-03-21 | CMU research |
 | [0042](text/0042-magic-sets-recursive-queries.md) | Magic Sets for Recursive Queries | 2026-03-22 | Gap analysis |
@@ -124,12 +124,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 89
-- **Implemented**: 27 (31%)
+- **Total RFCs**: 90
+- **Implemented**: 33 (37%)
 - **Underway**: 2 (2%)
-- **Accepted**: 12 (14%)
+- **Accepted**: 8 (9%)
 - **Under Review**: 6 (7%)
-- **Proposed**: 40 (45%)
+- **Proposed**: 40 (44%)
 - **Rejected**: 1 (1%)
 
-## Last Updated: 2026-05-26
+## Last Updated: 2026-05-29

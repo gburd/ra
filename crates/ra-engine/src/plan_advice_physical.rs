@@ -400,6 +400,21 @@ mod cost_driven {
         // un-analyzed indexes.
         let mut best: Option<(&String, usize, u8, f64)> = None;
         for (idx_name, idx_stats) in &stats.indexes {
+            // Only B-tree and Hash indexes match equality
+            // predicates correctly. GIN/GiST/BRIN/SP-GiST/RUM
+            // are operator-class-specific (text search,
+            // spatial overlap, range queries) and must not
+            // be selected for plain `=` predicates — choosing
+            // them would produce a plan that PG can't execute
+            // or that's executor-correct but pessimal.
+            // RFC 0039 documents the full operator-class-aware
+            // path; this MVP gates on index_type so the
+            // wrong index is never picked, then defers
+            // GIN/GiST etc. to explicit `INDEX_SCAN` advice
+            // until predicate-matching is wired through.
+            if !is_btree_or_hash(idx_stats.index_type) {
+                continue;
+            }
             let prefix_len = covered_prefix_len(&idx_stats.columns, &eq_columns);
             if prefix_len == 0 {
                 continue;
@@ -438,6 +453,16 @@ mod cost_driven {
             },
             None => ScanStrategy::Seq,
         }
+    }
+
+    /// True if `kind` indexes equality on B-tree-style ordering
+    /// or hash-style equality lookups. False for specialized
+    /// operator-class indexes (GIN/GiST/SP-GiST/BRIN/RUM/IVFFlat
+    /// /HNSW) which need predicate types this layer doesn't yet
+    /// recognize.
+    fn is_btree_or_hash(kind: ra_core::facts::IndexType) -> bool {
+        use ra_core::facts::IndexType;
+        matches!(kind, IndexType::BTree | IndexType::Hash)
     }
 
     /// Estimate the combined equality selectivity of every
