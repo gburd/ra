@@ -249,14 +249,13 @@ Cache functionality is split into two crates:
   - `saturation_terminates_quickly` skips Aggregate, self-ref-join, joins of the
     same base table, constant predicates, constant sort keys, and `UnaryOp` over
     constants — each documented inline with the rule-interaction reason
-  - `performance_framework_test` makes wall-clock latency assertions
-    (`*_under_Nms`, `*_performance`). They pass single-threaded
-    (`cargo test -p ra-engine --test performance_framework_test --
-    --test-threads=1`) but can flake under the parallel full-suite load
-    from CPU contention. Follow-up: convert the wall-clock assertions to
-    deterministic `ResourceUsageReport` iteration/node-count assertions
-    (the pattern `adaptive_limits_test::test_adaptive_limits_vs_fixed`
-    now uses).
+  - `performance_framework_test` asserts deterministic planning
+    effort: peak e-graph node counts stay within per-query
+    ceilings (the regression signal the old wall-clock latency
+    targets were a noisy proxy for). Node counts are independent
+    of CPU load, so the suite is deterministic in parallel and
+    single-threaded alike. Wall-clock medians are printed
+    (`[perf] ...`) for manual runs but never asserted.
   - `plan_diff` tests that toggle the `colored` crate's process-global override
     serialise on a module-static `COLOR_LOCK` + `ColorGuard` RAII helper
   - Config loader test clears `RA_*` env vars to isolate from developer shell
