@@ -169,7 +169,14 @@ to validate the advice as `failed` so the user gets a clear
 EXPLAIN signal that the requested optimization isn't
 available. The user can decide whether to disable Ra for
 foreign-join queries, configure their FDW differently, or
-accept the local join.
+accept the local join. The full design — phased
+implementation, deparse approach, FDW integration, cost
+plumbing — is documented in
+[RFC 0088](../../rfcs/text/0088-fdw-pushdown-foreign-join.md)
+for when a workload demand justifies the engineering
+investment (cross-region warehouse replicas, sharded fact
+tables via `postgres_fdw`, `file_fdw` over Parquet are
+the leading candidates).
 
 ### Cost-driven physical lowering: chosen sidecar design
 
@@ -207,17 +214,26 @@ This is a deliberate trade-off, not a missing feature:
   the inner side would be a cheap hash-join build, Ra can't
   see that during enumeration. PG can.
 
-Workloads where the con dominates would warrant a separate
-RFC promoting `PhysicalChoices` into e-graph rewrite rules
-that lower `Join` to `HashJoin`/`MergeJoin`/`NestLoop`. That
-RFC isn't filed because we haven't measured a workload where
-Ra's current approach loses to PG on plan quality (only on
-plan time, where Ra wins by 89×). The sidecar design **is the
-chosen design**; the door is left open if the workload
-demands change.
+Workloads where the con dominates would warrant promoting
+`PhysicalChoices` into e-graph rewrite rules that lower
+`Join` to `HashJoin`/`MergeJoin`/`NestLoop`. That design is
+documented in detail in
+[RFC 0089](../../rfcs/text/0089-egraph-cost-driven-physical-lowering.md):
+phased migration, cost-model extensions for sort-order
+analysis, supplied-advice biasing, and the rollout
+strategy. The sidecar design **is the chosen design today**
+because we haven't measured a workload where Ra loses to PG
+on plan quality (only on plan time, where Ra wins by 89×).
+RFC 0089 ships when the workload demand changes — the
+leading candidates are TPC-H 7-12 way joins, sort-rich
+analytical queries (TPC-DS), and cardinality-skewed joins
+where physical-method choice influences the optimal join
+order.
 
 See [RFC 0087](../../rfcs/text/0087-physical-operator-selection.md)
-for the formal architectural comparison.
+for the formal architectural comparison and
+[RFC 0089](../../rfcs/text/0089-egraph-cost-driven-physical-lowering.md)
+for the e-graph migration plan.
 
 ### Filter peephole for `TID_SCAN` and `BITMAP_HEAP_SCAN`
 
@@ -240,7 +256,12 @@ reality rather than emitting a malformed plan.
 - [`docs/research/pg-plan-advice-port.md`](../research/pg-plan-advice-port.md)
   — the full implementation plan.
 - [`rfcs/text/0087-physical-operator-selection.md`](../../rfcs/text/0087-physical-operator-selection.md)
-  — design for physical-operator selection.
+  — design for physical-operator selection (the sidecar
+  approach in production today).
+- [`rfcs/text/0088-fdw-pushdown-foreign-join.md`](../../rfcs/text/0088-fdw-pushdown-foreign-join.md)
+  — design for honoring `FOREIGN_JOIN` via PG FDW pushdown.
+- [`rfcs/text/0089-egraph-cost-driven-physical-lowering.md`](../../rfcs/text/0089-egraph-cost-driven-physical-lowering.md)
+  — design for moving physical decisions into the e-graph.
 - [PostgreSQL plan-advice documentation](https://www.postgresql.org/docs/current/pgplanadvice.html)
   — upstream reference.
 - `~/src/postgres/contrib/pg_plan_advice/README` — the design

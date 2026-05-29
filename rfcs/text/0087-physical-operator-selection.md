@@ -313,3 +313,10 @@ for a different problem, not a fix to this one.
   `~/src/postgres/src/backend/optimizer/path/costsize.c` —
   reference for what cost-driven physical selection looks like
   in a mature optimizer.
+- [RFC 0088](0088-fdw-pushdown-foreign-join.md) — design for
+  honoring `FOREIGN_JOIN` advice via real FDW pushdown
+  (orthogonal feature; produces another physical variant
+  `T_ForeignScan`).
+- [RFC 0089](0089-egraph-cost-driven-physical-lowering.md) —
+  design for moving physical-method choice from the sidecar
+  into the e-graph itself for analytical workloads.
