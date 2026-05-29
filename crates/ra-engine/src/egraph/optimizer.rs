@@ -1897,12 +1897,28 @@ impl Optimizer {
 
             let prev_classes = egraph.number_of_classes();
 
+            // Per-iteration egg time limit. egg only checks its own
+            // limit *between* its internal phases, and our outer loop
+            // only checks the budget *between* iterations — so a fixed
+            // multi-second per-iteration limit lets a single slow
+            // saturation pass blow far past the budget's `max_time`
+            // (observed: a 50ms budget producing a 235ms plan). Cap
+            // each iteration at whatever time the overall budget has
+            // left, so total wall-clock is bounded by `max_time` plus
+            // at most one short iteration.
+            let iter_time_limit = match tracker.remaining_time() {
+                Some(remaining) => {
+                    remaining.min(std::time::Duration::from_secs(time_limit_secs))
+                }
+                None => std::time::Duration::from_secs(time_limit_secs),
+            };
+
             // Run one iteration of equality saturation
             let runner: Runner<RelLang, RelAnalysis> = Runner::default()
                 .with_egraph(egraph)
                 .with_node_limit(node_limit)
                 .with_iter_limit(1)
-                .with_time_limit(std::time::Duration::from_secs(time_limit_secs))
+                .with_time_limit(iter_time_limit)
                 .run(&rules);
 
             egraph = runner.egraph;

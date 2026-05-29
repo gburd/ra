@@ -431,6 +431,20 @@ impl ResourceTracker {
         }
     }
 
+    /// Time remaining before the `max_time` (or `max_cpu_time`)
+    /// budget is exhausted, or `None` when neither is set. Used to
+    /// bound each saturation iteration so a single slow pass cannot
+    /// overrun the overall time budget.
+    #[must_use]
+    pub fn remaining_time(&self) -> Option<std::time::Duration> {
+        let limit = match (self.budget.max_time, self.budget.max_cpu_time) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) | (None, Some(a)) => a,
+            (None, None) => return None,
+        };
+        Some(limit.saturating_sub(self.start_time.elapsed()))
+    }
+
     /// Check whether any budget limit has been exceeded.
     #[must_use]
     pub fn check(&self) -> ResourceCheckResult {
@@ -1031,6 +1045,28 @@ mod tests {
         assert_eq!(tracker.iterations_used(), 0);
         assert_eq!(tracker.peak_egraph_nodes(), 0);
         assert_eq!(tracker.peak_memory_estimate(), 0);
+    }
+
+    #[test]
+    fn remaining_time_none_when_unbounded() {
+        // unlimited() has max_time: None and max_cpu_time: None.
+        let tracker = ResourceTracker::start(ResourceBudget::unlimited());
+        assert!(tracker.remaining_time().is_none());
+    }
+
+    #[test]
+    fn remaining_time_some_and_decreasing_when_bounded() {
+        let budget =
+            ResourceBudget::unlimited().with_time_limit(Duration::from_millis(200));
+        let tracker = ResourceTracker::start(budget);
+        let r = tracker
+            .remaining_time()
+            .expect("bounded budget has remaining time");
+        assert!(r <= Duration::from_millis(200));
+        // Saturating: an exhausted budget yields zero, never panics.
+        std::thread::sleep(Duration::from_millis(2));
+        let r2 = tracker.remaining_time().expect("still bounded");
+        assert!(r2 <= r);
     }
 
     #[test]
