@@ -6,6 +6,7 @@
 //!
 //! Collects timing, IO, and correctness metrics for comparison.
 
+#[cfg(feature = "live-comparison")]
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -344,5 +345,3 @@ pub fn print_summary(report: &CompareReport) {
     println!("║ PG exec faster:           {:>6}               ║", s.pg_exec_faster_count);
     println!("╚══════════════════════════════════════════════╝");
 }
-
-use std::io::Write;
