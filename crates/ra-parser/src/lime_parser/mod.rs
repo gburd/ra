@@ -550,6 +550,40 @@ mod tests {
     }
 
     #[test]
+    fn parse_insert_on_conflict_select_with_target() {
+        assert_parses_as(
+            "INSERT INTO t(a) VALUES (1) ON CONFLICT (a) DO SELECT",
+            |r| {
+                matches!(
+                    r,
+                    RelExpr::Insert {
+                        on_conflict: Some(ra_core::algebra::OnConflict::DoSelect { target }),
+                        ..
+                    } if target == &["a".to_owned()]
+                )
+            },
+            "Insert ON CONFLICT (a) DO SELECT (PG19)",
+        );
+    }
+
+    #[test]
+    fn parse_insert_on_conflict_select_bare() {
+        assert_parses_as(
+            "INSERT INTO t(a) VALUES (1) ON CONFLICT DO SELECT",
+            |r| {
+                matches!(
+                    r,
+                    RelExpr::Insert {
+                        on_conflict: Some(ra_core::algebra::OnConflict::DoSelect { target }),
+                        ..
+                    } if target.is_empty()
+                )
+            },
+            "Insert ON CONFLICT DO SELECT (bare, PG19)",
+        );
+    }
+
+    #[test]
     fn parse_insert_returning() {
         assert_parses_as(
             "INSERT INTO t(a) VALUES (1) RETURNING a",

@@ -862,6 +862,13 @@ fn add_on_conflict(
                 vec![tag_id, target_id, assigns_id].into_boxed_slice(),
             )))
         }
+        OnConflict::DoSelect { target } => {
+            let tag_id = add_symbol(rec, "do_select");
+            let target_id = add_string_list(rec, target);
+            Ok(rec.add(RelLang::Func(
+                vec![tag_id, target_id].into_boxed_slice(),
+            )))
+        }
     }
 }
 

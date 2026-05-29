@@ -745,6 +745,12 @@ opt_on_conflict(A) ::= ON CONFLICT LPAREN ident_list(T) RPAREN
                         DO UPDATE SET assignment_list(L). {
     A = ra_on_conflict_update(pstate, T, L);
 }
+opt_on_conflict(A) ::= ON CONFLICT LPAREN ident_list(T) RPAREN DO SELECT. {
+    A = ra_on_conflict_select(pstate, T);
+}
+opt_on_conflict(A) ::= ON CONFLICT DO SELECT. {
+    A = ra_on_conflict_select(pstate, NULL);
+}
 
 opt_returning(A) ::= .                            { A = NULL; }
 opt_returning(A) ::= RETURNING target_list(B).    { A = B; }

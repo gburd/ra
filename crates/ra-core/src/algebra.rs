@@ -23,6 +23,14 @@ pub enum OnConflict {
         /// SET assignments for the update.
         assignments: Vec<(String, Expr)>,
     },
+    /// ON CONFLICT DO SELECT (PostgreSQL 19) — return the existing
+    /// conflicting row(s) instead of updating, optionally taking a
+    /// row lock.
+    DoSelect {
+        /// Conflict target columns (empty for a bare
+        /// `ON CONFLICT DO SELECT`).
+        target: Vec<String>,
+    },
 }
 
 /// A relational expression (query plan node).

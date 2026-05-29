@@ -91,6 +91,7 @@ RaNode *ra_delete(RaParseState *st, const char *table,
 RaNode *ra_on_conflict_nothing(RaParseState *st);
 RaNode *ra_on_conflict_update(RaParseState *st,
                                RaNode *target_cols, RaNode *assignments);
+RaNode *ra_on_conflict_select(RaParseState *st, RaNode *target_cols);
 RaNode *ra_assignment(RaParseState *st, const char *column, RaNode *value);
 RaNode *ra_default_values(RaParseState *st);
 

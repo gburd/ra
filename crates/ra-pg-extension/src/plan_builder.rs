@@ -2588,6 +2588,21 @@ impl PlanBuilder {
                 }
                 (*mt).onConflictSet = set_list;
             }
+            OnConflict::DoSelect { .. } => {
+                // ON CONFLICT DO SELECT is a PostgreSQL 19 feature.
+                // pgrx 0.17 (pg13–pg18) has no ONCONFLICT_SELECT
+                // action, so we cannot emit an executable plan node
+                // for it here. The Lime parser and RelExpr model
+                // understand DO SELECT (parse coverage), but
+                // execution requires PG19, which the extension
+                // toolchain does not yet target. Leave the default
+                // action; the planner hook's fallback handles the
+                // (currently unreachable on pg18) execution path.
+                debug!(
+                    "ON CONFLICT DO SELECT recognized but not executable on pg<=18 \
+                     (PG19 feature); leaving default conflict action",
+                );
+            }
         }
     }
 

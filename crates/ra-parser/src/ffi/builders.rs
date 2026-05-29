@@ -964,6 +964,41 @@ pub unsafe extern "C" fn ra_on_conflict_update(
     list_ptr
 }
 
+/// Build an ON CONFLICT DO SELECT marker (PostgreSQL 19).
+///
+/// Stores a 1-element list `[target_cols_list_idx]`, distinguishing
+/// it from DO NOTHING (0 elements) and DO UPDATE (2 elements).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `target_cols` must be null or a valid tagged list pointer.
+#[no_mangle]
+pub unsafe extern "C" fn ra_on_conflict_select(
+    state: *mut RaParseState,
+    target_cols: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let list_ptr = st.push_list();
+    let Some((NodeTag::List, list_idx)) = decode(list_ptr) else {
+        return std::ptr::null_mut();
+    };
+    // Bare `ON CONFLICT DO SELECT` (no target) → empty target list.
+    let tc_idx = match decode(target_cols) {
+        Some((_tag, idx)) => idx,
+        None => {
+            let empty = st.push_list();
+            match decode(empty) {
+                Some((NodeTag::List, i)) => i,
+                _ => return std::ptr::null_mut(),
+            }
+        }
+    };
+    st.list_push(list_idx, tc_idx);
+    list_ptr
+}
+
 /// Build an assignment node (a 2-element list: [`col_name_expr`, `value_expr`]).
 ///
 /// # Safety
@@ -1060,10 +1095,27 @@ fn decode_assignments(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<(Strin
     result
 }
 
+/// Extract conflict-target column names from a tagged column-list
+/// index. Returns an empty vec when the list is absent/empty.
+fn decode_target_columns(state: &RaParseState, list_idx: usize) -> Vec<String> {
+    if let Some(tc_list) = state.get_list(list_idx).map(<[usize]>::to_vec) {
+        let mut names = Vec::with_capacity(tc_list.len());
+        for idx in tc_list {
+            if let Some(Expr::Column(col_ref)) = state.take_expr(idx) {
+                names.push(col_ref.column);
+            }
+        }
+        names
+    } else {
+        vec![]
+    }
+}
+
 /// Decode an `on_conflict` pointer into an `Option<OnConflict>`.
 ///
 /// - null → None
 /// - empty list → Some(DoNothing)
+/// - 1-element list → Some(DoSelect { target })  (PostgreSQL 19)
 /// - 2-element list → Some(DoUpdate { target, assignments })
 fn decode_on_conflict(state: &RaParseState, ptr: *mut RaNode) -> Option<OnConflict> {
     if ptr.is_null() {
@@ -1073,19 +1125,14 @@ fn decode_on_conflict(state: &RaParseState, ptr: *mut RaNode) -> Option<OnConfli
     if items.is_empty() {
         return Some(OnConflict::DoNothing);
     }
+    if items.len() == 1 {
+        // DO SELECT (PG19): items[0] = target_cols list index.
+        let target = decode_target_columns(state, items[0]);
+        return Some(OnConflict::DoSelect { target });
+    }
     if items.len() == 2 {
         // items[0] = target_cols list index, items[1] = assignments list index
-        let target_names = if let Some(tc_list) = state.get_list(items[0]).map(<[usize]>::to_vec) {
-            let mut names = Vec::with_capacity(tc_list.len());
-            for idx in tc_list {
-                if let Some(Expr::Column(col_ref)) = state.take_expr(idx) {
-                    names.push(col_ref.column);
-                }
-            }
-            names
-        } else {
-            vec![]
-        };
+        let target_names = decode_target_columns(state, items[0]);
         let assignments = if let Some(as_list) = state.get_list(items[1]).map(<[usize]>::to_vec) {
             let mut assigns = Vec::with_capacity(as_list.len());
             for idx in as_list {
