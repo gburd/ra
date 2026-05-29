@@ -88,6 +88,16 @@ RaNode *ra_update(RaParseState *st, const char *table,
 RaNode *ra_delete(RaParseState *st, const char *table,
                   RaNode *filter, RaNode *using_clause,
                   RaNode *returning);
+RaNode *ra_merge(RaParseState *st, const char *target,
+                 RaNode *source, RaNode *on,
+                 RaNode *when_clauses, RaNode *returning);
+int ra_merge_kind_by(const char *ident);
+RaNode *ra_merge_when_update(RaParseState *st, int kind,
+                             RaNode *cond, RaNode *assignments);
+RaNode *ra_merge_when_delete(RaParseState *st, int kind, RaNode *cond);
+RaNode *ra_merge_when_nothing(RaParseState *st, int kind, RaNode *cond);
+RaNode *ra_merge_when_insert(RaParseState *st, int kind, RaNode *cond,
+                             RaNode *columns, RaNode *values);
 RaNode *ra_on_conflict_nothing(RaParseState *st);
 RaNode *ra_on_conflict_update(RaParseState *st,
                                RaNode *target_cols, RaNode *assignments);

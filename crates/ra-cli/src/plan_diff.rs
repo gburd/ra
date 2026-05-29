@@ -225,6 +225,7 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::Insert { table, .. } => format!("Insert({table})"),
         RelExpr::Update { table, .. } => format!("Update({table})"),
         RelExpr::Delete { table, .. } => format!("Delete({table})"),
+        RelExpr::Merge { target, .. } => format!("Merge({target})"),
     }
 }
 

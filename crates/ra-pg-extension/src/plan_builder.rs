@@ -406,6 +406,14 @@ impl PlanBuilder {
             RelExpr::Insert { .. } | RelExpr::Update { .. } | RelExpr::Delete { .. } => {
                 self.build_modify_table_from_dml(expr)
             }
+            RelExpr::Merge { .. } => Err(PlanBuilderError::UnsupportedVariant(
+                // Ra parses and models MERGE, but lowering it requires a
+                // CMD_MERGE ModifyTable with mergeActionLists. PostgreSQL
+                // 15+ plans MERGE natively, so we defer to the native
+                // planner (the hook falls back on UnsupportedVariant)
+                // rather than emit a partial plan.
+                "MERGE (handled by native PostgreSQL planner)".to_owned(),
+            )),
         }
     }
 

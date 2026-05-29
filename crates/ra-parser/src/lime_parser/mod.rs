@@ -584,6 +584,71 @@ mod tests {
     }
 
     #[test]
+    fn parse_merge_upsert() {
+        assert_parses_as(
+            "MERGE INTO target t USING source s ON t.id = s.id \
+             WHEN MATCHED THEN UPDATE SET v = s.v \
+             WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)",
+            |r| {
+                let RelExpr::Merge {
+                    target,
+                    when_clauses,
+                    ..
+                } = r
+                else {
+                    return false;
+                };
+                target == "target"
+                    && when_clauses.len() == 2
+                    && matches!(
+                        when_clauses[0].action,
+                        ra_core::algebra::MergeAction::Update { .. }
+                    )
+                    && matches!(when_clauses[0].kind, ra_core::algebra::MergeMatchKind::Matched)
+                    && matches!(
+                        when_clauses[1].action,
+                        ra_core::algebra::MergeAction::Insert { .. }
+                    )
+                    && matches!(
+                        when_clauses[1].kind,
+                        ra_core::algebra::MergeMatchKind::NotMatched
+                    )
+            },
+            "MERGE upsert (matched update + not matched insert)",
+        );
+    }
+
+    #[test]
+    fn parse_merge_delete_and_by_source() {
+        assert_parses_as(
+            "MERGE INTO t USING s ON t.id = s.id \
+             WHEN MATCHED AND s.del = 1 THEN DELETE \
+             WHEN NOT MATCHED BY SOURCE THEN DELETE \
+             WHEN NOT MATCHED THEN DO NOTHING",
+            |r| {
+                let RelExpr::Merge { when_clauses, .. } = r else {
+                    return false;
+                };
+                when_clauses.len() == 3
+                    && when_clauses[0].condition.is_some()
+                    && matches!(
+                        when_clauses[0].action,
+                        ra_core::algebra::MergeAction::Delete
+                    )
+                    && matches!(
+                        when_clauses[1].kind,
+                        ra_core::algebra::MergeMatchKind::NotMatchedBySource
+                    )
+                    && matches!(
+                        when_clauses[2].action,
+                        ra_core::algebra::MergeAction::DoNothing
+                    )
+            },
+            "MERGE with AND condition, BY SOURCE, and DO NOTHING",
+        );
+    }
+
+    #[test]
     fn parse_insert_returning() {
         assert_parses_as(
             "INSERT INTO t(a) VALUES (1) RETURNING a",
