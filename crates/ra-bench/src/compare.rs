@@ -8,6 +8,11 @@
 
 #[cfg(feature = "live-comparison")]
 use anyhow::Result;
+// `Write` is needed for `stdout().flush()` inside the
+// live-comparison-gated `run_comparison`; gate the import the same
+// way so it isn't an unused import in the default build.
+#[cfg(feature = "live-comparison")]
+use std::io::Write;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the comparison run.
