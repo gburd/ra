@@ -72,10 +72,30 @@ unsafe extern "C-unwind" fn ra_planner_hook(
                 s.clone()
             } else if let Some(s) = payload.downcast_ref::<&str>() {
                 (*s).to_string()
+            } else if let Some(e) =
+                payload.downcast_ref::<pgrx::pg_sys::panic::ErrorReportWithLevel>()
+            {
+                e.message().to_string()
+            } else if let Some(c) = payload.downcast_ref::<pgrx::pg_sys::panic::CaughtError>() {
+                match c {
+                    pgrx::pg_sys::panic::CaughtError::PostgresError(e)
+                    | pgrx::pg_sys::panic::CaughtError::ErrorReport(e) => e.message().to_string(),
+                    pgrx::pg_sys::panic::CaughtError::RustPanic { ereport, .. } => {
+                        ereport.message().to_string()
+                    }
+                }
             } else {
                 "unknown panic".to_string()
             };
-            pgrx::error!("ra_planner: internal error: {}", msg);
+            // A Ra-side panic must NEVER crash the backend: fall back to
+            // the native planner. We deliberately do NOT use
+            // pgrx::error!/ereport here — this hook has no #[pg_guard]
+            // boundary, so raising a pgrx error panics via panic_any and,
+            // with no catch on the stack, aborts the process across PG's
+            // C planner() frame ("failed to initiate panic"). Log to
+            // stderr (captured by the server log) and degrade gracefully.
+            eprintln!("ra_planner: inner panic, falling back to native planner: {msg}");
+            call_prev_planner(parse, query_string, cursor_options, bound_params)
         }
     }
 }

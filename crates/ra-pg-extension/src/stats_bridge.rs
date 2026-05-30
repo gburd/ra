@@ -627,19 +627,22 @@ fn gather_index_stats_by_oid(rel_oid: pg_sys::Oid, stats: &mut Statistics) {
 
         let index_list = pg_sys::RelationGetIndexList(rel);
 
-        // Iterate the index OID list using list_nth (PG 13+ uses
-        // array-based Lists, not linked lists).
-        let n_indexes = (*index_list).length;
-        for i in 0..n_indexes {
-            let cell = pg_sys::list_nth(index_list, i);
-            let idx_oid = pg_sys::Oid::from(cell as u32);
+        // RelationGetIndexList returns an OID list (NIL when the
+        // relation has no indexes). Use list_nth_oid — list_nth is the
+        // pointer-list accessor and asserts IsPointerList, which aborts
+        // on an assert-enabled build. Guard the NIL/empty case too.
+        if !index_list.is_null() {
+            let n_indexes = (*index_list).length;
+            for i in 0..n_indexes {
+                let idx_oid = pg_sys::list_nth_oid(index_list, i);
 
-            if let Some((name, idx_stats)) = read_single_index(idx_oid) {
-                stats.indexes.insert(name, idx_stats);
+                if let Some((name, idx_stats)) = read_single_index(idx_oid) {
+                    stats.indexes.insert(name, idx_stats);
+                }
             }
+            pg_sys::list_free(index_list);
         }
 
-        pg_sys::list_free(index_list);
         pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
     }
 }
