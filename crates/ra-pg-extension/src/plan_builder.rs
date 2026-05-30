@@ -189,6 +189,22 @@ impl PlanBuilder {
     /// unsupported variant is encountered). The caller should fall back to the
     /// cost-manipulation strategy in that case.
     ///
+    /// Whether the plan_builder can correctly translate this whole
+    /// `RelExpr` tree to a PostgreSQL plan. Conservative allowlist:
+    /// single-relation `Scan` under any combination of `Filter` and
+    /// `Project`. Any other operator (Join, Aggregate, Sort, Limit,
+    /// Distinct, set-ops, DML, ...) is not yet verified correct and
+    /// makes the whole query defer to the native planner.
+    fn is_translatable(expr: &RelExpr) -> bool {
+        match expr {
+            RelExpr::Scan { .. } => true,
+            RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
+                Self::is_translatable(input)
+            }
+            _ => false,
+        }
+    }
+
     /// # Safety
     ///
     /// Must be called from within a live PostgreSQL backend process.
@@ -197,6 +213,23 @@ impl PlanBuilder {
         &mut self,
         expr: &RelExpr,
     ) -> Result<*mut pg_sys::PlannedStmt, PlanBuilderError> {
+        // Correctness gate (1.0 reliability invariant): only emit a Ra
+        // plan for relational shapes the plan_builder is verified to
+        // translate correctly. Everything else returns an error so the
+        // planner hook falls back to PostgreSQL's native planner —
+        // producing correct results rather than a wrong or unsafe plan.
+        // The currently-verified set is single-relation Scan / Filter /
+        // Project. Aggregate, Join, Sort, Limit, Distinct, set-ops, etc.
+        // are NOT yet correctly emitted (they variously drop rows,
+        // mistranslate aggregates, or corrupt executor memory) and must
+        // stay on the native planner until each is implemented and
+        // gated in via the replan-equivalence property test.
+        if !Self::is_translatable(expr) {
+            return Err(PlanBuilderError::UnsupportedVariant(
+                "plan shape not yet supported by Ra; deferring to native planner".to_owned(),
+            ));
+        }
+
         let plan_tree = self.build_plan(expr)?;
 
         let stmt = self.alloc_node::<pg_sys::PlannedStmt>();
@@ -270,49 +303,11 @@ impl PlanBuilder {
                 self.build_scan_with_advice(table, alias.as_deref())
             }
             RelExpr::Filter { predicate, input } => {
-                // Peephole: when the immediate input is a base
-                // Scan and supplied advice requests TID_SCAN or
-                // BITMAP_HEAP_SCAN, try the specialized builders
-                // first. They consume the predicate (no need to
-                // wrap in a separate Filter qual) when they
-                // succeed; on failure they return Err and we
-                // fall through to the generic Filter wrapping
-                // below.
-                if let RelExpr::Scan { table, alias } = input.as_ref() {
-                    let lookup_alias =
-                        alias.as_deref().unwrap_or(table.as_str());
-                    use ra_engine::plan_advice_physical::ScanStrategy;
-                    match self.physical_choices.scan_for(lookup_alias).cloned() {
-                        Some(ScanStrategy::Tid) => {
-                            match self.build_tid_scan(table, predicate) {
-                                Ok(plan) => return Ok(plan),
-                                Err(reason) => {
-                                    debug!(
-                                        table = %table,
-                                        %reason,
-                                        "TID_SCAN advice could not be honored; \
-                                         falling through to standard Filter+SeqScan",
-                                    );
-                                }
-                            }
-                        }
-                        Some(ScanStrategy::BitmapHeap) => {
-                            match self.build_bitmap_heap_for_filter(table, predicate) {
-                                Ok(plan) => return Ok(plan),
-                                Err(reason) => {
-                                    debug!(
-                                        table = %table,
-                                        %reason,
-                                        "BITMAP_HEAP_SCAN advice could not be honored; \
-                                         falling through to standard Filter+SeqScan",
-                                    );
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
+                // 1.0 safety: fold the predicate into the child scan's
+                // qual as a plain SeqScan filter. The previous TID_SCAN
+                // / BITMAP_HEAP_SCAN advice peephole here produced
+                // backend-crashing plans, so scan-strategy advice is not
+                // physically honored (see build_scan_with_advice).
                 let child = self.build_plan(input)?;
                 let pg_expr = expr_translator::translate(predicate, &self.expr_ctx);
                 if !child.is_null() && !pg_expr.is_null() {
@@ -487,46 +482,21 @@ impl PlanBuilder {
         let strategy = self.physical_choices.scan_for(lookup_alias).cloned();
 
         use ra_engine::plan_advice_physical::ScanStrategy;
+        // 1.0 safety: only SeqScan is verified correct end-to-end (see
+        // scripts/replan-equivalence-test.sh). IndexScan / IndexOnlyScan
+        // / BitmapHeap / Tid builders are not yet verified and have
+        // produced wrong results or backend crashes, so scan-strategy
+        // advice is parsed and validated but not physically honored —
+        // every Scan becomes a SeqScan. Re-enable a strategy here only
+        // once it passes the replan-equivalence property test.
         match strategy {
-            None | Some(ScanStrategy::Seq) => self.build_seq_scan(table),
-            Some(ScanStrategy::Index { schema: _, name }) => {
-                self.build_index_scan_by_index_name(table, &name)
-            }
-            Some(ScanStrategy::IndexOnly { schema: _, name }) => {
-                self.build_index_only_scan(table, &name)
-            }
-            Some(ScanStrategy::BitmapHeap) => {
-                // Honored at the Filter peephole when a Filter
-                // is the immediate parent. Reaching here means
-                // the Scan is unfiltered, so a bitmap scan
-                // can't help — degrade to SeqScan.
-                debug!(
-                    table = table,
-                    "BITMAP_HEAP_SCAN advice without a parent Filter \
-                     is inapplicable; falling back to SeqScan",
-                );
-                self.build_seq_scan(table)
-            }
-            Some(ScanStrategy::Tid) => {
-                // Same reasoning: TID_SCAN needs a `ctid =`
-                // predicate which only exists in a parent
-                // Filter. The peephole catches that case;
-                // reaching here means there's no Filter.
-                debug!(
-                    table = table,
-                    "TID_SCAN advice without a parent Filter is \
-                     inapplicable; falling back to SeqScan",
-                );
-                self.build_seq_scan(table)
-            }
-            Some(ScanStrategy::DoNotScan) => {
-                debug!(
-                    table = table,
-                    "DO_NOT_SCAN advice cannot be honored at this layer; \
-                     falling back to SeqScan",
-                );
-                self.build_seq_scan(table)
-            }
+            None
+            | Some(ScanStrategy::Seq)
+            | Some(ScanStrategy::Index { .. })
+            | Some(ScanStrategy::IndexOnly { .. })
+            | Some(ScanStrategy::BitmapHeap)
+            | Some(ScanStrategy::Tid)
+            | Some(ScanStrategy::DoNotScan) => self.build_seq_scan(table),
         }
     }
 
