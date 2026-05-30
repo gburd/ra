@@ -649,10 +649,88 @@ mod tests {
     }
 
     #[test]
+    fn parse_graph_table() {
+        assert_parses_as(
+            "SELECT * FROM GRAPH_TABLE (g MATCH (a IS person)-[e IS knows]->(b IS person) \
+             COLUMNS (a.name AS who, b.name AS friend))",
+            |r| {
+                // GraphTable is nested under the SELECT's Project.
+                fn find_graph_table(e: &RelExpr) -> Option<&RelExpr> {
+                    if matches!(e, RelExpr::GraphTable { .. }) {
+                        return Some(e);
+                    }
+                    e.children().into_iter().find_map(find_graph_table)
+                }
+                let Some(RelExpr::GraphTable {
+                    graph,
+                    pattern,
+                    columns,
+                    ..
+                }) = find_graph_table(r)
+                else {
+                    return false;
+                };
+                graph == "g"
+                    && pattern.len() == 3
+                    && columns.len() == 2
+                    && matches!(
+                        pattern[0],
+                        ra_core::algebra::GraphPatternElement::Vertex { .. }
+                    )
+                    && matches!(
+                        pattern[1],
+                        ra_core::algebra::GraphPatternElement::Edge {
+                            direction: ra_core::algebra::EdgeDirection::Right,
+                            ..
+                        }
+                    )
+            },
+            "GRAPH_TABLE with vertex/edge/vertex pattern and COLUMNS",
+        );
+    }
+
+    #[test]
+    fn parse_graph_table_left_and_undirected_edges() {
+        assert_parses_as(
+            "SELECT * FROM GRAPH_TABLE (g MATCH (a)<-[e]-(b)-[f]-(c) COLUMNS (a.id AS x)) AS gt",
+            |r| {
+                fn find_graph_table(e: &RelExpr) -> Option<&RelExpr> {
+                    if matches!(e, RelExpr::GraphTable { .. }) {
+                        return Some(e);
+                    }
+                    e.children().into_iter().find_map(find_graph_table)
+                }
+                let Some(RelExpr::GraphTable {
+                    pattern, alias, ..
+                }) = find_graph_table(r)
+                else {
+                    return false;
+                };
+                pattern.len() == 5
+                    && alias.as_deref() == Some("gt")
+                    && matches!(
+                        pattern[1],
+                        ra_core::algebra::GraphPatternElement::Edge {
+                            direction: ra_core::algebra::EdgeDirection::Left,
+                            ..
+                        }
+                    )
+                    && matches!(
+                        pattern[3],
+                        ra_core::algebra::GraphPatternElement::Edge {
+                            direction: ra_core::algebra::EdgeDirection::Undirected,
+                            ..
+                        }
+                    )
+            },
+            "GRAPH_TABLE with left and undirected edges and alias",
+        );
+    }
+
+    #[test]
     fn parse_insert_returning() {
         assert_parses_as(
-            "INSERT INTO t(a) VALUES (1) RETURNING a",
-            |r| matches!(r, RelExpr::Insert { returning: Some(cols), .. } if !cols.is_empty()),
+            "INSERT INTO t(a) VALUES (1) RETURNING a",            |r| matches!(r, RelExpr::Insert { returning: Some(cols), .. } if !cols.is_empty()),
             "Insert RETURNING",
         );
     }

@@ -2372,6 +2372,21 @@ pub fn relexpr_to_explain_node(expr: &ra_core::algebra::RelExpr) -> ExplainNode 
             raw_detail: Some("Merge".to_string()),
             children: vec![relexpr_to_explain_node(source)],
         },
+
+        RelExpr::GraphTable { graph, .. } => ExplainNode {
+            node_type: NodeType::Other,
+            join_type: None,
+            relation: Some(graph.clone()),
+            index_name: None,
+            startup_cost: None,
+            total_cost: None,
+            estimated_rows: None,
+            estimated_width: None,
+            filter: None,
+            scan_direction: None,
+            raw_detail: Some("GraphTable".to_string()),
+            children: vec![],
+        },
     }
 }
 

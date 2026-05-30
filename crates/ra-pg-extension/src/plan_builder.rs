@@ -414,6 +414,12 @@ impl PlanBuilder {
                 // rather than emit a partial plan.
                 "MERGE (handled by native PostgreSQL planner)".to_owned(),
             )),
+            RelExpr::GraphTable { .. } => Err(PlanBuilderError::UnsupportedVariant(
+                // GRAPH_TABLE (SQL/PGQ) is parsed and modeled by Ra but
+                // executed by PostgreSQL 19's native property-graph
+                // machinery; defer to the native planner.
+                "GRAPH_TABLE (handled by native PostgreSQL planner)".to_owned(),
+            )),
         }
     }
 

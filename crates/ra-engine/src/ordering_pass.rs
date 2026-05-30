@@ -495,6 +495,12 @@ fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, Re
             (PropertySet::new(), node)
         }
 
+        graph_table @ RelExpr::GraphTable { .. } => {
+            // GRAPH_TABLE is a leaf row source with no ordering
+            // guarantees; pass it through unchanged.
+            (PropertySet::new(), graph_table)
+        }
+
         // Leaf nodes with no ordering: Scan, Values, MultiUnnest, etc.
         RelExpr::Scan { .. }
         | RelExpr::Values { .. }

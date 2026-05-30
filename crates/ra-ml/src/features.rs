@@ -204,7 +204,7 @@ impl FeatureSchema {
                 self.encode_expr(recursive_case, stats, features);
                 self.encode_expr(body, stats, features);
             }
-            RelExpr::Values { .. } => {
+            RelExpr::Values { .. } | RelExpr::GraphTable { .. } => {
                 features[OP_TYPE_OFFSET] = 1.0;
             }
             RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {

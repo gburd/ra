@@ -98,6 +98,12 @@ RaNode *ra_merge_when_delete(RaParseState *st, int kind, RaNode *cond);
 RaNode *ra_merge_when_nothing(RaParseState *st, int kind, RaNode *cond);
 RaNode *ra_merge_when_insert(RaParseState *st, int kind, RaNode *cond,
                              RaNode *columns, RaNode *values);
+RaNode *ra_graph_vertex(RaParseState *st, const char *variable,
+                        const char *label);
+RaNode *ra_graph_edge(RaParseState *st, const char *variable,
+                      const char *label, int direction);
+RaNode *ra_graph_table(RaParseState *st, const char *graph,
+                       RaNode *pattern, RaNode *columns, const char *alias);
 RaNode *ra_on_conflict_nothing(RaParseState *st);
 RaNode *ra_on_conflict_update(RaParseState *st,
                                RaNode *target_cols, RaNode *assignments);

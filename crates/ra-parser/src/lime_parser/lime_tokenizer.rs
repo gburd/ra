@@ -152,6 +152,9 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         b"NOTHING" => Some(token::NOTHING),
         b"MERGE" => Some(token::MERGE),
         b"MATCHED" => Some(token::MATCHED),
+        b"GRAPH_TABLE" => Some(token::GRAPH_TABLE),
+        b"MATCH" => Some(token::MATCH),
+        b"COLUMNS" => Some(token::COLUMNS),
         b"DEFAULT" => Some(token::DEFAULT),
         // Parser gap fixes
         b"NATURAL" => Some(token::NATURAL),

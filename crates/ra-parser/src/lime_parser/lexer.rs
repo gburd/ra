@@ -147,6 +147,11 @@ pub mod token {
     // MERGE statement (SQL:2008 / PostgreSQL 15+)
     pub const MERGE: i32 = 114;
     pub const MATCHED: i32 = 115;
+
+    // GRAPH_TABLE / SQL/PGQ (SQL:2023 / PostgreSQL 19)
+    pub const GRAPH_TABLE: i32 = 116;
+    pub const MATCH: i32 = 117;
+    pub const COLUMNS: i32 = 118;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -312,6 +317,9 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "NOTHING" => Some(token::NOTHING),
         "MERGE" => Some(token::MERGE),
         "MATCHED" => Some(token::MATCHED),
+        "GRAPH_TABLE" => Some(token::GRAPH_TABLE),
+        "MATCH" => Some(token::MATCH),
+        "COLUMNS" => Some(token::COLUMNS),
         "DEFAULT" => Some(token::DEFAULT),
         // SIMILAR TO operator
         "SIMILAR" => Some(token::SIMILAR),

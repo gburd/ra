@@ -407,7 +407,29 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         other => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            let _ = writeln!(buf, "{:?}", std::mem::discriminant(other));
+            match other {
+                RelExpr::GraphTable { graph, pattern, .. } => {
+                    let _ = writeln!(
+                        buf,
+                        "GraphTable({graph}, {} pattern elements)",
+                        pattern.len()
+                    );
+                }
+                RelExpr::Merge {
+                    target,
+                    when_clauses,
+                    ..
+                } => {
+                    let _ = writeln!(
+                        buf,
+                        "Merge({target}, {} when clauses)",
+                        when_clauses.len()
+                    );
+                }
+                _ => {
+                    let _ = writeln!(buf, "{:?}", std::mem::discriminant(other));
+                }
+            }
         }
     }
 }

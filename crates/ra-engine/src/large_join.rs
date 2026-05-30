@@ -283,7 +283,8 @@ impl LargeJoinOptimizer {
             | RelExpr::IndexOnlyScan { .. }
             | RelExpr::BitmapIndexScan { .. }
             | RelExpr::ParallelScan { .. }
-            | RelExpr::MvScan { .. } => 1,
+            | RelExpr::MvScan { .. }
+            | RelExpr::GraphTable { .. } => 1,
 
             RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => 0,
 
@@ -436,7 +437,8 @@ impl LargeJoinOptimizer {
             | RelExpr::ParallelScan { .. }
             | RelExpr::IndexScan { .. }
             | RelExpr::IndexOnlyScan { .. }
-            | RelExpr::MvScan { .. } => {
+            | RelExpr::MvScan { .. }
+            | RelExpr::GraphTable { .. } => {
                 // Leaf nodes, no joins to extract
             }
             RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => {

@@ -38,6 +38,7 @@ pub fn derive_properties(expr: &RelExpr, input_props: &[&PropertySet]) -> Proper
         | RelExpr::RecursiveCTE { .. }
         | RelExpr::Union { .. }
         | RelExpr::Intersect { .. }
+        | RelExpr::GraphTable { .. }
         | RelExpr::Except { .. } => PropertySet::new(),
 
         RelExpr::Filter { .. } | RelExpr::Limit { .. } | RelExpr::Window { .. } => {

@@ -204,6 +204,7 @@ fn estimate_heuristic(expr: &RelExpr, stats: &dyn StatisticsProvider) -> f64 {
                 1000.0
             }
         }
+        RelExpr::GraphTable { .. } => 1000.0,
     }
 }
 
@@ -351,7 +352,7 @@ fn collect_tables_recursive(
             collect_tables_recursive(recursive_case, provider, map);
             collect_tables_recursive(body, provider, map);
         }
-        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } | RelExpr::GraphTable { .. } => {}
         RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_tables_recursive(inp, provider, map);
@@ -376,6 +377,8 @@ fn collect_tables_recursive(
         RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => {
             collect_tables_recursive(source, provider, map);
         }
+        // GRAPH_TABLE references a property graph, not base tables
+        // (folded into the Values/MultiUnnest no-op arm above).
         RelExpr::Update { from, .. } => {
             if let Some(f) = from {
                 collect_tables_recursive(f, provider, map);
