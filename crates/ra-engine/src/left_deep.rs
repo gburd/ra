@@ -87,20 +87,45 @@ impl LeftDeepBuilder {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Build left-deep tree
+        // Build left-deep tree. A condition is used as a join edge only if it
+        // references the newly added table and at least one already-joined
+        // table (a genuine two-table predicate). Every condition not consumed
+        // as a join edge — single-table filters (e.g. a WHERE clause) and any
+        // leftover predicate — is re-applied as a Filter so no predicate is
+        // ever dropped.
+        let mut used = vec![false; conditions.len()];
         let mut tables_iter = tables.into_iter();
         let mut current = tables_iter.next().expect("len()>=2 guarantees element");
+        let mut current_tables = Self::expr_tables(&current);
 
         for table in tables_iter {
+            let new_tables = Self::expr_tables(&table);
             let condition = self
-                .find_join_condition(&current, &table, &conditions)
+                .find_join_condition(&current_tables, &new_tables, &conditions, &mut used)
                 .unwrap_or(Expr::Const(ra_core::expr::Const::Bool(true)));
-
             current = RelExpr::Join {
                 join_type: JoinType::Inner,
                 condition,
                 left: Box::new(current),
                 right: Box::new(table),
+            };
+            current_tables.extend(new_tables);
+        }
+
+        // Re-apply any predicate not consumed as a join edge as a Filter.
+        let residuals: Vec<Expr> = conditions
+            .into_iter()
+            .zip(used)
+            .filter_map(|(c, u)| (!u).then_some(c))
+            .collect();
+        if let Some(pred) = residuals.into_iter().reduce(|acc, c| Expr::BinOp {
+            op: ra_core::expr::BinOp::And,
+            left: Box::new(acc),
+            right: Box::new(c),
+        }) {
+            current = RelExpr::Filter {
+                predicate: pred,
+                input: Box::new(current),
             };
         }
 
@@ -131,14 +156,20 @@ impl LeftDeepBuilder {
                 left,
                 right,
                 condition,
+                join_type,
                 ..
             }
             | RelExpr::ParallelHashJoin {
                 left,
                 right,
                 condition,
+                join_type,
                 ..
             } => {
+                // Left-deep rebuilds joins as Inner; refuse outer/semi/anti.
+                if !matches!(join_type, JoinType::Inner | JoinType::Cross) {
+                    return Err(anyhow!("non-inner join not eligible for left-deep"));
+                }
                 // Extract condition
                 if !matches!(condition, Expr::Const(ra_core::expr::Const::Bool(true))) {
                     conditions.push(condition.clone());
@@ -190,24 +221,112 @@ impl LeftDeepBuilder {
         table_name.and_then(|t| self.stats_provider.get_statistics(t).map(|s| s.row_count))
     }
 
-    /// Find the best join condition between two tables.
-    ///
-    /// This is a simple heuristic that looks for conditions referencing
-    /// columns from both tables.
-    #[expect(
-        clippy::unused_self,
-        reason = "will use self for table statistics lookup"
-    )]
+    /// Find a join-edge condition between the already-joined tables and the
+    /// newly added table: an unused predicate that references the new table
+    /// and at least one current table, with all referenced tables available.
+    /// Marks the chosen condition used.
+    #[expect(clippy::unused_self, reason = "method on builder for API consistency")]
     fn find_join_condition(
         &self,
-        _left: &RelExpr,
-        _right: &RelExpr,
+        current_tables: &[String],
+        new_tables: &[String],
         conditions: &[Expr],
+        used: &mut [bool],
     ) -> Option<Expr> {
-        // For now, use the first available condition
-        // A more sophisticated implementation would analyze which
-        // columns are referenced and pick the best condition
-        conditions.first().cloned()
+        for (i, cond) in conditions.iter().enumerate() {
+            if used[i] || !is_column_equi(cond) {
+                continue;
+            }
+            let refs = condition_tables(cond);
+            // Unqualified `col = col` (no table prefixes): treat as a join edge
+            // for this step — it is a column comparison, not a single-table
+            // filter. Qualified predicates must reference the new table and a
+            // current table with all referenced tables available.
+            let usable = if refs.is_empty() {
+                true
+            } else {
+                let refs_new = refs.iter().any(|t| new_tables.contains(t));
+                let refs_current = refs.iter().any(|t| current_tables.contains(t));
+                let all_available = refs
+                    .iter()
+                    .all(|t| new_tables.contains(t) || current_tables.contains(t));
+                refs_new && refs_current && all_available
+            };
+            if usable {
+                used[i] = true;
+                return Some(cond.clone());
+            }
+        }
+        None
+    }
+
+    /// Scan table names (or aliases) under `expr`.
+    fn expr_tables(expr: &RelExpr) -> Vec<String> {
+        let mut out = Vec::new();
+        Self::collect_tables(expr, &mut out);
+        out
+    }
+
+    fn collect_tables(expr: &RelExpr, out: &mut Vec<String>) {
+        match expr {
+            RelExpr::Scan { table, alias } => {
+                out.push(alias.clone().unwrap_or_else(|| table.clone()));
+            }
+            RelExpr::IndexScan { table, .. }
+            | RelExpr::IndexOnlyScan { table, .. }
+            | RelExpr::ParallelScan { table, .. }
+            | RelExpr::BitmapHeapScan { table, .. } => out.push(table.clone()),
+            RelExpr::MvScan { view_name, alias } => {
+                out.push(alias.clone().unwrap_or_else(|| view_name.clone()));
+            }
+            RelExpr::Join { left, right, .. } | RelExpr::ParallelHashJoin { left, right, .. } => {
+                Self::collect_tables(left, out);
+                Self::collect_tables(right, out);
+            }
+            RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
+                Self::collect_tables(input, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether `expr` is an equi-comparison of two columns (`col = col`) — a join
+/// edge — as opposed to a single-table filter such as `col = const`.
+fn is_column_equi(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::BinOp { op: ra_core::expr::BinOp::Eq, left, right }
+            if matches!(left.as_ref(), Expr::Column(_))
+                && matches!(right.as_ref(), Expr::Column(_))
+    )
+}
+
+/// Table names referenced by the columns in a scalar predicate.
+fn condition_tables(expr: &Expr) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    collect_condition_tables(expr, &mut out);
+    out
+}
+
+fn collect_condition_tables(expr: &Expr, out: &mut std::collections::HashSet<String>) {
+    match expr {
+        Expr::Column(c) => {
+            if let Some(t) = &c.table {
+                out.insert(t.clone());
+            }
+        }
+        Expr::BinOp { left, right, .. } => {
+            collect_condition_tables(left, out);
+            collect_condition_tables(right, out);
+        }
+        Expr::UnaryOp { operand, .. } => collect_condition_tables(operand, out),
+        Expr::Function { args, .. } => {
+            for a in args {
+                collect_condition_tables(a, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -388,8 +507,14 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
         | RelExpr::BitmapHeapScan { .. }
         | RelExpr::ParallelScan { .. }
         | RelExpr::MvScan { .. } => true,
-        RelExpr::Join { left, right, .. } | RelExpr::ParallelHashJoin { left, right, .. } => {
-            is_left_deep_eligible(left) && is_left_deep_eligible(right)
+        RelExpr::Join { join_type, left, right, .. }
+        | RelExpr::ParallelHashJoin { join_type, left, right, .. } => {
+            // Left-deep construction rebuilds every join as Inner, so it is
+            // only valid for Inner/Cross joins. Outer/semi/anti joins must
+            // go through the e-graph, which preserves their semantics.
+            matches!(join_type, JoinType::Inner | JoinType::Cross)
+                && is_left_deep_eligible(left)
+                && is_left_deep_eligible(right)
         }
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
@@ -453,10 +578,14 @@ mod tests {
     }
 
     fn eq_col(left: &str, right: &str) -> Expr {
+        let mk = |s: &str| match s.split_once('.') {
+            Some((t, c)) => Expr::Column(ColumnRef::qualified(t, c)),
+            None => Expr::Column(ColumnRef::new(s)),
+        };
         Expr::BinOp {
             op: BinOp::Eq,
-            left: Box::new(Expr::Column(ColumnRef::new(left))),
-            right: Box::new(Expr::Column(ColumnRef::new(right))),
+            left: Box::new(mk(left)),
+            right: Box::new(mk(right)),
         }
     }
 
