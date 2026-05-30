@@ -191,9 +191,16 @@ impl PlanBuilder {
     fn first_unsupported_op(expr: &RelExpr) -> Option<&'static str> {
         match expr {
             RelExpr::Scan { .. } => None,
-            RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
-                Self::first_unsupported_op(input)
-            }
+            RelExpr::Filter { input, .. } => Self::first_unsupported_op(input),
+            // Project over Aggregate is built as a single Agg node
+            // (build_grouped_aggregate); check the aggregate's input. The
+            // builder itself returns Err (→ fallback) for shapes it cannot
+            // handle (HAVING's nested form, expressions over aggregates,
+            // DISTINCT/unsupported aggregates).
+            RelExpr::Project { input, .. } => match &**input {
+                RelExpr::Aggregate { input: agg_in, .. } => Self::first_unsupported_op(agg_in),
+                _ => Self::first_unsupported_op(input),
+            },
             // Projection-incapable passthrough nodes: they share the child
             // targetlist; ordering/limit semantics handled by the PG executor
             // node. Sort is admitted only when every key is a plain column —
@@ -371,6 +378,16 @@ impl PlanBuilder {
                 Ok(child)
             }
             RelExpr::Project { columns, input } => {
+                // Project over Aggregate is built as one Agg node whose
+                // targetlist carries the group Vars and Aggref nodes.
+                if let RelExpr::Aggregate {
+                    group_by,
+                    input: agg_input,
+                    ..
+                } = &**input
+                {
+                    return self.build_grouped_aggregate(columns, group_by, agg_input);
+                }
                 let child = self.build_plan(input)?;
                 self.set_targetlist(child, columns)?;
                 Ok(child)
@@ -1480,6 +1497,260 @@ impl PlanBuilder {
     // -----------------------------------------------------------------------
     // Aggregate, Sort, Limit
     // -----------------------------------------------------------------------
+
+    /// Build a `Var` referencing the lefttree output at position `pos`
+    /// (`OUTER_VAR`). Upper plan nodes reference their child's output this
+    /// way; Ra bypasses the planner's setrefs pass so we emit it directly.
+    unsafe fn outer_var(
+        &self,
+        pos: i32,
+        vartype: pg_sys::Oid,
+        varcollid: pg_sys::Oid,
+    ) -> *mut pg_sys::Expr {
+        let var = self.alloc_node::<pg_sys::Var>();
+        (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+        (*var).varno = pg_sys::OUTER_VAR;
+        (*var).varattno = pos as i16;
+        (*var).vartype = vartype;
+        (*var).vartypmod = -1;
+        (*var).varcollid = varcollid;
+        (*var).varlevelsup = 0;
+        var.cast()
+    }
+
+    /// Add `col` (a plain column) to the aggregate input targetlist if not
+    /// already present, returning `(position, type, collation)` of the
+    /// column in that targetlist. Returns `None` if `col` is not a Var.
+    unsafe fn add_input_col(
+        &self,
+        col: &Expr,
+        in_tlist: &mut *mut pg_sys::List,
+        colmap: &mut Vec<(i16, i32, pg_sys::Oid, pg_sys::Oid)>,
+    ) -> Option<(i32, pg_sys::Oid, pg_sys::Oid)> {
+        let v = expr_translator::translate(col, &self.expr_ctx);
+        if v.is_null() || (*v).type_ != pg_sys::NodeTag::T_Var {
+            return None;
+        }
+        let var = v.cast::<pg_sys::Var>();
+        let attno = (*var).varattno;
+        if let Some(&(_, pos, ty, coll)) = colmap.iter().find(|(a, ..)| *a == attno) {
+            return Some((pos, ty, coll));
+        }
+        let pos = colmap.len() as i32 + 1;
+        let te = pg_sys::makeTargetEntry(v.cast(), pos as i16, std::ptr::null_mut(), false);
+        *in_tlist = pg_sys::lappend(*in_tlist, te.cast());
+        let (ty, coll) = ((*var).vartype, (*var).varcollid);
+        colmap.push((attno, pos, ty, coll));
+        Some((pos, ty, coll))
+    }
+
+    /// Build an `Aggref` for a supported aggregate (`count`/`sum`/`avg`/
+    /// `min`/`max`). `arg_var`/`arg_type` describe the (already-resolved
+    /// OUTER) argument, or `None` for `count(*)`.
+    unsafe fn build_aggref(
+        &self,
+        name: &str,
+        arg: Option<(*mut pg_sys::Expr, pg_sys::Oid, pg_sys::Oid)>,
+        aggno: i32,
+    ) -> Result<*mut pg_sys::Expr, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        let lower = name.to_lowercase();
+        let nargs = i32::from(arg.is_some());
+        let mut argtypes = [pg_sys::InvalidOid; 1];
+        if let Some((_, ty, _)) = arg {
+            argtypes[0] = ty;
+        }
+        let fname = CString::new(lower.as_str()).map_err(|_| unsupported("agg name"))?;
+        let name_node = pg_sys::makeString(fname.as_ptr().cast_mut());
+        let fname_list = pg_sys::lappend(std::ptr::null_mut(), name_node.cast());
+        let aggfnoid = pg_sys::LookupFuncName(fname_list, nargs, argtypes.as_ptr(), true);
+        if aggfnoid == pg_sys::InvalidOid
+            || pg_sys::get_func_prokind(aggfnoid) != pg_sys::PROKIND_AGGREGATE as i8
+        {
+            return Err(unsupported("aggregate function lookup"));
+        }
+        // aggtranstype from pg_aggregate (catalog column 17,
+        // Anum_pg_aggregate_aggtranstype — stable across PG13-19). The Form
+        // struct is not generated by pgrx, so read the attribute directly.
+        let aggtup = pg_sys::SearchSysCache1(
+            pg_sys::SysCacheIdentifier::AGGFNOID as i32,
+            pg_sys::Datum::from(aggfnoid),
+        );
+        if aggtup.is_null() {
+            return Err(unsupported("pg_aggregate lookup"));
+        }
+        let mut isnull = false;
+        let transtype_datum = pg_sys::SysCacheGetAttr(
+            pg_sys::SysCacheIdentifier::AGGFNOID as i32,
+            aggtup,
+            17,
+            &mut isnull,
+        );
+        pg_sys::ReleaseSysCache(aggtup);
+        if isnull {
+            return Err(unsupported("aggregate transtype"));
+        }
+        let aggtranstype = pg_sys::Oid::from(transtype_datum.value() as u32);
+
+        let aggtype = pg_sys::get_func_rettype(aggfnoid);
+        let node = self.alloc_node::<pg_sys::Aggref>();
+        (*node).xpr.type_ = pg_sys::NodeTag::T_Aggref;
+        (*node).aggfnoid = aggfnoid;
+        (*node).aggtype = aggtype;
+        (*node).aggcollid = pg_sys::get_typcollation(aggtype);
+        (*node).aggtranstype = aggtranstype;
+        (*node).aggstar = arg.is_none();
+        (*node).aggkind = b'n' as i8; // AGGKIND_NORMAL
+        (*node).aggsplit = pg_sys::AggSplit::AGGSPLIT_SIMPLE;
+        (*node).aggno = aggno;
+        (*node).aggtransno = aggno;
+        (*node).agglevelsup = 0;
+        if let Some((arg_expr, ty, coll)) = arg {
+            (*node).inputcollid = coll;
+            (*node).aggargtypes = pg_sys::lappend_oid(std::ptr::null_mut(), ty);
+            let te = pg_sys::makeTargetEntry(arg_expr, 1, std::ptr::null_mut(), false);
+            (*node).args = pg_sys::lappend(std::ptr::null_mut(), te.cast());
+        }
+        Ok(node.cast())
+    }
+
+    /// Build an `Agg` plan node for `Project(out_columns)` over
+    /// `Aggregate(group_by)`. Output columns must each be a group column or
+    /// a supported aggregate (`count`/`sum`/`avg`/`min`/`max`) over a
+    /// single-relation input. Any other shape returns `Err` (→ native
+    /// planner): expressions over aggregates, `DISTINCT` aggregates,
+    /// `HAVING`'s nested form, unsupported functions, multi-relation input.
+    unsafe fn build_grouped_aggregate(
+        &mut self,
+        out_columns: &[ProjectionColumn],
+        group_by: &[Expr],
+        agg_input: &RelExpr,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        let child = self.build_plan(agg_input)?;
+        if child.is_null() {
+            return Err(unsupported("aggregate input"));
+        }
+        let mut in_tlist: *mut pg_sys::List = std::ptr::null_mut();
+        let mut colmap: Vec<(i16, i32, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
+
+        // Pass 1: register every input column referenced by group_by and by
+        // aggregate arguments so the scan exposes them.
+        let mut grp_pos: Vec<(i32, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
+        for g in group_by {
+            match self.add_input_col(g, &mut in_tlist, &mut colmap) {
+                Some(t) => grp_pos.push(t),
+                None => return Err(unsupported("group key not a column")),
+            }
+        }
+        for pc in out_columns {
+            if let Expr::Function { name, args } = &pc.expr {
+                if Self::is_supported_agg(name) {
+                    if let Some(arg) = Self::agg_column_arg(args) {
+                        if self.add_input_col(arg, &mut in_tlist, &mut colmap).is_none() {
+                            return Err(unsupported("aggregate arg not a column"));
+                        }
+                    }
+                }
+            }
+        }
+        (*child).targetlist = in_tlist;
+
+        let node = self.alloc_node::<pg_sys::Agg>();
+        if node.is_null() {
+            return Err(PlanBuilderError::NullPointer("Agg".to_owned()));
+        }
+        (*node).plan.type_ = pg_sys::NodeTag::T_Agg;
+        (*node).plan.lefttree = child;
+        (*node).aggsplit = pg_sys::AggSplit::AGGSPLIT_SIMPLE;
+
+        // Pass 2: build the Agg output targetlist (group Vars + Aggrefs).
+        let mut out_tlist: *mut pg_sys::List = std::ptr::null_mut();
+        let mut aggno = 0;
+        for (i, pc) in out_columns.iter().enumerate() {
+            let entry: *mut pg_sys::Expr = match &pc.expr {
+                Expr::Column(_) => {
+                    let (pos, ty, coll) = self
+                        .add_input_col(&pc.expr, &mut in_tlist, &mut colmap)
+                        .ok_or_else(|| unsupported("output column"))?;
+                    self.outer_var(pos, ty, coll)
+                }
+                Expr::Function { name, args } if Self::is_supported_agg(name) => {
+                    let arg = match Self::agg_column_arg(args) {
+                        Some(c) => {
+                            let (pos, ty, coll) = self
+                                .add_input_col(c, &mut in_tlist, &mut colmap)
+                                .ok_or_else(|| unsupported("aggregate arg"))?;
+                            Some((self.outer_var(pos, ty, coll), ty, coll))
+                        }
+                        None => None,
+                    };
+                    let aggref = self.build_aggref(name, arg, aggno)?;
+                    aggno += 1;
+                    aggref
+                }
+                _ => return Err(unsupported("aggregate output expression")),
+            };
+            let resname = pc
+                .alias
+                .as_deref()
+                .or_else(|| crate::sort_utils::extract_column_name(&pc.expr));
+            let rn = match resname {
+                Some(n) => CString::new(n).map(|c| pg_sys::pstrdup(c.as_ptr())).unwrap_or(std::ptr::null_mut()),
+                None => std::ptr::null_mut(),
+            };
+            let te = pg_sys::makeTargetEntry(entry, (i + 1) as i16, rn, false);
+            out_tlist = pg_sys::lappend(out_tlist, te.cast());
+        }
+        (*node).plan.targetlist = out_tlist;
+
+        // Grouping metadata.
+        if group_by.is_empty() {
+            (*node).aggstrategy = pg_sys::AggStrategy::AGG_PLAIN;
+            (*node).numGroups = 1;
+        } else {
+            (*node).aggstrategy = pg_sys::AggStrategy::AGG_HASHED;
+            let n = grp_pos.len();
+            let col_idx = pg_sys::palloc(n * std::mem::size_of::<pg_sys::AttrNumber>())
+                as *mut pg_sys::AttrNumber;
+            let ops = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+            let colls = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+            for (i, &(pos, ty, coll)) in grp_pos.iter().enumerate() {
+                *col_idx.add(i) = pos as i16;
+                *ops.add(i) = crate::sort_utils::resolve_equality_op(ty);
+                *colls.add(i) = coll;
+            }
+            (*node).numCols = n as i32;
+            (*node).grpColIdx = col_idx;
+            (*node).grpOperators = ops;
+            (*node).grpCollations = colls;
+            let rows = (*child).plan_rows.max(1.0);
+            (*node).numGroups = (rows.sqrt() as i64).clamp(1, 1_000_000);
+        }
+        (*node).plan.plan_rows = (*node).numGroups as f64;
+        (*node).plan.total_cost = (*child).total_cost + (*child).plan_rows * 0.01;
+        (*node).plan.startup_cost = (*node).plan.total_cost;
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
+    }
+
+    fn is_supported_agg(name: &str) -> bool {
+        matches!(
+            name.to_lowercase().as_str(),
+            "count" | "sum" | "avg" | "min" | "max"
+        )
+    }
+
+    /// The single column argument of an aggregate, or `None` for a star
+    /// aggregate (`count(*)`) or no-arg form.
+    fn agg_column_arg(args: &[Expr]) -> Option<&Expr> {
+        match args {
+            [arg] => match arg {
+                Expr::Column(c) if c.column == "*" => None,
+                _ => Some(arg),
+            },
+            _ => None,
+        }
+    }
 
     unsafe fn build_aggregate(
         &mut self,
