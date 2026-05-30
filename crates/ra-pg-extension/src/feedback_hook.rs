@@ -113,8 +113,14 @@ pub fn register_pending(query_id: u64, pending: PendingFeedback) {
 #[pg_guard]
 unsafe extern "C-unwind" fn ra_executor_end_hook(query_desc: *mut pg_sys::QueryDesc) {
     // Capture feedback before calling the previous hook (which may free state).
+    // Feedback collection is best-effort telemetry: a panic here must never
+    // crash the backend, so catch it locally and degrade. (A panic unwinding
+    // across the C-unwind boundary into the executor can abort the process
+    // rather than be caught by #[pg_guard].)
     if !query_desc.is_null() {
-        capture_feedback(query_desc);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            capture_feedback(query_desc);
+        }));
     }
 
     // Chain to previous hook or standard executor end.

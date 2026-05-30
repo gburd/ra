@@ -221,6 +221,29 @@ impl PlanBuilder {
         // Copy range table and result relations from original query
         if !self.original_query.is_null() {
             (*stmt).rtable = (*self.original_query).rtable;
+            // PG16+ moved per-relation permission checking out of
+            // RangeTblEntry into a separate RTEPermissionInfo list that
+            // the RTE references via `perminfoindex`. Since we copy the
+            // rtable verbatim (perminfoindex values intact), we must
+            // propagate the matching permInfos list too, or the
+            // executor rejects the plan with "invalid perminfoindex".
+            #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
+            {
+                (*stmt).permInfos = (*self.original_query).rteperminfos;
+            }
+            // PG18+ run-time pruning tracks which relids the executor may
+            // open via `unprunableRelids`; relations not listed there are
+            // assumed pruned and raise "trying to open a pruned relation".
+            // Ra never emits run-time-pruning plans, so every range-table
+            // entry is unprunable (always opened).
+            #[cfg(any(feature = "pg18", feature = "pg19"))]
+            {
+                let n = pg_sys::list_length((*self.original_query).rtable);
+                if n > 0 {
+                    (*stmt).unprunableRelids =
+                        pg_sys::bms_add_range(std::ptr::null_mut(), 1, n);
+                }
+            }
             (*stmt).resultRelations = std::ptr::null_mut();
         }
 
