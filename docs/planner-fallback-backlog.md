@@ -48,7 +48,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 
 | Op token | SQL it blocks | Status / why it falls back | Pri |
 |---|---|---|---|
-| `Join` | any multi-table join | `build_join` returns empty result sets | P0 |
+| ~~`Join`~~ | ~~multi-table join~~ | **DONE** for Inner/Left/Cross over two base relations (build_projected_join, NestLoop). Right/Full/Semi/Anti and 3+ table joins still defer. Fixing this also fixed two latent **optimizer** correctness bugs (left-deep dropped a WHERE predicate / rebuilt the join as a cartesian product; left-deep converted LEFT/RIGHT/FULL joins to INNER) | P2 |
 | ~~`Aggregate`~~ | ~~`count/sum/avg/min/max`, `GROUP BY`~~ | **DONE** for count/sum/avg/min/max (± GROUP BY, ± ORDER BY). HAVING, expressions over aggregates, DISTINCT aggregates, and stddev/variance/string_agg/array_agg still defer | P2 |
 | ~~`Sort`~~ | ~~`ORDER BY`~~ | **DONE** (plain-column keys); expression keys and `ORDER BY` of a non-output column still defer (need resjunk targetlist / ordering-operator resolution) | — |
 | ~~`Limit`~~ | ~~`LIMIT` / `OFFSET`~~ | **DONE** | — |
