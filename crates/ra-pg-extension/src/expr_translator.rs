@@ -155,23 +155,57 @@ unsafe fn const_to_pg(c: &RaConst) -> *mut pg_sys::Expr {
 /// Translate a Ra `ColumnRef` to a PostgreSQL `Var` node.
 unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *mut pg_sys::Expr {
     let table = col.table.as_deref().unwrap_or("").to_lowercase();
-    let rtindex = match ctx.rtindex_map.get(&table) {
-        Some(&idx) => idx,
-        None => return std::ptr::null_mut(),
-    };
-    let reloid = match ctx.rtoid_map.get(&table) {
-        Some(&oid) => oid,
-        None => return std::ptr::null_mut(),
-    };
-
     let col_name = match CString::new(col.column.as_str()) {
         Ok(cs) => cs,
         Err(_) => return std::ptr::null_mut(),
     };
-    let attnum = pg_sys::get_attnum(reloid, col_name.as_ptr());
-    if attnum == pg_sys::InvalidAttrNumber as i16 {
-        return std::ptr::null_mut();
-    }
+
+    // Resolve the column to (rtindex, reloid, attnum). A qualified
+    // reference (`t.col`) looks up its table directly. An UNqualified
+    // reference (`col`) — which Ra's Lime parser emits for
+    // single-table `SELECT col FROM t` — is resolved by finding the
+    // range-table relation that actually has a column of this name
+    // (mirroring PostgreSQL's own unqualified-name resolution). Without
+    // this, unqualified columns produced NULL Vars, silently dropping
+    // targetlist entries and filter quals.
+    let resolve = |rtindex: pg_sys::Index, reloid: pg_sys::Oid| -> Option<(pg_sys::Index, pg_sys::Oid, i16)> {
+        let attnum = pg_sys::get_attnum(reloid, col_name.as_ptr());
+        if attnum == pg_sys::InvalidAttrNumber as i16 {
+            None
+        } else {
+            Some((rtindex, reloid, attnum))
+        }
+    };
+    let (rtindex, reloid, attnum) = if table.is_empty() {
+        // Unqualified: search relations for the one owning this column.
+        let mut found = None;
+        for (t, &rtindex) in &ctx.rtindex_map {
+            if let Some(&reloid) = ctx.rtoid_map.get(t) {
+                if let Some(r) = resolve(rtindex, reloid) {
+                    found = Some(r);
+                    break;
+                }
+            }
+        }
+        match found {
+            Some(r) => r,
+            None => return std::ptr::null_mut(),
+        }
+    } else {
+        let rtindex = match ctx.rtindex_map.get(&table) {
+            Some(&idx) => idx,
+            None => return std::ptr::null_mut(),
+        };
+        let reloid = match ctx.rtoid_map.get(&table) {
+            Some(&oid) => oid,
+            None => return std::ptr::null_mut(),
+        };
+        match resolve(rtindex, reloid) {
+            Some(r) => r,
+            None => return std::ptr::null_mut(),
+        }
+    };
+
     let atttype = pg_sys::get_atttype(reloid, attnum);
     if atttype == pg_sys::InvalidOid {
         return std::ptr::null_mut();

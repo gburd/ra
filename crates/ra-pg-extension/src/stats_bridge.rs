@@ -617,6 +617,18 @@ fn gather_index_stats(schema: &str, table: &str, stats: &mut Statistics) {
 /// Uses `RelationGetIndexList` and syscache lookups on `pg_index`
 /// and `pg_class` instead of SPI.
 fn gather_index_stats_by_oid(rel_oid: pg_sys::Oid, stats: &mut Statistics) {
+    // Index statistics are an optional optimization input. Contain any
+    // panic (e.g. a syscache/relcache edge that surfaces as a pfree
+    // error on an assert-enabled build) so it degrades to "no index
+    // stats for this relation" instead of failing the whole plan or
+    // propagating across the planner-hook boundary. Ra still optimizes
+    // using table + column statistics.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        gather_index_stats_inner(rel_oid, stats);
+    }));
+}
+
+fn gather_index_stats_inner(rel_oid: pg_sys::Oid, stats: &mut Statistics) {
     unsafe {
         // Open the relation to get its index list.
         // AccessShareLock is sufficient for reading metadata.
