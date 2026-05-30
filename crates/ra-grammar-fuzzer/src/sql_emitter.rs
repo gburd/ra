@@ -352,6 +352,18 @@ impl SqlEmitter {
                     "SELECT 1".to_owned()
                 }
             }
+            RelExpr::Merge {
+                target, source, ..
+            } => {
+                format!(
+                    "MERGE INTO {} USING ({}) AS __s ON true WHEN MATCHED THEN DO NOTHING",
+                    target,
+                    self.emit_subquery(source)
+                )
+            }
+            RelExpr::GraphTable { graph, .. } => {
+                format!("SELECT * FROM GRAPH_TABLE ({graph} MATCH (a) COLUMNS (a.id AS id))")
+            }
         }
     }
 

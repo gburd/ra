@@ -359,6 +359,16 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             when_clauses.len().hash(hasher);
             hash_rel_expr(source, hasher);
         }
+        RelExpr::GraphTable {
+            graph,
+            pattern,
+            alias,
+            ..
+        } => {
+            graph.hash(hasher);
+            pattern.len().hash(hasher);
+            alias.hash(hasher);
+        }
     }
 }
 

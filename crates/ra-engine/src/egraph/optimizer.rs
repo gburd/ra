@@ -756,6 +756,16 @@ impl Optimizer {
         }
     }
 
+    /// Whether the expression tree contains a `GRAPH_TABLE` node
+    /// anywhere. Such queries bypass the e-graph (the MATCH pattern is
+    /// opaque to the rewrite rules and not representable in `RecExpr`).
+    fn contains_graph_table(expr: &RelExpr) -> bool {
+        if matches!(expr, RelExpr::GraphTable { .. }) {
+            return true;
+        }
+        expr.children().iter().any(|c| Self::contains_graph_table(c))
+    }
+
     /// Optimize DML sub-relations without putting the DML envelope
     /// through equality saturation.
     ///
@@ -763,8 +773,7 @@ impl Optimizer {
     fn try_optimize_dml(
         &self,
         expr: &RelExpr,
-    ) -> Result<Option<RelExpr>, EGraphError> {
-        match expr {
+    ) -> Result<Option<RelExpr>, EGraphError> {        match expr {
             RelExpr::Insert {
                 table,
                 columns,
@@ -899,6 +908,14 @@ impl Optimizer {
             debug!("DML optimization completed");
             self.insert_into_cache(fingerprint.as_ref(), &result);
             return Ok(result);
+        }
+
+        // 2a'. GRAPH_TABLE (SQL/PGQ) fast-path: opaque to the rewrite
+        // rules and executed natively by PostgreSQL 19; return as-is.
+        if Self::contains_graph_table(expr) {
+            debug!("GRAPH_TABLE fast-path: skipping e-graph");
+            self.record_fast_path_trace(expr, "graph_table_fast_path", 0.0);
+            return Ok(expr.clone());
         }
 
         // 2. Trivial fast-path
@@ -1874,6 +1891,23 @@ impl Optimizer {
         if let Some(plan) = self.try_optimize_dml(expr)? {
             return Ok(OptimizationResult {
                 plan,
+                cost: 0.0,
+                status: OptimizationStatus::Complete,
+                resource_usage: tracker.report(),
+                applied_rules: None,
+                rule_tracking: None,
+                provenance: None,
+                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+            });
+        }
+
+        // GRAPH_TABLE (SQL/PGQ) fast-path: the MATCH pattern is opaque
+        // to the rewrite rules and not representable in the e-graph,
+        // and PostgreSQL 19 executes GRAPH_TABLE natively. Return it
+        // unchanged rather than failing extraction.
+        if Self::contains_graph_table(expr) {
+            return Ok(OptimizationResult {
+                plan: expr.clone(),
                 cost: 0.0,
                 status: OptimizationStatus::Complete,
                 resource_usage: tracker.report(),

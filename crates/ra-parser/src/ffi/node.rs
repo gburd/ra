@@ -13,7 +13,9 @@
 
 use std::fmt;
 
-use ra_core::algebra::{AggregateExpr, MergeWhen, RelExpr, SortKey, WindowExpr};
+use ra_core::algebra::{
+    AggregateExpr, GraphPatternElement, MergeWhen, RelExpr, SortKey, WindowExpr,
+};
 use ra_core::expr::Expr;
 
 /// A structured syntax error captured from the Lime parser.
@@ -125,6 +127,8 @@ pub enum NodeTag {
     Window = 0b101,
     /// A `MERGE` `WHEN` clause node.
     MergeWhen = 0b110,
+    /// A `GRAPH_TABLE` `MATCH` pattern element node.
+    GraphElem = 0b111,
 }
 
 /// Number of bits used for the tag.
@@ -187,6 +191,12 @@ pub fn encode_merge_when(index: usize) -> *mut RaNode {
     encode(index, NodeTag::MergeWhen)
 }
 
+/// Encode a `GRAPH_TABLE` pattern-element arena index.
+#[must_use]
+pub fn encode_graph_elem(index: usize) -> *mut RaNode {
+    encode(index, NodeTag::GraphElem)
+}
+
 /// Decode a tagged pointer into its tag and arena index.
 ///
 /// Returns `None` if the pointer is null.
@@ -211,6 +221,7 @@ pub fn decode(ptr: *mut RaNode) -> Option<(NodeTag, usize)> {
         0b100 => NodeTag::Agg,
         0b101 => NodeTag::Window,
         0b110 => NodeTag::MergeWhen,
+        0b111 => NodeTag::GraphElem,
         _ => return None,
     };
     Some((tag, index))
@@ -237,6 +248,8 @@ pub struct RaParseState {
     window_exprs: Vec<WindowExpr>,
     /// Arena for MERGE WHEN-clause nodes.
     merge_whens: Vec<MergeWhen>,
+    /// Arena for `GRAPH_TABLE` pattern-element nodes.
+    graph_elems: Vec<GraphPatternElement>,
     /// Accumulated parse errors (from builder/semantic actions).
     errors: Vec<String>,
     /// Structured syntax errors (from `%syntax_error` hook).
@@ -255,6 +268,7 @@ impl RaParseState {
             agg_exprs: Vec::new(),
             window_exprs: Vec::new(),
             merge_whens: Vec::new(),
+            graph_elems: Vec::new(),
             errors: Vec::new(),
             structured_errors: Vec::new(),
         }
@@ -313,6 +327,19 @@ impl RaParseState {
     #[must_use]
     pub fn take_merge_when(&self, index: usize) -> Option<MergeWhen> {
         self.merge_whens.get(index).cloned()
+    }
+
+    /// Push a `GRAPH_TABLE` pattern element and return its tagged pointer.
+    pub fn push_graph_elem(&mut self, elem: GraphPatternElement) -> *mut RaNode {
+        let index = self.graph_elems.len();
+        self.graph_elems.push(elem);
+        encode_graph_elem(index)
+    }
+
+    /// Take (clone) a `GRAPH_TABLE` pattern element by arena index.
+    #[must_use]
+    pub fn take_graph_elem(&self, index: usize) -> Option<GraphPatternElement> {
+        self.graph_elems.get(index).cloned()
     }
 
     /// Append an item index to an existing list.

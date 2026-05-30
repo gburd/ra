@@ -189,6 +189,8 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
             out.push(target.to_lowercase());
             collect_table_names_inner(source, out);
         }
+        // GRAPH_TABLE references a graph, not base tables.
+        RelExpr::GraphTable { .. } => {}
     }
 }
 
@@ -447,6 +449,9 @@ impl FeatureExtractor {
             RelExpr::Merge { source, .. } => {
                 self.table_count += 1;
                 self.visit(source);
+            }
+            RelExpr::GraphTable { .. } => {
+                self.table_count += 1;
             }
         }
     }

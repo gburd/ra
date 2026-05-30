@@ -97,7 +97,7 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
             collect_tables_rec(recursive_case, out);
             collect_tables_rec(body, out);
         }
-        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } | RelExpr::GraphTable { .. } => {}
         RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_tables_rec(inp, out);
@@ -153,7 +153,8 @@ fn depth(expr: &RelExpr) -> usize {
         | RelExpr::BitmapIndexScan { .. }
         | RelExpr::IndexOnlyScan { .. }
         | RelExpr::ParallelScan { .. }
-        | RelExpr::MvScan { .. } => 1,
+        | RelExpr::MvScan { .. }
+        | RelExpr::GraphTable { .. } => 1,
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }

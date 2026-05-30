@@ -77,6 +77,38 @@ pub enum MergeAction {
     DoNothing,
 }
 
+/// Direction of an edge in a `GRAPH_TABLE` `MATCH` pattern.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum EdgeDirection {
+    /// `-[e]->` — points from the left vertex to the right.
+    Right,
+    /// `<-[e]-` — points from the right vertex to the left.
+    Left,
+    /// `-[e]-` — undirected.
+    Undirected,
+}
+
+/// One element of a `GRAPH_TABLE` `MATCH` path pattern.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GraphPatternElement {
+    /// A vertex pattern `(var IS label)` (both parts optional).
+    Vertex {
+        /// Optional binding variable.
+        variable: Option<String>,
+        /// Optional vertex label predicate.
+        label: Option<String>,
+    },
+    /// An edge pattern `-[var IS label]->` (var/label optional).
+    Edge {
+        /// Optional binding variable.
+        variable: Option<String>,
+        /// Optional edge label predicate.
+        label: Option<String>,
+        /// Edge direction.
+        direction: EdgeDirection,
+    },
+}
+
 /// A relational expression (query plan node).
 ///
 /// Each variant wraps its children in `Box<RelExpr>` to form a tree.
@@ -494,6 +526,20 @@ pub enum RelExpr {
         /// Optional RETURNING clause (PostgreSQL 17+).
         returning: Option<Vec<ProjectionColumn>>,
     },
+
+    /// GRAPH_TABLE (graph MATCH pattern COLUMNS (...)) — SQL/PGQ
+    /// property-graph query (SQL:2023 / PostgreSQL 19). Produces a
+    /// relation whose columns come from the COLUMNS clause.
+    GraphTable {
+        /// Name of the property graph.
+        graph: String,
+        /// The `MATCH` path pattern (vertices and edges in order).
+        pattern: Vec<GraphPatternElement>,
+        /// The `COLUMNS (...)` output projection.
+        columns: Vec<ProjectionColumn>,
+        /// Optional table alias.
+        alias: Option<String>,
+    },
 }
 
 /// Configuration for cycle detection in recursive CTEs.
@@ -786,7 +832,8 @@ impl RelExpr {
             | Self::BitmapIndexScan { .. }
             | Self::ParallelScan { .. }
             | Self::IndexOnlyScan { .. }
-            | Self::MvScan { .. } => vec![],
+            | Self::MvScan { .. }
+            | Self::GraphTable { .. } => vec![],
             Self::Filter { input, .. }
             | Self::Project { input, .. }
             | Self::Aggregate { input, .. }
@@ -1126,6 +1173,11 @@ impl RelExpr {
                     }
                 }
             }
+            Self::GraphTable { columns, .. } => {
+                for pc in columns {
+                    collect_expr_columns(&pc.expr, out);
+                }
+            }
         }
     }
 }
@@ -1176,7 +1228,7 @@ impl RelExpr {
                     || recursive_case.references_cte(cte_name)
                     || body.references_cte(cte_name)
             }
-            Self::Values { .. } | Self::MultiUnnest { .. } => false,
+            Self::Values { .. } | Self::MultiUnnest { .. } | Self::GraphTable { .. } => false,
             Self::Unnest { input, .. } | Self::TableFunction { input, .. } => {
                 input.as_ref().is_some_and(|i| i.references_cte(cte_name))
             }

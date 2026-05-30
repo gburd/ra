@@ -196,6 +196,11 @@ typedef struct RaToken {
 %token MERGE.
 %token MATCHED.
 
+/* GRAPH_TABLE / SQL/PGQ property-graph queries (SQL:2023 / PG19) */
+%token GRAPH_TABLE.
+%token MATCH.
+%token COLUMNS.
+
 /* ================================================================== */
 /* Precedence (low to high)                                            */
 /* ================================================================== */
@@ -482,6 +487,7 @@ from_list(A) ::= from_list(B) COMMA table_ref(C). {
 table_ref(A) ::= IDENT(B). {
     A = ra_scan(pstate, B.text);
 }
+table_ref(A) ::= graph_table_ref(B). { A = B; }
 table_ref(A) ::= IDENT(B) AS IDENT(C). {
     A = ra_scan_alias(pstate, B.text, C.text);
 }
@@ -878,6 +884,56 @@ merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C)
 merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C)
                    THEN INSERT VALUES LPAREN expr_list(V) RPAREN. {
     A = ra_merge_when_insert(pstate, ra_merge_kind_by(D.text), C, NULL, V);
+}
+
+/* -- GRAPH_TABLE (SQL/PGQ, SQL:2023 / PostgreSQL 19) --------------- */
+
+graph_table_ref(A) ::= GRAPH_TABLE LPAREN IDENT(G) MATCH graph_pattern(P)
+                        COLUMNS LPAREN target_list(C) RPAREN RPAREN. {
+    A = ra_graph_table(pstate, G.text, P, C, NULL);
+}
+graph_table_ref(A) ::= GRAPH_TABLE LPAREN IDENT(G) MATCH graph_pattern(P)
+                        COLUMNS LPAREN target_list(C) RPAREN RPAREN AS IDENT(AL). {
+    A = ra_graph_table(pstate, G.text, P, C, AL.text);
+}
+
+graph_pattern(A) ::= graph_elem(B). {
+    A = ra_list_push(pstate, ra_list_new(pstate), B);
+}
+graph_pattern(A) ::= graph_pattern(L) graph_elem(B). {
+    A = ra_list_push(pstate, L, B);
+}
+
+/* vertices: ( ), (v), (v IS label), (IS label) */
+graph_elem(A) ::= LPAREN RPAREN.                 { A = ra_graph_vertex(pstate, NULL, NULL); }
+graph_elem(A) ::= LPAREN IDENT(V) RPAREN.        { A = ra_graph_vertex(pstate, V.text, NULL); }
+graph_elem(A) ::= LPAREN IDENT(V) IS IDENT(L) RPAREN. {
+    A = ra_graph_vertex(pstate, V.text, L.text);
+}
+graph_elem(A) ::= LPAREN IS IDENT(L) RPAREN.     { A = ra_graph_vertex(pstate, NULL, L.text); }
+
+/* edges: right -[..]-> (dir 0), undirected -[..]- (dir 2),
+ *        left <-[..]- (dir 1) */
+graph_elem(A) ::= MINUS LBRACKET RBRACKET ARROW. { A = ra_graph_edge(pstate, NULL, NULL, 0); }
+graph_elem(A) ::= MINUS LBRACKET IDENT(V) RBRACKET ARROW. {
+    A = ra_graph_edge(pstate, V.text, NULL, 0);
+}
+graph_elem(A) ::= MINUS LBRACKET IDENT(V) IS IDENT(L) RBRACKET ARROW. {
+    A = ra_graph_edge(pstate, V.text, L.text, 0);
+}
+graph_elem(A) ::= MINUS LBRACKET RBRACKET MINUS. { A = ra_graph_edge(pstate, NULL, NULL, 2); }
+graph_elem(A) ::= MINUS LBRACKET IDENT(V) RBRACKET MINUS. {
+    A = ra_graph_edge(pstate, V.text, NULL, 2);
+}
+graph_elem(A) ::= MINUS LBRACKET IDENT(V) IS IDENT(L) RBRACKET MINUS. {
+    A = ra_graph_edge(pstate, V.text, L.text, 2);
+}
+graph_elem(A) ::= LT MINUS LBRACKET RBRACKET MINUS. { A = ra_graph_edge(pstate, NULL, NULL, 1); }
+graph_elem(A) ::= LT MINUS LBRACKET IDENT(V) RBRACKET MINUS. {
+    A = ra_graph_edge(pstate, V.text, NULL, 1);
+}
+graph_elem(A) ::= LT MINUS LBRACKET IDENT(V) IS IDENT(L) RBRACKET MINUS. {
+    A = ra_graph_edge(pstate, V.text, L.text, 1);
 }
 
 /* ================================================================== */

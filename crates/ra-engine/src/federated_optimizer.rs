@@ -224,7 +224,8 @@ impl FederatedOptimizer {
             | RelExpr::Insert { .. }
             | RelExpr::Update { .. }
             | RelExpr::Delete { .. }
-            | RelExpr::Merge { .. } => false,
+            | RelExpr::Merge { .. }
+            | RelExpr::GraphTable { .. } => false,
         }
     }
 

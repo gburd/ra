@@ -15,9 +15,9 @@ use crate::lime_parser::diagnostics;
 use crate::lime_parser::lexer::RaToken;
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, CycleDetection, JoinType, MergeAction, MergeMatchKind,
-    MergeWhen, NullOrdering, OnConflict, ProjectionColumn, RelExpr, SortDirection, SortKey,
-    WindowExpr, WindowFunction,
+    AggregateExpr, AggregateFunction, CycleDetection, EdgeDirection, GraphPatternElement, JoinType,
+    MergeAction, MergeMatchKind, MergeWhen, NullOrdering, OnConflict, ProjectionColumn, RelExpr,
+    SortDirection, SortKey, WindowExpr, WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
@@ -1123,6 +1123,113 @@ fn decode_merge_whens(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<MergeW
     for idx in indices {
         if let Some(w) = state.take_merge_when(idx) {
             out.push(w);
+        }
+    }
+    out
+}
+
+/// Read an optional NUL-terminated C string into `Option<String>`.
+///
+/// # Safety
+/// - `ptr` must be null or a valid NUL-terminated C string.
+unsafe fn opt_c_string(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        None
+    } else {
+        Some(unsafe { c_str_to_string(ptr) })
+    }
+}
+
+/// Build a `GRAPH_TABLE` vertex pattern element `(var IS label)`.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `variable` / `label` must be null or valid C strings.
+#[no_mangle]
+pub unsafe extern "C" fn ra_graph_vertex(
+    state: *mut RaParseState,
+    variable: *const c_char,
+    label: *const c_char,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let variable = unsafe { opt_c_string(variable) };
+    let label = unsafe { opt_c_string(label) };
+    st.push_graph_elem(GraphPatternElement::Vertex { variable, label })
+}
+
+/// Build a `GRAPH_TABLE` edge pattern element. `direction`: 0=right
+/// (`-[]->`), 1=left (`<-[]-`), other=undirected (`-[]-`).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `variable` / `label` must be null or valid C strings.
+#[no_mangle]
+pub unsafe extern "C" fn ra_graph_edge(
+    state: *mut RaParseState,
+    variable: *const c_char,
+    label: *const c_char,
+    direction: c_int,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let variable = unsafe { opt_c_string(variable) };
+    let label = unsafe { opt_c_string(label) };
+    let direction = match direction {
+        0 => EdgeDirection::Right,
+        1 => EdgeDirection::Left,
+        _ => EdgeDirection::Undirected,
+    };
+    st.push_graph_elem(GraphPatternElement::Edge {
+        variable,
+        label,
+        direction,
+    })
+}
+
+/// Build a `GRAPH_TABLE (graph MATCH pattern COLUMNS (...))` relation.
+///
+/// `pattern` is a list of GRAPH-element tagged nodes; `columns` is a
+/// target list (as for RETURNING).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `graph` / `alias` must be null or valid C strings.
+/// - `pattern` / `columns` must be valid tagged pointers or null.
+#[no_mangle]
+pub unsafe extern "C" fn ra_graph_table(
+    state: *mut RaParseState,
+    graph: *const c_char,
+    pattern: *mut RaNode,
+    columns: *mut RaNode,
+    alias: *const c_char,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let graph_name = unsafe { c_str_to_string(graph) };
+    let pattern_elems = decode_graph_pattern(st, pattern);
+    let columns = decode_returning(st, columns).unwrap_or_default();
+    let alias = unsafe { opt_c_string(alias) };
+    st.push_rel(RelExpr::GraphTable {
+        graph: graph_name,
+        pattern: pattern_elems,
+        columns,
+        alias,
+    })
+}
+
+/// Decode a list of GRAPH-element tagged nodes into a pattern vec.
+fn decode_graph_pattern(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<GraphPatternElement> {
+    let Some(indices) = decode_list(state, list_ptr) else {
+        return vec![];
+    };
+    let mut out = Vec::with_capacity(indices.len());
+    for idx in indices {
+        if let Some(e) = state.take_graph_elem(idx) {
+            out.push(e);
         }
     }
     out

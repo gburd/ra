@@ -264,7 +264,8 @@ impl FingerprintCollector {
             RelExpr::Values { .. }
             | RelExpr::MultiUnnest { .. }
             | RelExpr::RowPattern { .. }
-            | RelExpr::MvScan { .. } => {}
+            | RelExpr::MvScan { .. }
+            | RelExpr::GraphTable { .. } => {}
             RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => {
                 self.visit(source);
             }

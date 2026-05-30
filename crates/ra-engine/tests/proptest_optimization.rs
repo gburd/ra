@@ -832,7 +832,8 @@ fn contains_joins(expr: &RelExpr) -> bool {
         | RelExpr::BitmapIndexScan { .. }
         | RelExpr::IndexOnlyScan { .. }
         | RelExpr::ParallelScan { .. }
-        | RelExpr::MvScan { .. } => false,
+        | RelExpr::MvScan { .. }
+        | RelExpr::GraphTable { .. } => false,
         RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             input.as_ref().is_some_and(|i| contains_joins(i))
         }
@@ -1030,7 +1031,7 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             collect_tables_rec(recursive_case, out);
             collect_tables_rec(body, out);
         }
-        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } | RelExpr::GraphTable { .. } => {}
         RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_tables_rec(inp, out);

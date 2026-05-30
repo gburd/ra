@@ -426,6 +426,26 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             ];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
+        RelExpr::GraphTable {
+            graph,
+            pattern,
+            columns,
+            alias,
+        } => {
+            // GRAPH_TABLE is a leaf row source handled outside the
+            // e-graph; encode it structurally (the MATCH pattern is
+            // opaque, recorded as an element-count marker).
+            let tag_id = add_symbol(rec, "graph_table");
+            let graph_id = add_symbol(rec, graph);
+            let pattern_id = add_symbol(rec, &pattern.len().to_string());
+            let cols_id = add_optional_projection(rec, Some(columns))?;
+            let alias_id = match alias {
+                Some(a) => add_symbol(rec, a),
+                None => add_symbol(rec, ""),
+            };
+            let ids = vec![tag_id, graph_id, pattern_id, cols_id, alias_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
     }
 }
 
