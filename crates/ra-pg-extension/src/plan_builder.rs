@@ -211,9 +211,9 @@ impl PlanBuilder {
             RelExpr::Limit { input, .. } => Self::first_unsupported_op(input),
             RelExpr::Join { .. } => Some("Join"),
             RelExpr::Aggregate { .. } => Some("Aggregate"),
-            // Distinct via Unique needs its input sorted on the distinct keys;
-            // Ra does not yet guarantee that, so it would leave duplicates.
-            RelExpr::Distinct { .. } => Some("Distinct"),
+            // Distinct (SELECT DISTINCT): build_unique sorts its input on all
+            // output columns before the Unique, so adjacent-dedup is correct.
+            RelExpr::Distinct { input } => Self::first_unsupported_op(input),
             RelExpr::Union { .. } => Some("Union"),
             RelExpr::Intersect { .. } => Some("Intersect"),
             RelExpr::Except { .. } => Some("Except"),
@@ -1787,11 +1787,70 @@ impl PlanBuilder {
     // Set operations, Distinct, Window
     // -----------------------------------------------------------------------
 
+    /// Build a `Sort` over `child` ordered by all of `child`'s output
+    /// columns (ascending, NULLS LAST). Used to give `Unique` the sorted
+    /// input it requires (PG's Sort+Unique strategy for `SELECT DISTINCT`).
+    unsafe fn build_sort_all_columns(
+        &mut self,
+        child: *mut pg_sys::Plan,
+    ) -> *mut pg_sys::Plan {
+        if child.is_null() || (*child).targetlist.is_null() {
+            return child;
+        }
+        let ncols = (*(*child).targetlist).length;
+        if ncols == 0 {
+            return child;
+        }
+        let node = self.alloc_node::<pg_sys::Sort>();
+        if node.is_null() {
+            return child;
+        }
+        (*node).plan.type_ = pg_sys::NodeTag::T_Sort;
+        (*node).plan.lefttree = child;
+        (*node).plan.targetlist = (*child).targetlist;
+        let col_idx = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>())
+            as *mut pg_sys::AttrNumber;
+        let operators =
+            pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+        let collations =
+            pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+        let nulls_first = pg_sys::palloc(ncols as usize * std::mem::size_of::<bool>()) as *mut bool;
+        let elements = (*(*child).targetlist).elements;
+        for i in 0..ncols as usize {
+            let te = (*elements.add(i)).ptr_value as *mut pg_sys::TargetEntry;
+            let (resno, type_oid, coll) = if te.is_null() || (*te).expr.is_null() {
+                ((i + 1) as pg_sys::AttrNumber, pg_sys::INT4OID, pg_sys::InvalidOid)
+            } else {
+                (
+                    (*te).resno,
+                    pg_sys::exprType((*te).expr.cast()),
+                    pg_sys::exprCollation((*te).expr.cast()),
+                )
+            };
+            *col_idx.add(i) = resno;
+            *operators.add(i) = crate::sort_utils::resolve_sort_operator(type_oid, true);
+            *collations.add(i) = coll;
+            *nulls_first.add(i) = false;
+        }
+        (*node).numCols = ncols;
+        (*node).sortColIdx = col_idx;
+        (*node).sortOperators = operators;
+        (*node).collations = collations;
+        (*node).nullsFirst = nulls_first;
+        (*node).plan.total_cost = (*child).total_cost;
+        (*node).plan.plan_rows = (*child).plan_rows;
+        (*node).plan.plan_width = (*child).plan_width;
+        &mut (*node).plan as *mut pg_sys::Plan
+    }
+
     unsafe fn build_unique(
         &mut self,
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        let child = self.build_plan(input)?;
+        let raw_child = self.build_plan(input)?;
+        // Unique only collapses *adjacent* equal rows, so its input must be
+        // sorted on the distinct columns. Sort by all output columns first.
+        let child = self.build_sort_all_columns(raw_child);
         let node = self.alloc_node::<pg_sys::Unique>();
         if node.is_null() {
             return Err(PlanBuilderError::NullPointer(
