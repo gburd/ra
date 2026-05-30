@@ -52,7 +52,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 | `Aggregate` | `count/sum/avg/...`, `GROUP BY`, `HAVING` | `build_aggregate` ignores the aggregate exprs → unresolved `aggregate_dummy` | P0 |
 | ~~`Sort`~~ | ~~`ORDER BY`~~ | **DONE** (plain-column keys); expression keys and `ORDER BY` of a non-output column still defer (need resjunk targetlist / ordering-operator resolution) | — |
 | ~~`Limit`~~ | ~~`LIMIT` / `OFFSET`~~ | **DONE** | — |
-| `Distinct` | `SELECT DISTINCT` | `build_unique` needs its input sorted on the distinct keys; Ra does not yet guarantee that, so it would leave duplicates | P1 |
+| ~~`Distinct`~~ | ~~`SELECT DISTINCT`~~ | **DONE** — `build_unique` sorts its input on all output columns (Sort+Unique) | — |
 | `Union` / `Intersect` / `Except` | set operations (+ `ALL`) | not verified | P1 |
 | `Window` | window functions (`OVER (...)`) | not verified | P1 |
 | `Values` | `VALUES (...)`, `INSERT ... VALUES` source | not verified | P1 |
