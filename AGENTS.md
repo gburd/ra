@@ -211,6 +211,16 @@ Uses a custom fork at `crates/ra-sql-parser` (based on sqlparser 0.52) reference
 - Typed string literals: `DATE 'str'`, `INTERVAL 'str'` (as string constants)
 - `?` placeholder → NULL constant
 - COALESCE, GREATEST, and arbitrary function calls
+- DML: INSERT (with ON CONFLICT DO NOTHING/UPDATE/SELECT — DO SELECT is the
+  PostgreSQL 19 form), UPDATE, DELETE, and MERGE (`MERGE INTO target USING
+  source ON cond WHEN [NOT] MATCHED [BY SOURCE/TARGET] [AND cond] THEN
+  UPDATE/DELETE/INSERT/DO NOTHING`). DML envelopes bypass the e-graph via the
+  DML fast-path (`try_optimize_dml`).
+- GRAPH_TABLE (SQL/PGQ property-graph queries, SQL:2023 / PostgreSQL 19):
+  `GRAPH_TABLE (graph MATCH (v IS label)-[e IS label]->(v2) COLUMNS (...))`
+  with right/left/undirected edges. Modeled as `RelExpr::GraphTable`; bypasses
+  the e-graph (the MATCH pattern is opaque to rewrite rules; executed natively
+  by PostgreSQL 19).
 
 **Structured error reporting (RFC 0059):**
 - `%syntax_error` calls `ra_record_parse_error` which captures position, token length, and expected-token hints from the Lime LALR state
@@ -244,7 +254,7 @@ Cache functionality is split into two crates:
 
 - **0 clippy errors** (`cargo clippy --all-targets --all-features -- -D warnings`)
 - **0 compiler warnings** on `cargo build --workspace --all-features`
-- **168 test suites, 7812 tests passing, 0 failing, 58 ignored** (`cargo test --workspace --all-features`)
+- **168 test suites, 7816 tests passing, 0 failing, 58 ignored** (`cargo test --workspace --all-features`)
 - Known flaky test mitigations:
   - `saturation_terminates_quickly` skips Aggregate, self-ref-join, joins of the
     same base table, constant predicates, constant sort keys, and `UnaryOp` over
