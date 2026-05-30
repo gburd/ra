@@ -1705,9 +1705,9 @@ impl PlanBuilder {
         (*node).plan.targetlist = out_tlist;
 
         // Grouping metadata.
-        if group_by.is_empty() {
+        let ngroups: f64 = if group_by.is_empty() {
             (*node).aggstrategy = pg_sys::AggStrategy::AGG_PLAIN;
-            (*node).numGroups = 1;
+            1.0
         } else {
             (*node).aggstrategy = pg_sys::AggStrategy::AGG_HASHED;
             let n = grp_pos.len();
@@ -1724,10 +1724,18 @@ impl PlanBuilder {
             (*node).grpColIdx = col_idx;
             (*node).grpOperators = ops;
             (*node).grpCollations = colls;
-            let rows = (*child).plan_rows.max(1.0);
-            (*node).numGroups = (rows.sqrt() as i64).clamp(1, 1_000_000);
+            (*child).plan_rows.max(1.0).sqrt().clamp(1.0, 1_000_000.0)
+        };
+        // numGroups: i64 on pg13..pg18, Cardinality (f64) on pg19+.
+        #[cfg(not(feature = "pg19"))]
+        {
+            (*node).numGroups = ngroups as i64;
         }
-        (*node).plan.plan_rows = (*node).numGroups as f64;
+        #[cfg(feature = "pg19")]
+        {
+            (*node).numGroups = ngroups;
+        }
+        (*node).plan.plan_rows = ngroups;
         (*node).plan.total_cost = (*child).total_cost + (*child).plan_rows * 0.01;
         (*node).plan.startup_cost = (*node).plan.total_cost;
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
