@@ -214,7 +214,12 @@ unsafe fn extract_execution_metrics(
     let instrument = &*(*plan_state).instrument;
 
     // Total execution time in ms (from PostgreSQL's Instrumentation struct).
+    // PG19 changed Instrumentation.total from a double (seconds) to an
+    // instr_time (nanoseconds in `.ticks`).
+    #[cfg(not(feature = "pg19"))]
     let total_time_ms = instrument.total * 1000.0;
+    #[cfg(feature = "pg19")]
+    let total_time_ms = instrument.total.ticks as f64 / 1_000_000.0;
 
     // Total rows produced by the top-level plan node.
     let actual_rows = instrument.ntuples as u64;

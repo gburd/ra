@@ -1479,13 +1479,25 @@ impl PlanBuilder {
         } else {
             (*child).plan_rows.max(1.0)
         };
-        (*node).numGroups = if group_by.is_empty() {
-            1
-        } else {
-            // Conservative estimate: sqrt(input_rows), clamped.
-            // PG 18 changed `Result.numHashes` (and similar) from u64 to i64.
-            (input_rows.sqrt() as i64).clamp(10, 1_000_000)
-        };
+        // numGroups type: i64 on pg13..pg18, Cardinality (f64) on pg19+.
+        #[cfg(not(feature = "pg19"))]
+        {
+            (*node).numGroups = if group_by.is_empty() {
+                1
+            } else {
+                // Conservative estimate: sqrt(input_rows), clamped.
+                // PG 18 changed `Result.numHashes` (and similar) from u64 to i64.
+                (input_rows.sqrt() as i64).clamp(10, 1_000_000)
+            };
+        }
+        #[cfg(feature = "pg19")]
+        {
+            (*node).numGroups = if group_by.is_empty() {
+                1.0
+            } else {
+                input_rows.sqrt().clamp(10.0, 1_000_000.0)
+            };
+        }
 
         // Cost: child cost + per-row hashing/comparison cost
         if !child.is_null() {

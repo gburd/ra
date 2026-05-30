@@ -11,10 +11,6 @@ repository = "https://github.com/gregburd/ra"
 [lib]
 crate-type = ["cdylib", "lib"]
 
-[[bin]]
-name = "pgrx_embed_pg_ra_planner"
-path = "./src/bin/pgrx_embed.rs"
-
 [features]
 default = ["pg16"]
 pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
@@ -23,12 +19,13 @@ pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
 pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
 pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
 pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
+pg19 = ["pgrx/pg19", "pgrx-tests/pg19"]
 pg_test = []
 # Enables raw_parser_hook — requires patched PostgreSQL with the hook.
 parser_hook = []
 
 [dependencies]
-pgrx = "=0.17.0"
+pgrx = { path = "/Users/gregburd/src/pgrx/pgrx" }
 ra-core = { path = "../ra-core" }
 ra-engine = { path = "../ra-engine" }
 ra-hardware = { path = "../ra-hardware" }
@@ -42,7 +39,7 @@ toml = "0.8"
 tracing = "0.1"
 
 [dev-dependencies]
-pgrx-tests = "=0.17.0"
+pgrx-tests = { path = "/Users/gregburd/src/pgrx/pgrx-tests" }
 proptest = "1.5"
 
 [profile.dev]

@@ -44,25 +44,27 @@ unsafe extern "C-unwind" fn ra_planner_hook(
     query_string: *const std::ffi::c_char,
     cursor_options: i32,
     bound_params: *mut pg_sys::ParamListInfoData,
+    #[cfg(feature = "pg19")]
+    es: *mut pg_sys::ExplainState,
 ) -> *mut pg_sys::PlannedStmt {
     // Fast path: extension disabled.
     if !RA_ENABLED.get() {
-        return call_prev_planner(parse, query_string, cursor_options, bound_params);
+        return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
     }
 
     // Skip utility statements.
     if !parse.is_null() && !(*parse).utilityStmt.is_null() {
-        return call_prev_planner(parse, query_string, cursor_options, bound_params);
+        return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
     }
 
     // Skip system catalog queries.
     if !parse.is_null() && references_system_catalogs(parse) {
-        return call_prev_planner(parse, query_string, cursor_options, bound_params);
+        return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
     }
 
     // Catch panics to surface as PostgreSQL ERRORs rather than crashing.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ra_planner_hook_inner(parse, query_string, cursor_options, bound_params)
+        ra_planner_hook_inner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es)
     }));
 
     match result {
@@ -94,6 +96,8 @@ unsafe fn ra_planner_hook_inner(
     query_string: *const std::ffi::c_char,
     cursor_options: i32,
     bound_params: *mut pg_sys::ParamListInfoData,
+    #[cfg(feature = "pg19")]
+    es: *mut pg_sys::ExplainState,
 ) -> *mut pg_sys::PlannedStmt {
     use ra_core::algebra::Statement;
 
@@ -108,7 +112,7 @@ unsafe fn ra_planner_hook_inner(
 
     // Empty query string: nothing for Ra to do — let PG handle it.
     if sql.trim().is_empty() {
-        return call_prev_planner(parse, query_string, cursor_options, bound_params);
+        return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
     }
 
     let log = RA_LOG_DECISIONS.get();
@@ -123,7 +127,7 @@ unsafe fn ra_planner_hook_inner(
             Statement::Ddl(_) | Statement::Utility(_) | Statement::Transaction(_) => {
                 // Non-optimizable statements should not reach the planner.
                 // Fall back to PG's standard planner.
-                return call_prev_planner(parse, query_string, cursor_options, bound_params);
+                return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
             }
         }
     } else {
@@ -142,7 +146,7 @@ unsafe fn ra_planner_hook_inner(
                         truncate_sql(&sql, 80)
                     );
                 }
-                return call_prev_planner(parse, query_string, cursor_options, bound_params);
+                return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
             }
         }
     };
@@ -168,7 +172,7 @@ unsafe fn ra_planner_hook_inner(
                     truncate_sql(&sql, 80)
                 );
             }
-            return call_prev_planner(parse, query_string, cursor_options, bound_params);
+            return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
         }
     };
     let optimize_ms = t1.elapsed().as_secs_f64() * 1000.0;
@@ -215,7 +219,7 @@ unsafe fn ra_planner_hook_inner(
                     truncate_sql(&sql, 80)
                 );
             }
-            return call_prev_planner(parse, query_string, cursor_options, bound_params);
+            return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
         }
     };
     let translate_ms = t2.elapsed().as_secs_f64() * 1000.0;
@@ -398,11 +402,13 @@ unsafe fn call_prev_planner(
     query_string: *const std::ffi::c_char,
     cursor_options: i32,
     bound_params: *mut pg_sys::ParamListInfoData,
+    #[cfg(feature = "pg19")]
+    es: *mut pg_sys::ExplainState,
 ) -> *mut pg_sys::PlannedStmt {
     if let Some(prev) = PREV_PLANNER_HOOK {
-        prev(parse, query_string, cursor_options, bound_params)
+        prev(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es)
     } else {
-        pg_sys::standard_planner(parse, query_string, cursor_options, bound_params)
+        pg_sys::standard_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es)
     }
 }
 
