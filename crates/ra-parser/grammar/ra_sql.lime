@@ -462,7 +462,7 @@ target_list(A) ::= target_list(B) COMMA target_item(C). {
 }
 
 target_item(A) ::= expr(B).                 { A = B; }
-target_item(A) ::= expr(B) AS IDENT.        { A = B; }
+target_item(A) ::= expr(B) AS IDENT(C).     { A = ra_alias_target(pstate, B, C.text); }
 target_item(A) ::= STAR. {
     A = ra_column(pstate, "*");
 }
@@ -702,7 +702,7 @@ sort_item(A) ::= expr(B) nulls_order(C). {
 %type nulls_order {RaToken}
 nulls_order(A) ::= NULLS FIRST. { A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
 nulls_order(A) ::= NULLS LAST.  { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
-nulls_order(A) ::= .            { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+nulls_order(A) ::= .            { A.int_val = 2; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
 
 /* -- LIMIT clause -------------------------------------------------- */
 /* Uses float_val as a "has limit" flag (1.0 = present, 0.0 = absent).

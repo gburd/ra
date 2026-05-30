@@ -250,6 +250,9 @@ pub struct RaParseState {
     merge_whens: Vec<MergeWhen>,
     /// Arena for `GRAPH_TABLE` pattern-element nodes.
     graph_elems: Vec<GraphPatternElement>,
+    /// Output-column aliases for SELECT-list items, keyed by expr arena
+    /// index (`SELECT expr AS alias`). Consulted by `ra_project`.
+    expr_aliases: std::collections::HashMap<usize, String>,
     /// Accumulated parse errors (from builder/semantic actions).
     errors: Vec<String>,
     /// Structured syntax errors (from `%syntax_error` hook).
@@ -269,6 +272,7 @@ impl RaParseState {
             window_exprs: Vec::new(),
             merge_whens: Vec::new(),
             graph_elems: Vec::new(),
+            expr_aliases: std::collections::HashMap::new(),
             errors: Vec::new(),
             structured_errors: Vec::new(),
         }
@@ -392,6 +396,17 @@ impl RaParseState {
     #[must_use]
     pub fn take_expr(&self, index: usize) -> Option<Expr> {
         self.expr_nodes.get(index).cloned()
+    }
+
+    /// Record an output-column alias for the expr at `index`.
+    pub fn set_expr_alias(&mut self, index: usize, alias: String) {
+        self.expr_aliases.insert(index, alias);
+    }
+
+    /// Output-column alias previously recorded for the expr at `index`.
+    #[must_use]
+    pub fn expr_alias(&self, index: usize) -> Option<String> {
+        self.expr_aliases.get(&index).cloned()
     }
 
     /// Retrieve a sort key by arena index.

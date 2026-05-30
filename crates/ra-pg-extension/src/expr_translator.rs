@@ -60,7 +60,16 @@ pub unsafe fn translate(expr: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
             UnaryOp::IsNotNull => build_null_test(operand, pg_sys::NullTestType::IS_NOT_NULL, ctx),
             UnaryOp::Neg => build_unary_neg(operand, ctx),
         },
-        RaExpr::Function { name, args } => build_func_expr(name, args, ctx),
+        RaExpr::Function { name, args } => match (name.as_str(), args.as_slice()) {
+            // Parser markers for IS NULL / IS NOT NULL (see ra_sql.lime).
+            ("__is_null", [operand]) => {
+                build_null_test(operand, pg_sys::NullTestType::IS_NULL, ctx)
+            }
+            ("__is_not_null", [operand]) => {
+                build_null_test(operand, pg_sys::NullTestType::IS_NOT_NULL, ctx)
+            }
+            _ => build_func_expr(name, args, ctx),
+        },
         RaExpr::Case {
             operand,
             when_clauses,
@@ -145,6 +154,9 @@ unsafe fn const_to_pg(c: &RaConst) -> *mut pg_sys::Expr {
             }
         }
     }
+    // Collatable constants (text) need a collation so collation-sensitive
+    // operators can resolve; non-collatable types get InvalidOid.
+    (*node).constcollid = pg_sys::get_typcollation((*node).consttype);
     (node as *mut pg_sys::Expr)
 }
 
@@ -221,7 +233,11 @@ unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *m
     (*var).varattno = attnum;
     (*var).vartype = atttype;
     (*var).vartypmod = atttypmod;
-    (*var).varcollid = pg_sys::InvalidOid;
+    // Collation is required for collation-sensitive operators (text
+    // comparison/sort); a missing collation makes the executor raise
+    // "could not determine which collation to use". Use the type's default
+    // collation (correct for columns without an explicit COLLATE clause).
+    (*var).varcollid = pg_sys::get_typcollation(atttype);
     (*var).varlevelsup = 0;
     (var as *mut pg_sys::Expr)
 }
@@ -283,8 +299,19 @@ unsafe fn build_op_expr(
     (*node).opfuncid = opfuncid;
     (*node).opresulttype = opresulttype;
     (*node).opretset = false;
-    (*node).opcollid = pg_sys::InvalidOid;
-    (*node).inputcollid = pg_sys::InvalidOid;
+    // Derive the input collation from the operands (PG requires it for
+    // collation-sensitive operators such as text comparison). The result
+    // collation applies only when the result type is itself collatable.
+    let mut inputcollid = pg_sys::exprCollation(left_pg.cast());
+    if inputcollid == pg_sys::InvalidOid {
+        inputcollid = pg_sys::exprCollation(right_pg.cast());
+    }
+    (*node).inputcollid = inputcollid;
+    (*node).opcollid = if pg_sys::get_typcollation(opresulttype) == pg_sys::InvalidOid {
+        pg_sys::InvalidOid
+    } else {
+        inputcollid
+    };
     let mut args = std::ptr::null_mut::<pg_sys::List>();
     args = pg_sys::lappend(args, left_pg.cast());
     args = pg_sys::lappend(args, right_pg.cast());

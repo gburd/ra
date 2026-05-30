@@ -29,6 +29,7 @@ RaNode *ra_filter_agg(RaParseState *st, const char *func_name,
                       RaNode *args_list, RaNode *filter_cond);
 RaNode *ra_filter(RaParseState *st, RaNode *input, RaNode *predicate);
 RaNode *ra_project(RaParseState *st, RaNode *input, RaNode *columns);
+RaNode *ra_alias_target(RaParseState *st, RaNode *expr_node, const char *alias);
 RaNode *ra_join(RaParseState *st, uint32_t join_type,
                 RaNode *left, RaNode *right, RaNode *condition);
 RaNode *ra_aggregate(RaParseState *st, RaNode *input,
