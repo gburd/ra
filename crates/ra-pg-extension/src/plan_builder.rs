@@ -1870,6 +1870,20 @@ impl PlanBuilder {
                     break;
                 }
             }
+            // Fallback: match by output column name. Needed when the child is
+            // an Agg whose output columns are OUTER_VAR references (their
+            // varno/varattno don't match the key's scan-relative Var), but the
+            // TargetEntry carries the group column's resname.
+            if !resolved {
+                if let Some(name) = crate::sort_utils::extract_column_name(&key.expr) {
+                    if let Some(resno) =
+                        crate::sort_utils::find_attr_in_targetlist(child_tlist, name)
+                    {
+                        *col_idx.add(i) = resno;
+                        resolved = true;
+                    }
+                }
+            }
             if !resolved {
                 return false;
             }
