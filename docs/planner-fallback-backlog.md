@@ -49,7 +49,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 | Op token | SQL it blocks | Status / why it falls back | Pri |
 |---|---|---|---|
 | `Join` | any multi-table join | `build_join` returns empty result sets | P0 |
-| `Aggregate` | `count/sum/avg/...`, `GROUP BY`, `HAVING` | `build_aggregate` ignores the aggregate exprs → unresolved `aggregate_dummy` | P0 |
+| ~~`Aggregate`~~ | ~~`count/sum/avg/min/max`, `GROUP BY`~~ | **DONE** for count/sum/avg/min/max (± GROUP BY, ± ORDER BY). HAVING, expressions over aggregates, DISTINCT aggregates, and stddev/variance/string_agg/array_agg still defer | P2 |
 | ~~`Sort`~~ | ~~`ORDER BY`~~ | **DONE** (plain-column keys); expression keys and `ORDER BY` of a non-output column still defer (need resjunk targetlist / ordering-operator resolution) | — |
 | ~~`Limit`~~ | ~~`LIMIT` / `OFFSET`~~ | **DONE** | — |
 | ~~`Distinct`~~ | ~~`SELECT DISTINCT`~~ | **DONE** — `build_unique` sorts its input on all output columns (Sort+Unique) | — |
