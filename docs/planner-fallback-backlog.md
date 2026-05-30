@@ -25,10 +25,22 @@ to `first_unsupported_op` (return `None`), then prove it with
 result rows must equal the native planner). Only operators that pass the
 property test are allowed to stay enabled.
 
+**Expression-level fail-safe.** A plan is also rejected (→ native planner) when
+any filter predicate or projection column cannot be faithfully translated to a
+PG expression. This prevents silently dropping an untranslatable qual (which
+returned unfiltered rows). Note: a *runtime* error from a malformed-but-built
+plan (e.g. a missing collation) is NOT caught by the planner-hook fallback, so
+expression translation must be correct, not merely non-null — see the text
+collation fixes (`varcollid` / `inputcollid` / `constcollid`).
+
 ## Currently supported (no fallback)
 
 - Single-relation `Scan` (SeqScan) with any nesting of `Filter` (→ qual) and
-  `Project` (→ targetlist), including qualified and unqualified columns.
+  `Project` (→ targetlist), including qualified and unqualified columns, NULL
+  tests (`IS [NOT] NULL`), and text/collation-sensitive comparisons.
+- `Sort` (`ORDER BY`, single or multi-key, ASC/DESC, NULLS FIRST/LAST, aliases)
+  and `Limit`/`OFFSET`, when every sort key is a plain column that appears in
+  the output. Verified row-equivalent on a live PG18 cluster.
 
 ## Plan-builder gaps (each = one task)
 
@@ -38,9 +50,9 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 |---|---|---|---|
 | `Join` | any multi-table join | `build_join` returns empty result sets | P0 |
 | `Aggregate` | `count/sum/avg/...`, `GROUP BY`, `HAVING` | `build_aggregate` ignores the aggregate exprs → unresolved `aggregate_dummy` | P0 |
-| `Sort` | `ORDER BY` (and `IncrementalSort`) | `build_sort` corrupts executor memory ("write past chunk end") | P0 |
-| `Limit` | `LIMIT` / `OFFSET` | corrupts executor memory in combination with sort | P0 |
-| `Distinct` | `SELECT DISTINCT` | crashes the backend | P1 |
+| ~~`Sort`~~ | ~~`ORDER BY`~~ | **DONE** (plain-column keys); expression keys and `ORDER BY` of a non-output column still defer (need resjunk targetlist / ordering-operator resolution) | — |
+| ~~`Limit`~~ | ~~`LIMIT` / `OFFSET`~~ | **DONE** | — |
+| `Distinct` | `SELECT DISTINCT` | `build_unique` needs its input sorted on the distinct keys; Ra does not yet guarantee that, so it would leave duplicates | P1 |
 | `Union` / `Intersect` / `Except` | set operations (+ `ALL`) | not verified | P1 |
 | `Window` | window functions (`OVER (...)`) | not verified | P1 |
 | `Values` | `VALUES (...)`, `INSERT ... VALUES` source | not verified | P1 |
