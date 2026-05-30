@@ -22,7 +22,45 @@ use ra_core::search_types::DistanceMetric;
 pub fn apply_all(rel: RelExpr) -> RelExpr {
     let rel = transform_window_functions(rel);
     let rel = transform_scalar_aggregates(rel);
+    let rel = transform_order_by_aliases(rel);
     transform_vector_search(rel)
+}
+
+/// Nearest projection that defines the output columns visible to an
+/// `ORDER BY`, looking through passthrough nodes.
+fn projection_below(rel: &RelExpr) -> Option<&[ProjectionColumn]> {
+    match rel {
+        RelExpr::Project { columns, .. } => Some(columns),
+        RelExpr::Filter { input, .. }
+        | RelExpr::Distinct { input, .. }
+        | RelExpr::Limit { input, .. } => projection_below(input),
+        _ => None,
+    }
+}
+
+/// Lower `ORDER BY <output-alias>` to the underlying projected expression,
+/// as `PostgreSQL` does during parse analysis. Without this the sort key
+/// references an alias that has no binding once the optimizer folds the
+/// projection away, producing a wrong (or no-op) sort.
+fn transform_order_by_aliases(rel: RelExpr) -> RelExpr {
+    let rel = map_children(rel, transform_order_by_aliases);
+    let RelExpr::Sort { mut keys, input } = rel else {
+        return rel;
+    };
+    if let Some(cols) = projection_below(&input) {
+        for key in &mut keys {
+            let Expr::Column(ColumnRef { table: None, column }) = &key.expr else {
+                continue;
+            };
+            if let Some(pc) = cols
+                .iter()
+                .find(|c| c.alias.as_deref() == Some(column.as_str()))
+            {
+                key.expr = pc.expr.clone();
+            }
+        }
+    }
+    RelExpr::Sort { keys, input }
 }
 
 // ---------------------------------------------------------------------------

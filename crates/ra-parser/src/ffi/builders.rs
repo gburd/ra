@@ -256,12 +256,39 @@ pub unsafe extern "C" fn ra_project(
             st.push_error(format!("ra_project: invalid expr index {idx}"));
             return std::ptr::null_mut();
         };
-        columns.push(ProjectionColumn { expr, alias: None });
+        columns.push(ProjectionColumn {
+            expr,
+            alias: st.expr_alias(idx),
+        });
     }
     st.push_rel(RelExpr::Project {
         columns,
         input: Box::new(input_rel),
     })
+}
+
+/// Record an output-column alias for a SELECT-list item (`expr AS alias`)
+/// and return the expr pointer unchanged, so the alias rides through
+/// `target_list` to `ra_project`.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `expr_node` must be a valid tagged expr pointer.
+/// - `alias` must be a valid NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn ra_alias_target(
+    state: *mut RaParseState,
+    expr_node: *mut RaNode,
+    alias: *const c_char,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return expr_node;
+    };
+    if let Some((NodeTag::Expr, idx)) = decode(expr_node) {
+        let alias_name = unsafe { c_str_to_string(alias) };
+        st.set_expr_alias(idx, alias_name);
+    }
+    expr_node
 }
 
 /// Build a `Join` node.
@@ -2299,10 +2326,14 @@ pub unsafe extern "C" fn ra_sort_key(
     } else {
         SortDirection::Desc
     };
-    let nulls = if nulls_first != 0 {
-        NullOrdering::First
-    } else {
-        NullOrdering::Last
+    let nulls = match nulls_first {
+        0 => NullOrdering::Last,
+        1 => NullOrdering::First,
+        // 2 = unspecified: PG defaults ASC→NULLS LAST, DESC→NULLS FIRST.
+        _ => match direction {
+            SortDirection::Asc => NullOrdering::Last,
+            SortDirection::Desc => NullOrdering::First,
+        },
     };
     st.push_sort_key(SortKey {
         expr: key_expr,

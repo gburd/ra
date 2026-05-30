@@ -194,10 +194,25 @@ impl PlanBuilder {
             RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
                 Self::first_unsupported_op(input)
             }
+            // Projection-incapable passthrough nodes: they share the child
+            // targetlist; ordering/limit semantics handled by the PG executor
+            // node. Sort is admitted only when every key is a plain column —
+            // expression keys still need ordering-operator resolution, so they
+            // defer to PG.
+            RelExpr::Sort { keys, input }
+                if keys
+                    .iter()
+                    .all(|k| matches!(k.expr, ra_core::expr::Expr::Column(_))) =>
+            {
+                Self::first_unsupported_op(input)
+            }
+            RelExpr::Sort { .. } => Some("Sort"),
+            RelExpr::IncrementalSort { .. } => Some("Sort"),
+            RelExpr::Limit { input, .. } => Self::first_unsupported_op(input),
             RelExpr::Join { .. } => Some("Join"),
             RelExpr::Aggregate { .. } => Some("Aggregate"),
-            RelExpr::Sort { .. } | RelExpr::IncrementalSort { .. } => Some("Sort"),
-            RelExpr::Limit { .. } => Some("Limit"),
+            // Distinct via Unique needs its input sorted on the distinct keys;
+            // Ra does not yet guarantee that, so it would leave duplicates.
             RelExpr::Distinct { .. } => Some("Distinct"),
             RelExpr::Union { .. } => Some("Union"),
             RelExpr::Intersect { .. } => Some("Intersect"),
@@ -340,14 +355,24 @@ impl PlanBuilder {
                 // physically honored (see build_scan_with_advice).
                 let child = self.build_plan(input)?;
                 let pg_expr = expr_translator::translate(predicate, &self.expr_ctx);
-                if !child.is_null() && !pg_expr.is_null() {
+                // Fail-safe: an untranslatable predicate must NOT be silently
+                // dropped (that returns unfiltered rows — wrong results).
+                // Defer the whole query to the native planner instead.
+                if pg_expr.is_null() {
+                    return Err(PlanBuilderError::UnsupportedVariant(
+                        "filter predicate not translatable; deferring to native \
+                         planner (see docs/planner-fallback-backlog.md)"
+                            .to_owned(),
+                    ));
+                }
+                if !child.is_null() {
                     (*child).qual = pg_sys::lappend((*child).qual, pg_expr.cast());
                 }
                 Ok(child)
             }
             RelExpr::Project { columns, input } => {
                 let child = self.build_plan(input)?;
-                self.set_targetlist(child, columns);
+                self.set_targetlist(child, columns)?;
                 Ok(child)
             }
             RelExpr::Join {
@@ -1525,6 +1550,62 @@ impl PlanBuilder {
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
+    /// Resolve each sort key to its output column position in `child_tlist`.
+    ///
+    /// Sort keys reference the underlying column (the parser lowers
+    /// `ORDER BY <alias>` to the source column), so a `resname`-based lookup
+    /// misses aliased outputs. We translate each key to its PG `Var` and match
+    /// it against the child targetlist by `varattno`/`varno`, robust to
+    /// projection folding and aliasing.
+    ///
+    /// Returns `false` if any key does not correspond to an output column
+    /// (e.g. `ORDER BY <column-not-in-SELECT>`, which PG handles with a
+    /// resjunk targetlist entry that Ra does not yet build). The caller must
+    /// then defer to the native planner — a dangling sort index reads past the
+    /// tuple slot (wrong results or a backend crash).
+    unsafe fn resolve_sort_indices(
+        &self,
+        keys: &[SortKey],
+        child_tlist: *mut pg_sys::List,
+        col_idx: *mut pg_sys::AttrNumber,
+        num_cols: i32,
+    ) -> bool {
+        if child_tlist.is_null() || col_idx.is_null() {
+            return false;
+        }
+        for (i, key) in keys.iter().enumerate() {
+            if i as i32 >= num_cols {
+                break;
+            }
+            let key_expr = expr_translator::translate(&key.expr, &self.expr_ctx);
+            if key_expr.is_null() || (*key_expr).type_ != pg_sys::NodeTag::T_Var {
+                return false;
+            }
+            let kv = key_expr.cast::<pg_sys::Var>();
+            let elements = (*child_tlist).elements;
+            let mut resolved = false;
+            for pos in 0..(*child_tlist).length {
+                let te = (*elements.add(pos as usize)).ptr_value as *mut pg_sys::TargetEntry;
+                if te.is_null() || (*te).expr.is_null() {
+                    continue;
+                }
+                if (*(*te).expr).type_ != pg_sys::NodeTag::T_Var {
+                    continue;
+                }
+                let tv = (*te).expr.cast::<pg_sys::Var>();
+                if (*tv).varattno == (*kv).varattno && (*tv).varno == (*kv).varno {
+                    *col_idx.add(i) = (*te).resno;
+                    resolved = true;
+                    break;
+                }
+            }
+            if !resolved {
+                return false;
+            }
+        }
+        true
+    }
+
     unsafe fn build_sort(
         &mut self,
         keys: &[SortKey],
@@ -1537,6 +1618,13 @@ impl PlanBuilder {
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Sort;
         (*node).plan.lefttree = child;
+        // Sort passes tuples through unchanged: share the child targetlist
+        // verbatim (PG's make_sort does `plan->targetlist = lefttree->targetlist`).
+        // Without this the executor reads an empty targetlist and writes past
+        // the tuple slot ("write past chunk end").
+        if !child.is_null() {
+            (*node).plan.targetlist = (*child).targetlist;
+        }
 
         // Build sort column metadata arrays using sort_utils
         let child_tlist = if child.is_null() {
@@ -1547,6 +1635,16 @@ impl PlanBuilder {
         let rel_oid = self.first_rel_oid(input);
 
         if let Some(arrays) = crate::sort_utils::build_sort_arrays(keys, child_tlist, rel_oid) {
+            // Every sort key must map to an output column; otherwise the sort
+            // index dangles (ORDER BY a non-selected column needs a resjunk
+            // targetlist entry Ra does not build). Defer to native PG.
+            if !self.resolve_sort_indices(keys, child_tlist, arrays.col_idx, arrays.num_cols) {
+                return Err(PlanBuilderError::UnsupportedVariant(
+                    "ORDER BY references a column not in the output; deferring to \
+                     native planner (see docs/planner-fallback-backlog.md)"
+                        .to_owned(),
+                ));
+            }
             (*node).numCols = arrays.num_cols;
             (*node).sortColIdx = arrays.col_idx;
             (*node).sortOperators = arrays.operators;
@@ -1582,6 +1680,10 @@ impl PlanBuilder {
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Limit;
         (*node).plan.lefttree = child;
+        // Limit passes tuples through unchanged: share the child targetlist.
+        if !child.is_null() {
+            (*node).plan.targetlist = (*child).targetlist;
+        }
 
         // Build Const nodes for limitCount and limitOffset
         (*node).limitCount = make_int8_const(count as i64).cast();
@@ -1686,6 +1788,10 @@ impl PlanBuilder {
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Unique;
         (*node).plan.lefttree = child;
+        // Unique passes tuples through unchanged: share the child targetlist.
+        if !child.is_null() {
+            (*node).plan.targetlist = (*child).targetlist;
+        }
 
         // Build unique column arrays from child's targetlist
         // Unique operates on ALL output columns (SELECT DISTINCT)
@@ -2029,6 +2135,10 @@ impl PlanBuilder {
         }
         (*node).sort.plan.type_ = pg_sys::NodeTag::T_IncrementalSort;
         (*node).sort.plan.lefttree = child;
+        // IncrementalSort passes tuples through unchanged: share child targetlist.
+        if !child.is_null() {
+            (*node).sort.plan.targetlist = (*child).targetlist;
+        }
 
         // Total keys = prefix (already sorted) + suffix (to sort within groups)
         let all_keys: Vec<SortKey> = prefix_keys
@@ -2191,29 +2301,49 @@ impl PlanBuilder {
     }
 
     /// Set the targetlist on a plan node from Ra projection columns.
-    unsafe fn set_targetlist(&self, plan: *mut pg_sys::Plan, columns: &[ProjectionColumn]) {
+    ///
+    /// Fail-safe: if any column expression cannot be translated, returns
+    /// `Err` so the whole query defers to the native planner rather than
+    /// emitting a plan with a missing output column (wrong results).
+    unsafe fn set_targetlist(
+        &self,
+        plan: *mut pg_sys::Plan,
+        columns: &[ProjectionColumn],
+    ) -> Result<(), PlanBuilderError> {
         if plan.is_null() {
-            return;
+            return Ok(());
         }
         for (i, pc) in columns.iter().enumerate() {
             let pg_expr = expr_translator::translate(&pc.expr, &self.expr_ctx);
             if pg_expr.is_null() {
-                continue;
+                return Err(PlanBuilderError::UnsupportedVariant(
+                    "projection column not translatable; deferring to native \
+                     planner (see docs/planner-fallback-backlog.md)"
+                        .to_owned(),
+                ));
             }
             let te = self.alloc_node::<pg_sys::TargetEntry>();
             if te.is_null() {
-                continue;
+                return Err(PlanBuilderError::NullPointer("TargetEntry".to_owned()));
             }
             (*te).xpr.type_ = pg_sys::NodeTag::T_TargetEntry;
             (*te).expr = pg_expr;
             (*te).resno = (i + 1) as pg_sys::AttrNumber;
-            if let Some(alias) = &pc.alias {
-                if let Ok(cs) = CString::new(alias.as_str()) {
+            // Name the output column: explicit alias, else the source column
+            // name (matches PG — `SELECT id` yields a column named "id"). The
+            // name lets sort/group key resolution find this column by name.
+            let resname = pc
+                .alias
+                .as_deref()
+                .or_else(|| crate::sort_utils::extract_column_name(&pc.expr));
+            if let Some(name) = resname {
+                if let Ok(cs) = CString::new(name) {
                     (*te).resname = pg_sys::pstrdup(cs.as_ptr());
                 }
             }
             (*plan).targetlist = pg_sys::lappend((*plan).targetlist, te.cast());
         }
+        Ok(())
     }
 
     /// Set cost estimates on a scan plan node from gathered catalog statistics.
