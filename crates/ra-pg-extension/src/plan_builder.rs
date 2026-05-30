@@ -183,28 +183,57 @@ impl PlanBuilder {
         self.physical_choices = choices;
     }
 
-    /// Build a complete `PlannedStmt` from an optimized `RelExpr` tree.
-    ///
-    /// Returns `Err` if the plan tree cannot be constructed directly (e.g., an
-    /// unsupported variant is encountered). The caller should fall back to the
-    /// cost-manipulation strategy in that case.
-    ///
-    /// Whether the plan_builder can correctly translate this whole
-    /// `RelExpr` tree to a PostgreSQL plan. Conservative allowlist:
-    /// single-relation `Scan` under any combination of `Filter` and
-    /// `Project`. Any other operator (Join, Aggregate, Sort, Limit,
-    /// Distinct, set-ops, DML, ...) is not yet verified correct and
-    /// makes the whole query defer to the native planner.
-    fn is_translatable(expr: &RelExpr) -> bool {
+    /// Name of the first operator in `expr` that the plan_builder does
+    /// not yet correctly translate, or `None` if the whole tree is
+    /// supported. Makes every native-planner fallback name the exact
+    /// gap so logs map directly to a coverage backlog task (see
+    /// docs/planner-fallback-backlog.md).
+    fn first_unsupported_op(expr: &RelExpr) -> Option<&'static str> {
         match expr {
-            RelExpr::Scan { .. } => true,
+            RelExpr::Scan { .. } => None,
             RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
-                Self::is_translatable(input)
+                Self::first_unsupported_op(input)
             }
-            _ => false,
+            RelExpr::Join { .. } => Some("Join"),
+            RelExpr::Aggregate { .. } => Some("Aggregate"),
+            RelExpr::Sort { .. } | RelExpr::IncrementalSort { .. } => Some("Sort"),
+            RelExpr::Limit { .. } => Some("Limit"),
+            RelExpr::Distinct { .. } => Some("Distinct"),
+            RelExpr::Union { .. } => Some("Union"),
+            RelExpr::Intersect { .. } => Some("Intersect"),
+            RelExpr::Except { .. } => Some("Except"),
+            RelExpr::Window { .. } => Some("Window"),
+            RelExpr::Values { .. } => Some("Values"),
+            RelExpr::CTE { .. } => Some("CTE"),
+            RelExpr::RecursiveCTE { .. } => Some("RecursiveCTE"),
+            RelExpr::Unnest { .. } | RelExpr::MultiUnnest { .. } => Some("Unnest"),
+            RelExpr::TableFunction { .. } => Some("TableFunction"),
+            RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => Some("IndexScan"),
+            RelExpr::BitmapHeapScan { .. }
+            | RelExpr::BitmapIndexScan { .. }
+            | RelExpr::BitmapAnd { .. }
+            | RelExpr::BitmapOr { .. } => Some("BitmapScan"),
+            RelExpr::MvScan { .. } => Some("MvScan"),
+            RelExpr::ParallelScan { .. }
+            | RelExpr::ParallelHashJoin { .. }
+            | RelExpr::ParallelAggregate { .. }
+            | RelExpr::Gather { .. } => Some("Parallel"),
+            RelExpr::TopK { .. } | RelExpr::VectorFilter { .. } => Some("VectorSearch"),
+            RelExpr::RowPattern { .. } => Some("RowPattern"),
+            RelExpr::GraphTable { .. } => Some("GraphTable"),
+            RelExpr::Insert { .. } => Some("Insert"),
+            RelExpr::Update { .. } => Some("Update"),
+            RelExpr::Delete { .. } => Some("Delete"),
+            RelExpr::Merge { .. } => Some("Merge"),
         }
     }
 
+    /// Build a complete `PlannedStmt` from an optimized `RelExpr` tree.
+    ///
+    /// Returns `Err` if the plan shape is not yet supported by the
+    /// plan_builder; the planner hook then falls back to the native
+    /// planner. The error names the first unsupported operator.
+    ///
     /// # Safety
     ///
     /// Must be called from within a live PostgreSQL backend process.
@@ -224,10 +253,11 @@ impl PlanBuilder {
         // mistranslate aggregates, or corrupt executor memory) and must
         // stay on the native planner until each is implemented and
         // gated in via the replan-equivalence property test.
-        if !Self::is_translatable(expr) {
-            return Err(PlanBuilderError::UnsupportedVariant(
-                "plan shape not yet supported by Ra; deferring to native planner".to_owned(),
-            ));
+        if let Some(op) = Self::first_unsupported_op(expr) {
+            return Err(PlanBuilderError::UnsupportedVariant(format!(
+                "{op} not yet supported by Ra plan_builder; deferring to native \
+                 planner (see docs/planner-fallback-backlog.md)"
+            )));
         }
 
         let plan_tree = self.build_plan(expr)?;
