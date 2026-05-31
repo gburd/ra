@@ -461,8 +461,15 @@ fn wrap_scalar_aggregate(rel: RelExpr) -> RelExpr {
         return rel;
     };
 
-    // Don't double-wrap if already aggregated.
-    if matches!(input.as_ref(), RelExpr::Aggregate { .. }) {
+    // Don't double-wrap if already aggregated — including a GROUP BY
+    // aggregate under a HAVING `Filter` (the projection sits above the
+    // HAVING, which sits above the Aggregate).
+    let already_aggregated = match input.as_ref() {
+        RelExpr::Aggregate { .. } => true,
+        RelExpr::Filter { input: fi, .. } => matches!(fi.as_ref(), RelExpr::Aggregate { .. }),
+        _ => false,
+    };
+    if already_aggregated {
         return rel;
     }
 

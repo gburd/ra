@@ -434,6 +434,15 @@ unsafe fn build_bool_expr(
 ) -> *mut pg_sys::Expr {
     let left_pg = translate(left, ctx);
     let right_pg = translate(right, ctx);
+    bool_expr_from_nodes(bool_type, left_pg, right_pg)
+}
+
+/// Build a 2-arg `BoolExpr` from already-translated operand nodes.
+pub(crate) unsafe fn bool_expr_from_nodes(
+    bool_type: pg_sys::BoolExprType::Type,
+    left_pg: *mut pg_sys::Expr,
+    right_pg: *mut pg_sys::Expr,
+) -> *mut pg_sys::Expr {
     if left_pg.is_null() || right_pg.is_null() {
         return std::ptr::null_mut();
     }

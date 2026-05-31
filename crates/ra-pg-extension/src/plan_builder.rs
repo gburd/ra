@@ -248,6 +248,12 @@ impl PlanBuilder {
                 RelExpr::Filter { input: fi, .. } => match &**fi {
                     RelExpr::Join { left, right, .. } => Self::first_unsupported_op(left)
                         .or_else(|| Self::first_unsupported_op(right)),
+                    // Project over Filter over Aggregate is HAVING — built as
+                    // one Agg node with the HAVING as its qual; recurse into
+                    // the aggregate's input rather than the bare Aggregate.
+                    RelExpr::Aggregate { input: agg_in, .. } => {
+                        Self::first_unsupported_op(agg_in)
+                    }
                     _ => Self::first_unsupported_op(input),
                 },
                 _ => Self::first_unsupported_op(input),
@@ -529,7 +535,25 @@ impl PlanBuilder {
                     ..
                 } = &**input
                 {
-                    return self.build_grouped_aggregate(columns, group_by, agg_input);
+                    return self.build_grouped_aggregate(columns, group_by, agg_input, None);
+                }
+                // Project over Filter over Aggregate is HAVING: the Filter
+                // predicate becomes the Agg node's qual (evaluated after
+                // aggregation), referencing the same Aggrefs/group Vars.
+                if let RelExpr::Filter { predicate, input: fi } = &**input {
+                    if let RelExpr::Aggregate {
+                        group_by,
+                        input: agg_input,
+                        ..
+                    } = &**fi
+                    {
+                        return self.build_grouped_aggregate(
+                            columns,
+                            group_by,
+                            agg_input,
+                            Some(predicate),
+                        );
+                    }
                 }
                 // Project over Join (optionally with a WHERE Filter between)
                 // is built as one NestLoop with remapped OUTER/INNER refs.
@@ -2634,6 +2658,26 @@ impl PlanBuilder {
                 let e = expr_translator::translate(expr, &self.expr_ctx);
                 (!e.is_null()).then_some(e)
             }
+            Expr::BinOp { op: ra_core::expr::BinOp::And, left, right } => {
+                let l = self.build_agg_out_expr(left, in_tlist, colmap, aggno)?;
+                let r = self.build_agg_out_expr(right, in_tlist, colmap, aggno)?;
+                let e = expr_translator::bool_expr_from_nodes(
+                    pg_sys::BoolExprType::AND_EXPR,
+                    l,
+                    r,
+                );
+                (!e.is_null()).then_some(e)
+            }
+            Expr::BinOp { op: ra_core::expr::BinOp::Or, left, right } => {
+                let l = self.build_agg_out_expr(left, in_tlist, colmap, aggno)?;
+                let r = self.build_agg_out_expr(right, in_tlist, colmap, aggno)?;
+                let e = expr_translator::bool_expr_from_nodes(
+                    pg_sys::BoolExprType::OR_EXPR,
+                    l,
+                    r,
+                );
+                (!e.is_null()).then_some(e)
+            }
             Expr::BinOp { op, left, right } => {
                 let op_str = expr_translator::binop_op_str(op)?;
                 let l = self.build_agg_out_expr(left, in_tlist, colmap, aggno)?;
@@ -2657,6 +2701,7 @@ impl PlanBuilder {
         out_columns: &[ProjectionColumn],
         group_by: &[Expr],
         agg_input: &RelExpr,
+        having: Option<&Expr>,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
         let child = self.build_plan(agg_input)?;
@@ -2677,6 +2722,9 @@ impl PlanBuilder {
         }
         for pc in out_columns {
             self.register_agg_args(&pc.expr, &mut in_tlist, &mut colmap)?;
+        }
+        if let Some(h) = having {
+            self.register_agg_args(h, &mut in_tlist, &mut colmap)?;
         }
         (*child).targetlist = in_tlist;
 
@@ -2708,7 +2756,15 @@ impl PlanBuilder {
         }
         (*node).plan.targetlist = out_tlist;
 
-        // Grouping metadata.
+        // HAVING → the Agg node's qual (evaluated after aggregation),
+        // continuing aggno so its Aggrefs are distinct from output ones.
+        if let Some(h) = having {
+            let q = self
+                .build_agg_out_expr(h, &mut in_tlist, &mut colmap, &mut aggno)
+                .ok_or_else(|| unsupported("HAVING expression"))?;
+            (*node).plan.qual = pg_sys::lappend(std::ptr::null_mut(), q.cast());
+        }
+
         let ngroups: f64 = if group_by.is_empty() {
             (*node).aggstrategy = pg_sys::AggStrategy::AGG_PLAIN;
             1.0
