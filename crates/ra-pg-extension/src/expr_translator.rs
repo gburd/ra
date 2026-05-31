@@ -103,6 +103,15 @@ pub unsafe fn translate(expr: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
             ("__in_list", args) if args.len() >= 2 => build_in_list(args, ctx),
             // COALESCE(a, b, ...) → CoalesceExpr (not a catalog function).
             ("coalesce" | "COALESCE", args) if !args.is_empty() => build_coalesce(args, ctx),
+            // NULLIF(a, b) → NullIfExpr (an OpExpr tagged T_NullIfExpr).
+            ("nullif" | "NULLIF", [a, b]) => build_nullif(a, b, ctx),
+            // GREATEST / LEAST → MinMaxExpr.
+            ("greatest" | "GREATEST", args) if !args.is_empty() => {
+                build_minmax(pg_sys::MinMaxOp::IS_GREATEST, args, ctx)
+            }
+            ("least" | "LEAST", args) if !args.is_empty() => {
+                build_minmax(pg_sys::MinMaxOp::IS_LEAST, args, ctx)
+            }
             _ => build_func_expr(name, args, ctx),
         },
         RaExpr::Case {
@@ -562,6 +571,84 @@ unsafe fn build_in_list(args: &[RaExpr], ctx: &ExprContext) -> *mut pg_sys::Expr
     }
     (*node).inputcollid = coll;
     (*node).args = pg_sys::lappend(pg_sys::lappend(std::ptr::null_mut(), test.cast()), arr.cast());
+    (*node).location = -1;
+    node.cast()
+}
+
+/// Build `NULLIF(a, b)` as a `NullIfExpr` (an `OpExpr` tagged T_NullIfExpr):
+/// returns NULL when `a = b`, else `a`. Result type is `a`'s type.
+unsafe fn build_nullif(a: &RaExpr, b: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
+    let l = translate(a, ctx);
+    let r = translate(b, ctx);
+    if l.is_null() || r.is_null() {
+        return std::ptr::null_mut();
+    }
+    let lt = pg_sys::exprType(l.cast());
+    let eq = match CString::new("=") {
+        Ok(cs) => cs,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let opname = pg_sys::lappend(
+        std::ptr::null_mut(),
+        pg_sys::makeString(eq.as_ptr().cast_mut()).cast(),
+    );
+    let opno = pg_sys::OpernameGetOprid(opname, lt, pg_sys::exprType(r.cast()));
+    if opno == pg_sys::InvalidOid {
+        return std::ptr::null_mut();
+    }
+    let node = alloc::<pg_sys::NullIfExpr>();
+    (*node).xpr.type_ = pg_sys::NodeTag::T_NullIfExpr;
+    (*node).opno = opno;
+    (*node).opfuncid = pg_sys::get_opcode(opno);
+    (*node).opresulttype = lt;
+    (*node).opretset = false;
+    let coll = pg_sys::exprCollation(l.cast());
+    (*node).inputcollid = coll;
+    (*node).opcollid = if pg_sys::get_typcollation(lt) == pg_sys::InvalidOid {
+        pg_sys::InvalidOid
+    } else {
+        coll
+    };
+    (*node).args = pg_sys::lappend(pg_sys::lappend(std::ptr::null_mut(), l.cast()), r.cast());
+    (*node).location = -1;
+    node.cast()
+}
+
+/// Build `GREATEST` / `LEAST` as a `MinMaxExpr`. Only when all arguments share
+/// a result type (avoiding PG's parse-time type unification); else defers.
+unsafe fn build_minmax(
+    op: pg_sys::MinMaxOp::Type,
+    args: &[RaExpr],
+    ctx: &ExprContext,
+) -> *mut pg_sys::Expr {
+    let mut pg_args: *mut pg_sys::List = std::ptr::null_mut();
+    let mut ty = pg_sys::InvalidOid;
+    let mut coll = pg_sys::InvalidOid;
+    for a in args {
+        let p = translate(a, ctx);
+        if p.is_null() {
+            return std::ptr::null_mut();
+        }
+        let t = pg_sys::exprType(p.cast());
+        if ty == pg_sys::InvalidOid {
+            ty = t;
+            coll = pg_sys::exprCollation(p.cast());
+        } else if t != ty {
+            return std::ptr::null_mut();
+        }
+        pg_args = pg_sys::lappend(pg_args, p.cast());
+    }
+    let node = alloc::<pg_sys::MinMaxExpr>();
+    (*node).xpr.type_ = pg_sys::NodeTag::T_MinMaxExpr;
+    (*node).minmaxtype = ty;
+    (*node).minmaxcollid = if pg_sys::get_typcollation(ty) == pg_sys::InvalidOid {
+        pg_sys::InvalidOid
+    } else {
+        coll
+    };
+    (*node).inputcollid = coll;
+    (*node).op = op;
+    (*node).args = pg_args;
     (*node).location = -1;
     node.cast()
 }
