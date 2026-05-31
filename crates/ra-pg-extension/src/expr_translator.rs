@@ -99,6 +99,8 @@ pub unsafe fn translate(expr: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
             // LIKE / ILIKE parser markers → the `~~` / `~~*` text operators.
             ("__like", [l, r]) => build_named_op("~~", l, r, ctx),
             ("__ilike", [l, r]) => build_named_op("~~*", l, r, ctx),
+            // IN (list): __in_list(test, v1, v2, ...) → test = ANY(ARRAY[...]).
+            ("__in_list", args) if args.len() >= 2 => build_in_list(args, ctx),
             // COALESCE(a, b, ...) → CoalesceExpr (not a catalog function).
             ("coalesce" | "COALESCE", args) if !args.is_empty() => build_coalesce(args, ctx),
             _ => build_func_expr(name, args, ctx),
@@ -494,6 +496,48 @@ unsafe fn build_unary_neg(operand: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::E
 /// executor result without PG's parse-analysis type unification, only build
 /// when every argument has the same result type (the common case); otherwise
 /// return null so the planner hook defers to native PG.
+/// Build `test = ANY(ARRAY[values...])` for `IN (list)` from the marker
+/// `__in_list(test, v1, v2, ...)`.
+unsafe fn build_in_list(args: &[RaExpr], ctx: &ExprContext) -> *mut pg_sys::Expr {
+    let test = translate(&args[0], ctx);
+    if test.is_null() {
+        return std::ptr::null_mut();
+    }
+    let arr = build_array_expr(&args[1..], ctx);
+    if arr.is_null() {
+        return std::ptr::null_mut();
+    }
+    let test_type = pg_sys::exprType(test.cast());
+    let elem_type = (*arr.cast::<pg_sys::ArrayExpr>()).element_typeid;
+    let eq = match CString::new("=") {
+        Ok(cs) => cs,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let opname = pg_sys::lappend(
+        std::ptr::null_mut(),
+        pg_sys::makeString(eq.as_ptr().cast_mut()).cast(),
+    );
+    let opno = pg_sys::OpernameGetOprid(opname, test_type, elem_type);
+    if opno == pg_sys::InvalidOid {
+        return std::ptr::null_mut();
+    }
+    let node = alloc::<pg_sys::ScalarArrayOpExpr>();
+    (*node).xpr.type_ = pg_sys::NodeTag::T_ScalarArrayOpExpr;
+    (*node).opno = opno;
+    (*node).opfuncid = pg_sys::get_opcode(opno);
+    (*node).hashfuncid = pg_sys::InvalidOid;
+    (*node).negfuncid = pg_sys::InvalidOid;
+    (*node).useOr = true;
+    let mut coll = pg_sys::exprCollation(test.cast());
+    if coll == pg_sys::InvalidOid {
+        coll = pg_sys::exprCollation(arr.cast());
+    }
+    (*node).inputcollid = coll;
+    (*node).args = pg_sys::lappend(pg_sys::lappend(std::ptr::null_mut(), test.cast()), arr.cast());
+    (*node).location = -1;
+    node.cast()
+}
+
 unsafe fn build_coalesce(args: &[RaExpr], ctx: &ExprContext) -> *mut pg_sys::Expr {
     let mut pg_args: *mut pg_sys::List = std::ptr::null_mut();
     let mut common_type = pg_sys::InvalidOid;
