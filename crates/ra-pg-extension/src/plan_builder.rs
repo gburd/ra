@@ -2521,6 +2521,12 @@ impl PlanBuilder {
         if let Some((_, ty, _)) = arg {
             argtypes[0] = ty;
         }
+        // `count(col)` resolves to the polymorphic `count("any")` aggregate;
+        // LookupFuncName needs the declared ANYOID, not the column's type
+        // (type-specific aggregates like max/sum match their exact type).
+        if lower == "count" && arg.is_some() {
+            argtypes[0] = pg_sys::ANYOID;
+        }
         let fname = CString::new(lower.as_str()).map_err(|_| unsupported("agg name"))?;
         let name_node = pg_sys::makeString(fname.as_ptr().cast_mut());
         let fname_list = pg_sys::lappend(std::ptr::null_mut(), name_node.cast());
@@ -3050,15 +3056,23 @@ impl PlanBuilder {
             (*node).plan.targetlist = (*child).targetlist;
         }
 
-        // Build Const nodes for limitCount and limitOffset
-        (*node).limitCount = make_int8_const(count as i64).cast();
+        // Build Const nodes for limitCount and limitOffset. count == u64::MAX
+        // is the "no count limit" sentinel (OFFSET without LIMIT) → leave
+        // limitCount null so the executor returns all rows past the offset.
+        if count != u64::MAX {
+            (*node).limitCount = make_int8_const(count as i64).cast();
+        }
         if offset > 0 {
             (*node).limitOffset = make_int8_const(offset as i64).cast();
         }
 
         if !child.is_null() {
             (*node).plan.total_cost = (*child).total_cost;
-            (*node).plan.plan_rows = count as f64;
+            (*node).plan.plan_rows = if count == u64::MAX {
+                (*child).plan_rows
+            } else {
+                count as f64
+            };
         }
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
