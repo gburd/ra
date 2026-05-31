@@ -111,14 +111,18 @@ resolved:
   `Param`s (parParam/args), and `PlannedStmt.subplans`/`paramExecTypes`
   are populated. Correlated and uncorrelated forms verified
   row-equivalent to native PG.
-- **`WITH RECURSIVE`** — **DONE for single-relation recursive CTEs.**
+- **`WITH RECURSIVE`** — **DONE, including base-relation joins.**
   Built as `CteScan` over a `RecursiveUnion{anchor Result, recursive
   WorkTableScan}`, reusing PG's existing `RTE_CTE` and threading the
-  cte/worktable `PARAM_EXEC` params. Counters, traversals, aggregates,
-  and ORDER BY/WHERE over the CTE verified row-equivalent to native PG.
-  Recursive CTEs whose recursive term or body **joins a base relation**
-  still defer cleanly to native PG (the join builder cannot scan the
-  CTE); this is a guarded, panic-free fallback.
+  cte/worktable `PARAM_EXEC` params. The join builder resolves a join
+  side that references the in-scope CTE to its WorkTableScan/CteScan, and
+  `flatten_rtes` pulls the joined base relations out of the recursive
+  term's set-operation arms. Verified row-equivalent to native PG:
+  counters, multi-column depth tracking, graph traversal (CTE joined with
+  an edges table on either side), bodies joining the CTE with a base
+  relation, and aggregate / GROUP BY / ORDER BY / WHERE over the CTE.
+  `UNION` (distinct) recursive CTEs still defer cleanly (only `UNION ALL`
+  is built natively).
 - **Index-stats double-free** — **not a demonstrable bug.** Two code
   inspections found no double-free: `list_free(RelationGetIndexList(rel))`
   matches PG core (the returned list is caller-owned) and
@@ -129,8 +133,21 @@ resolved:
   No speculative fix applied per the no-phantom-features standard.
 
 ### Remaining narrow fallbacks
-- `WITH RECURSIVE` with a base-relation join in the recursive term/body.
-- Recursive CTE self-references nested under a join in non-recursive CTEs
-  or derived tables.
+- `UNION` (distinct) recursive CTEs (only `UNION ALL` is built natively).
+- Recursive terms/bodies with a 3+ way join (the projected-join builder
+  handles two relations; deeper joins defer cleanly).
 - No-FROM `SELECT <expr>` (standalone) defers to native PG.
+
+### Rules-system review (recent SQL constructs)
+Scalar sub-queries and recursive CTEs need **no new `.rra` rewrite
+rules** — they are lowering concerns (SubPlan / RecursiveUnion
+construction in `plan_builder`, correctly in Rust). The e-graph treats
+`RecursiveCTE` as opaque (like `GraphTable`); scalar sub-queries lower to
+`SubPlan`. One piece of rule-like logic was mistakenly in Rust lowering:
+the "projection of aggregate functions over a non-Aggregate input → no-
+GROUP-BY Aggregate" normalization in `plan_builder` (a workaround for the
+parser not recursing into sub-queries). It has been relocated to the
+parser's `apply_all` (`normalize_subqueries`), so every consumer —
+including the e-graph optimizer — sees normalized sub-queries, and the
+lowering workaround is removed.
 
