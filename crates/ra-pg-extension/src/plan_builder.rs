@@ -124,6 +124,10 @@ pub struct PlanBuilder {
     /// `HASH_JOIN(b)` / `NO_GATHER(t)` advice actually steers the
     /// produced PG `Plan` tree.
     physical_choices: ra_engine::plan_advice_physical::PhysicalChoices,
+    /// Inner plans for scalar sub-queries, in `PlannedStmt.subplans` order.
+    subplans: Vec<*mut pg_sys::Plan>,
+    /// PARAM_EXEC parameter types (becomes `PlannedStmt.paramExecTypes`).
+    param_types: Vec<pg_sys::Oid>,
 }
 
 impl PlanBuilder {
@@ -154,6 +158,7 @@ impl PlanBuilder {
         let expr_ctx = ExprContext {
             rtindex_map,
             rtoid_map,
+            subplans: std::cell::RefCell::new(HashMap::new()),
         };
         let stats = gathered_stats
             .iter()
@@ -166,6 +171,8 @@ impl PlanBuilder {
             plan_rows: 1.0,
             stats,
             physical_choices: ra_engine::plan_advice_physical::PhysicalChoices::new(),
+            subplans: Vec::new(),
+            param_types: Vec::new(),
         }
     }
 
@@ -308,6 +315,10 @@ impl PlanBuilder {
             )));
         }
 
+        // Pre-build SubPlan nodes for scalar sub-queries so expression
+        // translation can resolve them; Errs here defer to native PG.
+        self.prepare_subplans(expr)?;
+
         let plan_tree = self.build_plan(expr)?;
 
         let stmt = self.alloc_node::<pg_sys::PlannedStmt>();
@@ -386,6 +397,22 @@ impl PlanBuilder {
             (*stmt).resultRelations = std::ptr::null_mut();
         }
 
+        // Scalar sub-query plans and their PARAM_EXEC parameter types.
+        if !self.subplans.is_empty() {
+            let mut sp_list: *mut pg_sys::List = std::ptr::null_mut();
+            for p in &self.subplans {
+                sp_list = pg_sys::lappend(sp_list, (*p).cast());
+            }
+            (*stmt).subplans = sp_list;
+        }
+        if !self.param_types.is_empty() {
+            let mut pt_list: *mut pg_sys::List = std::ptr::null_mut();
+            for ty in &self.param_types {
+                pt_list = pg_sys::lappend_oid(pt_list, *ty);
+            }
+            (*stmt).paramExecTypes = pt_list;
+        }
+
         // Propagate top-level plan cost estimate
         if !plan_tree.is_null() {
             (*stmt).planTree = plan_tree;
@@ -441,6 +468,17 @@ impl PlanBuilder {
                 } = &**input
                 {
                     return self.build_grouped_aggregate(columns, group_by, agg_input);
+                }
+                // Scalar aggregate not wrapped in an Aggregate node (e.g. a
+                // sub-query's `SELECT max(x) FROM t` — the parser's scalar-
+                // aggregate transform does not recurse into sub-queries): a
+                // projection of aggregate functions over a non-Aggregate input
+                // is a plain (no-GROUP-BY) aggregate.
+                if columns
+                    .iter()
+                    .any(|c| matches!(&c.expr, Expr::Function { name, .. } if Self::is_supported_agg(name)))
+                {
+                    return self.build_grouped_aggregate(columns, &[], input);
                 }
                 // Project over Join (optionally with a WHERE Filter between)
                 // is built as one NestLoop with remapped OUTER/INNER refs.
@@ -1364,6 +1402,256 @@ impl PlanBuilder {
                 Self::base_scan_table(input)
             }
             _ => None,
+        }
+    }
+
+    /// Pre-build a `SubPlan` for every scalar sub-query reachable in `expr`'s
+    /// projection/filter expressions, registering each in `expr_ctx.subplans`
+    /// so expression translation can resolve it.
+    unsafe fn prepare_subplans(&mut self, expr: &RelExpr) -> Result<(), PlanBuilderError> {
+        match expr {
+            RelExpr::Project { columns, input } => {
+                for pc in columns {
+                    self.prepare_expr_subplans(&pc.expr)?;
+                }
+                self.prepare_subplans(input)?;
+            }
+            RelExpr::Filter { predicate, input } => {
+                self.prepare_expr_subplans(predicate)?;
+                self.prepare_subplans(input)?;
+            }
+            _ => {
+                for child in expr.children() {
+                    self.prepare_subplans(child)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Build a `SubPlan` for each scalar `Expr::SubQuery` in `e`.
+    unsafe fn prepare_expr_subplans(&mut self, e: &Expr) -> Result<(), PlanBuilderError> {
+        match e {
+            Expr::SubQuery { subquery_type, query, test_expr } => {
+                if matches!(subquery_type, ra_core::expr::SubQueryType::Scalar) {
+                    let key = std::ptr::from_ref::<RelExpr>(query.as_ref()) as usize;
+                    if !self.expr_ctx.subplans.borrow().contains_key(&key) {
+                        let sp = self.build_scalar_subplan(query)?;
+                        self.expr_ctx.subplans.borrow_mut().insert(key, sp);
+                    }
+                }
+                if let Some(t) = test_expr {
+                    self.prepare_expr_subplans(t)?;
+                }
+            }
+            Expr::BinOp { left, right, .. } => {
+                self.prepare_expr_subplans(left)?;
+                self.prepare_expr_subplans(right)?;
+            }
+            Expr::UnaryOp { operand, .. } => self.prepare_expr_subplans(operand)?,
+            Expr::Function { args, .. } | Expr::Array(args) => {
+                for a in args {
+                    self.prepare_expr_subplans(a)?;
+                }
+            }
+            Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => {
+                self.prepare_expr_subplans(expr)?;
+            }
+            Expr::Case { operand, when_clauses, else_result } => {
+                if let Some(o) = operand {
+                    self.prepare_expr_subplans(o)?;
+                }
+                for (w, t) in when_clauses {
+                    self.prepare_expr_subplans(w)?;
+                    self.prepare_expr_subplans(t)?;
+                }
+                if let Some(els) = else_result {
+                    self.prepare_expr_subplans(els)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Build an `EXPR_SUBLINK` `SubPlan` from a scalar sub-query: build the
+    /// inner plan, replace its references to outer (correlation) relations
+    /// with `PARAM_EXEC` parameters, and register the inner plan.
+    unsafe fn build_scalar_subplan(
+        &mut self,
+        query: &RelExpr,
+    ) -> Result<*mut pg_sys::Expr, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        // Nested scalar sub-queries first.
+        self.prepare_subplans(query)?;
+        // Inner relations (this sub-query's own scans) → their rtindexes.
+        let mut inner_rtis = std::collections::HashSet::new();
+        let mut tables = Vec::new();
+        Self::collect_scan_tables(query, &mut tables);
+        for t in tables {
+            if let Ok(rti) = self.rtindex_for(&t) {
+                inner_rtis.insert(rti as i32);
+            }
+        }
+        let plan = self.build_plan(query)?;
+        if plan.is_null() || (*plan).targetlist.is_null() {
+            return Err(unsupported("subquery plan"));
+        }
+        // Replace correlation Vars with parameters.
+        let mut params: Vec<(i32, *mut pg_sys::Var)> = Vec::new();
+        self.paramify_plan(plan, &inner_rtis, &mut params);
+
+        // First output column type (the scalar result type).
+        let first_te = (*(*plan).targetlist).elements;
+        let te0 = (*first_te.add(0)).ptr_value as *mut pg_sys::TargetEntry;
+        if te0.is_null() || (*te0).expr.is_null() {
+            return Err(unsupported("subquery output"));
+        }
+        let first_type = pg_sys::exprType((*te0).expr.cast());
+        let first_typmod = pg_sys::exprTypmod((*te0).expr.cast());
+        let first_coll = pg_sys::exprCollation((*te0).expr.cast());
+
+        self.subplans.push(plan);
+        let plan_id = self.subplans.len() as i32;
+
+        let node = self.alloc_node::<pg_sys::SubPlan>();
+        (*node).xpr.type_ = pg_sys::NodeTag::T_SubPlan;
+        (*node).subLinkType = pg_sys::SubLinkType::EXPR_SUBLINK;
+        (*node).plan_id = plan_id;
+        (*node).firstColType = first_type;
+        (*node).firstColTypmod = first_typmod;
+        (*node).firstColCollation = first_coll;
+        (*node).useHashTable = false;
+        (*node).parallel_safe = false;
+        let mut par_param: *mut pg_sys::List = std::ptr::null_mut();
+        let mut args: *mut pg_sys::List = std::ptr::null_mut();
+        for (pid, var) in params {
+            par_param = pg_sys::lappend_int(par_param, pid);
+            args = pg_sys::lappend(args, var.cast());
+        }
+        (*node).parParam = par_param;
+        (*node).args = args;
+        Ok(node.cast())
+    }
+
+    fn collect_scan_tables(expr: &RelExpr, out: &mut Vec<String>) {
+        if let RelExpr::Scan { table, .. } = expr {
+            out.push(table.clone());
+        }
+        for c in expr.children() {
+            Self::collect_scan_tables(c, out);
+        }
+    }
+
+    /// Allocate a `PARAM_EXEC` parameter of `ty` and return its id.
+    fn alloc_param(&mut self, ty: pg_sys::Oid) -> i32 {
+        let id = self.param_types.len() as i32;
+        self.param_types.push(ty);
+        id
+    }
+
+    /// Walk a plan tree replacing Vars that reference relations outside
+    /// `inner_rtis` (correlation references) with `PARAM_EXEC` `Param` nodes;
+    /// records `(param_id, original_var)` for the SubPlan's parParam/args.
+    unsafe fn paramify_plan(
+        &mut self,
+        plan: *mut pg_sys::Plan,
+        inner: &std::collections::HashSet<i32>,
+        out: &mut Vec<(i32, *mut pg_sys::Var)>,
+    ) {
+        if plan.is_null() {
+            return;
+        }
+        let tl = (*plan).targetlist;
+        if !tl.is_null() {
+            let e = (*tl).elements;
+            for i in 0..(*tl).length {
+                let te = (*e.add(i as usize)).ptr_value as *mut pg_sys::TargetEntry;
+                if !te.is_null() {
+                    (*te).expr = self.paramify_node((*te).expr.cast(), inner, out).cast();
+                }
+            }
+        }
+        self.paramify_list((*plan).qual, inner, out);
+        self.paramify_plan((*plan).lefttree, inner, out);
+        self.paramify_plan((*plan).righttree, inner, out);
+    }
+
+    unsafe fn paramify_list(
+        &mut self,
+        list: *mut pg_sys::List,
+        inner: &std::collections::HashSet<i32>,
+        out: &mut Vec<(i32, *mut pg_sys::Var)>,
+    ) {
+        if list.is_null() {
+            return;
+        }
+        let e = (*list).elements;
+        for i in 0..(*list).length {
+            let slot = e.add(i as usize);
+            (*slot).ptr_value = self
+                .paramify_node((*slot).ptr_value.cast(), inner, out)
+                .cast();
+        }
+    }
+
+    unsafe fn paramify_node(
+        &mut self,
+        node: *mut pg_sys::Node,
+        inner: &std::collections::HashSet<i32>,
+        out: &mut Vec<(i32, *mut pg_sys::Var)>,
+    ) -> *mut pg_sys::Node {
+        if node.is_null() {
+            return node;
+        }
+        match (*node).type_ {
+            pg_sys::NodeTag::T_Var => {
+                let v = node.cast::<pg_sys::Var>();
+                if (*v).varno > 0 && !inner.contains(&(*v).varno) {
+                    let pid = self.alloc_param((*v).vartype);
+                    out.push((pid, v));
+                    let p = self.alloc_node::<pg_sys::Param>();
+                    (*p).xpr.type_ = pg_sys::NodeTag::T_Param;
+                    (*p).paramkind = pg_sys::ParamKind::PARAM_EXEC;
+                    (*p).paramid = pid;
+                    (*p).paramtype = (*v).vartype;
+                    (*p).paramtypmod = (*v).vartypmod;
+                    (*p).paramcollid = (*v).varcollid;
+                    return p.cast();
+                }
+                node
+            }
+            pg_sys::NodeTag::T_OpExpr | pg_sys::NodeTag::T_DistinctExpr => {
+                self.paramify_list((*node.cast::<pg_sys::OpExpr>()).args, inner, out);
+                node
+            }
+            pg_sys::NodeTag::T_ScalarArrayOpExpr => {
+                self.paramify_list((*node.cast::<pg_sys::ScalarArrayOpExpr>()).args, inner, out);
+                node
+            }
+            pg_sys::NodeTag::T_BoolExpr => {
+                self.paramify_list((*node.cast::<pg_sys::BoolExpr>()).args, inner, out);
+                node
+            }
+            pg_sys::NodeTag::T_FuncExpr => {
+                self.paramify_list((*node.cast::<pg_sys::FuncExpr>()).args, inner, out);
+                node
+            }
+            pg_sys::NodeTag::T_Aggref => {
+                self.paramify_list((*node.cast::<pg_sys::Aggref>()).args, inner, out);
+                node
+            }
+            pg_sys::NodeTag::T_NullTest => {
+                let n = node.cast::<pg_sys::NullTest>();
+                (*n).arg = self.paramify_node((*n).arg.cast(), inner, out).cast();
+                node
+            }
+            pg_sys::NodeTag::T_RelabelType => {
+                let n = node.cast::<pg_sys::RelabelType>();
+                (*n).arg = self.paramify_node((*n).arg.cast(), inner, out).cast();
+                node
+            }
+            _ => node,
         }
     }
 
