@@ -242,7 +242,9 @@ impl PlanBuilder {
             }
             RelExpr::Intersect { .. } => Some("Intersect"),
             RelExpr::Except { .. } => Some("Except"),
-            RelExpr::Values { .. } => Some("Values"),
+            // VALUES: built as an Append of one-row Result nodes;
+            // build_values_result Errs (→ fallback) for non-constant rows.
+            RelExpr::Values { .. } => None,
             RelExpr::CTE { .. } => Some("CTE"),
             RelExpr::RecursiveCTE { .. } => Some("RecursiveCTE"),
             RelExpr::Unnest { .. } | RelExpr::MultiUnnest { .. } => Some("Unnest"),
@@ -535,7 +537,7 @@ impl PlanBuilder {
             RelExpr::Unnest { .. } | RelExpr::TableFunction { .. } => {
                 self.build_function_scan(expr)
             }
-            RelExpr::Values { .. } => self.build_values_result(),
+            RelExpr::Values { rows } => self.build_values_result(rows),
             // Advanced variants not yet directly supported — fall back.
             RelExpr::MultiUnnest { .. } => Err(PlanBuilderError::UnsupportedVariant(
                 "MultiUnnest".to_string(),
@@ -3097,16 +3099,38 @@ impl PlanBuilder {
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
-    unsafe fn build_values_result(&mut self) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+    /// Build a plan for a single-row `VALUES` as a one-row `Result` node
+    /// (evaluates its constant targetlist once, no input). Multi-row VALUES
+    /// needs a ValuesScan (RTE_VALUES) and defers to the native planner — an
+    /// Append of one-row Results segfaults the executor.
+    unsafe fn build_values_result(
+        &mut self,
+        rows: &[Vec<Expr>],
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        let [row] = rows else {
+            return Err(unsupported("VALUES requires exactly one row"));
+        };
         let node = self.alloc_node::<pg_sys::Result>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer(
-                "Result allocation".to_string(),
-            ));
+            return Err(PlanBuilderError::NullPointer("Result".to_owned()));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Result;
         (*node).plan.plan_rows = 1.0;
         (*node).plan.total_cost = 0.01;
+        let mut tlist: *mut pg_sys::List = std::ptr::null_mut();
+        for (i, e) in row.iter().enumerate() {
+            let pg_expr = expr_translator::translate(e, &self.expr_ctx);
+            if pg_expr.is_null() {
+                return Err(unsupported("VALUES expression"));
+            }
+            let rn = CString::new(format!("column{}", i + 1))
+                .map(|c| pg_sys::pstrdup(c.as_ptr()))
+                .unwrap_or(std::ptr::null_mut());
+            let te = pg_sys::makeTargetEntry(pg_expr, (i + 1) as i16, rn, false);
+            tlist = pg_sys::lappend(tlist, te.cast());
+        }
+        (*node).plan.targetlist = tlist;
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
