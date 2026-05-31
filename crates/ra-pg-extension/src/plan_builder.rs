@@ -334,7 +334,7 @@ impl PlanBuilder {
             // Flatten any non-recursive CTE relations into a fresh rtable copy
             // (never mutate PG's parse tree — fallback would then see it). The
             // appended order matches build_table_map's index assignment.
-            let cte_rtes = cte_flatten_rtes(self.original_query);
+            let cte_rtes = flatten_rtes(self.original_query);
             if cte_rtes.is_empty() {
                 (*stmt).rtable = (*self.original_query).rtable;
                 #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
@@ -349,14 +349,15 @@ impl PlanBuilder {
                 } else {
                     pg_sys::list_copy((*self.original_query).rteperminfos)
                 };
-                for (rte, pinfo) in cte_rtes {
-                    let rte_copy = pg_sys::copyObjectImpl(rte.cast()) as *mut pg_sys::RangeTblEntry;
+                for fr in cte_rtes {
+                    let rte_copy =
+                        pg_sys::copyObjectImpl(fr.rte.cast()) as *mut pg_sys::RangeTblEntry;
                     #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
                     {
-                        if pinfo.is_null() {
+                        if fr.perminfo.is_null() {
                             (*rte_copy).perminfoindex = 0;
                         } else {
-                            let pcopy = pg_sys::copyObjectImpl(pinfo.cast());
+                            let pcopy = pg_sys::copyObjectImpl(fr.perminfo.cast());
                             perminfos = pg_sys::lappend(perminfos, pcopy);
                             (*rte_copy).perminfoindex = pg_sys::list_length(perminfos) as u32;
                         }
@@ -4129,8 +4130,8 @@ pub unsafe fn build_table_map(
     // PlannedStmt rtable in the same order). Keeps the rtindex_map and the
     // executed rtable consistent without mutating PG's parse tree.
     let mut next = length + 1;
-    for (rte, _pinfo) in cte_flatten_rtes(query) {
-        let relid = (*rte).relid;
+    for fr in flatten_rtes(query) {
+        let relid = (*fr.rte).relid;
         let relname = pg_sys::get_rel_name(relid);
         if relname.is_null() {
             continue;
@@ -4139,6 +4140,10 @@ pub unsafe fn build_table_map(
             .to_string_lossy()
             .to_lowercase();
         map.entry(name).or_insert((next as pg_sys::Index, relid));
+        // Derived-table alias resolves to the same (passthrough) relation.
+        if let Some(a) = fr.alias {
+            map.entry(a).or_insert((next as pg_sys::Index, relid));
+        }
         next += 1;
     }
     map
@@ -4220,40 +4225,143 @@ fn inline_cte_scan(body: &RelExpr, name: &str, def: &RelExpr) -> RelExpr {
 /// are preserved. Returns empty unless every CTE is non-recursive and its
 /// sub-query's range table is entirely base relations (the simple,
 /// inline-able shape); anything else defers the whole query to native PG.
-pub unsafe fn cte_flatten_rtes(
-    query: *mut pg_sys::Query,
-) -> Vec<(*mut pg_sys::RangeTblEntry, *mut pg_sys::RangeTblEntry)> {
+/// A relation pulled up from a CTE definition or a derived-table (FROM
+/// sub-query) so it can be referenced in the flat PlannedStmt range table.
+pub struct FlatRel {
+    pub rte: *mut pg_sys::RangeTblEntry,
+    pub perminfo: *mut pg_sys::RTEPermissionInfo,
+    /// Sub-query alias to also map to this relation (derived tables only).
+    pub alias: Option<String>,
+}
+
+/// Verify a derived-table sub-query is a single-relation *passthrough*
+/// (`SELECT <cols> FROM rel [WHERE ...]`, no rename/compute/aggregate/limit),
+/// returning the inner base relation and its perminfo. Only then is mapping
+/// the derived-table alias to the inner relation correct.
+unsafe fn subquery_passthrough(
+    rte: *mut pg_sys::RangeTblEntry,
+) -> Option<(*mut pg_sys::RangeTblEntry, *mut pg_sys::RTEPermissionInfo)> {
+    let sq = (*rte).subquery;
+    if sq.is_null()
+        || (*sq).hasAggs
+        || !(*sq).groupClause.is_null()
+        || !(*sq).distinctClause.is_null()
+        || !(*sq).havingQual.is_null()
+        || !(*sq).windowClause.is_null()
+        || !(*sq).setOperations.is_null()
+        || !(*sq).limitCount.is_null()
+        || !(*sq).limitOffset.is_null()
+    {
+        return None;
+    }
+    let srt = (*sq).rtable;
+    if srt.is_null() || (*srt).length != 1 {
+        return None;
+    }
+    let inner = (*(*srt).elements.add(0)).ptr_value as *mut pg_sys::RangeTblEntry;
+    if inner.is_null() || (*inner).rtekind != pg_sys::RTEKind::RTE_RELATION {
+        return None;
+    }
+    let relid = (*inner).relid;
+    // Every non-junk output column must be a passthrough Var of the inner
+    // relation whose name matches the underlying column (no rename/compute),
+    // so `alias.col` resolves to the same column as `inner.col`.
+    let tl = (*sq).targetList;
+    if !tl.is_null() {
+        let elems = (*tl).elements;
+        for i in 0..(*tl).length {
+            let te = (*elems.add(i as usize)).ptr_value as *mut pg_sys::TargetEntry;
+            if te.is_null() || (*te).resjunk {
+                continue;
+            }
+            let e = (*te).expr;
+            if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+                return None;
+            }
+            let var = e.cast::<pg_sys::Var>();
+            if (*var).varno != 1 {
+                return None;
+            }
+            let real = pg_sys::get_attname(relid, (*var).varattno, true);
+            if real.is_null() || (*te).resname.is_null() {
+                return None;
+            }
+            if std::ffi::CStr::from_ptr(real) != std::ffi::CStr::from_ptr((*te).resname) {
+                return None;
+            }
+        }
+    }
+    let pinfo = if (*inner).perminfoindex > 0 && !(*sq).rteperminfos.is_null() {
+        pg_sys::list_nth((*sq).rteperminfos, ((*inner).perminfoindex - 1) as i32)
+            as *mut pg_sys::RTEPermissionInfo
+    } else {
+        std::ptr::null_mut()
+    };
+    Some((inner, pinfo))
+}
+
+/// Relations to pull up into the flat range table: non-recursive CTE
+/// definitions and simple passthrough derived tables. Deterministic order
+/// (CTEs then main-rtable sub-queries) so build_table_map and
+/// build_planned_stmt assign matching indices. Empty if any CTE is not
+/// inline-able.
+pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
     let mut out = Vec::new();
-    if query.is_null() || (*query).cteList.is_null() {
+    if query.is_null() {
         return out;
     }
-    let ctes = (*query).cteList;
-    let cte_elems = (*ctes).elements;
-    for c in 0..(*ctes).length {
-        let cte = (*cte_elems.add(c as usize)).ptr_value as *mut pg_sys::CommonTableExpr;
-        if cte.is_null() || (*cte).cterecursive {
-            return Vec::new();
-        }
-        let cq = (*cte).ctequery as *mut pg_sys::Query;
-        if cq.is_null() || (*cq).rtable.is_null() {
-            return Vec::new();
-        }
-        let crt = (*cq).rtable;
-        let cre = (*crt).elements;
-        for i in 0..(*crt).length {
-            let rte = (*cre.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
-            if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
-                // Non-relation in the CTE body (subquery, join RTE, ...) —
-                // outside the simple inline-able shape.
+    // CTEs.
+    if !(*query).cteList.is_null() {
+        let ctes = (*query).cteList;
+        let cte_elems = (*ctes).elements;
+        for c in 0..(*ctes).length {
+            let cte = (*cte_elems.add(c as usize)).ptr_value as *mut pg_sys::CommonTableExpr;
+            if cte.is_null() || (*cte).cterecursive {
                 return Vec::new();
             }
-            let pinfo = if (*rte).perminfoindex > 0 && !(*cq).rteperminfos.is_null() {
-                pg_sys::list_nth((*cq).rteperminfos, ((*rte).perminfoindex - 1) as i32)
-                    as *mut pg_sys::RangeTblEntry
-            } else {
-                std::ptr::null_mut()
+            let cq = (*cte).ctequery as *mut pg_sys::Query;
+            if cq.is_null() || (*cq).rtable.is_null() {
+                return Vec::new();
+            }
+            let crt = (*cq).rtable;
+            let cre = (*crt).elements;
+            for i in 0..(*crt).length {
+                let rte = (*cre.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+                if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
+                    return Vec::new();
+                }
+                let perminfo = if (*rte).perminfoindex > 0 && !(*cq).rteperminfos.is_null() {
+                    pg_sys::list_nth((*cq).rteperminfos, ((*rte).perminfoindex - 1) as i32)
+                        as *mut pg_sys::RTEPermissionInfo
+                } else {
+                    std::ptr::null_mut()
+                };
+                out.push(FlatRel { rte, perminfo, alias: None });
+            }
+        }
+    }
+    // Derived tables (FROM sub-queries) in the main range table.
+    if !(*query).rtable.is_null() {
+        let rt = (*query).rtable;
+        let re = (*rt).elements;
+        for i in 0..(*rt).length {
+            let rte = (*re.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+            if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_SUBQUERY {
+                continue;
+            }
+            let Some((inner, perminfo)) = subquery_passthrough(rte) else {
+                continue;
             };
-            out.push((rte, pinfo));
+            let alias = if !(*rte).eref.is_null() && !(*(*rte).eref).aliasname.is_null() {
+                Some(
+                    std::ffi::CStr::from_ptr((*(*rte).eref).aliasname)
+                        .to_string_lossy()
+                        .to_lowercase(),
+                )
+            } else {
+                None
+            };
+            out.push(FlatRel { rte: inner, perminfo, alias });
         }
     }
     out
