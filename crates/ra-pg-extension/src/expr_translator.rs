@@ -326,20 +326,8 @@ unsafe fn build_op_expr(
     right: &RaExpr,
     ctx: &ExprContext,
 ) -> *mut pg_sys::Expr {
-    let op_str = match op {
-        BinOp::Eq => "=",
-        BinOp::Ne => "<>",
-        BinOp::Lt => "<",
-        BinOp::Le => "<=",
-        BinOp::Gt => ">",
-        BinOp::Ge => ">=",
-        BinOp::Add => "+",
-        BinOp::Sub => "-",
-        BinOp::Mul => "*",
-        BinOp::Div => "/",
-        BinOp::Mod => "%",
-        BinOp::Concat => "||",
-        _ => return std::ptr::null_mut(),
+    let Some(op_str) = binop_op_str(op) else {
+        return std::ptr::null_mut();
     };
     build_named_op(op_str, left, right, ctx)
 }
@@ -354,6 +342,37 @@ unsafe fn build_named_op(
 ) -> *mut pg_sys::Expr {
     let left_pg = translate(left, ctx);
     let right_pg = translate(right, ctx);
+    op_expr_from_nodes(op_str, left_pg, right_pg)
+}
+
+/// String operator name for a [`BinOp`] (`None` for non-operator variants).
+#[must_use]
+pub fn binop_op_str(op: &BinOp) -> Option<&'static str> {
+    Some(match op {
+        BinOp::Eq => "=",
+        BinOp::Ne => "<>",
+        BinOp::Lt => "<",
+        BinOp::Le => "<=",
+        BinOp::Gt => ">",
+        BinOp::Ge => ">=",
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+        BinOp::Mod => "%",
+        BinOp::Concat => "||",
+        _ => return None,
+    })
+}
+
+/// Build an `OpExpr` for `op_str` over two already-translated operand nodes.
+/// Used both for Ra-operand binops and for aggregate-output expressions whose
+/// operands are pre-built `Aggref` / `Var` nodes.
+pub(crate) unsafe fn op_expr_from_nodes(
+    op_str: &str,
+    left_pg: *mut pg_sys::Expr,
+    right_pg: *mut pg_sys::Expr,
+) -> *mut pg_sys::Expr {
     if left_pg.is_null() || right_pg.is_null() {
         return std::ptr::null_mut();
     }
@@ -793,18 +812,10 @@ pub unsafe fn expr_result_type(expr: *mut pg_sys::Expr) -> pg_sys::Oid {
     if expr.is_null() {
         return pg_sys::InvalidOid;
     }
-    match (*expr).type_ {
-        pg_sys::NodeTag::T_Const => (*(expr as *mut pg_sys::Const)).consttype,
-        pg_sys::NodeTag::T_Var => (*(expr as *mut pg_sys::Var)).vartype,
-        pg_sys::NodeTag::T_OpExpr => (*(expr as *mut pg_sys::OpExpr)).opresulttype,
-        pg_sys::NodeTag::T_BoolExpr => pg_sys::BOOLOID,
-        pg_sys::NodeTag::T_NullTest => pg_sys::BOOLOID,
-        pg_sys::NodeTag::T_FuncExpr => (*(expr as *mut pg_sys::FuncExpr)).funcresulttype,
-        pg_sys::NodeTag::T_CaseExpr => (*(expr as *mut pg_sys::CaseExpr)).casetype,
-        pg_sys::NodeTag::T_CoerceViaIO => (*(expr as *mut pg_sys::CoerceViaIO)).resulttype,
-        pg_sys::NodeTag::T_ArrayExpr => (*(expr as *mut pg_sys::ArrayExpr)).array_typeid,
-        _ => pg_sys::InvalidOid,
-    }
+    // PG's canonical accessor handles every Expr node kind (Aggref, Param,
+    // RelabelType, ...) — a hand-rolled match misses types such as Aggref,
+    // which broke operator resolution for expressions over aggregates.
+    pg_sys::exprType(expr.cast())
 }
 
 /// Allocate a zeroed node in the current PostgreSQL memory context.

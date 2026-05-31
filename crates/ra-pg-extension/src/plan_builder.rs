@@ -2551,10 +2551,105 @@ impl PlanBuilder {
         Ok(node.cast())
     }
 
+    /// Register the input columns referenced by any aggregate argument
+    /// reachable in `expr` (recursing through expressions, stopping at an
+    /// aggregate's own argument). Group-by columns are registered separately.
+    unsafe fn register_agg_args(
+        &self,
+        expr: &Expr,
+        in_tlist: &mut *mut pg_sys::List,
+        colmap: &mut Vec<(i16, i32, pg_sys::Oid, pg_sys::Oid)>,
+    ) -> Result<(), PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        if let Expr::Function { name, args } = expr {
+            if Self::is_supported_agg(name) {
+                if let Some(arg) = Self::agg_column_arg(args) {
+                    if self.add_input_col(arg, in_tlist, colmap).is_none() {
+                        return Err(unsupported("aggregate arg not a column"));
+                    }
+                }
+                return Ok(());
+            }
+        }
+        match expr {
+            Expr::BinOp { left, right, .. } => {
+                self.register_agg_args(left, in_tlist, colmap)?;
+                self.register_agg_args(right, in_tlist, colmap)?;
+            }
+            Expr::UnaryOp { operand, .. } => self.register_agg_args(operand, in_tlist, colmap)?,
+            Expr::Function { args, .. } | Expr::Array(args) => {
+                for a in args {
+                    self.register_agg_args(a, in_tlist, colmap)?;
+                }
+            }
+            Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => {
+                self.register_agg_args(expr, in_tlist, colmap)?;
+            }
+            Expr::Case { operand, when_clauses, else_result } => {
+                if let Some(o) = operand {
+                    self.register_agg_args(o, in_tlist, colmap)?;
+                }
+                for (w, t) in when_clauses {
+                    self.register_agg_args(w, in_tlist, colmap)?;
+                    self.register_agg_args(t, in_tlist, colmap)?;
+                }
+                if let Some(el) = else_result {
+                    self.register_agg_args(el, in_tlist, colmap)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Build an aggregate-context output/qual expression: aggregate calls
+    /// become `Aggref`s, group/scan columns become OUTER Vars, constants pass
+    /// through, and binary operators combine recursively-built operands.
+    /// `None` (→ caller Errs → native planner) for any other shape.
+    unsafe fn build_agg_out_expr(
+        &self,
+        expr: &Expr,
+        in_tlist: &mut *mut pg_sys::List,
+        colmap: &mut Vec<(i16, i32, pg_sys::Oid, pg_sys::Oid)>,
+        aggno: &mut i32,
+    ) -> Option<*mut pg_sys::Expr> {
+        match expr {
+            Expr::Function { name, args } if Self::is_supported_agg(name) => {
+                let arg = match Self::agg_column_arg(args) {
+                    Some(c) => {
+                        let (pos, ty, coll) = self.add_input_col(c, in_tlist, colmap)?;
+                        Some((self.outer_var(pos, ty, coll), ty, coll))
+                    }
+                    None => None,
+                };
+                let aggref = self.build_aggref(name, arg, *aggno).ok()?;
+                *aggno += 1;
+                Some(aggref)
+            }
+            Expr::Column(_) => {
+                let (pos, ty, coll) = self.add_input_col(expr, in_tlist, colmap)?;
+                Some(self.outer_var(pos, ty, coll))
+            }
+            Expr::Const(_) => {
+                let e = expr_translator::translate(expr, &self.expr_ctx);
+                (!e.is_null()).then_some(e)
+            }
+            Expr::BinOp { op, left, right } => {
+                let op_str = expr_translator::binop_op_str(op)?;
+                let l = self.build_agg_out_expr(left, in_tlist, colmap, aggno)?;
+                let r = self.build_agg_out_expr(right, in_tlist, colmap, aggno)?;
+                let e = expr_translator::op_expr_from_nodes(op_str, l, r);
+                (!e.is_null()).then_some(e)
+            }
+            _ => None,
+        }
+    }
+
     /// Build an `Agg` plan node for `Project(out_columns)` over
-    /// `Aggregate(group_by)`. Output columns must each be a group column or
-    /// a supported aggregate (`count`/`sum`/`avg`/`min`/`max`) over a
-    /// single-relation input. Any other shape returns `Err` (→ native
+    /// `Aggregate(group_by)`. Output columns may be group columns, supported
+    /// aggregates, or expressions combining them; aggregate arguments and
+    /// group keys must be plain columns of a single-relation input. Any other
+    /// shape returns `Err` (→ native
     /// planner): expressions over aggregates, `DISTINCT` aggregates,
     /// `HAVING`'s nested form, unsupported functions, multi-relation input.
     unsafe fn build_grouped_aggregate(
@@ -2581,15 +2676,7 @@ impl PlanBuilder {
             }
         }
         for pc in out_columns {
-            if let Expr::Function { name, args } = &pc.expr {
-                if Self::is_supported_agg(name) {
-                    if let Some(arg) = Self::agg_column_arg(args) {
-                        if self.add_input_col(arg, &mut in_tlist, &mut colmap).is_none() {
-                            return Err(unsupported("aggregate arg not a column"));
-                        }
-                    }
-                }
-            }
+            self.register_agg_args(&pc.expr, &mut in_tlist, &mut colmap)?;
         }
         (*child).targetlist = in_tlist;
 
@@ -2605,29 +2692,9 @@ impl PlanBuilder {
         let mut out_tlist: *mut pg_sys::List = std::ptr::null_mut();
         let mut aggno = 0;
         for (i, pc) in out_columns.iter().enumerate() {
-            let entry: *mut pg_sys::Expr = match &pc.expr {
-                Expr::Column(_) => {
-                    let (pos, ty, coll) = self
-                        .add_input_col(&pc.expr, &mut in_tlist, &mut colmap)
-                        .ok_or_else(|| unsupported("output column"))?;
-                    self.outer_var(pos, ty, coll)
-                }
-                Expr::Function { name, args } if Self::is_supported_agg(name) => {
-                    let arg = match Self::agg_column_arg(args) {
-                        Some(c) => {
-                            let (pos, ty, coll) = self
-                                .add_input_col(c, &mut in_tlist, &mut colmap)
-                                .ok_or_else(|| unsupported("aggregate arg"))?;
-                            Some((self.outer_var(pos, ty, coll), ty, coll))
-                        }
-                        None => None,
-                    };
-                    let aggref = self.build_aggref(name, arg, aggno)?;
-                    aggno += 1;
-                    aggref
-                }
-                _ => return Err(unsupported("aggregate output expression")),
-            };
+            let entry = self
+                .build_agg_out_expr(&pc.expr, &mut in_tlist, &mut colmap, &mut aggno)
+                .ok_or_else(|| unsupported("aggregate output expression"))?;
             let resname = pc
                 .alias
                 .as_deref()
