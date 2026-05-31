@@ -20,6 +20,14 @@ use ra_core::search_types::DistanceMetric;
 /// transformed tree.
 #[must_use]
 pub fn apply_all(rel: RelExpr) -> RelExpr {
+    // Normalize sub-queries nested inside expressions first. The per-node
+    // transforms below recurse RelExpr children via `map_children`, but a
+    // sub-query's inner query lives inside an `Expr` (a Project column,
+    // Filter/Join predicate, ...) which `map_children` does not descend into.
+    // Running `apply_all` on each inner query ensures sub-queries are
+    // normalized identically to top-level queries (e.g. a scalar
+    // `(SELECT max(x) ...)` is wrapped in an Aggregate node).
+    let rel = normalize_subqueries(rel);
     let rel = transform_window_functions(rel);
     let rel = transform_scalar_aggregates(rel);
     let rel = transform_order_by_aliases(rel);
@@ -447,6 +455,85 @@ fn wrap_scalar_aggregate(rel: RelExpr) -> RelExpr {
 fn transform_scalar_aggregates(rel: RelExpr) -> RelExpr {
     let rel = map_children(rel, transform_scalar_aggregates);
     wrap_scalar_aggregate(rel)
+}
+
+/// Apply [`apply_all`] to every sub-query inner query reachable in `rel`'s own
+/// expressions, recursing into RelExpr children via `map_children`.
+fn normalize_subqueries(rel: RelExpr) -> RelExpr {
+    let mut rel = map_children(rel, normalize_subqueries);
+    match &mut rel {
+        RelExpr::Project { columns, .. } => {
+            for c in columns {
+                normalize_expr_subqueries(&mut c.expr);
+            }
+        }
+        RelExpr::Filter { predicate, .. } => normalize_expr_subqueries(predicate),
+        RelExpr::Join { condition, .. } => normalize_expr_subqueries(condition),
+        _ => {}
+    }
+    rel
+}
+
+/// Normalize the inner query of every `SubQuery` nested in `e` (in place).
+fn normalize_expr_subqueries(e: &mut Expr) {
+    match e {
+        Expr::SubQuery { query, test_expr, .. } => {
+            let inner = std::mem::replace(query.as_mut(), RelExpr::Values { rows: Vec::new() });
+            *query = Box::new(apply_all(inner));
+            if let Some(t) = test_expr {
+                normalize_expr_subqueries(t);
+            }
+        }
+        Expr::BinOp { left, right, .. } => {
+            normalize_expr_subqueries(left);
+            normalize_expr_subqueries(right);
+        }
+        Expr::UnaryOp { operand, .. } => normalize_expr_subqueries(operand),
+        Expr::Function { args, .. } | Expr::Array(args) => {
+            for a in args {
+                normalize_expr_subqueries(a);
+            }
+        }
+        Expr::Case { operand, when_clauses, else_result } => {
+            if let Some(o) = operand {
+                normalize_expr_subqueries(o);
+            }
+            for (w, t) in when_clauses {
+                normalize_expr_subqueries(w);
+                normalize_expr_subqueries(t);
+            }
+            if let Some(el) = else_result {
+                normalize_expr_subqueries(el);
+            }
+        }
+        Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => normalize_expr_subqueries(expr),
+        Expr::ArrayIndex(a, b) => {
+            normalize_expr_subqueries(a);
+            normalize_expr_subqueries(b);
+        }
+        Expr::ArraySlice { array, start, end } => {
+            normalize_expr_subqueries(array);
+            if let Some(s) = start {
+                normalize_expr_subqueries(s);
+            }
+            if let Some(en) = end {
+                normalize_expr_subqueries(en);
+            }
+        }
+        Expr::VectorDistance { column, target, .. } => {
+            normalize_expr_subqueries(column);
+            normalize_expr_subqueries(target);
+        }
+        Expr::PatternPrev(inner, _)
+        | Expr::PatternNext(inner, _)
+        | Expr::PatternFirst(inner, _)
+        | Expr::PatternLast(inner, _) => normalize_expr_subqueries(inner),
+        Expr::Column(_)
+        | Expr::Const(_)
+        | Expr::FullTextMatch { .. }
+        | Expr::PatternClassifier
+        | Expr::PatternMatchNumber => {}
+    }
 }
 
 // ---------------------------------------------------------------------------

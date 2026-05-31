@@ -531,17 +531,6 @@ impl PlanBuilder {
                 {
                     return self.build_grouped_aggregate(columns, group_by, agg_input);
                 }
-                // Scalar aggregate not wrapped in an Aggregate node (e.g. a
-                // sub-query's `SELECT max(x) FROM t` — the parser's scalar-
-                // aggregate transform does not recurse into sub-queries): a
-                // projection of aggregate functions over a non-Aggregate input
-                // is a plain (no-GROUP-BY) aggregate.
-                if columns
-                    .iter()
-                    .any(|c| matches!(&c.expr, Expr::Function { name, .. } if Self::is_supported_agg(name)))
-                {
-                    return self.build_grouped_aggregate(columns, &[], input);
-                }
                 // Project over Join (optionally with a WHERE Filter between)
                 // is built as one NestLoop with remapped OUTER/INNER refs.
                 if let RelExpr::Join {
