@@ -53,7 +53,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 | ~~`Sort`~~ | ~~`ORDER BY`~~ | **DONE** (plain-column keys); expression keys and `ORDER BY` of a non-output column still defer (need resjunk targetlist / ordering-operator resolution) | — |
 | ~~`Limit`~~ | ~~`LIMIT` / `OFFSET`~~ | **DONE** | — |
 | ~~`Distinct`~~ | ~~`SELECT DISTINCT`~~ | **DONE** — `build_unique` sorts its input on all output columns (Sort+Unique) | — |
-| `Union` / `Intersect` / `Except` | set operations (+ `ALL`) | not verified | P1 |
+| ~~`Union`~~ / `Intersect` / `Except` | set operations (+ `ALL`) | **UNION/UNION ALL DONE** (Append + dedup). INTERSECT/EXCEPT defer (need flag-tagged SetOp) | P2 |
 | ~~`Window`~~ | ~~window functions~~ | **DONE** for row_number/rank/dense_rank and sum/count/avg/min/max OVER (PARTITION BY/ORDER BY, default frame, single spec). Explicit frames, multiple window specs, and lag/lead/ntile/nth_value/first_value/last_value defer | P2 |
 | `Values` | `VALUES (...)`, `INSERT ... VALUES` source | not verified | P1 |
 | `CTE` / `RecursiveCTE` | `WITH` / `WITH RECURSIVE` | not verified | P1 |
