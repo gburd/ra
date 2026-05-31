@@ -240,8 +240,9 @@ impl PlanBuilder {
             RelExpr::Union { left, right, .. } => {
                 Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
             }
-            RelExpr::Intersect { .. } => Some("Intersect"),
-            RelExpr::Except { .. } => Some("Except"),
+            RelExpr::Intersect { left, right, .. } | RelExpr::Except { left, right, .. } => {
+                Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
+            }
             // VALUES: built as an Append of one-row Result nodes;
             // build_values_result Errs (→ fallback) for non-constant rows.
             RelExpr::Values { .. } => None,
@@ -2575,7 +2576,12 @@ impl PlanBuilder {
         left: &RelExpr,
         right: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        self.build_setop_node(pg_sys::SetOpCmd::SETOPCMD_INTERSECT, all, left, right)
+        let cmd = if all {
+            pg_sys::SetOpCmd::SETOPCMD_INTERSECT_ALL
+        } else {
+            pg_sys::SetOpCmd::SETOPCMD_INTERSECT
+        };
+        self.build_setop_node(cmd, left, right)
     }
 
     unsafe fn build_set_op_except(
@@ -2584,33 +2590,84 @@ impl PlanBuilder {
         left: &RelExpr,
         right: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        self.build_setop_node(pg_sys::SetOpCmd::SETOPCMD_EXCEPT, all, left, right)
+        let cmd = if all {
+            pg_sys::SetOpCmd::SETOPCMD_EXCEPT_ALL
+        } else {
+            pg_sys::SetOpCmd::SETOPCMD_EXCEPT
+        };
+        self.build_setop_node(cmd, left, right)
     }
 
+    /// Build a PG18 `SetOp` (INTERSECT/EXCEPT [ALL]). PG18's hashed SetOp
+    /// takes two children directly and compares all output columns with
+    /// equality operators — no flag column or sorted input required.
     unsafe fn build_setop_node(
         &mut self,
         cmd: pg_sys::SetOpCmd::Type,
-        all: bool,
         left: &RelExpr,
         right: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let left_plan = self.build_plan(left)?;
         let right_plan = self.build_plan(right)?;
+        if left_plan.is_null() || right_plan.is_null() || (*left_plan).targetlist.is_null() {
+            return Err(PlanBuilderError::UnsupportedVariant("setop child".to_owned()));
+        }
         let node = self.alloc_node::<pg_sys::SetOp>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer(
-                "SetOp allocation".to_string(),
-            ));
+            return Err(PlanBuilderError::NullPointer("SetOp".to_owned()));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_SetOp;
         (*node).cmd = cmd;
-        (*node).strategy = if all {
-            pg_sys::SetOpStrategy::SETOP_HASHED
-        } else {
-            pg_sys::SetOpStrategy::SETOP_SORTED
-        };
+        (*node).strategy = pg_sys::SetOpStrategy::SETOP_HASHED;
         (*node).plan.lefttree = left_plan;
         (*node).plan.righttree = right_plan;
+        (*node).plan.targetlist = (*left_plan).targetlist;
+        (*node).plan.plan_width = (*left_plan).plan_width;
+
+        // Compare on all output columns with equality operators.
+        let tlist = (*left_plan).targetlist;
+        let ncols = (*tlist).length;
+        let col_idx = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>())
+            as *mut pg_sys::AttrNumber;
+        let ops = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
+            as *mut pg_sys::Oid;
+        let colls = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
+            as *mut pg_sys::Oid;
+        let nulls = pg_sys::palloc(ncols as usize * std::mem::size_of::<bool>()) as *mut bool;
+        let elements = (*tlist).elements;
+        for i in 0..ncols as usize {
+            let te = (*elements.add(i)).ptr_value as *mut pg_sys::TargetEntry;
+            let (resno, ty, coll) = if te.is_null() || (*te).expr.is_null() {
+                ((i + 1) as pg_sys::AttrNumber, pg_sys::INT4OID, pg_sys::InvalidOid)
+            } else {
+                (
+                    (*te).resno,
+                    pg_sys::exprType((*te).expr.cast()),
+                    pg_sys::exprCollation((*te).expr.cast()),
+                )
+            };
+            *col_idx.add(i) = resno;
+            *ops.add(i) = crate::sort_utils::resolve_equality_op(ty);
+            *colls.add(i) = coll;
+            *nulls.add(i) = false;
+        }
+        (*node).numCols = ncols;
+        (*node).cmpColIdx = col_idx;
+        (*node).cmpOperators = ops;
+        (*node).cmpCollations = colls;
+        (*node).cmpNullsFirst = nulls;
+        let ngroups = (*left_plan).plan_rows.max(1.0).clamp(1.0, 1_000_000.0);
+        // SetOp.numGroups: c_long on pg13..pg18, Cardinality (f64) on pg19+.
+        #[cfg(not(feature = "pg19"))]
+        {
+            (*node).numGroups = ngroups as std::os::raw::c_long;
+        }
+        #[cfg(feature = "pg19")]
+        {
+            (*node).numGroups = ngroups;
+        }
+        (*node).plan.plan_rows = (*left_plan).plan_rows;
+        (*node).plan.total_cost = (*left_plan).total_cost + (*right_plan).total_cost;
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
