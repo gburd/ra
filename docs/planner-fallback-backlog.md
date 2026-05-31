@@ -133,6 +133,26 @@ resolved:
   No speculative fix applied per the no-phantom-features standard.
 
 ### Remaining narrow fallbacks
+### Correctness fixes & coverage (2026-05-31, differential audit)
+Bugs found by Ra-vs-PG differential audit and fixed:
+- **Recurring backend abort**: `monitor::maybe_refresh` ran SPI inside the
+  planner hook with no re-entrancy guard, recursing into nested SPI until
+  abort (~once per 1s refresh under load). Added a re-entrancy guard.
+- **DISTINCT aggregate wrong result**: the parser dropped the DISTINCT
+  flag, so `count(DISTINCT x)` planned as `count(x)`. DISTINCT args are now
+  wrapped in a `__distinct` marker → safe fallback (native DISTINCT-agg TBD).
+- **CAST coercion**: `build_cast` always used CoerceViaIO; `(bool)::int`
+  errored. Now resolves via `find_coercion_pathway` (FuncExpr / RelabelType
+  / CoerceViaIO).
+- **Function-call collation**: `upper()`/`lower()` errored ("could not
+  determine collation"); `build_func_expr` now sets input/result collation.
+- **Correlated IN/ANY/ALL wrong result**: decorrelation left the
+  correlation predicate inside the inner side (unreachable by Ra's
+  nested-loop); now pulled into the join condition.
+
+Also added natively: `count(col)` (polymorphic count("any")), `OFFSET`
+without `LIMIT`, `NULLIF`, `GREATEST`/`LEAST`.
+
 ### Expression / aggregate coverage added (2026-05-31)
 Now built natively (verified row-equivalent on PG18), previously fell back:
 - `LIKE` / `NOT LIKE` / `ILIKE` (the `~~` / `~~*` operators).
