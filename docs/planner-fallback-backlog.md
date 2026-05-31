@@ -95,3 +95,21 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 Zero fallbacks means: across a representative workload (and the JOB / TPC-H
 suites), `ra_planner.log_decisions = on` reports no `fell back` lines, and the
 replan-equivalence test passes for every shape exercised.
+
+## Remaining deep gaps (fall back safely)
+
+After the operator work, Ra natively plans the full common SQL surface
+(scan/filter/project, sort, limit, distinct, aggregates, joins, window
+functions, all set operations, VALUES, CTEs, derived tables, and
+IN/EXISTS/NOT IN/NOT EXISTS subqueries). Three gaps remain, each
+deferring correctly to the native planner:
+
+- **Scalar subqueries** `(SELECT ...)` used in an expression — need a
+  `SubPlan`/`InitPlan` with `PARAM_EXEC` parameters threaded through the
+  plan builder, plus correlated outer-Var→Param replacement in the inner
+  plan and `PlannedStmt.subplans`/`paramExecTypes` setup.
+- **`WITH RECURSIVE`** — needs a `RecursiveUnion` plan node + a
+  `WorkTableScan` referencing the recursive term via `wtParam`.
+- **Index-stats double-free** — contained by `catch_unwind` (degrades to
+  no index stats; correctness unaffected); not reproducible in heavy
+  stress; needs ASan + a repro to root-cause.
