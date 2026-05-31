@@ -700,6 +700,7 @@ sort_item(A) ::= expr(B) nulls_order(C). {
 }
 
 %type nulls_order {RaToken}
+%type opt_window_frame {RaToken}
 nulls_order(A) ::= NULLS FIRST. { A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
 nulls_order(A) ::= NULLS LAST.  { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
 nulls_order(A) ::= .            { A.int_val = 2; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
@@ -1435,35 +1436,32 @@ expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN WITHIN GROUP LPAREN ORDER BY sor
 
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER LPAREN
              opt_partition(D) opt_window_order(E) opt_window_frame(F) RPAREN. {
-    A = ra_window_marker_full(pstate, B.text, C, D, E);
-    (void)F; /* Frame clause parsed but not yet used in optimizer */
+    A = ra_window_marker_full(pstate, B.text, C, D, E, F.int_val);
 }
 
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) opt_window_frame(E) RPAREN. {
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
-    A = ra_window_marker_full(pstate, B.text, l, C, D);
-    (void)E;
+    A = ra_window_marker_full(pstate, B.text, l, C, D, E.int_val);
 }
 
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) opt_window_frame(E) RPAREN. {
-    A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), C, D);
-    (void)E;
+    A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), C, D, E.int_val);
 }
 
 /* Named window reference: func() OVER w — treated as empty window spec */
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER IDENT. {
-    A = ra_window_marker_full(pstate, B.text, C, 0, 0);
+    A = ra_window_marker_full(pstate, B.text, C, 0, 0, 0);
 }
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER IDENT. {
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
-    A = ra_window_marker_full(pstate, B.text, l, 0, 0);
+    A = ra_window_marker_full(pstate, B.text, l, 0, 0, 0);
 }
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER IDENT. {
-    A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), 0, 0);
+    A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), 0, 0, 0);
 }
 
 opt_partition(A) ::= PARTITION BY expr_list(B). { A = B; }
@@ -1474,11 +1472,12 @@ opt_window_order(A) ::= .                       { A = 0; }
 
 /* Window frame clause: ROWS/RANGE BETWEEN ... AND ... */
 opt_window_frame(A) ::= IDENT BETWEEN frame_bound(B) AND frame_bound(C). {
-    /* ROWS BETWEEN start AND end, RANGE BETWEEN start AND end */
-    A = 0; /* Parsed but frame semantics not implemented yet */
+    /* ROWS/RANGE BETWEEN start AND end — flag presence so the optimizer can
+     * defer (frame semantics are not built directly). */
+    A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0;
     (void)B; (void)C;
 }
-opt_window_frame(A) ::= . { A = 0; }
+opt_window_frame(A) ::= . { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
 
 /* Frame bounds: UNBOUNDED PRECEDING, CURRENT ROW, expr PRECEDING/FOLLOWING */
 frame_bound(A) ::= IDENT IDENT. {

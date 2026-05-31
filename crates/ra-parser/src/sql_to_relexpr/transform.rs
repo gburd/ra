@@ -260,7 +260,7 @@ fn extract_window_exprs(
         if let Expr::Function { ref name, ref args } = col.expr {
             if name.starts_with("__window_") {
                 if let Some(func) = window_function_for(name) {
-                    let (real_args, partition_by, order_by) =
+                    let (real_args, partition_by, order_by, has_frame) =
                         decode_window_sentinels(args.clone());
                     let arg = real_args.into_iter().next();
                     window_exprs.push(WindowExpr {
@@ -268,7 +268,14 @@ fn extract_window_exprs(
                         arg,
                         partition_by,
                         order_by,
-                        frame: None,
+                        // An explicit (non-default) frame was specified. We do
+                        // not build frame semantics directly; recording it as
+                        // Some makes the plan-builder defer to native PG.
+                        frame: has_frame.then(|| ra_core::algebra::WindowFrame {
+                            mode: ra_core::algebra::WindowFrameMode::Range,
+                            start: ra_core::algebra::WindowFrameBound::UnboundedPreceding,
+                            end: ra_core::algebra::WindowFrameBound::CurrentRow,
+                        }),
                         alias: col.alias.clone(),
                     });
                     clean_cols.push(col);
@@ -287,10 +294,11 @@ fn extract_window_exprs(
 /// Returns `(real_args, partition_by_exprs, order_by_sort_keys)`.
 fn decode_window_sentinels(
     args: Vec<Expr>,
-) -> (Vec<Expr>, Vec<Expr>, Vec<SortKey>) {
+) -> (Vec<Expr>, Vec<Expr>, Vec<SortKey>, bool) {
     let mut real_args = Vec::new();
     let mut partition_by = Vec::new();
     let mut order_by = Vec::new();
+    let mut has_frame = false;
 
     for arg in args {
         match &arg {
@@ -315,11 +323,14 @@ fn decode_window_sentinels(
                     });
                 }
             }
+            Expr::Function { name, .. } if name == "__window_frame" => {
+                has_frame = true;
+            }
             _ => real_args.push(arg),
         }
     }
 
-    (real_args, partition_by, order_by)
+    (real_args, partition_by, order_by, has_frame)
 }
 
 fn promote_window_in_project(rel: RelExpr) -> RelExpr {
