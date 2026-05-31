@@ -1763,23 +1763,6 @@ impl PlanBuilder {
         cte_param: i32,
         wt_param: i32,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        // Conservative shape guard: the bespoke WorkTableScan / CteScan wiring
-        // only resolves a `Scan` of the CTE itself. A join of the CTE with a
-        // base relation (in the recursive term or body) routes through
-        // build_projected_join, which would try to scan the CTE as a base
-        // table — defer those cleanly to native PG instead of panicking.
-        let cte_only = |e: &RelExpr| {
-            let mut tabs = Vec::new();
-            Self::collect_scan_tables(e, &mut tabs);
-            tabs.iter()
-                .all(|t| t.eq_ignore_ascii_case(lname) || t.eq_ignore_ascii_case("__dual"))
-        };
-        if !cte_only(recursive) || !cte_only(body) {
-            return Err(PlanBuilderError::UnsupportedVariant(
-                "recursive CTE with base-relation join; deferring to native planner".to_owned(),
-            ));
-        }
-
         // Anchor (non-recursive term): no self-reference, no CTE scope.
         let base_plan = self.build_plan(base)?;
         if base_plan.is_null() || (*base_plan).targetlist.is_null() {
@@ -1801,7 +1784,7 @@ impl PlanBuilder {
             mode: CteScanMode::Recursive,
         });
         *self.expr_ctx.cte_scope.borrow_mut() =
-            Some(CteScope { rtindex, cols: clone_cols(&cols) });
+            Some(CteScope { name: lname.to_owned(), rtindex, cols: clone_cols(&cols) });
         let rec_result = self.build_plan(recursive);
         *self.expr_ctx.cte_scope.borrow_mut() = None;
         self.cte_runtime = None;
@@ -1842,7 +1825,7 @@ impl PlanBuilder {
             wt_param,
             mode: CteScanMode::Body,
         });
-        *self.expr_ctx.cte_scope.borrow_mut() = Some(CteScope { rtindex, cols });
+        *self.expr_ctx.cte_scope.borrow_mut() = Some(CteScope { name: lname.to_owned(), rtindex, cols });
         let body_result = self.build_plan(body);
         *self.expr_ctx.cte_scope.borrow_mut() = None;
         self.cte_runtime = None;
@@ -1961,6 +1944,39 @@ impl PlanBuilder {
         }
     }
 
+    /// Resolve one side of a `build_projected_join` to its scan range-table
+    /// index, output targetlist, and attno→position map. A side referencing
+    /// the in-scope recursive CTE resolves to the CTE's WorkTableScan/CteScan
+    /// (columns from the CTE scope, identity attno→position map); any other
+    /// side resolves to a base relation via the catalog.
+    unsafe fn join_side_cols(
+        &self,
+        side: &RelExpr,
+    ) -> Result<(pg_sys::Index, *mut pg_sys::List, HashMap<i16, i32>), PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        let tab = Self::base_scan_table(side).ok_or_else(|| unsupported("join side not a scan"))?;
+        if let Some(rt) = &self.cte_runtime {
+            if tab.eq_ignore_ascii_case(&rt.name) {
+                let rti = rt.rtindex;
+                let tlist = self.cte_column_tlist(rti);
+                let n = self
+                    .expr_ctx
+                    .cte_scope
+                    .borrow()
+                    .as_ref()
+                    .map_or(0, |s| s.cols.len());
+                let map = (1..=n as i16).map(|i| (i, i32::from(i))).collect();
+                return Ok((rti, tlist, map));
+            }
+        }
+        let rti = self.rtindex_for(tab)?;
+        let reloid = self.rel_oid_for(tab)?;
+        let (tlist, map) = self
+            .expose_relation_columns(rti, reloid)
+            .ok_or_else(|| unsupported("expose join-side columns"))?;
+        Ok((rti, tlist, map))
+    }
+
     /// Build a `Project` over a two-relation `Join` as a single `NestLoop`
     /// plan node. Supports Inner / Left / Cross joins over two `Scan`
     /// relations. The join output targetlist and the ON / WHERE quals are
@@ -1986,27 +2002,15 @@ impl PlanBuilder {
             | JoinType::Anti => {}
             _ => return Err(unsupported("join type")),
         }
-        // Each side must reduce to a single base relation, optionally under
-        // Filters (e.g. a sub-query's WHERE). build_plan folds those filters
-        // into the scan's qual; expose_relation_columns then sets its tlist.
-        let Some(lt) = Self::base_scan_table(left) else {
-            return Err(unsupported("join left not a base scan"));
-        };
-        let Some(rt) = Self::base_scan_table(right) else {
-            return Err(unsupported("join right not a base scan"));
-        };
-        let lrti = self.rtindex_for(lt)?;
-        let rrti = self.rtindex_for(rt)?;
-        let lreloid = self.rel_oid_for(lt)?;
-        let rreloid = self.rel_oid_for(rt)?;
+        // Each side must reduce to a single base relation (optionally under
+        // Filters — build_plan folds those into the scan qual) OR to the
+        // in-scope recursive CTE (built as a WorkTableScan / CteScan). The
+        // per-side resolver returns the scan rtindex, output targetlist, and
+        // attno→position map for join-Var remapping.
+        let (lrti, l_tlist, lmap) = self.join_side_cols(left)?;
+        let (rrti, r_tlist, rmap) = self.join_side_cols(right)?;
         let left_plan = self.build_plan(left)?;
         let right_plan = self.build_plan(right)?;
-        let (l_tlist, lmap) = self
-            .expose_relation_columns(lrti, lreloid)
-            .ok_or_else(|| unsupported("expose left columns"))?;
-        let (r_tlist, rmap) = self
-            .expose_relation_columns(rrti, rreloid)
-            .ok_or_else(|| unsupported("expose right columns"))?;
         (*left_plan).targetlist = l_tlist;
         (*right_plan).targetlist = r_tlist;
 
@@ -4924,6 +4928,46 @@ unsafe fn subquery_passthrough(
     Some((inner, pinfo))
 }
 
+/// Recursively collect base (`RTE_RELATION`) entries from `q`'s range table,
+/// descending into `RTE_SUBQUERY` entries (set-operation arms of a recursive
+/// CTE nest their FROM relations inside arm sub-queries). `RTE_CTE`
+/// self-references and other kinds are skipped.
+unsafe fn collect_query_base_rtes(q: *mut pg_sys::Query, out: &mut Vec<FlatRel>) {
+    if q.is_null() || (*q).rtable.is_null() {
+        return;
+    }
+    let rt = (*q).rtable;
+    let e = (*rt).elements;
+    for i in 0..(*rt).length {
+        let rte = (*e.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+        if rte.is_null() {
+            continue;
+        }
+        match (*rte).rtekind {
+            pg_sys::RTEKind::RTE_RELATION => {
+                let perminfo = if (*rte).perminfoindex > 0 && !(*q).rteperminfos.is_null() {
+                    pg_sys::list_nth((*q).rteperminfos, ((*rte).perminfoindex - 1) as i32)
+                        as *mut pg_sys::RTEPermissionInfo
+                } else {
+                    std::ptr::null_mut()
+                };
+                let alias = if !(*rte).eref.is_null() && !(*(*rte).eref).aliasname.is_null() {
+                    Some(
+                        std::ffi::CStr::from_ptr((*(*rte).eref).aliasname)
+                            .to_string_lossy()
+                            .to_lowercase(),
+                    )
+                } else {
+                    None
+                };
+                out.push(FlatRel { rte, perminfo, alias });
+            }
+            pg_sys::RTEKind::RTE_SUBQUERY => collect_query_base_rtes((*rte).subquery, out),
+            _ => {}
+        }
+    }
+}
+
 /// Relations to pull up into the flat range table: non-recursive CTE
 /// definitions and simple passthrough derived tables. Deterministic order
 /// (CTEs then main-rtable sub-queries) so build_table_map and
@@ -4940,11 +4984,21 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
         let cte_elems = (*ctes).elements;
         for c in 0..(*ctes).length {
             let cte = (*cte_elems.add(c as usize)).ptr_value as *mut pg_sys::CommonTableExpr;
-            if cte.is_null() || (*cte).cterecursive {
+            if cte.is_null() {
                 return Vec::new();
             }
             let cq = (*cte).ctequery as *mut pg_sys::Query;
-            if cq.is_null() || (*cq).rtable.is_null() {
+            if cq.is_null() {
+                return Vec::new();
+            }
+            // Recursive CTE: its base relations live in the recursive term,
+            // nested inside set-operation arm sub-queries. Pull them up so the
+            // WorkTableScan-side joins can resolve them.
+            if (*cte).cterecursive {
+                collect_query_base_rtes(cq, &mut out);
+                continue;
+            }
+            if (*cq).rtable.is_null() {
                 return Vec::new();
             }
             let crt = (*cq).rtable;

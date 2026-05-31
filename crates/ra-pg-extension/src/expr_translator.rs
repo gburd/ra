@@ -59,6 +59,9 @@ pub struct CteCol {
 /// The output columns of an in-scope CTE and the range-table index of the
 /// scan (WorkTableScan or CteScan) that produces them.
 pub struct CteScope {
+    /// CTE reference name (lower-cased); column resolution only applies to
+    /// unqualified columns or those qualified with this name.
+    pub name: String,
     pub rtindex: pg_sys::Index,
     pub cols: Vec<CteCol>,
 }
@@ -207,21 +210,30 @@ unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *m
 
     // CTE-column resolution: when building a recursive CTE's recursive term
     // or body, columns refer to the CTE's output (a WorkTableScan / CteScan),
-    // which has no catalog entry. Resolve such names against the CTE scope.
+    // which has no catalog entry. Resolve such names against the CTE scope —
+    // but only unqualified columns or those qualified with the CTE's name, so
+    // a same-named column of a joined base relation (e.g. `labels.id` vs the
+    // CTE's `id`) is not mis-resolved to the CTE.
     if let Some(scope) = ctx.cte_scope.borrow().as_ref() {
-        let want = col.column.to_lowercase();
-        for (i, c) in scope.cols.iter().enumerate() {
-            if c.name == want {
-                let var = alloc::<pg_sys::Var>();
-                (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
-                (*var).varno = scope.rtindex as i32;
-                (*var).varattno = (i + 1) as i16;
-                (*var).vartype = c.typ;
-                (*var).vartypmod = c.typmod;
-                (*var).varcollid = c.coll;
-                (*var).varlevelsup = 0;
-                (*var).location = -1;
-                return var.cast();
+        let qualifies = col
+            .table
+            .as_deref()
+            .is_none_or(|t| t.eq_ignore_ascii_case(&scope.name));
+        if qualifies {
+            let want = col.column.to_lowercase();
+            for (i, c) in scope.cols.iter().enumerate() {
+                if c.name == want {
+                    let var = alloc::<pg_sys::Var>();
+                    (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+                    (*var).varno = scope.rtindex as i32;
+                    (*var).varattno = (i + 1) as i16;
+                    (*var).vartype = c.typ;
+                    (*var).vartypmod = c.typmod;
+                    (*var).varcollid = c.coll;
+                    (*var).varlevelsup = 0;
+                    (*var).location = -1;
+                    return var.cast();
+                }
             }
         }
     }
