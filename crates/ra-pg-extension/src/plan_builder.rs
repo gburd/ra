@@ -3156,39 +3156,77 @@ impl PlanBuilder {
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
-    /// Build a plan for a single-row `VALUES` as a one-row `Result` node
-    /// (evaluates its constant targetlist once, no input). Multi-row VALUES
-    /// needs a ValuesScan (RTE_VALUES) and defers to the native planner — an
-    /// Append of one-row Results segfaults the executor.
+    /// Build a `ValuesScan` for a `VALUES` clause, referencing the
+    /// `RTE_VALUES` PostgreSQL already built in the original query's range
+    /// table (reused verbatim as the PlannedStmt rtable). Falls back if no
+    /// RTE_VALUES is present.
     unsafe fn build_values_result(
         &mut self,
         rows: &[Vec<Expr>],
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
-        let [row] = rows else {
-            return Err(unsupported("VALUES requires exactly one row"));
-        };
-        let node = self.alloc_node::<pg_sys::Result>();
-        if node.is_null() {
-            return Err(PlanBuilderError::NullPointer("Result".to_owned()));
+        if rows.is_empty() || self.original_query.is_null() {
+            return Err(unsupported("VALUES"));
         }
-        (*node).plan.type_ = pg_sys::NodeTag::T_Result;
-        (*node).plan.plan_rows = 1.0;
-        (*node).plan.total_cost = 0.01;
-        let mut tlist: *mut pg_sys::List = std::ptr::null_mut();
-        for (i, e) in row.iter().enumerate() {
-            let pg_expr = expr_translator::translate(e, &self.expr_ctx);
-            if pg_expr.is_null() {
-                return Err(unsupported("VALUES expression"));
+        // Locate the RTE_VALUES in PG's range table.
+        let rtable = (*self.original_query).rtable;
+        if rtable.is_null() {
+            return Err(unsupported("VALUES rtable"));
+        }
+        let mut scanrelid: pg_sys::Index = 0;
+        let mut rte: *mut pg_sys::RangeTblEntry = std::ptr::null_mut();
+        let elements = (*rtable).elements;
+        for i in 0..(*rtable).length {
+            let r = (*elements.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+            if !r.is_null() && (*r).rtekind == pg_sys::RTEKind::RTE_VALUES {
+                scanrelid = (i + 1) as pg_sys::Index;
+                rte = r;
+                break;
             }
-            let rn = CString::new(format!("column{}", i + 1))
+        }
+        if rte.is_null() || (*rte).values_lists.is_null() {
+            return Err(unsupported("no RTE_VALUES"));
+        }
+        let first = pg_sys::list_nth((*rte).values_lists, 0) as *mut pg_sys::List;
+        if first.is_null() {
+            return Err(unsupported("empty VALUES row"));
+        }
+        let ncols = (*first).length;
+        let node = self.alloc_node::<pg_sys::ValuesScan>();
+        if node.is_null() {
+            return Err(PlanBuilderError::NullPointer("ValuesScan".to_owned()));
+        }
+        (*node).scan.plan.type_ = pg_sys::NodeTag::T_ValuesScan;
+        (*node).scan.scanrelid = scanrelid;
+        (*node).values_lists = (*rte).values_lists;
+        // Output Vars reference the RTE's columns; types come from the
+        // (already type-unified) first row's expressions.
+        let row_elems = (*first).elements;
+        let mut tlist: *mut pg_sys::List = std::ptr::null_mut();
+        for j in 0..ncols {
+            let e = (*row_elems.add(j as usize)).ptr_value as *mut pg_sys::Node;
+            let var = self.alloc_node::<pg_sys::Var>();
+            (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*var).varno = scanrelid as i32;
+            (*var).varattno = (j + 1) as i16;
+            (*var).vartype = if e.is_null() { pg_sys::INT4OID } else { pg_sys::exprType(e) };
+            (*var).vartypmod = if e.is_null() { -1 } else { pg_sys::exprTypmod(e) };
+            (*var).varcollid = if e.is_null() {
+                pg_sys::InvalidOid
+            } else {
+                pg_sys::exprCollation(e)
+            };
+            (*var).varlevelsup = 0;
+            let rn = CString::new(format!("column{}", j + 1))
                 .map(|c| pg_sys::pstrdup(c.as_ptr()))
                 .unwrap_or(std::ptr::null_mut());
-            let te = pg_sys::makeTargetEntry(pg_expr, (i + 1) as i16, rn, false);
+            let te = pg_sys::makeTargetEntry(var.cast(), (j + 1) as i16, rn, false);
             tlist = pg_sys::lappend(tlist, te.cast());
         }
-        (*node).plan.targetlist = tlist;
-        Ok(&mut (*node).plan as *mut pg_sys::Plan)
+        (*node).scan.plan.targetlist = tlist;
+        (*node).scan.plan.plan_rows = rows.len() as f64;
+        (*node).scan.plan.total_cost = 0.01 * rows.len() as f64;
+        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
     // -----------------------------------------------------------------------
