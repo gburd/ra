@@ -84,15 +84,13 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
             }
         }
         RelExpr::Project { columns, input } => {
-            let new_input = decorrelate(input);
-            // Check if any projection column contains a subquery
-            if columns.iter().any(|c| contains_subquery(&c.expr)) {
-                decorrelate_project_subqueries(columns, new_input)
-            } else {
-                RelExpr::Project {
-                    columns: columns.clone(),
-                    input: Box::new(new_input),
-                }
+            // Subqueries in projection columns (scalar `(SELECT ...)`) are
+            // handled by the plan builder as SubPlan/Param nodes, which is
+            // correct for correlated cases; leave the columns intact and only
+            // decorrelate the input.
+            RelExpr::Project {
+                columns: columns.clone(),
+                input: Box::new(decorrelate(input)),
             }
         }
         RelExpr::Aggregate {
@@ -890,38 +888,6 @@ fn parse_aggregate_function(name: &str) -> Option<AggregateFunction> {
 /// Decorrelate subqueries found in projection columns.
 ///
 /// For each column containing a scalar subquery, the subquery is extracted
-/// and converted to a join (left outer for correlated, cross for uncorrelated).
-/// The column expression is replaced with a reference to the join output.
-fn decorrelate_project_subqueries(
-    columns: &[ProjectionColumn],
-    input: RelExpr,
-) -> RelExpr {
-    let mut current_input = input;
-    let mut new_columns = Vec::with_capacity(columns.len());
-    let mut sq_counter = 0usize;
-
-    for col in columns {
-        if !contains_subquery(&col.expr) {
-            new_columns.push(col.clone());
-            continue;
-        }
-        // Replace subquery in the column expression with a column ref,
-        // building up the join tree as we go.
-        let (rewritten_expr, updated_input) =
-            replace_subquery_in_expr(&col.expr, current_input, &mut sq_counter);
-        current_input = updated_input;
-        new_columns.push(ProjectionColumn {
-            expr: rewritten_expr,
-            alias: col.alias.clone(),
-        });
-    }
-
-    RelExpr::Project {
-        columns: new_columns,
-        input: Box::new(current_input),
-    }
-}
-
 /// Replace the first subquery found in an expression with a column reference,
 /// joining the subquery's result into the input relation.
 ///

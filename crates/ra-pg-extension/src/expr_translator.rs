@@ -29,6 +29,7 @@ use std::ffi::CString;
 use pgrx::pg_sys;
 
 use ra_core::expr::{BinOp, Const as RaConst, Expr as RaExpr, UnaryOp};
+use ra_core::algebra::RelExpr;
 
 /// Context for expression translation, carrying OID resolution maps.
 pub struct ExprContext {
@@ -36,6 +37,11 @@ pub struct ExprContext {
     pub rtindex_map: HashMap<String, pg_sys::Index>,
     /// Maps table name (lowercase) → relation OID.
     pub rtoid_map: HashMap<String, pg_sys::Oid>,
+    /// Pre-built `SubPlan` expression for each scalar sub-query, keyed by the
+    /// address of its inner `RelExpr` (populated by the plan builder before
+    /// expression translation). Lets a `SubQuery` expression resolve to its
+    /// already-constructed SubPlan node.
+    pub subplans: std::cell::RefCell<HashMap<usize, *mut pg_sys::Expr>>,
 }
 
 /// Translate a Ra [`RaExpr`] to a PostgreSQL `Expr*` node.
@@ -85,7 +91,15 @@ pub unsafe fn translate(expr: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
             target_type,
         } => build_cast(inner, target_type, ctx),
         RaExpr::Array(elements) => build_array_expr(elements, ctx),
-        // Unsupported: SubQuery, FullTextMatch, VectorDistance, Pattern*, ArraySlice, etc.
+        // Scalar sub-query: return the SubPlan the plan builder prepared for
+        // this inner query (keyed by its address); null if none → fallback.
+        RaExpr::SubQuery { query, .. } => ctx
+            .subplans
+            .borrow()
+            .get(&(std::ptr::from_ref::<RelExpr>(query.as_ref()) as usize))
+            .copied()
+            .unwrap_or(std::ptr::null_mut()),
+        // Unsupported: FullTextMatch, VectorDistance, Pattern*, ArraySlice, etc.
         _ => std::ptr::null_mut(),
     }
 }
