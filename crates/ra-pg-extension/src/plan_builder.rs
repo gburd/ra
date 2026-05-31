@@ -226,6 +226,12 @@ impl PlanBuilder {
             RelExpr::Sort { .. } => Some("Sort"),
             RelExpr::IncrementalSort { .. } => Some("Sort"),
             RelExpr::Limit { input, .. } => Self::first_unsupported_op(input),
+            // Window over a projection: build_window_plan handles it and Errs
+            // (→ fallback) for multi-spec / non-default frame / unsupported fn.
+            RelExpr::Window { input, .. } => match &**input {
+                RelExpr::Project { input: pin, .. } => Self::first_unsupported_op(pin),
+                _ => Some("Window"),
+            },
             RelExpr::Join { .. } => Some("Join"),
             RelExpr::Aggregate { .. } => Some("Aggregate"),
             // Distinct (SELECT DISTINCT): build_unique sorts its input on all
@@ -234,7 +240,6 @@ impl PlanBuilder {
             RelExpr::Union { .. } => Some("Union"),
             RelExpr::Intersect { .. } => Some("Intersect"),
             RelExpr::Except { .. } => Some("Except"),
-            RelExpr::Window { .. } => Some("Window"),
             RelExpr::Values { .. } => Some("Values"),
             RelExpr::CTE { .. } => Some("CTE"),
             RelExpr::RecursiveCTE { .. } => Some("RecursiveCTE"),
@@ -508,7 +513,12 @@ impl PlanBuilder {
                 self.build_set_op_intersect(*all, left, right)
             }
             RelExpr::Except { all, left, right } => self.build_set_op_except(*all, left, right),
-            RelExpr::Window { functions, input } => self.build_window_agg(functions, input),
+            RelExpr::Window { functions, input } => match &**input {
+                RelExpr::Project { columns, input: proj_in } => {
+                    self.build_window_plan(functions, columns, proj_in)
+                }
+                _ => self.build_window_agg(functions, input),
+            },
             RelExpr::IncrementalSort {
                 prefix_keys,
                 suffix_keys,
@@ -2625,6 +2635,253 @@ impl PlanBuilder {
         (*node).plan.lefttree = left_plan;
         (*node).plan.righttree = right_plan;
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
+    }
+
+    /// Build a `WindowFunc` node for a supported window function. `arg`
+    /// describes the single OUTER argument (or `None` for no-arg /
+    /// star functions). `winref` links it to the `WindowAgg`.
+    unsafe fn build_window_func(
+        &self,
+        func: &ra_core::algebra::WindowFunction,
+        arg: Option<(*mut pg_sys::Expr, pg_sys::Oid, pg_sys::Oid)>,
+        winref: pg_sys::Index,
+    ) -> Result<*mut pg_sys::Expr, PlanBuilderError> {
+        use ra_core::algebra::WindowFunction as Wf;
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        let name = match func {
+            Wf::RowNumber => "row_number",
+            Wf::Rank => "rank",
+            Wf::DenseRank => "dense_rank",
+            Wf::Sum => "sum",
+            Wf::Count => "count",
+            Wf::Avg => "avg",
+            Wf::Min => "min",
+            Wf::Max => "max",
+            _ => return Err(unsupported("window function")),
+        };
+        let nargs = i32::from(arg.is_some());
+        let mut argtypes = [pg_sys::InvalidOid; 1];
+        if let Some((_, ty, _)) = arg {
+            argtypes[0] = ty;
+        }
+        let fname = CString::new(name).map_err(|_| unsupported("window fn name"))?;
+        let name_node = pg_sys::makeString(fname.as_ptr().cast_mut());
+        let fname_list = pg_sys::lappend(std::ptr::null_mut(), name_node.cast());
+        let winfnoid = pg_sys::LookupFuncName(fname_list, nargs, argtypes.as_ptr(), true);
+        if winfnoid == pg_sys::InvalidOid {
+            return Err(unsupported("window fn lookup"));
+        }
+        let prokind = pg_sys::get_func_prokind(winfnoid);
+        let winagg = prokind == pg_sys::PROKIND_AGGREGATE as i8;
+        if !winagg && prokind != pg_sys::PROKIND_WINDOW as i8 {
+            return Err(unsupported("not a window/agg function"));
+        }
+        let wintype = pg_sys::get_func_rettype(winfnoid);
+        let node = self.alloc_node::<pg_sys::WindowFunc>();
+        (*node).xpr.type_ = pg_sys::NodeTag::T_WindowFunc;
+        (*node).winfnoid = winfnoid;
+        (*node).wintype = wintype;
+        (*node).wincollid = pg_sys::get_typcollation(wintype);
+        (*node).winref = winref;
+        (*node).winstar = arg.is_none() && matches!(func, Wf::Count);
+        (*node).winagg = winagg;
+        if let Some((arg_expr, _, coll)) = arg {
+            (*node).inputcollid = coll;
+            (*node).args = pg_sys::lappend(std::ptr::null_mut(), arg_expr.cast());
+        }
+        Ok(node.cast())
+    }
+
+    /// Build a `WindowAgg` for `Window([wf])` over `Project(out_columns)`.
+    /// Exposes the referenced columns on the scan, sorts by
+    /// PARTITION BY ++ ORDER BY (WindowAgg requires sorted input), then
+    /// builds the WindowAgg whose targetlist carries passthrough Vars and
+    /// the WindowFunc. Returns `Err` (→ native planner) for multiple window
+    /// specs, non-default frames, unsupported functions, or non-scan input.
+    unsafe fn build_window_plan(
+        &mut self,
+        functions: &[ra_core::algebra::WindowExpr],
+        out_columns: &[ProjectionColumn],
+        input: &RelExpr,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        let [wf] = functions else {
+            return Err(unsupported("multiple window functions"));
+        };
+        if wf.frame.is_some() {
+            return Err(unsupported("non-default window frame"));
+        }
+        // Order keys must be plain columns (operator/index resolution).
+        if !wf.order_by.iter().all(|k| matches!(k.expr, Expr::Column(_)))
+            || !wf.partition_by.iter().all(|e| matches!(e, Expr::Column(_)))
+        {
+            return Err(unsupported("window partition/order not plain columns"));
+        }
+        let child = self.build_plan(input)?;
+        if child.is_null() {
+            return Err(unsupported("window input"));
+        }
+        let mut in_tlist: *mut pg_sys::List = std::ptr::null_mut();
+        let mut colmap: Vec<(i16, i32, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
+
+        // Pass 1: register all needed input columns (passthrough outputs,
+        // partition, order, window arg) so the scan exposes them.
+        for pc in out_columns {
+            if !Self::is_window_marker(&pc.expr) {
+                if self.add_input_col(&pc.expr, &mut in_tlist, &mut colmap).is_none() {
+                    return Err(unsupported("window passthrough column"));
+                }
+            }
+        }
+        let mut sort_keys: Vec<(i32, pg_sys::Oid, pg_sys::Oid, bool, bool)> = Vec::new();
+        let mut part_pos: Vec<(i32, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
+        for p in &wf.partition_by {
+            let t = self
+                .add_input_col(p, &mut in_tlist, &mut colmap)
+                .ok_or_else(|| unsupported("partition col"))?;
+            part_pos.push(t);
+            sort_keys.push((t.0, t.1, t.2, true, false));
+        }
+        let mut ord_pos: Vec<(i32, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
+        for k in &wf.order_by {
+            let t = self
+                .add_input_col(&k.expr, &mut in_tlist, &mut colmap)
+                .ok_or_else(|| unsupported("order col"))?;
+            ord_pos.push(t);
+            let asc = matches!(k.direction, ra_core::algebra::SortDirection::Asc);
+            let nf = matches!(k.nulls, ra_core::algebra::NullOrdering::First);
+            sort_keys.push((t.0, t.1, t.2, asc, nf));
+        }
+        let arg_outer = match &wf.arg {
+            Some(a) => {
+                let (pos, ty, coll) = self
+                    .add_input_col(a, &mut in_tlist, &mut colmap)
+                    .ok_or_else(|| unsupported("window arg"))?;
+                Some((self.outer_var(pos, ty, coll), ty, coll))
+            }
+            None => None,
+        };
+        (*child).targetlist = in_tlist;
+
+        // WindowAgg requires its input sorted on PARTITION BY ++ ORDER BY.
+        let sorted = self.build_keyed_sort(child, &sort_keys);
+
+        let node = self.alloc_node::<pg_sys::WindowAgg>();
+        if node.is_null() {
+            return Err(PlanBuilderError::NullPointer("WindowAgg".to_owned()));
+        }
+        (*node).plan.type_ = pg_sys::NodeTag::T_WindowAgg;
+        (*node).plan.lefttree = sorted;
+        (*node).winref = 1;
+        (*node).frameOptions = pg_sys::FRAMEOPTION_DEFAULTS as i32;
+
+        let set_cols = |n: usize,
+                        positions: &[(i32, pg_sys::Oid, pg_sys::Oid)],
+                        eq: bool|
+         -> (*mut pg_sys::AttrNumber, *mut pg_sys::Oid, *mut pg_sys::Oid) {
+            let col_idx = pg_sys::palloc(n * std::mem::size_of::<pg_sys::AttrNumber>())
+                as *mut pg_sys::AttrNumber;
+            let ops = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+            let colls = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+            for (i, &(pos, ty, coll)) in positions.iter().enumerate() {
+                *col_idx.add(i) = pos as i16;
+                *ops.add(i) = if eq {
+                    crate::sort_utils::resolve_equality_op(ty)
+                } else {
+                    crate::sort_utils::resolve_sort_operator(ty, true)
+                };
+                *colls.add(i) = coll;
+            }
+            (col_idx, ops, colls)
+        };
+        if !part_pos.is_empty() {
+            let (ci, op, co) = set_cols(part_pos.len(), &part_pos, true);
+            (*node).partNumCols = part_pos.len() as i32;
+            (*node).partColIdx = ci;
+            (*node).partOperators = op;
+            (*node).partCollations = co;
+        }
+        if !ord_pos.is_empty() {
+            let (ci, op, co) = set_cols(ord_pos.len(), &ord_pos, true);
+            (*node).ordNumCols = ord_pos.len() as i32;
+            (*node).ordColIdx = ci;
+            (*node).ordOperators = op;
+            (*node).ordCollations = co;
+        }
+
+        // Targetlist: passthrough Vars + the single WindowFunc.
+        let mut out_tlist: *mut pg_sys::List = std::ptr::null_mut();
+        for (i, pc) in out_columns.iter().enumerate() {
+            let entry: *mut pg_sys::Expr = if Self::is_window_marker(&pc.expr) {
+                self.build_window_func(&wf.function, arg_outer, 1)?
+            } else {
+                let (pos, ty, coll) = self
+                    .add_input_col(&pc.expr, &mut in_tlist, &mut colmap)
+                    .ok_or_else(|| unsupported("window output column"))?;
+                self.outer_var(pos, ty, coll)
+            };
+            let rn = pc
+                .alias
+                .as_deref()
+                .or_else(|| crate::sort_utils::extract_column_name(&pc.expr))
+                .and_then(|n| CString::new(n).ok())
+                .map_or(std::ptr::null_mut(), |c| pg_sys::pstrdup(c.as_ptr()));
+            let te = pg_sys::makeTargetEntry(entry, (i + 1) as i16, rn, false);
+            out_tlist = pg_sys::lappend(out_tlist, te.cast());
+        }
+        (*node).plan.targetlist = out_tlist;
+        if !sorted.is_null() {
+            (*node).plan.plan_rows = (*sorted).plan_rows;
+            (*node).plan.total_cost = (*sorted).total_cost;
+            (*node).plan.startup_cost = (*sorted).total_cost;
+        }
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
+    }
+
+    /// Is `expr` a Window-function placeholder (`__window_*`) emitted by the
+    /// parser into the projection?
+    fn is_window_marker(expr: &Expr) -> bool {
+        matches!(expr, Expr::Function { name, .. } if name.starts_with("__window_"))
+    }
+
+    /// Build a `Sort` over `child` with explicit keys
+    /// `(position, type, collation, ascending, nulls_first)`.
+    unsafe fn build_keyed_sort(
+        &mut self,
+        child: *mut pg_sys::Plan,
+        keys: &[(i32, pg_sys::Oid, pg_sys::Oid, bool, bool)],
+    ) -> *mut pg_sys::Plan {
+        if child.is_null() || keys.is_empty() {
+            return child;
+        }
+        let node = self.alloc_node::<pg_sys::Sort>();
+        if node.is_null() {
+            return child;
+        }
+        (*node).plan.type_ = pg_sys::NodeTag::T_Sort;
+        (*node).plan.lefttree = child;
+        (*node).plan.targetlist = (*child).targetlist;
+        let n = keys.len();
+        let col_idx =
+            pg_sys::palloc(n * std::mem::size_of::<pg_sys::AttrNumber>()) as *mut pg_sys::AttrNumber;
+        let ops = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+        let colls = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+        let nulls = pg_sys::palloc(n * std::mem::size_of::<bool>()) as *mut bool;
+        for (i, &(pos, ty, coll, asc, nf)) in keys.iter().enumerate() {
+            *col_idx.add(i) = pos as i16;
+            *ops.add(i) = crate::sort_utils::resolve_sort_operator(ty, asc);
+            *colls.add(i) = coll;
+            *nulls.add(i) = nf;
+        }
+        (*node).numCols = n as i32;
+        (*node).sortColIdx = col_idx;
+        (*node).sortOperators = ops;
+        (*node).collations = colls;
+        (*node).nullsFirst = nulls;
+        (*node).plan.plan_rows = (*child).plan_rows;
+        (*node).plan.total_cost = (*child).total_cost;
+        (*node).plan.plan_width = (*child).plan_width;
+        &mut (*node).plan as *mut pg_sys::Plan
     }
 
     unsafe fn build_window_agg(
