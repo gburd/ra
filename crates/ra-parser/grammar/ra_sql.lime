@@ -722,6 +722,12 @@ limit_clause(A) ::= LIMIT ICONST(B). {
     A.location = 0;                  /* no offset */
     A.float_val = 1.0;               /* flag: limit present */
 }
+limit_clause(A) ::= OFFSET ICONST(C). {
+    A.text = 0; A.length = 0;
+    A.int_val = -1;                  /* count = u64::MAX sentinel: no limit */
+    A.location = (int)C.int_val;     /* offset */
+    A.float_val = 1.0;               /* flag: clause present */
+}
 limit_clause(A) ::= . {
     A.text = 0; A.length = 0; A.int_val = 0; A.location = 0;
     A.float_val = 0.0;               /* flag: no limit */
@@ -1406,18 +1412,25 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN FILTER LPAREN WHERE expr(D) 
     when_list = ra_list_push(pstate, when_list, D);
     when_list = ra_list_push(pstate, when_list, C);
     RaNode *case_expr = ra_case(pstate, 0, when_list, ra_const_null(pstate));
+    RaNode *darg = ra_list_new(pstate);
+    darg = ra_list_push(pstate, darg, case_expr);
+    RaNode *marker = ra_func(pstate, "__distinct", darg);
     RaNode *new_args = ra_list_new(pstate);
-    new_args = ra_list_push(pstate, new_args, case_expr);
+    new_args = ra_list_push(pstate, new_args, marker);
     A = ra_func(pstate, B.text, new_args);
 }
 
 /* -- Aggregate DISTINCT: COUNT(DISTINCT col) etc. ------------------ */
 
 expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN. {
-    /* Encode aggregate DISTINCT as a regular function call for now.
-       The optimizer layer recognizes DISTINCT aggregates by context. */
+    /* Wrap the argument in a __distinct marker so the plan builder, which
+       does not yet emit Aggref.aggdistinct, defers to native PG instead of
+       silently building a non-DISTINCT aggregate (a wrong result). */
+    RaNode *darg = ra_list_new(pstate);
+    darg = ra_list_push(pstate, darg, C);
+    RaNode *marker = ra_func(pstate, "__distinct", darg);
     RaNode *args = ra_list_new(pstate);
-    args = ra_list_push(pstate, args, C);
+    args = ra_list_push(pstate, args, marker);
     A = ra_func(pstate, B.text, args);
 }
 
