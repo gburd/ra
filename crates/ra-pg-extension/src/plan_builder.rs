@@ -1354,6 +1354,19 @@ impl PlanBuilder {
         true
     }
 
+    /// The single base-relation table name a join side reduces to (a `Scan`
+    /// optionally under `Filter`/`Project` chains; the filters fold into the
+    /// scan qual). `None` if it is not a single base relation.
+    fn base_scan_table(expr: &RelExpr) -> Option<&str> {
+        match expr {
+            RelExpr::Scan { table, .. } => Some(table),
+            RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
+                Self::base_scan_table(input)
+            }
+            _ => None,
+        }
+    }
+
     /// Build a `Project` over a two-relation `Join` as a single `NestLoop`
     /// plan node. Supports Inner / Left / Cross joins over two `Scan`
     /// relations. The join output targetlist and the ON / WHERE quals are
@@ -1372,12 +1385,21 @@ impl PlanBuilder {
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::Cross => {}
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::Cross
+            | JoinType::Semi
+            | JoinType::Anti => {}
             _ => return Err(unsupported("join type")),
         }
-        let (RelExpr::Scan { table: lt, .. }, RelExpr::Scan { table: rt, .. }) = (left, right)
-        else {
-            return Err(unsupported("join inputs must be base scans"));
+        // Each side must reduce to a single base relation, optionally under
+        // Filters (e.g. a sub-query's WHERE). build_plan folds those filters
+        // into the scan's qual; expose_relation_columns then sets its tlist.
+        let Some(lt) = Self::base_scan_table(left) else {
+            return Err(unsupported("join left not a base scan"));
+        };
+        let Some(rt) = Self::base_scan_table(right) else {
+            return Err(unsupported("join right not a base scan"));
         };
         let lrti = self.rtindex_for(lt)?;
         let rrti = self.rtindex_for(rt)?;
@@ -4124,6 +4146,14 @@ pub unsafe fn build_table_map(
             .to_lowercase();
         let rtindex = (i + 1) as pg_sys::Index;
         map.insert(name, (rtindex, relid));
+        // Also map the table alias (FROM peq p → "p") so alias-qualified
+        // columns resolve.
+        if !(*rte).eref.is_null() && !(*(*rte).eref).aliasname.is_null() {
+            let alias = std::ffi::CStr::from_ptr((*(*rte).eref).aliasname)
+                .to_string_lossy()
+                .to_lowercase();
+            map.entry(alias).or_insert((rtindex, relid));
+        }
     }
     // Flatten non-recursive CTE relations: assign each the next range-table
     // index past the original rtable (build_planned_stmt appends them to the
@@ -4364,7 +4394,100 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
             out.push(FlatRel { rte: inner, perminfo, alias });
         }
     }
+    // Relations from IN/EXISTS/scalar sub-queries (SubLinks) — decorrelation
+    // turns these into semi/anti joins that reference the sub-query relation.
+    let mut sublinks: Vec<*mut pg_sys::Query> = Vec::new();
+    if !(*query).jointree.is_null() {
+        collect_sublink_queries((*(*query).jointree).quals, &mut sublinks);
+    }
+    if !(*query).targetList.is_null() {
+        let tl = (*query).targetList;
+        let te = (*tl).elements;
+        for i in 0..(*tl).length {
+            let entry = (*te.add(i as usize)).ptr_value as *mut pg_sys::TargetEntry;
+            if !entry.is_null() {
+                collect_sublink_queries((*entry).expr.cast(), &mut sublinks);
+            }
+        }
+    }
+    for sq in sublinks {
+        if sq.is_null() || (*sq).rtable.is_null() {
+            continue;
+        }
+        let srt = (*sq).rtable;
+        let sre = (*srt).elements;
+        for i in 0..(*srt).length {
+            let rte = (*sre.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+            if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
+                continue;
+            }
+            let perminfo = if (*rte).perminfoindex > 0 && !(*sq).rteperminfos.is_null() {
+                pg_sys::list_nth((*sq).rteperminfos, ((*rte).perminfoindex - 1) as i32)
+                    as *mut pg_sys::RTEPermissionInfo
+            } else {
+                std::ptr::null_mut()
+            };
+            out.push(FlatRel { rte, perminfo, alias: None });
+        }
+    }
+    // Safety: if any pulled-up relation name collides with a relation already
+    // in the main range table, name-based resolution would alias two distinct
+    // scans to one rtindex (e.g. a self-referencing sub-query). Bail to the
+    // native planner in that case.
+    let mut main_names = std::collections::HashSet::new();
+    let mrt = (*query).rtable;
+    let mre = (*mrt).elements;
+    for i in 0..(*mrt).length {
+        let rte = (*mre.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+        if !rte.is_null() && (*rte).rtekind == pg_sys::RTEKind::RTE_RELATION {
+            main_names.insert((*rte).relid);
+        }
+    }
+    let mut seen = main_names.clone();
+    for fr in &out {
+        if !seen.insert((*fr.rte).relid) {
+            return Vec::new();
+        }
+    }
     out
+}
+
+/// Collect the sub-query of each SubLink reachable in a scalar expression
+/// `node` (handles the common Bool/Op/ScalarArrayOp nesting; unknown node
+/// types are ignored, so their relations simply aren't pulled up).
+unsafe fn collect_sublink_queries(node: *mut pg_sys::Node, out: &mut Vec<*mut pg_sys::Query>) {
+    if node.is_null() {
+        return;
+    }
+    match (*node).type_ {
+        pg_sys::NodeTag::T_SubLink => {
+            let sl = node.cast::<pg_sys::SubLink>();
+            if !(*sl).subselect.is_null() {
+                out.push((*sl).subselect.cast());
+            }
+            collect_sublink_queries((*sl).testexpr, out);
+        }
+        pg_sys::NodeTag::T_BoolExpr => {
+            collect_list_sublinks((*node.cast::<pg_sys::BoolExpr>()).args, out);
+        }
+        pg_sys::NodeTag::T_OpExpr => {
+            collect_list_sublinks((*node.cast::<pg_sys::OpExpr>()).args, out);
+        }
+        pg_sys::NodeTag::T_ScalarArrayOpExpr => {
+            collect_list_sublinks((*node.cast::<pg_sys::ScalarArrayOpExpr>()).args, out);
+        }
+        _ => {}
+    }
+}
+
+unsafe fn collect_list_sublinks(list: *mut pg_sys::List, out: &mut Vec<*mut pg_sys::Query>) {
+    if list.is_null() {
+        return;
+    }
+    let elems = (*list).elements;
+    for i in 0..(*list).length {
+        collect_sublink_queries((*elems.add(i as usize)).ptr_value.cast(), out);
+    }
 }
 
 /// Resolve a table name to its PostgreSQL relation OID using the search path.
