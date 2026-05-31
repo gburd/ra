@@ -237,7 +237,9 @@ impl PlanBuilder {
             // Distinct (SELECT DISTINCT): build_unique sorts its input on all
             // output columns before the Unique, so adjacent-dedup is correct.
             RelExpr::Distinct { input } => Self::first_unsupported_op(input),
-            RelExpr::Union { .. } => Some("Union"),
+            RelExpr::Union { left, right, .. } => {
+                Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
+            }
             RelExpr::Intersect { .. } => Some("Intersect"),
             RelExpr::Except { .. } => Some("Except"),
             RelExpr::Values { .. } => Some("Values"),
@@ -2415,14 +2417,19 @@ impl PlanBuilder {
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let raw_child = self.build_plan(input)?;
+        Ok(self.dedup_plan(raw_child))
+    }
+
+    /// Deduplicate a plan's rows on all output columns: sort by every output
+    /// column then apply `Unique` (PG's Sort+Unique strategy). Used by both
+    /// `SELECT DISTINCT` and `UNION` (distinct).
+    unsafe fn dedup_plan(&mut self, raw_child: *mut pg_sys::Plan) -> *mut pg_sys::Plan {
         // Unique only collapses *adjacent* equal rows, so its input must be
         // sorted on the distinct columns. Sort by all output columns first.
         let child = self.build_sort_all_columns(raw_child);
         let node = self.alloc_node::<pg_sys::Unique>();
         if node.is_null() {
-            return Err(PlanBuilderError::NullPointer(
-                "Unique allocation".to_string(),
-            ));
+            return raw_child;
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Unique;
         (*node).plan.lefttree = child;
@@ -2435,7 +2442,6 @@ impl PlanBuilder {
         // Unique operates on ALL output columns (SELECT DISTINCT)
         if !child.is_null() && !(*child).targetlist.is_null() {
             let ncols = (*(*child).targetlist).length;
-            let rel_oid = self.first_rel_oid(input);
 
             if ncols > 0 {
                 let col_idx =
@@ -2463,7 +2469,6 @@ impl PlanBuilder {
                     } else {
                         pg_sys::INT4OID
                     };
-                    let _ = rel_oid; // used for fallback if needed
                     *operators.add(i) = crate::sort_utils::resolve_equality_op(type_oid);
                     *collations.add(i) = pg_sys::exprCollation(if !te.is_null() {
                         (*te).expr as *mut pg_sys::Node
@@ -2482,7 +2487,7 @@ impl PlanBuilder {
             (*node).plan.plan_rows = ((*child).plan_rows * 0.75).max(1.0);
             (*node).plan.plan_width = (*child).plan_width;
         }
-        Ok(&mut (*node).plan as *mut pg_sys::Plan)
+        &mut (*node).plan as *mut pg_sys::Plan
     }
 
     unsafe fn build_set_op_union(
@@ -2533,51 +2538,21 @@ impl PlanBuilder {
         };
         (*node).plan.total_cost = left_cost + right_cost;
         (*node).plan.plan_rows = left_rows + right_rows;
-
-        if !all {
-            // UNION DISTINCT: wrap Append in Unique to deduplicate.
-            // The Unique node uses all output columns for comparison.
-            let append_plan = &mut (*node).plan as *mut pg_sys::Plan;
-            let unique = self.alloc_node::<pg_sys::Unique>();
-            if unique.is_null() {
-                return Ok(append_plan);
-            }
-            (*unique).plan.type_ = pg_sys::NodeTag::T_Unique;
-            (*unique).plan.lefttree = append_plan;
-            (*unique).plan.total_cost = (*append_plan).total_cost;
-            (*unique).plan.plan_rows = ((*append_plan).plan_rows * 0.75).max(1.0);
-            (*unique).plan.plan_width = (*append_plan).plan_width;
-
-            // Set unique column arrays for all output columns
-            let ncols = if !left_plan.is_null() && !(*left_plan).targetlist.is_null() {
-                (*(*left_plan).targetlist).length
-            } else {
-                0
-            };
-            if ncols > 0 {
-                let col_idx =
-                    pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>())
-                        as *mut pg_sys::AttrNumber;
-                let operators = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
-                    as *mut pg_sys::Oid;
-                let collations = pg_sys::palloc(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
-                    as *mut pg_sys::Oid;
-
-                for i in 0..ncols as usize {
-                    *col_idx.add(i) = (i + 1) as pg_sys::AttrNumber;
-                    *operators.add(i) = pg_sys::InvalidOid; // will use default eq
-                    *collations.add(i) = pg_sys::InvalidOid;
-                }
-                (*unique).numCols = ncols;
-                (*unique).uniqColIdx = col_idx;
-                (*unique).uniqOperators = operators;
-                (*unique).uniqCollations = collations;
-            }
-
-            return Ok(&mut (*unique).plan as *mut pg_sys::Plan);
+        // Append returns child slots directly; its targetlist supplies the
+        // result tuple descriptor (column types). Share the first child's.
+        if left_plan.is_null() || right_plan.is_null() {
+            return Err(PlanBuilderError::UnsupportedVariant("union child".to_owned()));
         }
+        (*node).plan.targetlist = (*left_plan).targetlist;
+        (*node).plan.plan_width = (*left_plan).plan_width;
+        let append_plan = &mut (*node).plan as *mut pg_sys::Plan;
 
-        Ok(&mut (*node).plan as *mut pg_sys::Plan)
+        if all {
+            Ok(append_plan)
+        } else {
+            // UNION (distinct): deduplicate the appended rows.
+            Ok(self.dedup_plan(append_plan))
+        }
     }
 
     unsafe fn build_set_op_intersect(
