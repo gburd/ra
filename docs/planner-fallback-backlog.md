@@ -133,10 +133,26 @@ resolved:
   No speculative fix applied per the no-phantom-features standard.
 
 ### Remaining narrow fallbacks
+### Expression / aggregate coverage added (2026-05-31)
+Now built natively (verified row-equivalent on PG18), previously fell back:
+- `LIKE` / `NOT LIKE` / `ILIKE` (the `~~` / `~~*` operators).
+- `COALESCE(...)` (CoalesceExpr; same-type arguments, else defers).
+- `IN (value-list)` / `NOT IN (value-list)` as a `ScalarArrayOpExpr`
+  (also fixed a latent parser bug that dropped the tested operand).
+- Aggregates nested in expressions, scalar and grouped
+  (`max(id)-min(id)`, `sum(id)/count(*)`, `sum(id)+grp`).
+- `HAVING` (single, aggregate-expression, group-column, and AND/OR
+  conditions) as the Agg node's qual.
+
+### Remaining narrow fallbacks
 - `UNION` (distinct) recursive CTEs (only `UNION ALL` is built natively).
 - Recursive terms/bodies with a 3+ way join (the projected-join builder
   handles two relations; deeper joins defer cleanly).
+- 3+ way and self joins generally (projected-join builds two relations).
 - No-FROM `SELECT <expr>` (standalone) defers to native PG.
+- `IN (subquery)` non-decorrelatable shapes, GROUPING SETS/ROLLUP/CUBE,
+  DISTINCT ON, aggregate FILTER, ORDER BY arbitrary expression, and
+  non-default window frames still defer.
 
 ### Rules-system review (recent SQL constructs)
 Scalar sub-queries and recursive CTEs need **no new `.rra` rewrite
