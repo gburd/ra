@@ -96,6 +96,11 @@ pub unsafe fn translate(expr: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
             ("__is_not_null", [operand]) => {
                 build_null_test(operand, pg_sys::NullTestType::IS_NOT_NULL, ctx)
             }
+            // LIKE / ILIKE parser markers → the `~~` / `~~*` text operators.
+            ("__like", [l, r]) => build_named_op("~~", l, r, ctx),
+            ("__ilike", [l, r]) => build_named_op("~~*", l, r, ctx),
+            // COALESCE(a, b, ...) → CoalesceExpr (not a catalog function).
+            ("coalesce" | "COALESCE", args) if !args.is_empty() => build_coalesce(args, ctx),
             _ => build_func_expr(name, args, ctx),
         },
         RaExpr::Case {
@@ -319,12 +324,6 @@ unsafe fn build_op_expr(
     right: &RaExpr,
     ctx: &ExprContext,
 ) -> *mut pg_sys::Expr {
-    let left_pg = translate(left, ctx);
-    let right_pg = translate(right, ctx);
-    if left_pg.is_null() || right_pg.is_null() {
-        return std::ptr::null_mut();
-    }
-
     let op_str = match op {
         BinOp::Eq => "=",
         BinOp::Ne => "<>",
@@ -340,6 +339,22 @@ unsafe fn build_op_expr(
         BinOp::Concat => "||",
         _ => return std::ptr::null_mut(),
     };
+    build_named_op(op_str, left, right, ctx)
+}
+
+/// Build an `OpExpr` for a named binary operator (`op_str`, e.g. `=`, `~~`)
+/// over two Ra operands, resolving the operator from the operand types.
+unsafe fn build_named_op(
+    op_str: &str,
+    left: &RaExpr,
+    right: &RaExpr,
+    ctx: &ExprContext,
+) -> *mut pg_sys::Expr {
+    let left_pg = translate(left, ctx);
+    let right_pg = translate(right, ctx);
+    if left_pg.is_null() || right_pg.is_null() {
+        return std::ptr::null_mut();
+    }
 
     let op_cstr = match CString::new(op_str) {
         Ok(cs) => cs,
@@ -473,6 +488,37 @@ unsafe fn build_unary_neg(operand: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::E
     (*node).opresulttype = opresulttype;
     (*node).args = pg_sys::lappend(std::ptr::null_mut(), arg.cast());
     (node as *mut pg_sys::Expr)
+}
+
+/// Build a `CoalesceExpr` from COALESCE arguments. To guarantee a correct
+/// executor result without PG's parse-analysis type unification, only build
+/// when every argument has the same result type (the common case); otherwise
+/// return null so the planner hook defers to native PG.
+unsafe fn build_coalesce(args: &[RaExpr], ctx: &ExprContext) -> *mut pg_sys::Expr {
+    let mut pg_args: *mut pg_sys::List = std::ptr::null_mut();
+    let mut common_type = pg_sys::InvalidOid;
+    let mut collid = pg_sys::InvalidOid;
+    for a in args {
+        let pg = translate(a, ctx);
+        if pg.is_null() {
+            return std::ptr::null_mut();
+        }
+        let ty = pg_sys::exprType(pg.cast());
+        if common_type == pg_sys::InvalidOid {
+            common_type = ty;
+            collid = pg_sys::exprCollation(pg.cast());
+        } else if ty != common_type {
+            return std::ptr::null_mut();
+        }
+        pg_args = pg_sys::lappend(pg_args, pg.cast());
+    }
+    let node = alloc::<pg_sys::CoalesceExpr>();
+    (*node).xpr.type_ = pg_sys::NodeTag::T_CoalesceExpr;
+    (*node).coalescetype = common_type;
+    (*node).coalescecollid = collid;
+    (*node).args = pg_args;
+    (*node).location = -1;
+    node.cast()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
