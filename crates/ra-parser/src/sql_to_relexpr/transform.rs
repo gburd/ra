@@ -416,6 +416,46 @@ fn make_agg_expr(expr: &Expr) -> Option<AggregateExpr> {
     })
 }
 
+/// Collect every aggregate sub-expression reachable in `expr` (an aggregate's
+/// own argument cannot contain another aggregate, so recursion stops once an
+/// aggregate is found).
+fn collect_aggs(expr: &Expr, out: &mut Vec<AggregateExpr>) {
+    if let Some(agg) = make_agg_expr(expr) {
+        out.push(agg);
+        return;
+    }
+    match expr {
+        Expr::BinOp { left, right, .. } => {
+            collect_aggs(left, out);
+            collect_aggs(right, out);
+        }
+        Expr::UnaryOp { operand, .. } => collect_aggs(operand, out),
+        Expr::Function { args, .. } | Expr::Array(args) => {
+            for a in args {
+                collect_aggs(a, out);
+            }
+        }
+        Expr::Case { operand, when_clauses, else_result } => {
+            if let Some(o) = operand {
+                collect_aggs(o, out);
+            }
+            for (w, t) in when_clauses {
+                collect_aggs(w, out);
+                collect_aggs(t, out);
+            }
+            if let Some(el) = else_result {
+                collect_aggs(el, out);
+            }
+        }
+        Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => collect_aggs(expr, out),
+        Expr::ArrayIndex(a, b) => {
+            collect_aggs(a, out);
+            collect_aggs(b, out);
+        }
+        _ => {}
+    }
+}
+
 fn wrap_scalar_aggregate(rel: RelExpr) -> RelExpr {
     let RelExpr::Project { ref columns, ref input } = rel else {
         return rel;
@@ -426,11 +466,13 @@ fn wrap_scalar_aggregate(rel: RelExpr) -> RelExpr {
         return rel;
     }
 
-    // Collect aggregate expressions.
-    let agg_exprs: Vec<AggregateExpr> = columns
-        .iter()
-        .filter_map(|col| make_agg_expr(&col.expr))
-        .collect();
+    // Collect aggregate expressions reachable anywhere in the projection
+    // columns — not just a column that is directly an aggregate, but also
+    // aggregates nested in expressions (e.g. `max(id) - min(id)`).
+    let mut agg_exprs = Vec::new();
+    for col in columns {
+        collect_aggs(&col.expr, &mut agg_exprs);
+    }
 
     if agg_exprs.is_empty() {
         return rel;
