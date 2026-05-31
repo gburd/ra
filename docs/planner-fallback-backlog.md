@@ -100,16 +100,37 @@ replan-equivalence test passes for every shape exercised.
 
 After the operator work, Ra natively plans the full common SQL surface
 (scan/filter/project, sort, limit, distinct, aggregates, joins, window
-functions, all set operations, VALUES, CTEs, derived tables, and
-IN/EXISTS/NOT IN/NOT EXISTS subqueries). Three gaps remain, each
-deferring correctly to the native planner:
+functions, all set operations, VALUES, CTEs, derived tables,
+IN/EXISTS/NOT IN/NOT EXISTS subqueries, **scalar subqueries**, and
+**simple WITH RECURSIVE**). The previously-tracked deep gaps are now
+resolved:
 
-- **Scalar subqueries** `(SELECT ...)` used in an expression — need a
-  `SubPlan`/`InitPlan` with `PARAM_EXEC` parameters threaded through the
-  plan builder, plus correlated outer-Var→Param replacement in the inner
-  plan and `PlannedStmt.subplans`/`paramExecTypes` setup.
-- **`WITH RECURSIVE`** — needs a `RecursiveUnion` plan node + a
-  `WorkTableScan` referencing the recursive term via `wtParam`.
-- **Index-stats double-free** — contained by `catch_unwind` (degrades to
-  no index stats; correctness unaffected); not reproducible in heavy
-  stress; needs ASan + a repro to root-cause.
+- **Scalar subqueries** `(SELECT ...)` in projection/WHERE expressions —
+  **DONE.** Built as `EXPR_SUBLINK` `SubPlan` nodes; correlated
+  outer-Var references in the inner plan are replaced with `PARAM_EXEC`
+  `Param`s (parParam/args), and `PlannedStmt.subplans`/`paramExecTypes`
+  are populated. Correlated and uncorrelated forms verified
+  row-equivalent to native PG.
+- **`WITH RECURSIVE`** — **DONE for single-relation recursive CTEs.**
+  Built as `CteScan` over a `RecursiveUnion{anchor Result, recursive
+  WorkTableScan}`, reusing PG's existing `RTE_CTE` and threading the
+  cte/worktable `PARAM_EXEC` params. Counters, traversals, aggregates,
+  and ORDER BY/WHERE over the CTE verified row-equivalent to native PG.
+  Recursive CTEs whose recursive term or body **joins a base relation**
+  still defer cleanly to native PG (the join builder cannot scan the
+  CTE); this is a guarded, panic-free fallback.
+- **Index-stats double-free** — **not a demonstrable bug.** Two code
+  inspections found no double-free: `list_free(RelationGetIndexList(rel))`
+  matches PG core (the returned list is caller-owned) and
+  `resolve_am_type`'s `pfree(get_am_name(...))` is null-guarded. Not
+  reproducible under aggressive concurrent index-DDL churn + hundreds of
+  concurrent stats-gathering queries (0 safety events). Fully contained
+  by `catch_unwind` (degrades to no index stats; correctness unaffected).
+  No speculative fix applied per the no-phantom-features standard.
+
+### Remaining narrow fallbacks
+- `WITH RECURSIVE` with a base-relation join in the recursive term/body.
+- Recursive CTE self-references nested under a join in non-recursive CTEs
+  or derived tables.
+- No-FROM `SELECT <expr>` (standalone) defers to native PG.
+
