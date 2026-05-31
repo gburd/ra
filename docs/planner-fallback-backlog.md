@@ -81,7 +81,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 
 | Feature | Status | Pri |
 |---|---|---|
-| Correlated / IN / EXISTS / scalar subqueries | **Passthrough derived tables (FROM sub-queries) DONE** (flatten + alias map). Correlated/IN/EXISTS/scalar subqueries in expressions still fall back (need decorrelation or SubPlan) | P2 |
+| IN / EXISTS / NOT IN / NOT EXISTS / derived tables | **DONE** — decorrelated to semi/anti joins (built as NestLoop) + SubLink range-table flattening; passthrough derived tables flattened. **Scalar subqueries** `(SELECT ...)` in expressions still fall back (need SubPlan/InitPlan) | P2 |
 | (general) any `RelExpr` whose `to_rec`/`from_rec` round-trip is lossy | extend e-graph encoding | — |
 
 ## Known bugs causing fallback (not operator gaps)
