@@ -321,13 +321,17 @@ fn decorrelate_subquery(
 
     match subquery_type {
         SubQueryType::In => {
-            // x IN (SELECT col FROM Q) → SemiJoin(x = Q.col, input, Q)
-            let condition = build_in_condition(test_expr, &decorrelated_query);
+            // x IN (SELECT col FROM Q WHERE corr) → SemiJoin(x = col AND corr).
+            // The correlation predicate must move into the join condition; a
+            // nested-loop semi-join has no way to evaluate a correlated filter
+            // left inside the inner side (it would reference the outer row).
+            let in_cond = build_in_condition(test_expr, &decorrelated_query);
+            let (inner_query, corr) = extract_correlation_predicate(&decorrelated_query);
             Some(RelExpr::Join {
                 join_type: JoinType::Semi,
-                condition,
+                condition: and_exprs(in_cond, corr),
                 left: Box::new(input),
-                right: Box::new(decorrelated_query),
+                right: Box::new(inner_query),
             })
         }
         SubQueryType::Exists => {
@@ -341,27 +345,30 @@ fn decorrelate_subquery(
             })
         }
         SubQueryType::Any => {
-            // x op ANY (SELECT col FROM Q) → SemiJoin(x op Q.col, input, Q)
-            let condition = build_in_condition(test_expr, &decorrelated_query);
+            // x op ANY (SELECT col FROM Q WHERE corr) → SemiJoin(x op col AND corr)
+            let any_cond = build_in_condition(test_expr, &decorrelated_query);
+            let (inner_query, corr) = extract_correlation_predicate(&decorrelated_query);
             Some(RelExpr::Join {
                 join_type: JoinType::Semi,
-                condition,
+                condition: and_exprs(any_cond, corr),
                 left: Box::new(input),
-                right: Box::new(decorrelated_query),
+                right: Box::new(inner_query),
             })
         }
         SubQueryType::All => {
-            // x op ALL (SELECT col FROM Q) → AntiJoin(NOT(x op Q.col), input, Q)
+            // x op ALL (SELECT col FROM Q WHERE corr) →
+            //   AntiJoin(corr AND NOT(x op col), input, Q)
             let base_cond = build_in_condition(test_expr, &decorrelated_query);
             let negated = Expr::UnaryOp {
                 op: UnaryOp::Not,
                 operand: Box::new(base_cond),
             };
+            let (inner_query, corr) = extract_correlation_predicate(&decorrelated_query);
             Some(RelExpr::Join {
                 join_type: JoinType::Anti,
-                condition: negated,
+                condition: and_exprs(negated, corr),
                 left: Box::new(input),
-                right: Box::new(decorrelated_query),
+                right: Box::new(inner_query),
             })
         }
         SubQueryType::Scalar => {
@@ -395,37 +402,40 @@ fn decorrelate_negated_subquery(
             })
         }
         SubQueryType::In => {
-            // NOT IN (SELECT col FROM Q) → AntiJoin(x = Q.col, input, Q)
-            let condition = build_in_condition(test_expr, &decorrelated_query);
+            // NOT IN (SELECT col FROM Q WHERE corr) → AntiJoin(x = col AND corr)
+            let in_cond = build_in_condition(test_expr, &decorrelated_query);
+            let (inner_query, corr) = extract_correlation_predicate(&decorrelated_query);
             Some(RelExpr::Join {
                 join_type: JoinType::Anti,
-                condition,
+                condition: and_exprs(in_cond, corr),
                 left: Box::new(input),
-                right: Box::new(decorrelated_query),
+                right: Box::new(inner_query),
             })
         }
         SubQueryType::Any => {
-            // NOT (x op ANY (...)) → AntiJoin(x op Q.col, input, Q)
-            let condition = build_in_condition(test_expr, &decorrelated_query);
+            // NOT (x op ANY (...)) → AntiJoin(x op col AND corr)
+            let any_cond = build_in_condition(test_expr, &decorrelated_query);
+            let (inner_query, corr) = extract_correlation_predicate(&decorrelated_query);
             Some(RelExpr::Join {
                 join_type: JoinType::Anti,
-                condition,
+                condition: and_exprs(any_cond, corr),
                 left: Box::new(input),
-                right: Box::new(decorrelated_query),
+                right: Box::new(inner_query),
             })
         }
         SubQueryType::All => {
-            // NOT (x op ALL (...)) → SemiJoin(NOT(x op Q.col), input, Q)
+            // NOT (x op ALL (...)) → SemiJoin(NOT(x op col) AND corr)
             let base_cond = build_in_condition(test_expr, &decorrelated_query);
             let negated = Expr::UnaryOp {
                 op: UnaryOp::Not,
                 operand: Box::new(base_cond),
             };
+            let (inner_query, corr) = extract_correlation_predicate(&decorrelated_query);
             Some(RelExpr::Join {
                 join_type: JoinType::Semi,
-                condition: negated,
+                condition: and_exprs(negated, corr),
                 left: Box::new(input),
-                right: Box::new(decorrelated_query),
+                right: Box::new(inner_query),
             })
         }
         SubQueryType::Scalar => None,
@@ -488,6 +498,20 @@ fn decorrelate_scalar_comparison(
 ///
 /// Given `test_expr` (e.g., the `x` in `x IN (SELECT col FROM T)`)
 /// and the subquery, builds `test_expr = first_output_col(subquery)`.
+/// Combine two predicates with AND, dropping a trivial `TRUE` (so an
+/// uncorrelated subquery keeps its single-clause join condition).
+fn and_exprs(a: Expr, b: Expr) -> Expr {
+    match (&a, &b) {
+        (Expr::Const(Const::Bool(true)), _) => b,
+        (_, Expr::Const(Const::Bool(true))) => a,
+        _ => Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(a),
+            right: Box::new(b),
+        },
+    }
+}
+
 fn build_in_condition(test_expr: Option<&Expr>, subquery: &RelExpr) -> Expr {
     let subquery_col = first_output_column(subquery);
     let left = test_expr
