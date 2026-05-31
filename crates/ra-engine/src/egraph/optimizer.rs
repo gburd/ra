@@ -910,6 +910,19 @@ impl Optimizer {
             return Ok(result);
         }
 
+        // Decorrelate IN/EXISTS/scalar subqueries to semi/anti joins up front,
+        // independent of the routing decision below (the speculative router
+        // skips the e-graph — and thus the in-saturation decorrelation pass —
+        // for simple-looking queries). This is a correctness normalization.
+        let decorrelated_owned;
+        let expr: &RelExpr =
+            if crate::subquery_decorrelation::tree_contains_subquery(expr) {
+                decorrelated_owned = crate::subquery_decorrelation::decorrelate(expr);
+                &decorrelated_owned
+            } else {
+                expr
+            };
+
         // 2a'. GRAPH_TABLE (SQL/PGQ) fast-path: opaque to the rewrite
         // rules and executed natively by PostgreSQL 19; return as-is.
         if Self::contains_graph_table(expr) {
