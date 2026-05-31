@@ -37,6 +37,17 @@ struct RefreshTimestamps {
 /// backend process).
 static mut LAST_REFRESH: Option<RefreshTimestamps> = None;
 
+/// Re-entrancy flag for [`maybe_refresh`] (single-threaded PG backend).
+static mut IN_REFRESH: bool = false;
+
+/// RAII guard clearing [`IN_REFRESH`] on every exit path of `maybe_refresh`.
+struct RefreshGuard;
+impl Drop for RefreshGuard {
+    fn drop(&mut self) {
+        unsafe { IN_REFRESH = false };
+    }
+}
+
 /// Initialize the fingerprint monitor subsystem.
 ///
 /// Called once during `_PG_init`. Creates the shared `FingerprintReader`
@@ -68,6 +79,18 @@ pub fn fingerprint_reader() -> &'static FingerprintReader {
 /// Must be called from within a PostgreSQL backend process with a valid
 /// SPI context (inside a planner hook or transaction).
 pub fn maybe_refresh() {
+    // Re-entrancy guard: the SPI queries below are themselves planned through
+    // this planner hook, which calls maybe_refresh again. Without this guard
+    // (and because the refresh timestamp is only updated after polling) that
+    // recurses into nested SPI until the backend aborts. A PG backend is
+    // single-threaded, so a plain static flag is sufficient. The RAII guard
+    // resets it on every return path.
+    if unsafe { IN_REFRESH } {
+        return;
+    }
+    unsafe { IN_REFRESH = true };
+    let _guard = RefreshGuard;
+
     let now = Instant::now();
 
     // Initialize timestamps on first call.
