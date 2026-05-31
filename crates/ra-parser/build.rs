@@ -65,11 +65,18 @@ fn build_lime_tool(lime_root: &Path, out_dir: &Path) -> PathBuf {
 
     let lime_bin = out_dir.join("lime");
 
+    // As of Lime v0.8, lime.c references the Rust emitter (`emit_rust_parser`
+    // / `emit_rust_crate`) implemented in src/emit_rust.c, so the host tool
+    // must link it too (mirrors the `lime` executable in lime/meson.build).
+    let emit_rust_src = lime_root.join("src/emit_rust.c");
     let status = Command::new("cc")
         .arg("-O2")
         .arg("-o")
         .arg(&lime_bin)
+        .arg(format!("-I{}", lime_root.join("src").display()))
+        .arg(format!("-I{}", lime_root.join("include").display()))
         .arg(&lime_src)
+        .arg(&emit_rust_src)
         .status()
         .expect("failed to invoke C compiler for lime tool");
 
