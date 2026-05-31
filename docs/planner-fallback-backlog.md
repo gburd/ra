@@ -56,7 +56,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 | ~~`Union`~~ / `Intersect` / `Except` | set operations (+ `ALL`) | **UNION/UNION ALL DONE** (Append + dedup). INTERSECT/EXCEPT defer (need flag-tagged SetOp) | P2 |
 | ~~`Window`~~ | ~~window functions~~ | **DONE** for row_number/rank/dense_rank and sum/count/avg/min/max OVER (PARTITION BY/ORDER BY, default frame, single spec). Explicit frames, multiple window specs, and lag/lead/ntile/nth_value/first_value/last_value defer | P2 |
 | ~~`Values`~~ | single-row `VALUES` | **DONE** (one-row Result). Multi-row VALUES defers (needs ValuesScan/RTE_VALUES) | P2 |
-| `CTE` / `RecursiveCTE` | `WITH` / `WITH RECURSIVE` | not verified | P1 |
+| `CTE` / `RecursiveCTE` | `WITH` / `WITH RECURSIVE` | **BLOCKED on range-table reconstruction**: build_table_map only sees top-level RTE_RELATION; a CTE's inner tables live in a separate sub-query rtable invisible to the plan_builder, so neither inlining (can't resolve columns) nor CteScan (needs RTE_CTE+subplan list) works yet | P2 |
 | `IndexScan` | index / index-only scans (optimizer- or advice-chosen) | `build_index_scan*` unverified; scan-strategy advice not physically honored | P2 |
 | `BitmapScan` | bitmap heap/index/and/or scans | `build_bitmap_*` crashed the backend (the removed Filter peephole) | P2 |
 | `Parallel` | parallel scan/hash-join/agg, `Gather` | not verified | P2 |
@@ -81,7 +81,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 
 | Feature | Status | Pri |
 |---|---|---|
-| Correlated / general subquery expressions | "Subquery expressions not yet supported in the e-graph" | P1 |
+| Correlated / general subquery expressions | "Subquery expressions not yet supported in the e-graph" — also needs the same range-table reconstruction as CTE | P2 |
 | (general) any `RelExpr` whose `to_rec`/`from_rec` round-trip is lossy | extend e-graph encoding | — |
 
 ## Known bugs causing fallback (not operator gaps)
