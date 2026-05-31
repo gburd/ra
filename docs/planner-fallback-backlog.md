@@ -55,7 +55,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 | ~~`Distinct`~~ | ~~`SELECT DISTINCT`~~ | **DONE** — `build_unique` sorts its input on all output columns (Sort+Unique) | — |
 | ~~`Union` / `Intersect` / `Except`~~ | set operations (+ `ALL`) | **DONE** — UNION/UNION ALL (Append+dedup), INTERSECT/EXCEPT (+ALL) via PG18 hashed SetOp | — |
 | ~~`Window`~~ | ~~window functions~~ | **DONE** for row_number/rank/dense_rank and sum/count/avg/min/max OVER (PARTITION BY/ORDER BY, default frame, single spec). Explicit frames, multiple window specs, and lag/lead/ntile/nth_value/first_value/last_value defer | P2 |
-| ~~`Values`~~ | single-row `VALUES` | **DONE** (one-row Result). Multi-row VALUES defers (needs ValuesScan/RTE_VALUES) | P2 |
+| ~~`Values`~~ | `VALUES (...)` | **DONE** — ValuesScan over PG's RTE_VALUES (single and multi-row) | — |
 | `CTE` / `RecursiveCTE` | `WITH` / `WITH RECURSIVE` | **BLOCKED on range-table reconstruction**: build_table_map only sees top-level RTE_RELATION; a CTE's inner tables live in a separate sub-query rtable invisible to the plan_builder, so neither inlining (can't resolve columns) nor CteScan (needs RTE_CTE+subplan list) works yet | P2 |
 | `IndexScan` | index / index-only scans (optimizer- or advice-chosen) | `build_index_scan*` unverified; scan-strategy advice not physically honored | P2 |
 | `BitmapScan` | bitmap heap/index/and/or scans | `build_bitmap_*` crashed the backend (the removed Filter peephole) | P2 |
