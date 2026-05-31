@@ -2310,6 +2310,36 @@ pub unsafe extern "C" fn ra_list_push(
     }
 }
 
+/// Prepend an item to the front of a list node (returns the same list).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `list` must be a valid List tagged pointer; `item` a valid tagged pointer.
+#[no_mangle]
+pub unsafe extern "C" fn ra_list_prepend(
+    state: *mut RaParseState,
+    list: *mut RaNode,
+    item: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some((NodeTag::List, list_idx)) = decode(list) else {
+        st.push_error("ra_list_prepend: invalid list pointer".to_owned());
+        return std::ptr::null_mut();
+    };
+    let Some((_tag, item_idx)) = decode(item) else {
+        st.push_error("ra_list_prepend: invalid item pointer".to_owned());
+        return std::ptr::null_mut();
+    };
+    if st.list_prepend(list_idx, item_idx) {
+        list
+    } else {
+        st.push_error(format!("ra_list_prepend: list index {list_idx} out of bounds"));
+        std::ptr::null_mut()
+    }
+}
+
 /// Build a `SortKey` node.
 ///
 /// `ascending`: 0 = DESC, nonzero = ASC.

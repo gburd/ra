@@ -1268,13 +1268,13 @@ expr(A) ::= expr(B) NOT SIMILAR IDENT expr(C). [SIMILAR] {
 /* -- IN expression ------------------------------------------------- */
 
 expr(A) ::= expr(B) IN LPAREN expr_list(C) RPAREN. [IN] {
-    /* Encode as __in_list(values...) with test expr prepended. */
-    (void)B; /* Test expr handled by optimizer layer. */
+    /* Encode as __in_list(test, values...) — test expr is the first arg. */
+    ra_list_prepend(pstate, C, B);
     A = ra_func(pstate, "__in_list", C);
 }
 
 expr(A) ::= expr(B) NOT IN LPAREN expr_list(C) RPAREN. [IN] {
-    (void)B;
+    ra_list_prepend(pstate, C, B);
     A = ra_unary_op(pstate, 0, ra_func(pstate, "__in_list", C));
 }
 

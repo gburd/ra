@@ -160,6 +160,7 @@ RaNode *ra_window_expr(RaParseState *st, uint32_t func_code,
 
 RaNode *ra_list_new(RaParseState *st);
 RaNode *ra_list_push(RaParseState *st, RaNode *list, RaNode *item);
+RaNode *ra_list_prepend(RaParseState *st, RaNode *list, RaNode *item);
 RaNode *ra_sort_key(RaParseState *st, RaNode *expr,
                     uint32_t ascending, uint32_t nulls_first);
 

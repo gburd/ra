@@ -358,6 +358,17 @@ impl RaParseState {
         }
     }
 
+    /// Insert `item_idx` at the front of the list (used to prepend an IN
+    /// test expression ahead of its value list).
+    pub fn list_prepend(&mut self, list_idx: usize, item_idx: usize) -> bool {
+        if let Some(list) = self.lists.get_mut(list_idx) {
+            list.insert(0, item_idx);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Record a parse error (from builder/semantic actions).
     pub fn push_error(&mut self, msg: String) {
         self.errors.push(msg);
