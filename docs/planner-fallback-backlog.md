@@ -81,7 +81,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 
 | Feature | Status | Pri |
 |---|---|---|
-| Correlated / IN / EXISTS / scalar subqueries | The optimizer leaves them as `Expr::SubQuery`; expr_translator can't translate a SubQuery so they **fall back safely**. Full support needs decorrelation (EXISTS/IN→Semi/Anti join) or SubPlan construction — deep optimizer work | P2 |
+| Correlated / IN / EXISTS / scalar subqueries | **Passthrough derived tables (FROM sub-queries) DONE** (flatten + alias map). Correlated/IN/EXISTS/scalar subqueries in expressions still fall back (need decorrelation or SubPlan) | P2 |
 | (general) any `RelExpr` whose `to_rec`/`from_rec` round-trip is lossy | extend e-graph encoding | — |
 
 ## Known bugs causing fallback (not operator gaps)
