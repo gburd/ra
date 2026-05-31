@@ -81,14 +81,14 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 
 | Feature | Status | Pri |
 |---|---|---|
-| Correlated / general subquery expressions | "Subquery expressions not yet supported in the e-graph" — also needs the same range-table reconstruction as CTE | P2 |
+| Correlated / IN / EXISTS / scalar subqueries | The optimizer leaves them as `Expr::SubQuery`; expr_translator can't translate a SubQuery so they **fall back safely**. Full support needs decorrelation (EXISTS/IN→Semi/Anti join) or SubPlan construction — deep optimizer work | P2 |
 | (general) any `RelExpr` whose `to_rec`/`from_rec` round-trip is lossy | extend e-graph encoding | — |
 
 ## Known bugs causing fallback (not operator gaps)
 
 | Bug | Trigger | Status | Pri |
 |---|---|---|---|
-| Index-stats double-free | planning a query over an indexed table (intermittent) — `pfree called with invalid pointer (header 0x7f…)` | A `pfree` of an already-freed pointer in `stats_bridge` index-stats gathering. PG's `pfree` guard catches it (no corruption) and the planner-hook `catch_unwind` falls back, so results stay correct; but it discards Ra's plan. Wrapped `gather_index_stats` in `catch_unwind` reduced but did not eliminate it — not yet root-caused (became too rare to capture a backtrace). Use `backtrace_functions='BogusFree'` on an assert build to catch the caller. | P1 |
+| Index-stats double-free | planning over an indexed table (intermittent) — `pfree invalid pointer 0x7f…` — **contained** (catch_unwind → no index stats; correctness unaffected) and NOT reproducible in 750 stats-heavy queries; needs ASan + a repro to root-cause | A `pfree` of an already-freed pointer in `stats_bridge` index-stats gathering. PG's `pfree` guard catches it (no corruption) and the planner-hook `catch_unwind` falls back, so results stay correct; but it discards Ra's plan. Wrapped `gather_index_stats` in `catch_unwind` reduced but did not eliminate it — not yet root-caused (became too rare to capture a backtrace). Use `backtrace_functions='BogusFree'` on an assert build to catch the caller. | P1 |
 
 ## Definition of done
 
