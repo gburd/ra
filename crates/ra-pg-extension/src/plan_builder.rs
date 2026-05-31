@@ -246,7 +246,13 @@ impl PlanBuilder {
             // VALUES: built as an Append of one-row Result nodes;
             // build_values_result Errs (→ fallback) for non-constant rows.
             RelExpr::Values { .. } => None,
-            RelExpr::CTE { .. } => Some("CTE"),
+            // Non-recursive CTE is inlined (Scan(cte) → definition) and its
+            // base relations flattened into the rtable; build_plan Errs (→
+            // fallback) if a reference can't be resolved (e.g. CTE-qualified
+            // columns, multi-relation CTE bodies).
+            RelExpr::CTE { definition, body, .. } => {
+                Self::first_unsupported_op(definition).or_else(|| Self::first_unsupported_op(body))
+            }
             RelExpr::RecursiveCTE { .. } => Some("RecursiveCTE"),
             RelExpr::Unnest { .. } | RelExpr::MultiUnnest { .. } => Some("Unnest"),
             RelExpr::TableFunction { .. } => Some("TableFunction"),
@@ -325,16 +331,43 @@ impl PlanBuilder {
 
         // Copy range table and result relations from original query
         if !self.original_query.is_null() {
-            (*stmt).rtable = (*self.original_query).rtable;
-            // PG16+ moved per-relation permission checking out of
-            // RangeTblEntry into a separate RTEPermissionInfo list that
-            // the RTE references via `perminfoindex`. Since we copy the
-            // rtable verbatim (perminfoindex values intact), we must
-            // propagate the matching permInfos list too, or the
-            // executor rejects the plan with "invalid perminfoindex".
-            #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
-            {
-                (*stmt).permInfos = (*self.original_query).rteperminfos;
+            // Flatten any non-recursive CTE relations into a fresh rtable copy
+            // (never mutate PG's parse tree — fallback would then see it). The
+            // appended order matches build_table_map's index assignment.
+            let cte_rtes = cte_flatten_rtes(self.original_query);
+            if cte_rtes.is_empty() {
+                (*stmt).rtable = (*self.original_query).rtable;
+                #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
+                {
+                    (*stmt).permInfos = (*self.original_query).rteperminfos;
+                }
+            } else {
+                let mut rtable = pg_sys::list_copy((*self.original_query).rtable);
+                #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
+                let mut perminfos = if (*self.original_query).rteperminfos.is_null() {
+                    std::ptr::null_mut()
+                } else {
+                    pg_sys::list_copy((*self.original_query).rteperminfos)
+                };
+                for (rte, pinfo) in cte_rtes {
+                    let rte_copy = pg_sys::copyObjectImpl(rte.cast()) as *mut pg_sys::RangeTblEntry;
+                    #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
+                    {
+                        if pinfo.is_null() {
+                            (*rte_copy).perminfoindex = 0;
+                        } else {
+                            let pcopy = pg_sys::copyObjectImpl(pinfo.cast());
+                            perminfos = pg_sys::lappend(perminfos, pcopy);
+                            (*rte_copy).perminfoindex = pg_sys::list_length(perminfos) as u32;
+                        }
+                    }
+                    rtable = pg_sys::lappend(rtable, rte_copy.cast());
+                }
+                (*stmt).rtable = rtable;
+                #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
+                {
+                    (*stmt).permInfos = perminfos;
+                }
             }
             // PG18+ run-time pruning tracks which relids the executor may
             // open via `unprunableRelids`; relations not listed there are
@@ -343,7 +376,7 @@ impl PlanBuilder {
             // entry is unprunable (always opened).
             #[cfg(feature = "pg18")]
             {
-                let n = pg_sys::list_length((*self.original_query).rtable);
+                let n = pg_sys::list_length((*stmt).rtable);
                 if n > 0 {
                     (*stmt).unprunableRelids =
                         pg_sys::bms_add_range(std::ptr::null_mut(), 1, n);
@@ -529,9 +562,12 @@ impl PlanBuilder {
                 suffix_keys,
                 input,
             } => self.build_incremental_sort(prefix_keys, suffix_keys, input),
-            RelExpr::CTE { body, .. } => {
-                // CTE body is the primary output; definition is already materialized.
-                self.build_plan(body)
+            RelExpr::CTE { name, definition, body } => {
+                // Inline the non-recursive CTE: replace Scan(name) in the body
+                // with the definition (PG's default). The definition's base
+                // relations are flattened into the rtable by cte_flatten_rtes.
+                let inlined = inline_cte_scan(body, name, definition);
+                self.build_plan(&inlined)
             }
             RelExpr::RecursiveCTE { body, .. } => self.build_plan(body),
             RelExpr::MvScan { view_name, .. } => self.build_seq_scan(view_name),
@@ -3292,6 +3328,10 @@ impl PlanBuilder {
         if plan.is_null() {
             return Ok(());
         }
+        // A projection defines the complete output, so replace any existing
+        // targetlist (a nested Project from CTE inlining would otherwise
+        // double the columns by appending).
+        (*plan).targetlist = std::ptr::null_mut();
         for (i, pc) in columns.iter().enumerate() {
             let pg_expr = expr_translator::translate(&pc.expr, &self.expr_ctx);
             if pg_expr.is_null() {
@@ -4084,7 +4124,139 @@ pub unsafe fn build_table_map(
         let rtindex = (i + 1) as pg_sys::Index;
         map.insert(name, (rtindex, relid));
     }
+    // Flatten non-recursive CTE relations: assign each the next range-table
+    // index past the original rtable (build_planned_stmt appends them to the
+    // PlannedStmt rtable in the same order). Keeps the rtindex_map and the
+    // executed rtable consistent without mutating PG's parse tree.
+    let mut next = length + 1;
+    for (rte, _pinfo) in cte_flatten_rtes(query) {
+        let relid = (*rte).relid;
+        let relname = pg_sys::get_rel_name(relid);
+        if relname.is_null() {
+            continue;
+        }
+        let name = std::ffi::CStr::from_ptr(relname)
+            .to_string_lossy()
+            .to_lowercase();
+        map.entry(name).or_insert((next as pg_sys::Index, relid));
+        next += 1;
+    }
     map
+}
+
+/// Inline a non-recursive CTE: replace `Scan(cte_name)` references in `body`
+/// with the CTE `definition`. PostgreSQL inlines non-recursive CTEs by
+/// default; doing it here lets the flattened base relations resolve. Only
+/// recurses through the operator shapes Ra builds; in any other node a
+/// `Scan(cte_name)` survives and the build then defers to native PG.
+fn inline_cte_scan(body: &RelExpr, name: &str, def: &RelExpr) -> RelExpr {
+    let rec = |e: &RelExpr| Box::new(inline_cte_scan(e, name, def));
+    match body {
+        RelExpr::Scan { table, alias } => {
+            let refs = table.eq_ignore_ascii_case(name)
+                || alias.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(name));
+            if refs {
+                def.clone()
+            } else {
+                body.clone()
+            }
+        }
+        RelExpr::Filter { predicate, input } => RelExpr::Filter {
+            predicate: predicate.clone(),
+            input: rec(input),
+        },
+        RelExpr::Project { columns, input } => RelExpr::Project {
+            columns: columns.clone(),
+            input: rec(input),
+        },
+        RelExpr::Aggregate { aggregates, group_by, input } => RelExpr::Aggregate {
+            aggregates: aggregates.clone(),
+            group_by: group_by.clone(),
+            input: rec(input),
+        },
+        RelExpr::Sort { keys, input } => RelExpr::Sort {
+            keys: keys.clone(),
+            input: rec(input),
+        },
+        RelExpr::Limit { count, offset, input } => RelExpr::Limit {
+            count: *count,
+            offset: *offset,
+            input: rec(input),
+        },
+        RelExpr::Distinct { input } => RelExpr::Distinct { input: rec(input) },
+        RelExpr::Window { functions, input } => RelExpr::Window {
+            functions: functions.clone(),
+            input: rec(input),
+        },
+        RelExpr::Join { join_type, condition, left, right } => RelExpr::Join {
+            join_type: *join_type,
+            condition: condition.clone(),
+            left: rec(left),
+            right: rec(right),
+        },
+        RelExpr::Union { left, right, all } => RelExpr::Union {
+            left: rec(left),
+            right: rec(right),
+            all: *all,
+        },
+        RelExpr::Intersect { left, right, all } => RelExpr::Intersect {
+            left: rec(left),
+            right: rec(right),
+            all: *all,
+        },
+        RelExpr::Except { left, right, all } => RelExpr::Except {
+            left: rec(left),
+            right: rec(right),
+            all: *all,
+        },
+        other => other.clone(),
+    }
+}
+
+/// Range-table entries from non-recursive CTE definitions, flattened in a
+/// deterministic order so the rtindex_map and the PlannedStmt rtable agree.
+/// Returns `(rte, perminfo)` pairs; the perminfo (from the CTE sub-query's
+/// rteperminfos) must be copied into the main permInfos so permission checks
+/// are preserved. Returns empty unless every CTE is non-recursive and its
+/// sub-query's range table is entirely base relations (the simple,
+/// inline-able shape); anything else defers the whole query to native PG.
+pub unsafe fn cte_flatten_rtes(
+    query: *mut pg_sys::Query,
+) -> Vec<(*mut pg_sys::RangeTblEntry, *mut pg_sys::RangeTblEntry)> {
+    let mut out = Vec::new();
+    if query.is_null() || (*query).cteList.is_null() {
+        return out;
+    }
+    let ctes = (*query).cteList;
+    let cte_elems = (*ctes).elements;
+    for c in 0..(*ctes).length {
+        let cte = (*cte_elems.add(c as usize)).ptr_value as *mut pg_sys::CommonTableExpr;
+        if cte.is_null() || (*cte).cterecursive {
+            return Vec::new();
+        }
+        let cq = (*cte).ctequery as *mut pg_sys::Query;
+        if cq.is_null() || (*cq).rtable.is_null() {
+            return Vec::new();
+        }
+        let crt = (*cq).rtable;
+        let cre = (*crt).elements;
+        for i in 0..(*crt).length {
+            let rte = (*cre.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+            if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
+                // Non-relation in the CTE body (subquery, join RTE, ...) —
+                // outside the simple inline-able shape.
+                return Vec::new();
+            }
+            let pinfo = if (*rte).perminfoindex > 0 && !(*cq).rteperminfos.is_null() {
+                pg_sys::list_nth((*cq).rteperminfos, ((*rte).perminfoindex - 1) as i32)
+                    as *mut pg_sys::RangeTblEntry
+            } else {
+                std::ptr::null_mut()
+            };
+            out.push((rte, pinfo));
+        }
+    }
+    out
 }
 
 /// Resolve a table name to its PostgreSQL relation OID using the search path.
