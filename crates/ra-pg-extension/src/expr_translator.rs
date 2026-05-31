@@ -722,6 +722,32 @@ unsafe fn build_func_expr(name: &str, args: &[RaExpr], ctx: &ExprContext) -> *mu
 
     let rettype = pg_sys::get_func_rettype(funcoid);
 
+    // Derive the input collation from the arguments (PG requires it for
+    // collation-sensitive functions such as upper()/lower()). The result
+    // collation applies only when the result type is itself collatable.
+    let mut inputcollid = pg_sys::InvalidOid;
+    {
+        let elems = if pg_args.is_null() {
+            std::ptr::null()
+        } else {
+            (*pg_args).elements
+        };
+        let n = if pg_args.is_null() { 0 } else { (*pg_args).length };
+        for i in 0..n {
+            let a = (*elems.add(i as usize)).ptr_value.cast::<pg_sys::Expr>();
+            let c = pg_sys::exprCollation(a.cast());
+            if c != pg_sys::InvalidOid {
+                inputcollid = c;
+                break;
+            }
+        }
+    }
+    let funccollid = if pg_sys::get_typcollation(rettype) == pg_sys::InvalidOid {
+        pg_sys::InvalidOid
+    } else {
+        inputcollid
+    };
+
     let node = alloc::<pg_sys::FuncExpr>();
     (*node).xpr.type_ = pg_sys::NodeTag::T_FuncExpr;
     (*node).funcid = funcoid;
@@ -729,8 +755,8 @@ unsafe fn build_func_expr(name: &str, args: &[RaExpr], ctx: &ExprContext) -> *mu
     (*node).funcretset = false;
     (*node).funcvariadic = false;
     (*node).funcformat = pg_sys::CoercionForm::COERCE_EXPLICIT_CALL;
-    (*node).funccollid = pg_sys::InvalidOid;
-    (*node).inputcollid = pg_sys::InvalidOid;
+    (*node).funccollid = funccollid;
+    (*node).inputcollid = inputcollid;
     (*node).args = pg_args;
     (node as *mut pg_sys::Expr)
 }
@@ -813,14 +839,66 @@ unsafe fn build_cast(inner: &RaExpr, target_type: &str, ctx: &ExprContext) -> *m
     if target_oid == pg_sys::InvalidOid {
         return std::ptr::null_mut();
     }
+    let source_oid = pg_sys::exprType(arg.cast());
+    let source_coll = pg_sys::exprCollation(arg.cast());
+    let target_coll = if pg_sys::get_typcollation(target_oid) == pg_sys::InvalidOid {
+        pg_sys::InvalidOid
+    } else {
+        source_coll
+    };
 
-    let node = alloc::<pg_sys::CoerceViaIO>();
-    (*node).xpr.type_ = pg_sys::NodeTag::T_CoerceViaIO;
-    (*node).arg = arg.cast();
-    (*node).resulttype = target_oid;
-    (*node).resultcollid = pg_sys::InvalidOid;
-    (*node).coerceformat = pg_sys::CoercionForm::COERCE_EXPLICIT_CAST;
-    (node as *mut pg_sys::Expr)
+    // No-op cast (same type) → return the argument unchanged.
+    if source_oid == target_oid {
+        return arg;
+    }
+
+    // Resolve the correct coercion: a dedicated cast function (e.g.
+    // bool→int4), a binary relabel (binary-compatible types), or text I/O.
+    // Using CoerceViaIO unconditionally is wrong for function casts (e.g.
+    // bool→int via I/O parses 'f' as an integer and errors).
+    let mut castfunc = pg_sys::InvalidOid;
+    let path = pg_sys::find_coercion_pathway(
+        target_oid,
+        source_oid,
+        pg_sys::CoercionContext::COERCION_EXPLICIT,
+        &mut castfunc,
+    );
+    match path {
+        pg_sys::CoercionPathType::COERCION_PATH_FUNC if castfunc != pg_sys::InvalidOid => {
+            let node = alloc::<pg_sys::FuncExpr>();
+            (*node).xpr.type_ = pg_sys::NodeTag::T_FuncExpr;
+            (*node).funcid = castfunc;
+            (*node).funcresulttype = target_oid;
+            (*node).funcretset = false;
+            (*node).funcvariadic = false;
+            (*node).funcformat = pg_sys::CoercionForm::COERCE_EXPLICIT_CAST;
+            (*node).funccollid = target_coll;
+            (*node).inputcollid = source_coll;
+            (*node).args = pg_sys::lappend(std::ptr::null_mut(), arg.cast());
+            node.cast()
+        }
+        pg_sys::CoercionPathType::COERCION_PATH_RELABELTYPE => {
+            let node = alloc::<pg_sys::RelabelType>();
+            (*node).xpr.type_ = pg_sys::NodeTag::T_RelabelType;
+            (*node).arg = arg.cast();
+            (*node).resulttype = target_oid;
+            (*node).resulttypmod = -1;
+            (*node).resultcollid = target_coll;
+            (*node).relabelformat = pg_sys::CoercionForm::COERCE_EXPLICIT_CAST;
+            node.cast()
+        }
+        pg_sys::CoercionPathType::COERCION_PATH_COERCEVIAIO => {
+            let node = alloc::<pg_sys::CoerceViaIO>();
+            (*node).xpr.type_ = pg_sys::NodeTag::T_CoerceViaIO;
+            (*node).arg = arg.cast();
+            (*node).resulttype = target_oid;
+            (*node).resultcollid = target_coll;
+            (*node).coerceformat = pg_sys::CoercionForm::COERCE_EXPLICIT_CAST;
+            node.cast()
+        }
+        // ARRAYCOERCE / NONE: defer to native PG.
+        _ => std::ptr::null_mut(),
+    }
 }
 
 /// Resolve a type name string to its OID.
