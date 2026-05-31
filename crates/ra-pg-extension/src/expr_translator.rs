@@ -42,6 +42,25 @@ pub struct ExprContext {
     /// expression translation). Lets a `SubQuery` expression resolve to its
     /// already-constructed SubPlan node.
     pub subplans: std::cell::RefCell<HashMap<usize, *mut pg_sys::Expr>>,
+    /// Active CTE output-column scope for recursive-CTE recursive-term / body
+    /// translation (columns resolve to a WorkTableScan / CteScan, not catalog).
+    pub cte_scope: std::cell::RefCell<Option<CteScope>>,
+}
+
+/// One output column of a CTE (no catalog entry; types come from the RTE_CTE).
+pub struct CteCol {
+    /// Lower-cased column name.
+    pub name: String,
+    pub typ: pg_sys::Oid,
+    pub typmod: i32,
+    pub coll: pg_sys::Oid,
+}
+
+/// The output columns of an in-scope CTE and the range-table index of the
+/// scan (WorkTableScan or CteScan) that produces them.
+pub struct CteScope {
+    pub rtindex: pg_sys::Index,
+    pub cols: Vec<CteCol>,
 }
 
 /// Translate a Ra [`RaExpr`] to a PostgreSQL `Expr*` node.
@@ -185,6 +204,27 @@ unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *m
         Ok(cs) => cs,
         Err(_) => return std::ptr::null_mut(),
     };
+
+    // CTE-column resolution: when building a recursive CTE's recursive term
+    // or body, columns refer to the CTE's output (a WorkTableScan / CteScan),
+    // which has no catalog entry. Resolve such names against the CTE scope.
+    if let Some(scope) = ctx.cte_scope.borrow().as_ref() {
+        let want = col.column.to_lowercase();
+        for (i, c) in scope.cols.iter().enumerate() {
+            if c.name == want {
+                let var = alloc::<pg_sys::Var>();
+                (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+                (*var).varno = scope.rtindex as i32;
+                (*var).varattno = (i + 1) as i16;
+                (*var).vartype = c.typ;
+                (*var).vartypmod = c.typmod;
+                (*var).varcollid = c.coll;
+                (*var).varlevelsup = 0;
+                (*var).location = -1;
+                return var.cast();
+            }
+        }
+    }
 
     // Resolve the column to (rtindex, reloid, attnum). A qualified
     // reference (`t.col`) looks up its table directly. An UNqualified

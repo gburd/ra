@@ -70,7 +70,7 @@ use ra_core::algebra::{AggregateExpr, JoinType, OnConflict, ProjectionColumn, Re
 use ra_core::expr::Expr;
 use ra_core::statistics::Statistics;
 
-use crate::expr_translator::{self, ExprContext};
+use crate::expr_translator::{self, CteCol, CteScope, ExprContext};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -128,6 +128,37 @@ pub struct PlanBuilder {
     subplans: Vec<*mut pg_sys::Plan>,
     /// PARAM_EXEC parameter types (becomes `PlannedStmt.paramExecTypes`).
     param_types: Vec<pg_sys::Oid>,
+    /// Active recursive-CTE wiring while building its recursive term / body,
+    /// so a `Scan` of the CTE name builds a WorkTableScan or CteScan.
+    cte_runtime: Option<CteRuntime>,
+    /// True while building any term of a recursive CTE, so the anchor's
+    /// no-FROM `Scan(__dual)` becomes a one-row Result (standalone no-FROM
+    /// selects keep falling back to native PG).
+    in_recursive_cte: bool,
+}
+
+/// How a `Scan` of the in-scope recursive CTE should be built.
+enum CteScanMode {
+    /// Recursive term self-reference → WorkTableScan.
+    Recursive,
+    /// Body reference → CteScan.
+    Body,
+}
+
+/// Wiring for the recursive CTE currently being built.
+struct CteRuntime {
+    /// CTE name (lower-cased).
+    name: String,
+    /// Range-table index of the RTE_CTE (shared by both scan kinds).
+    rtindex: pg_sys::Index,
+    /// 1-based index into `PlannedStmt.subplans` of the RecursiveUnion.
+    cte_plan_id: i32,
+    /// PARAM_EXEC param holding the CTE result tuplestore.
+    cte_param: i32,
+    /// PARAM_EXEC param holding the working-table tuplestore.
+    wt_param: i32,
+    /// Whether a Scan of the CTE builds a WorkTableScan or CteScan.
+    mode: CteScanMode,
 }
 
 impl PlanBuilder {
@@ -159,6 +190,7 @@ impl PlanBuilder {
             rtindex_map,
             rtoid_map,
             subplans: std::cell::RefCell::new(HashMap::new()),
+            cte_scope: std::cell::RefCell::new(None),
         };
         let stats = gathered_stats
             .iter()
@@ -173,6 +205,8 @@ impl PlanBuilder {
             physical_choices: ra_engine::plan_advice_physical::PhysicalChoices::new(),
             subplans: Vec::new(),
             param_types: Vec::new(),
+            cte_runtime: None,
+            in_recursive_cte: false,
         }
     }
 
@@ -260,7 +294,17 @@ impl PlanBuilder {
             RelExpr::CTE { definition, body, .. } => {
                 Self::first_unsupported_op(definition).or_else(|| Self::first_unsupported_op(body))
             }
-            RelExpr::RecursiveCTE { .. } => Some("RecursiveCTE"),
+            // Recursive CTE → CteScan over RecursiveUnion{anchor,
+            // WorkTableScan}. Recurse into all three terms; build_plan Errs
+            // (→ fallback) for shapes the bespoke wiring can't resolve.
+            RelExpr::RecursiveCTE {
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => Self::first_unsupported_op(base_case)
+                .or_else(|| Self::first_unsupported_op(recursive_case))
+                .or_else(|| Self::first_unsupported_op(body)),
             RelExpr::Unnest { .. } | RelExpr::MultiUnnest { .. } => Some("Unnest"),
             RelExpr::TableFunction { .. } => Some("TableFunction"),
             RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => Some("IndexScan"),
@@ -433,6 +477,24 @@ impl PlanBuilder {
     unsafe fn build_plan(&mut self, expr: &RelExpr) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         match expr {
             RelExpr::Scan { table, alias } => {
+                if let Some(rt) = &self.cte_runtime {
+                    if table.to_lowercase() == rt.name {
+                        return self.build_cte_scan();
+                    }
+                }
+                if table.eq_ignore_ascii_case("__dual") {
+                    // No-FROM single-row source. As a recursive-CTE anchor
+                    // (`SELECT 1`) it is a one-row Result; standalone no-FROM
+                    // selects have no real relation to scan, so defer cleanly
+                    // to native PG rather than scanning a zero-OID relation.
+                    return if self.in_recursive_cte {
+                        self.build_result_node()
+                    } else {
+                        Err(PlanBuilderError::UnsupportedVariant(
+                            "no-FROM SELECT; deferring to native planner".to_owned(),
+                        ))
+                    };
+                }
                 self.build_scan_with_advice(table, alias.as_deref())
             }
             RelExpr::Filter { predicate, input } => {
@@ -608,7 +670,13 @@ impl PlanBuilder {
                 let inlined = inline_cte_scan(body, name, definition);
                 self.build_plan(&inlined)
             }
-            RelExpr::RecursiveCTE { body, .. } => self.build_plan(body),
+            RelExpr::RecursiveCTE {
+                name,
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => self.build_recursive_cte(name, base_case, recursive_case, body),
             RelExpr::MvScan { view_name, .. } => self.build_seq_scan(view_name),
             RelExpr::Unnest { .. } | RelExpr::TableFunction { .. } => {
                 self.build_function_scan(expr)
@@ -1541,6 +1609,244 @@ impl PlanBuilder {
         for c in expr.children() {
             Self::collect_scan_tables(c, out);
         }
+    }
+
+    /// Locate the `RTE_CTE` for `name` in the original query's range table and
+    /// extract its range-table index and output columns.
+    unsafe fn find_cte_rte(
+        &self,
+        name: &str,
+    ) -> Result<(pg_sys::Index, Vec<CteCol>), PlanBuilderError> {
+        let err = || PlanBuilderError::UnsupportedVariant("recursive CTE rte".to_owned());
+        if self.original_query.is_null() {
+            return Err(err());
+        }
+        let rtable = (*self.original_query).rtable;
+        if rtable.is_null() {
+            return Err(err());
+        }
+        let e = (*rtable).elements;
+        for i in 0..(*rtable).length {
+            let rte = (*e.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+            if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_CTE {
+                continue;
+            }
+            if (*rte).ctename.is_null()
+                || !std::ffi::CStr::from_ptr((*rte).ctename)
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(name)
+            {
+                continue;
+            }
+            let (types, mods, colls) = ((*rte).coltypes, (*rte).coltypmods, (*rte).colcollations);
+            if types.is_null() {
+                return Err(err());
+            }
+            let names = if (*rte).eref.is_null() {
+                std::ptr::null_mut()
+            } else {
+                (*(*rte).eref).colnames
+            };
+            let mut cols = Vec::with_capacity((*types).length as usize);
+            for j in 0..(*types).length as usize {
+                let typ = (*(*types).elements.add(j)).oid_value;
+                let typmod = (*(*mods).elements.add(j)).int_value;
+                let coll = (*(*colls).elements.add(j)).oid_value;
+                let name = if names.is_null() || j >= (*names).length as usize {
+                    format!("column{}", j + 1)
+                } else {
+                    let s = (*(*names).elements.add(j)).ptr_value as *mut pg_sys::String;
+                    std::ffi::CStr::from_ptr((*s).sval).to_string_lossy().to_lowercase()
+                };
+                cols.push(CteCol { name, typ, typmod, coll });
+            }
+            return Ok(((i + 1) as pg_sys::Index, cols));
+        }
+        Err(err())
+    }
+
+    /// One-row `Result` node (no scan); the enclosing Project sets its tlist.
+    unsafe fn build_result_node(&mut self) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let node = self.alloc_node::<pg_sys::Result>();
+        if node.is_null() {
+            return Err(PlanBuilderError::NullPointer("Result".to_owned()));
+        }
+        (*node).plan.type_ = pg_sys::NodeTag::T_Result;
+        (*node).plan.plan_rows = 1.0;
+        Ok(node.cast())
+    }
+
+    /// Build a `WorkTableScan` (recursive term) or `CteScan` (body) over the
+    /// in-scope recursive CTE, projecting the CTE's columns.
+    unsafe fn build_cte_scan(&mut self) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let rt = self
+            .cte_runtime
+            .as_ref()
+            .ok_or_else(|| PlanBuilderError::UnsupportedVariant("cte scan".to_owned()))?;
+        let (rtindex, cte_plan_id, cte_param, wt_param) =
+            (rt.rtindex, rt.cte_plan_id, rt.cte_param, rt.wt_param);
+        let is_body = matches!(rt.mode, CteScanMode::Body);
+        let tlist = self.cte_column_tlist(rtindex);
+        if is_body {
+            let n = self.alloc_node::<pg_sys::CteScan>();
+            (*n).scan.plan.type_ = pg_sys::NodeTag::T_CteScan;
+            (*n).scan.plan.targetlist = tlist;
+            (*n).scan.scanrelid = rtindex;
+            (*n).ctePlanId = cte_plan_id;
+            (*n).cteParam = cte_param;
+            Ok(n.cast())
+        } else {
+            let n = self.alloc_node::<pg_sys::WorkTableScan>();
+            (*n).scan.plan.type_ = pg_sys::NodeTag::T_WorkTableScan;
+            (*n).scan.plan.targetlist = tlist;
+            (*n).scan.scanrelid = rtindex;
+            (*n).wtParam = wt_param;
+            Ok(n.cast())
+        }
+    }
+
+    /// Targetlist of `Var`s for the in-scope CTE's columns (varno = `rtindex`).
+    unsafe fn cte_column_tlist(&self, rtindex: pg_sys::Index) -> *mut pg_sys::List {
+        let scope = self.expr_ctx.cte_scope.borrow();
+        let mut tlist: *mut pg_sys::List = std::ptr::null_mut();
+        if let Some(s) = scope.as_ref() {
+            for (i, c) in s.cols.iter().enumerate() {
+                let var = self.alloc_node::<pg_sys::Var>();
+                (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+                (*var).varno = rtindex as i32;
+                (*var).varattno = (i + 1) as i16;
+                (*var).vartype = c.typ;
+                (*var).vartypmod = c.typmod;
+                (*var).varcollid = c.coll;
+                (*var).location = -1;
+                let rn = match std::ffi::CString::new(c.name.as_str()) {
+                    Ok(s) => s.into_raw().cast::<i8>(),
+                    Err(_) => std::ptr::null_mut(),
+                };
+                let te = pg_sys::makeTargetEntry(var.cast(), (i + 1) as i16, rn, false);
+                tlist = pg_sys::lappend(tlist, te.cast());
+            }
+        }
+        tlist
+    }
+
+    /// Build a recursive CTE as `CteScan(body) → RecursiveUnion{anchor,
+    /// WorkTableScan(recursive)}`, referencing PG's existing RTE_CTE.
+    unsafe fn build_recursive_cte(
+        &mut self,
+        name: &str,
+        base: &RelExpr,
+        recursive: &RelExpr,
+        body: &RelExpr,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let lname = name.to_lowercase();
+        let (rtindex, cols) = self.find_cte_rte(&lname)?;
+        let cte_param = self.alloc_param(pg_sys::INTERNALOID);
+        let wt_param = self.alloc_param(pg_sys::INTERNALOID);
+        self.in_recursive_cte = true;
+        let result = self.build_recursive_cte_inner(
+            &lname, base, recursive, body, rtindex, cols, cte_param, wt_param,
+        );
+        self.in_recursive_cte = false;
+        result
+    }
+
+    #[expect(clippy::too_many_arguments, reason = "internal recursive-CTE wiring")]
+    unsafe fn build_recursive_cte_inner(
+        &mut self,
+        lname: &str,
+        base: &RelExpr,
+        recursive: &RelExpr,
+        body: &RelExpr,
+        rtindex: pg_sys::Index,
+        cols: Vec<CteCol>,
+        cte_param: i32,
+        wt_param: i32,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        // Conservative shape guard: the bespoke WorkTableScan / CteScan wiring
+        // only resolves a `Scan` of the CTE itself. A join of the CTE with a
+        // base relation (in the recursive term or body) routes through
+        // build_projected_join, which would try to scan the CTE as a base
+        // table — defer those cleanly to native PG instead of panicking.
+        let cte_only = |e: &RelExpr| {
+            let mut tabs = Vec::new();
+            Self::collect_scan_tables(e, &mut tabs);
+            tabs.iter()
+                .all(|t| t.eq_ignore_ascii_case(lname) || t.eq_ignore_ascii_case("__dual"))
+        };
+        if !cte_only(recursive) || !cte_only(body) {
+            return Err(PlanBuilderError::UnsupportedVariant(
+                "recursive CTE with base-relation join; deferring to native planner".to_owned(),
+            ));
+        }
+
+        // Anchor (non-recursive term): no self-reference, no CTE scope.
+        let base_plan = self.build_plan(base)?;
+        if base_plan.is_null() || (*base_plan).targetlist.is_null() {
+            return Err(PlanBuilderError::UnsupportedVariant("recursive anchor".to_owned()));
+        }
+
+        // Recursive term: Scan(name) → WorkTableScan; columns from the CTE.
+        let clone_cols = |cols: &[CteCol]| {
+            cols.iter()
+                .map(|c| CteCol { name: c.name.clone(), typ: c.typ, typmod: c.typmod, coll: c.coll })
+                .collect::<Vec<_>>()
+        };
+        self.cte_runtime = Some(CteRuntime {
+            name: lname.to_owned(),
+            rtindex,
+            cte_plan_id: 0,
+            cte_param,
+            wt_param,
+            mode: CteScanMode::Recursive,
+        });
+        *self.expr_ctx.cte_scope.borrow_mut() =
+            Some(CteScope { rtindex, cols: clone_cols(&cols) });
+        let rec_result = self.build_plan(recursive);
+        *self.expr_ctx.cte_scope.borrow_mut() = None;
+        self.cte_runtime = None;
+        let rec_plan = rec_result?;
+
+        // RecursiveUnion (UNION ALL → numCols = 0, no dedup).
+        let ru = self.alloc_node::<pg_sys::RecursiveUnion>();
+        (*ru).plan.type_ = pg_sys::NodeTag::T_RecursiveUnion;
+        (*ru).plan.lefttree = base_plan;
+        (*ru).plan.righttree = rec_plan;
+        (*ru).wtParam = wt_param;
+        (*ru).numCols = 0;
+        let mut ru_tlist: *mut pg_sys::List = std::ptr::null_mut();
+        for (i, c) in cols.iter().enumerate() {
+            let var = self.alloc_node::<pg_sys::Var>();
+            (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*var).varno = pg_sys::OUTER_VAR;
+            (*var).varattno = (i + 1) as i16;
+            (*var).vartype = c.typ;
+            (*var).vartypmod = c.typmod;
+            (*var).varcollid = c.coll;
+            (*var).location = -1;
+            let te = pg_sys::makeTargetEntry(var.cast(), (i + 1) as i16, std::ptr::null_mut(), false);
+            ru_tlist = pg_sys::lappend(ru_tlist, te.cast());
+        }
+        (*ru).plan.targetlist = ru_tlist;
+        (*ru).plan.plan_rows = (*base_plan).plan_rows.max(1.0);
+
+        self.subplans.push(ru.cast());
+        let cte_plan_id = self.subplans.len() as i32;
+
+        // Body: Scan(name) → CteScan referencing the RecursiveUnion subplan.
+        self.cte_runtime = Some(CteRuntime {
+            name: lname.to_owned(),
+            rtindex,
+            cte_plan_id,
+            cte_param,
+            wt_param,
+            mode: CteScanMode::Body,
+        });
+        *self.expr_ctx.cte_scope.borrow_mut() = Some(CteScope { rtindex, cols });
+        let body_result = self.build_plan(body);
+        *self.expr_ctx.cte_scope.borrow_mut() = None;
+        self.cte_runtime = None;
+        body_result
     }
 
     /// Allocate a `PARAM_EXEC` parameter of `ty` and return its id.
