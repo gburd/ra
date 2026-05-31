@@ -2046,6 +2046,7 @@ pub unsafe extern "C" fn ra_window_marker_full(
     args_list: *mut RaNode,
     partition_list: *mut RaNode,
     order_list: *mut RaNode,
+    has_frame: c_int,
 ) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
@@ -2073,6 +2074,16 @@ pub unsafe extern "C" fn ra_window_marker_full(
         args.push(Expr::Function {
             name: sentinel_name.to_string(),
             args: vec![key.expr],
+        });
+    }
+
+    // An explicit window frame is encoded as a sentinel arg so the
+    // optimizer/plan-builder can detect it and defer (the frame semantics
+    // are otherwise dropped). Frame-insensitive ranking functions ignore it.
+    if has_frame != 0 {
+        args.push(Expr::Function {
+            name: "__window_frame".to_string(),
+            args: Vec::new(),
         });
     }
 

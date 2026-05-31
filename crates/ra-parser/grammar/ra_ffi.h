@@ -70,7 +70,8 @@ RaNode *ra_window_marker(RaParseState *st, const char *name,
 RaNode *ra_window_marker_full(RaParseState *st, const char *name,
                                RaNode *args,
                                RaNode *partition_list,
-                               RaNode *order_list);
+                               RaNode *order_list,
+                               int has_frame);
 RaNode *ra_cte(RaParseState *st, const char *name,
                RaNode *definition, RaNode *body);
 RaNode *ra_window(RaParseState *st, RaNode *input, RaNode *funcs);
