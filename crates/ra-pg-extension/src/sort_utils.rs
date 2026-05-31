@@ -116,6 +116,11 @@ pub unsafe fn get_column_type_info(
     rel_oid: pg_sys::Oid,
     col_name: &str,
 ) -> Option<(pg_sys::Oid, pg_sys::Oid)> {
+    // No catalog relation (e.g. a CTE / derived-table output column) → caller
+    // must resolve the type elsewhere; never table_open(InvalidOid).
+    if rel_oid == pg_sys::InvalidOid {
+        return None;
+    }
     // We need to find the attnum for this column name first
     let rel = pg_sys::table_open(rel_oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
     if rel.is_null() {
@@ -167,6 +172,27 @@ pub fn extract_column_name(expr: &Expr) -> Option<&str> {
         Expr::Column(ColumnRef { column, .. }) => Some(column.as_str()),
         _ => None,
     }
+}
+
+/// Read the `(type_oid, collation_oid)` of the targetlist entry at 1-based
+/// position `attno`, using the entry's expression type. Returns `None` if the
+/// position is out of range. This is authoritative for CTE / derived columns
+/// that have no catalog relation.
+unsafe fn tlist_type_at(
+    tlist: *mut pg_sys::List,
+    attno: pg_sys::AttrNumber,
+) -> Option<(pg_sys::Oid, pg_sys::Oid)> {
+    if tlist.is_null() || attno < 1 || attno as i32 > (*tlist).length {
+        return None;
+    }
+    let te = (*(*tlist).elements.add((attno - 1) as usize)).ptr_value as *mut pg_sys::TargetEntry;
+    if te.is_null() || (*te).expr.is_null() {
+        return None;
+    }
+    Some((
+        pg_sys::exprType((*te).expr.cast()),
+        pg_sys::exprCollation((*te).expr.cast()),
+    ))
 }
 
 /// Build sort column arrays from a list of `SortKey`s.
@@ -225,8 +251,19 @@ pub unsafe fn build_sort_arrays(
             .unwrap_or((i + 1) as pg_sys::AttrNumber);
         *col_idx.add(i) = attno;
 
-        // Resolve type info and operators
-        let (type_oid, collation) = get_column_type_info(rel_oid, col_name)
+        // Resolve type info and operators. Prefer the child targetlist entry's
+        // own type/collation (authoritative for CTE / derived / base columns
+        // and avoids opening a relation — CTE columns have no relid, so a
+        // catalog lookup would `table_open(0)` and crash). Fall back to the
+        // catalog only when the targetlist type is unavailable.
+        let (type_oid, collation) = tlist_type_at(child_targetlist, attno)
+            .or_else(|| {
+                if rel_oid == pg_sys::InvalidOid {
+                    None
+                } else {
+                    get_column_type_info(rel_oid, col_name)
+                }
+            })
             .unwrap_or((pg_sys::INT4OID, pg_sys::InvalidOid));
 
         let ascending = matches!(key.direction, SortDirection::Asc);
