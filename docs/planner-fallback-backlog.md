@@ -244,10 +244,19 @@ shows two-bound `Index Cond`s; 12000 mixed stress queries with 0 crashes.
 no `$N` token (and ra-core no `Param` variant), so prepared statements fail
 Lime parse and already fall back to PG (which index-scans them correctly);
 adding native support is a grammar + ra-core + translator change, not a
-plan_builder one. Also pending: multi-column index prefixes (only the leading
-column is pushed today), `IndexOnlyScan` / `BitmapScan` emission, the
+plan_builder one. Also pending: `IndexOnlyScan` / `BitmapScan` emission, the
 optimizer choosing index access by cost, and a non-unique-equality
 `plan_rows` estimate better than the generic `0.1` selectivity.
+
+**Multi-column prefixes (added 2026-06-01).** `build_index_clause` matches a
+conjunct against *any* key column of the chosen index and emits the
+`INDEX_VAR` at that column's attno, checking the operator against that
+column's own operator family (`rd_opfamily[attno-1]`, capped at
+`indnkeyatts`), so `a = x AND b = y` on a compound index pushes both keys and
+mixed-type indexes (`(int, text)`) are handled correctly. Conjuncts on
+non-index columns stay as recheck `qual`. Validated row-equivalence +
+auto_explain (two-key `Index Cond`s, equality + non-leading range) + 10000
+compound stress queries with 0 crashes.
 
 ### Prior root cause (now resolved)
 The plan builder *has* `build_index_scan` / `build_index_only_scan` /
