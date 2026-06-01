@@ -187,3 +187,35 @@ parser's `apply_all` (`normalize_subqueries`), so every consumer —
 including the e-graph optimizer — sees normalized sub-queries, and the
 lowering workaround is removed.
 
+
+## Differential audit findings (2026-06-01)
+
+### Wrong results
+An exhaustive Ra-vs-PG sweep (~60 diverse shapes this round, on top of the
+five wrong-results fixed previously: DISTINCT aggregates, CAST coercion,
+function collation, correlated IN/ANY/ALL, and the monitor re-entrancy
+abort) found **no new wrong results**. NULL handling, set ops, casts,
+collation, aggregates/HAVING, joins, subqueries, and recursive CTEs are all
+row-equivalent to native PostgreSQL.
+
+### Suboptimal plans (top priority performance gap)
+**Ra emits a `SeqScan` for selective equality predicates on indexed
+columns** instead of an index scan. Measured: 200× `SELECT id,v FROM big
+WHERE id=1234567` on a 2M-row indexed table took 0.08 s with Ra vs 0.01 s
+native (8× slower). The plan builder *has* `build_index_scan` /
+`build_index_only_scan` / `build_bitmap_heap_scan` / `build_merge_join`,
+but `IndexScan`/`IndexOnlyScan`/`BitmapScan` `RelExpr`s are gated to
+fallback, and the optimizer does not emit them for indexed predicates.
+Forcing `INDEX_SCAN` advice produced correct results but no speedup (the
+index *condition* is not pushed onto the scan), so closing this gap is a
+real feature: emit index access paths with proper index quals + a
+cost-based choice, then admit them to the gate and verify each
+differentially. Until then Ra is correctness-complete but produces simpler
+(SeqScan/NestLoop) physical plans than PG for indexed / large-table queries.
+
+### EXPLAIN transparency
+`EXPLAIN` is a utility statement, so the planner hook skips it and EXPLAIN
+shows PostgreSQL's native plan, not the plan Ra actually builds for
+execution. For an extension that advertises new planner behaviour this is a
+transparency gap worth closing (e.g. an `EXPLAIN (RA_PROVENANCE)` option, as
+sketched in planner_hook.rs).
