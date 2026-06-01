@@ -367,3 +367,7 @@ pub fn parse_var(s: &str) -> egg::Var {
     s.parse()
         .expect("invalid egg::Var literal; pattern variables must start with '?'")
 }
+
+
+
+
