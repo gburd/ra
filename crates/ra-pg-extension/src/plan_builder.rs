@@ -4213,7 +4213,7 @@ impl PlanBuilder {
         }
         (*node).scan.plan.targetlist = tlist;
         (*node).scan.plan.plan_rows = rows.len() as f64;
-        (*node).scan.plan.total_cost = 0.01 * rows.len() as f64;
+        (*node).scan.plan.total_cost = host_cost_params().2 * rows.len() as f64;
         Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
     }
 
@@ -4326,9 +4326,8 @@ impl PlanBuilder {
     ///
     /// Falls back to conservative defaults when statistics are unavailable.
     unsafe fn set_costs_from_stats(&self, plan: &mut pg_sys::Plan, table: &str) {
-        // PostgreSQL cost constants (from GUC defaults)
-        const SEQ_PAGE_COST: f64 = 1.0;
-        const CPU_TUPLE_COST: f64 = 0.01;
+        // Host-calibrated cost parameters (not hardcoded GUC defaults).
+        let (seq_page_cost, _, cpu_tuple_cost, _) = host_cost_params();
 
         let table_lower = table.to_lowercase();
         if let Some(stats) = self.stats.get(&table_lower) {
@@ -4340,7 +4339,7 @@ impl PlanBuilder {
             };
 
             plan.startup_cost = 0.0;
-            plan.total_cost = relpages * SEQ_PAGE_COST + reltuples * CPU_TUPLE_COST;
+            plan.total_cost = relpages * seq_page_cost + reltuples * cpu_tuple_cost;
             plan.plan_rows = reltuples;
 
             // Sum avg_width from column stats, or default to 100
@@ -4368,9 +4367,7 @@ impl PlanBuilder {
     ///
     /// Index scans have higher per-page cost (random I/O) but read fewer pages.
     unsafe fn set_index_costs(&self, plan: &mut pg_sys::Plan, table: &str, selectivity: f64) {
-        const RANDOM_PAGE_COST: f64 = 4.0;
-        const CPU_TUPLE_COST: f64 = 0.01;
-        const CPU_INDEX_TUPLE_COST: f64 = 0.005;
+        let (_, random_page_cost, cpu_tuple_cost, cpu_index_tuple_cost) = host_cost_params();
 
         let table_lower = table.to_lowercase();
         if let Some(stats) = self.stats.get(&table_lower) {
@@ -4385,8 +4382,8 @@ impl PlanBuilder {
             let pages_fetched = (relpages * selectivity).max(1.0);
 
             plan.startup_cost = 0.1; // Index startup cost
-            plan.total_cost = pages_fetched * RANDOM_PAGE_COST
-                + selected_tuples * (CPU_INDEX_TUPLE_COST + CPU_TUPLE_COST);
+            plan.total_cost = pages_fetched * random_page_cost
+                + selected_tuples * (cpu_index_tuple_cost + cpu_tuple_cost);
             plan.plan_rows = selected_tuples;
             plan.plan_width = 100;
         } else {
@@ -4769,6 +4766,24 @@ fn split_conjuncts<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
     } else {
         out.push(expr);
     }
+}
+
+/// PostgreSQL cost parameters derived from the host's calibrated hardware
+/// model rather than hardcoded planner constants. Returns
+/// `(seq_page_cost, random_page_cost, cpu_tuple_cost, cpu_index_tuple_cost)`,
+/// each a ratio of detected/measured physical quantities with the sequential
+/// 8 KiB page read as the unit. On the reference machine these reduce to
+/// PostgreSQL's historical defaults.
+fn host_cost_params() -> (f64, f64, f64, f64) {
+    let cal = crate::extension_state::calibrated_cost_model();
+    let seq_mbps = cal.measurements.sequential_read_mbps.max(1.0);
+    // Nanoseconds to read one 8 KiB page sequentially on this host.
+    let page_seq_ns = 8192.0 * 1000.0 / seq_mbps;
+    let seq_page_cost = 1.0; // unit: one sequential page read
+    let random_page_cost = cal.random_io_ratio.max(1.0); // measured random:seq ratio
+    let cpu_tuple_cost = (cal.measurements.cpu_tuple_cost_ns / page_seq_ns).max(0.0);
+    let cpu_index_tuple_cost = cpu_tuple_cost * 0.5; // index tuples are narrower
+    (seq_page_cost, random_page_cost, cpu_tuple_cost, cpu_index_tuple_cost)
 }
 
 /// True if `op` is a comparison that can map to a btree index strategy.

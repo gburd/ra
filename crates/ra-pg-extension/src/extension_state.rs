@@ -118,6 +118,21 @@ pub fn cost_model() -> Option<&'static Arc<BitNetCostModel>> {
     COST_MODEL.get()
 }
 
+/// Host-calibrated cost model derived from the detected hardware profile.
+///
+/// Provides per-operation I/O and CPU costs measured/detected for this host
+/// instead of hardcoded planner constants. Falls back to the reference
+/// machine if hardware detection has not run (e.g. outside a backend).
+pub fn calibrated_cost_model() -> &'static ra_hardware::calibration::CalibratedCostModel {
+    static CALIBRATED: OnceLock<ra_hardware::calibration::CalibratedCostModel> = OnceLock::new();
+    CALIBRATED.get_or_init(|| {
+        HARDWARE_PROFILE.get().map_or_else(
+            ra_hardware::calibration::CalibratedCostModel::reference,
+            ra_hardware::calibration::CalibratedCostModel::from_profile,
+        )
+    })
+}
+
 /// Detect and store hardware profile.
 ///
 /// Called once during extension initialization (_PG_init).
