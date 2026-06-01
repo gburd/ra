@@ -15,32 +15,27 @@ use ra_stats::accuracy::{QualityMetrics, Staleness, StatisticsState};
 use ra_stats::integration::{ManagedTableStats, StatisticsAdapter};
 use ra_stats::profiles::StatisticsProfile;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Ambient live host conditions (hit rate, I/O saturation, CPU load), each an
-/// `f64` bit pattern, pushed by the monitoring dataflow via
-/// [`set_live_conditions`]. Default `0.0` is neutral (no cost change), so
-/// callers without a live monitor are unaffected.
-static LIVE_HIT: AtomicU64 = AtomicU64::new(0);
-static LIVE_IO: AtomicU64 = AtomicU64::new(0);
-static LIVE_CPU: AtomicU64 = AtomicU64::new(0);
-
-/// Push the latest measured host conditions into the cost model so that
-/// subsequently-constructed cost functions auto-tune their I/O and CPU costs
-/// to the execution environment. Values are fractions in `[0, 1]`.
-pub fn set_live_conditions(hit_rate: f64, io_saturation: f64, cpu_load: f64) {
-    LIVE_HIT.store(hit_rate.to_bits(), Ordering::Relaxed);
-    LIVE_IO.store(io_saturation.to_bits(), Ordering::Relaxed);
-    LIVE_CPU.store(cpu_load.to_bits(), Ordering::Relaxed);
+/// Live host conditions measured by the monitoring dataflow, threaded through
+/// the optimizer so cost functions auto-tune to the execution environment.
+/// Held and supplied by the owning [`crate::Optimizer`] — no global state.
+/// `NEUTRAL` leaves costs unchanged for callers without a live monitor.
+#[derive(Debug, Clone, Copy)]
+pub struct LiveConditions {
+    /// Buffer-cache hit rate in `[0, 1]`.
+    pub hit_rate: f64,
+    /// I/O saturation in `[0, 1]`.
+    pub io_saturation: f64,
+    /// CPU load fraction in `[0, 1]`.
+    pub cpu_load: f64,
 }
 
-/// Calibration adjusted by the current ambient live host conditions.
-fn calibration_with_live(hardware: &HardwareProfile) -> CalibratedCostModel {
-    CalibratedCostModel::from_profile(hardware).with_live_conditions(
-        f64::from_bits(LIVE_HIT.load(Ordering::Relaxed)),
-        f64::from_bits(LIVE_IO.load(Ordering::Relaxed)),
-        f64::from_bits(LIVE_CPU.load(Ordering::Relaxed)),
-    )
+impl LiveConditions {
+    /// Conditions that leave costs unchanged.
+    pub const NEUTRAL: Self = Self {
+        hit_rate: 0.0,
+        io_saturation: 0.0,
+        cpu_load: 0.0,
+    };
 }
 
 /// Staleness inflation factors applied to row count estimates.
@@ -90,7 +85,7 @@ impl IntegratedCostModel {
     /// Create a new integrated cost model.
     #[must_use]
     pub fn new(profile: StatisticsProfile, hardware: HardwareProfile) -> Self {
-        let calibration = calibration_with_live(&hardware);
+        let calibration = CalibratedCostModel::from_profile(&hardware);
         Self {
             adapter: StatisticsAdapter::new(profile),
             hardware,
@@ -1224,7 +1219,7 @@ impl IntegratedCostFn {
         table_stats: HashMap<String, Statistics>,
         staleness_map: HashMap<String, Staleness>,
     ) -> Self {
-        let calibration = calibration_with_live(&hardware);
+        let calibration = CalibratedCostModel::from_profile(&hardware);
         let avg_row_count = if table_stats.is_empty() {
             DEFAULT_ROW_COUNT
         } else {
@@ -1257,6 +1252,19 @@ impl IntegratedCostFn {
         let mut base = Self::new(hardware, table_stats, staleness_map);
         base.id_row_counts = std::sync::Arc::new(id_row_counts);
         base
+    }
+
+    /// Re-tune the calibrated cost rates to the live host conditions supplied
+    /// by the owning optimizer (cache-miss fraction × I/O saturation for page
+    /// I/O, load for CPU). `LiveConditions::NEUTRAL` is a no-op.
+    #[must_use]
+    pub fn with_live_conditions(mut self, live: LiveConditions) -> Self {
+        self.calibration = self.calibration.with_live_conditions(
+            live.hit_rate,
+            live.io_saturation,
+            live.cpu_load,
+        );
+        self
     }
 
     /// Create from an `IntegratedCostModel`, extracting necessary data.

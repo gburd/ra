@@ -160,7 +160,7 @@ pub use constraint_optimizer::{optimize_with_constraints, ConstraintOptResult};
 pub use convergence::{
     ConvergenceDetector, ConvergenceStats, IterationMetrics, TerminationDecision,
 };
-pub use cost::{set_live_conditions, CostCalibration, IntegratedCostFn, IntegratedCostModel};
+pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel, LiveConditions};
 pub use cost_pruning::{CostPruner, PruningStats};
 pub use covering_index::{covering_index_rules, index_only_scan_cost_factor};
 #[cfg(feature = "streaming")]

@@ -171,7 +171,12 @@ impl HybridCostFn {
         };
 
         Self {
-            integrated: IntegratedCostFn::new(hardware, table_stats, staleness_map),
+            integrated: IntegratedCostFn::new(hardware, table_stats, staleness_map)
+                .with_live_conditions(crate::cost::LiveConditions {
+                    hit_rate: f64::from(fingerprint.shared_buffers_hit_rate),
+                    io_saturation: f64::from(fingerprint.io_saturation),
+                    cpu_load: f64::from(fingerprint.cpu_load_fraction),
+                }),
             neural_weights,
             blend_alpha,
             context,

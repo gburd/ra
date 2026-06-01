@@ -408,15 +408,14 @@ fn optimize_relexpr(
     if let Some(s) = crate::extension_state::effective_plan_advice() {
         config.plan_advice = Some(s);
     }
-    // Push the latest monitored host conditions into the cost model so the
-    // optimizer's plan choice auto-tunes to the live execution environment.
-    let fp = crate::monitor::current_fingerprint();
-    ra_engine::set_live_conditions(
-        f64::from(fp.shared_buffers_hit_rate),
-        f64::from(fp.io_saturation),
-        f64::from(fp.cpu_load_fraction),
+    // Share the monitor's live fingerprint with the optimizer so its cost
+    // model auto-tunes plan choice to the execution environment. The
+    // fingerprint is an Arc<AtomicFingerprint> owned by the monitor — no
+    // global mutable state crosses into the engine.
+    let reader = ra_engine::state::FingerprintReader::from_shared(
+        crate::monitor::fingerprint_reader().shared().clone(),
     );
-    let optimizer = ra_engine::Optimizer::with_config(config);
+    let optimizer = ra_engine::Optimizer::with_config(config).with_fingerprint_reader(reader);
     optimizer
         .optimize_with_facts(rel_expr, facts)
         .map_err(|e| format!("{e}"))
