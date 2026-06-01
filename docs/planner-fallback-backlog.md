@@ -227,13 +227,27 @@ monitor's `poll_hardware_metrics` querying `pg_stat_bgwriter.buffers_backend`
 (removed in PG17/18 → a per-refresh panic that overflowed the error stack
 under load) — now reads `pg_stat_io`.
 
+**Extended 2026-06-01 (range + bounds + aliases + cost).** The peephole now
+collects *every* leading-column comparison conjunct (btree strategies 1–5)
+into the index condition, so `id >= a AND id <= b` (and `BETWEEN`, which
+desugars to it) becomes a *bounded* index scan rather than a half-open one;
+non-pushable conjuncts (e.g. `<>`) stay as recheck `qual`. The column
+qualifier is no longer matched by name (the translated-Var `varno` check is
+authoritative), so aliased queries (`WHERE b.id = …`) now use the index too.
+A unique-index equality reports `plan_rows ≈ 1`. The RHS guard is now
+`!contain_var_clause`, allowing any value that references no relation column.
+Validated: range/BETWEEN/aliased/commuted-bounds row-equivalence; auto_explain
+shows two-bound `Index Cond`s; 12000 mixed stress queries with 0 crashes.
+
 **Remaining scope (follow-ups; all currently bail to a correct SeqScan):**
-range predicates (`<`, `>`, `BETWEEN`), `Param`/expression right-hand sides
-(prepared statements `id = $1`), multi-column index prefixes, `IndexOnlyScan`
-/ `BitmapScan` emission, and the optimizer choosing index access by cost.
-Cosmetic: `set_index_costs` reports `plan_rows = reltuples * 0.1` rather than
-~1 for a unique-equality scan — harmless for the single-table case (the
-`Index Cond` is exact) but worth refining before index scans feed joins.
+`Param`/`$1` right-hand sides are a *parser-level* gap — the Lime grammar has
+no `$N` token (and ra-core no `Param` variant), so prepared statements fail
+Lime parse and already fall back to PG (which index-scans them correctly);
+adding native support is a grammar + ra-core + translator change, not a
+plan_builder one. Also pending: multi-column index prefixes (only the leading
+column is pushed today), `IndexOnlyScan` / `BitmapScan` emission, the
+optimizer choosing index access by cost, and a non-unique-equality
+`plan_rows` estimate better than the generic `0.1` selectivity.
 
 ### Prior root cause (now resolved)
 The plan builder *has* `build_index_scan` / `build_index_only_scan` /
