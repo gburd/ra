@@ -1154,20 +1154,19 @@ impl PlanBuilder {
         // conjunct. The column qualifier is not checked here: a Filter over a
         // single base Scan can only reference that relation, and the
         // translated-Var `varno` check below is the authoritative guard.
-        let mut found: Option<(crate::index_resolver::IndexInfo, String)> = None;
+        let mut found: Option<crate::index_resolver::IndexInfo> = None;
         for c in &conjuncts {
             let Some(cref) = comparison_column(c) else {
                 continue;
             };
             if let Some(info) = crate::index_resolver::resolve_index(rel_oid, &cref.column) {
                 if info.am_type == "btree" && !info.columns.is_empty() {
-                    let lead = info.columns[0].clone();
-                    found = Some((info, lead));
+                    found = Some(info);
                     break;
                 }
             }
         }
-        let Some((info, lead)) = found else {
+        let Some(info) = found else {
             return Ok(None);
         };
 
@@ -1180,19 +1179,33 @@ impl PlanBuilder {
             }
             return Ok(None);
         }
-        let opfamily = *(*idx_rel).rd_opfamily;
+        // Per-key-column operator families (copied out before closing the
+        // relcache entry); each conjunct is checked against its own column's
+        // family so a non-leading column of a different type is handled
+        // correctly. rd_opfamily has one entry per *key* column, so cap the
+        // read at indnkeyatts (INCLUDE columns have no searchable family).
+        let nkeys = if (*idx_rel).rd_index.is_null() {
+            0
+        } else {
+            (*(*idx_rel).rd_index).indnkeyatts as usize
+        };
+        let mut opfamilies: Vec<pg_sys::Oid> = Vec::with_capacity(nkeys);
+        for i in 0..nkeys {
+            opfamilies.push(*(*idx_rel).rd_opfamily.add(i));
+        }
         pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
 
-        // Push every conjunct on the leading column into the index condition
-        // (so `id >= a AND id <= b` becomes a bounded scan); every other
-        // conjunct becomes a heap recheck qual.
+        // Push every conjunct on an index key column into the index condition
+        // (so `id >= a AND id <= b` is a bounded scan, and `a = x AND b = y`
+        // on a compound index uses both keys); every other conjunct becomes a
+        // heap recheck qual.
         let mut indexqual = std::ptr::null_mut::<pg_sys::List>();
         let mut indexqualorig = std::ptr::null_mut::<pg_sys::List>();
         let mut qual = std::ptr::null_mut::<pg_sys::List>();
         let mut has_unique_eq = false;
         for c in &conjuncts {
             if let Some((heap_op, idx_op, is_eq)) =
-                self.build_index_clause(c, &lead, rtindex, opfamily)
+                self.build_index_clause(c, &info.columns, rtindex, &opfamilies)
             {
                 indexqualorig = pg_sys::lappend(indexqualorig, heap_op.cast());
                 indexqual = pg_sys::lappend(indexqual, idx_op.cast());
@@ -1230,17 +1243,18 @@ impl PlanBuilder {
     }
 
     /// Build one canonical index condition from `clause` if it is a
-    /// `lead <btree-op> X` comparison (in either argument order) whose `X`
-    /// references no relation column. Returns `(heap_form, index_form,
-    /// is_equality)`, where `index_form` rewrites the key to an `INDEX_VAR`
-    /// reference at attno 1. Returns `None` (→ the caller makes it a recheck
-    /// qual) for anything that is not a pushable btree condition.
+    /// `col <btree-op> X` comparison (in either argument order) where `col` is
+    /// one of `index_cols` and `X` references no relation column. Returns
+    /// `(heap_form, index_form, is_equality)`, where `index_form` rewrites the
+    /// key to an `INDEX_VAR` reference at the column's index attno. Returns
+    /// `None` (→ the caller makes it a recheck qual) for anything that is not
+    /// a pushable btree condition.
     unsafe fn build_index_clause(
         &self,
         clause: &Expr,
-        lead: &str,
+        index_cols: &[String],
         rtindex: pg_sys::Index,
-        opfamily: pg_sys::Oid,
+        opfamilies: &[pg_sys::Oid],
     ) -> Option<(*mut pg_sys::OpExpr, *mut pg_sys::OpExpr, bool)> {
         let Expr::BinOp { op, left, right } = clause else {
             return None;
@@ -1248,9 +1262,17 @@ impl PlanBuilder {
         if !is_comparison(*op) {
             return None;
         }
-        let col_on_left = match (&**left, &**right) {
-            (Expr::Column(cr), _) if cr.column.eq_ignore_ascii_case(lead) => true,
-            (_, Expr::Column(cr)) if cr.column.eq_ignore_ascii_case(lead) => false,
+        // The matched column must be one of the index's key columns; its
+        // 1-based position is the INDEX_VAR attno to use.
+        let attno_of = |cr: &ra_core::expr::ColumnRef| {
+            index_cols
+                .iter()
+                .position(|ic| ic.eq_ignore_ascii_case(&cr.column))
+                .map(|p| (p + 1) as i16)
+        };
+        let (col_on_left, index_attno) = match (&**left, &**right) {
+            (Expr::Column(cr), _) if attno_of(cr).is_some() => (true, attno_of(cr)?),
+            (_, Expr::Column(cr)) if attno_of(cr).is_some() => (false, attno_of(cr)?),
             _ => return None,
         };
         let orig = expr_translator::translate(clause, &self.expr_ctx);
@@ -1284,6 +1306,7 @@ impl PlanBuilder {
         if opno == pg_sys::InvalidOid {
             return None;
         }
+        let opfamily = *opfamilies.get((index_attno - 1) as usize)?;
         let strategy = pg_sys::get_op_opfamily_strategy(opno, opfamily);
         if !(1..=5).contains(&strategy) {
             return None;
@@ -1296,7 +1319,7 @@ impl PlanBuilder {
         let idx = pg_sys::copyObjectImpl(op_node.cast()).cast::<pg_sys::OpExpr>();
         let idx_key = pg_sys::list_nth((*idx).args, 0).cast::<pg_sys::Var>();
         (*idx_key).varno = pg_sys::INDEX_VAR;
-        (*idx_key).varattno = 1;
+        (*idx_key).varattno = index_attno;
         Some((op_node, idx, strategy == pg_sys::BTEqualStrategyNumber as i32))
     }
 
