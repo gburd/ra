@@ -15,6 +15,34 @@ use ra_stats::accuracy::{QualityMetrics, Staleness, StatisticsState};
 use ra_stats::integration::{ManagedTableStats, StatisticsAdapter};
 use ra_stats::profiles::StatisticsProfile;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Ambient live host conditions (hit rate, I/O saturation, CPU load), each an
+/// `f64` bit pattern, pushed by the monitoring dataflow via
+/// [`set_live_conditions`]. Default `0.0` is neutral (no cost change), so
+/// callers without a live monitor are unaffected.
+static LIVE_HIT: AtomicU64 = AtomicU64::new(0);
+static LIVE_IO: AtomicU64 = AtomicU64::new(0);
+static LIVE_CPU: AtomicU64 = AtomicU64::new(0);
+
+/// Push the latest measured host conditions into the cost model so that
+/// subsequently-constructed cost functions auto-tune their I/O and CPU costs
+/// to the execution environment. Values are fractions in `[0, 1]`.
+pub fn set_live_conditions(hit_rate: f64, io_saturation: f64, cpu_load: f64) {
+    LIVE_HIT.store(hit_rate.to_bits(), Ordering::Relaxed);
+    LIVE_IO.store(io_saturation.to_bits(), Ordering::Relaxed);
+    LIVE_CPU.store(cpu_load.to_bits(), Ordering::Relaxed);
+}
+
+/// Calibration adjusted by the current ambient live host conditions.
+fn calibration_with_live(hardware: &HardwareProfile) -> CalibratedCostModel {
+    CalibratedCostModel::from_profile(hardware).with_live_conditions(
+        f64::from_bits(LIVE_HIT.load(Ordering::Relaxed)),
+        f64::from_bits(LIVE_IO.load(Ordering::Relaxed)),
+        f64::from_bits(LIVE_CPU.load(Ordering::Relaxed)),
+    )
+}
+
 /// Staleness inflation factors applied to row count estimates.
 ///
 /// When statistics are stale, we inflate row count estimates to
@@ -62,7 +90,7 @@ impl IntegratedCostModel {
     /// Create a new integrated cost model.
     #[must_use]
     pub fn new(profile: StatisticsProfile, hardware: HardwareProfile) -> Self {
-        let calibration = CalibratedCostModel::from_profile(&hardware);
+        let calibration = calibration_with_live(&hardware);
         Self {
             adapter: StatisticsAdapter::new(profile),
             hardware,
@@ -1196,7 +1224,7 @@ impl IntegratedCostFn {
         table_stats: HashMap<String, Statistics>,
         staleness_map: HashMap<String, Staleness>,
     ) -> Self {
-        let calibration = CalibratedCostModel::from_profile(&hardware);
+        let calibration = calibration_with_live(&hardware);
         let avg_row_count = if table_stats.is_empty() {
             DEFAULT_ROW_COUNT
         } else {

@@ -125,6 +125,23 @@ impl CalibratedCostModel {
         Self::from_measurements(&m)
     }
 
+    /// Apply live host conditions measured by the monitoring dataflow.
+    ///
+    /// Page I/O is paid only on the cache-miss fraction (`1 - hit_rate`) and
+    /// scaled by `io_saturation`; CPU is scaled by `cpu_load`. All inputs are
+    /// in `[0, 1]`. Neutral conditions `(0, 0, 0)` return an unchanged clone,
+    /// so callers without live data are unaffected.
+    #[must_use]
+    pub fn with_live_conditions(&self, hit_rate: f64, io_saturation: f64, cpu_load: f64) -> Self {
+        let io_factor = (1.0 - hit_rate.clamp(0.0, 1.0)) * (1.0 + io_saturation.max(0.0));
+        let cpu_factor = 1.0 + cpu_load.max(0.0);
+        let mut m = self.clone();
+        m.sequential_io_cost *= io_factor;
+        m.random_io_cost *= io_factor;
+        m.cpu_tuple_cost *= cpu_factor;
+        m
+    }
+
     /// Cost of sequential scan per page.
     ///
     /// Accounts for actual storage throughput relative to reference.
@@ -198,6 +215,25 @@ mod tests {
         assert!((model.sequential_io_cost - 1.0).abs() < 0.01);
         assert!((model.random_io_cost - 1.0).abs() < 0.01);
         assert!((model.cpu_tuple_cost - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn live_conditions_tune_costs() {
+        let base = CalibratedCostModel::reference();
+        // Neutral conditions leave costs unchanged.
+        let neutral = base.with_live_conditions(0.0, 0.0, 0.0);
+        assert!((neutral.seq_page_cost() - base.seq_page_cost()).abs() < 1e-9);
+        assert!((neutral.tuple_cost() - base.tuple_cost()).abs() < 1e-9);
+        // A fully-cached relation pays no page I/O.
+        let cached = base.with_live_conditions(1.0, 0.0, 0.0);
+        assert!(cached.seq_page_cost() < 1e-9 && cached.rand_page_cost() < 1e-9);
+        // I/O contention (cold + saturated) raises page costs above base.
+        let busy = base.with_live_conditions(0.0, 2.0, 0.0);
+        assert!(busy.rand_page_cost() > base.rand_page_cost());
+        // CPU load raises tuple cost but not page I/O.
+        let loaded = base.with_live_conditions(0.0, 0.0, 1.0);
+        assert!(loaded.tuple_cost() > base.tuple_cost());
+        assert!((loaded.seq_page_cost() - base.seq_page_cost()).abs() < 1e-9);
     }
 
     #[test]

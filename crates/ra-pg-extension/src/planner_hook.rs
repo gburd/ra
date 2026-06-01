@@ -397,6 +397,14 @@ fn optimize_relexpr(
     if let Some(s) = crate::extension_state::effective_plan_advice() {
         config.plan_advice = Some(s);
     }
+    // Push the latest monitored host conditions into the cost model so the
+    // optimizer's plan choice auto-tunes to the live execution environment.
+    let fp = crate::monitor::current_fingerprint();
+    ra_engine::set_live_conditions(
+        f64::from(fp.shared_buffers_hit_rate),
+        f64::from(fp.io_saturation),
+        f64::from(fp.cpu_load_fraction),
+    );
     let optimizer = ra_engine::Optimizer::with_config(config);
     optimizer
         .optimize_with_facts(rel_expr, facts)
