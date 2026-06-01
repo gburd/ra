@@ -206,12 +206,42 @@ native (8× slower). The plan builder *has* `build_index_scan` /
 `build_index_only_scan` / `build_bitmap_heap_scan` / `build_merge_join`,
 but `IndexScan`/`IndexOnlyScan`/`BitmapScan` `RelExpr`s are gated to
 fallback, and the optimizer does not emit them for indexed predicates.
-Forcing `INDEX_SCAN` advice produced correct results but no speedup (the
-index *condition* is not pushed onto the scan), so closing this gap is a
-real feature: emit index access paths with proper index quals + a
-cost-based choice, then admit them to the gate and verify each
-differentially. Until then Ra is correctness-complete but produces simpler
-(SeqScan/NestLoop) physical plans than PG for indexed / large-table queries.
+Forcing `INDEX_SCAN` advice produced correct results but no speedup.
+
+**Precise root cause (2026-06-01).** *Every* index-access builder
+(`build_index_scan`, `build_index_only_scan`, `build_bitmap_index_scan`)
+sets only `scanrelid` + `indexid` and **never sets `indexqual`**. With no
+index condition the executor scans the whole index, so the result is
+correct but no faster than a SeqScan. The predicate currently survives only
+as a recheck `qual` folded onto the scan by the `Filter` arm of
+`build_plan`. Worse, `RelExpr::IndexScan` carries only `{ table, column }`
+— it has **no field to represent the index condition** (unlike
+`BitmapIndexScan`/`IndexOnlyScan`, which do carry a `predicate`).
+
+**Why this is RFC-scale, not a wiring fix.** Closing it requires all of:
+1. A way to carry the index condition to the builder — either add a
+   `condition` field to `RelExpr::IndexScan` (ripples through `to_rec`/
+   `from_rec`, optimizer, every match site) or plumb the parent `Filter`
+   predicate through a peephole.
+2. Canonical-form `indexqual` construction: an `OpExpr` whose indexed side
+   is `Var(varno=INDEX_VAR, varattno=indexcol+1)` and whose operator comes
+   from the index's **opfamily** (e.g. btree `=` strategy), plus
+   `indexqualorig` (heap-Var form) and `indexqualcols`. This is
+   executor-coupled: `ExecIndexBuildScanKeys` is strict about the form, and
+   a malformed qual crashes the backend or returns wrong rows.
+3. Optimizer support to actually emit index access paths for selective
+   indexed predicates (cost-based), then gate admission + exhaustive A/B +
+   crash testing.
+
+This is the same executor-coupled class that the removed scan-strategy
+advice peephole fell into — the `Filter` arm comment records it "produced
+backend-crashing plans." Per the correctness mandate (prefer safe fallback
+over a wrong/crashing plan), this should be done as a focused,
+verification-first effort (single-column btree equality first, behind the
+opt-in advice path, validated by `scripts/replan-equivalence-test.sh` for
+correctness *and* timing) — not rushed. Until then Ra is
+correctness-complete but produces simpler (SeqScan/NestLoop) physical plans
+than PG for indexed / large-table queries.
 
 ### EXPLAIN transparency
 `EXPLAIN` is a utility statement, so the planner hook skips it and EXPLAIN
