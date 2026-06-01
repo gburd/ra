@@ -40,7 +40,12 @@ pub unsafe fn resolve_index(rel_oid: pg_sys::Oid, column_name: &str) -> Option<I
     }
 
     let index_list = pg_sys::RelationGetIndexList(rel);
-    let n_indexes = (*index_list).length;
+    // An empty index set is NIL (a null List pointer); guard before deref.
+    let n_indexes = if index_list.is_null() {
+        0
+    } else {
+        (*index_list).length
+    };
 
     let mut best: Option<IndexInfo> = None;
 
@@ -86,7 +91,12 @@ pub unsafe fn resolve_index_by_name(rel_oid: pg_sys::Oid, index_name: &str) -> O
     }
 
     let index_list = pg_sys::RelationGetIndexList(rel);
-    let n_indexes = (*index_list).length;
+    // An empty index set is NIL (a null List pointer); guard before deref.
+    let n_indexes = if index_list.is_null() {
+        0
+    } else {
+        (*index_list).length
+    };
 
     for i in 0..n_indexes {
         let cell = pg_sys::list_nth(index_list, i);
