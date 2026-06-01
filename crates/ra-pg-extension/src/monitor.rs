@@ -68,6 +68,15 @@ pub fn fingerprint_reader() -> &'static FingerprintReader {
         .expect("Fingerprint monitor not initialized")
 }
 
+/// Read the current monitored system fingerprint (cpu load, I/O saturation,
+/// buffer-cache hit rate, ...), or defaults if the monitor has not been
+/// initialized. Lock-free; safe to call on the planning hot path.
+pub fn current_fingerprint() -> SystemFingerprint {
+    FINGERPRINT
+        .get()
+        .map_or_else(SystemFingerprint::default, FingerprintReader::read)
+}
+
 /// Check whether a refresh is due and update the fingerprint if so.
 ///
 /// Called at the top of each planner_hook invocation. The SPI queries
