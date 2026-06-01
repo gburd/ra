@@ -1200,7 +1200,7 @@ fn extract_best_without_stats() {
     let root = egraph.add_expr(&rec);
 
     let stats: HashMap<String, ra_core::statistics::Statistics> = HashMap::new();
-    let result = extract_best(&egraph, root, &stats, &hw).expect("extraction should succeed");
+    let result = extract_best(&egraph, root, &stats, &hw, crate::cost::LiveConditions::NEUTRAL).expect("extraction should succeed");
     assert!(matches!(result, RelExpr::Filter { .. }));
 }
 
@@ -1218,7 +1218,7 @@ fn extract_best_with_stats() {
         "users".to_string(),
         ra_core::statistics::Statistics::new(10000.0),
     );
-    let result = extract_best(&egraph, root, &stats, &hw).expect("extraction should succeed");
+    let result = extract_best(&egraph, root, &stats, &hw, crate::cost::LiveConditions::NEUTRAL).expect("extraction should succeed");
     assert!(matches!(result, RelExpr::Scan { .. }));
 }
 

@@ -728,7 +728,20 @@ impl Optimizer {
                 .collect();
             extract_best_bitnet(egraph, root, table_stats, &staleness_map, hardware, model, &fingerprint)
         } else {
-            extract_best(egraph, root, table_stats, hardware)
+            // Traditional path: tune costs to live conditions when a monitor
+            // fingerprint is wired into this optimizer, else neutral.
+            let live = self.fingerprint_reader.as_ref().map_or(
+                crate::cost::LiveConditions::NEUTRAL,
+                |r| {
+                    let fp = r.read();
+                    crate::cost::LiveConditions {
+                        hit_rate: f64::from(fp.shared_buffers_hit_rate),
+                        io_saturation: f64::from(fp.io_saturation),
+                        cpu_load: f64::from(fp.cpu_load_fraction),
+                    }
+                },
+            );
+            extract_best(egraph, root, table_stats, hardware, live)
         }
     }
 

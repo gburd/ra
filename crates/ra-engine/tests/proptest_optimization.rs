@@ -459,7 +459,7 @@ proptest! {
         let stats: HashMap<String, ra_core::statistics::Statistics> =
             HashMap::new();
         let hardware = ra_hardware::HardwareProfile::cpu_only();
-        let result = extract_best(&runner.egraph, root, &stats, &hardware);
+        let result = extract_best(&runner.egraph, root, &stats, &hardware, ra_engine::LiveConditions::NEUTRAL);
         prop_assert!(
             result.is_ok(),
             "extract_best should succeed: {:?}",
@@ -488,7 +488,7 @@ proptest! {
         let stats: HashMap<String, ra_core::statistics::Statistics> =
             HashMap::new();
         let hardware = ra_hardware::HardwareProfile::cpu_only();
-        let result = extract_best(&runner.egraph, root, &stats, &hardware);
+        let result = extract_best(&runner.egraph, root, &stats, &hardware, ra_engine::LiveConditions::NEUTRAL);
         // Extraction may fail on certain rewritten expressions where
         // node types change during saturation (e.g., Symbol → ConstInt).
         // This is a known limitation tracked for improvement.

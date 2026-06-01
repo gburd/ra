@@ -31,6 +31,7 @@ pub fn extract_best<S: BuildHasher>(
     root: Id,
     table_stats: &HashMap<String, Statistics, S>,
     hardware: &ra_hardware::HardwareProfile,
+    live: crate::cost::LiveConditions,
 ) -> Result<RelExpr, EGraphError> {
     if table_stats.is_empty() {
         let cost_fn = RelCostFn::new(hardware.clone());
@@ -57,7 +58,8 @@ pub fn extract_best<S: BuildHasher>(
             .collect();
 
         let cost_fn =
-            IntegratedCostFn::with_id_row_counts(hardware.clone(), stats, staleness_map, id_row_counts);
+            IntegratedCostFn::with_id_row_counts(hardware.clone(), stats, staleness_map, id_row_counts)
+                .with_live_conditions(live);
         let extractor = egg::Extractor::new(egraph, cost_fn);
         let (_, best_expr) = extractor.find_best(root);
         rec_expr_to_rel_expr(&best_expr)
