@@ -198,50 +198,53 @@ abort) found **no new wrong results**. NULL handling, set ops, casts,
 collation, aggregates/HAVING, joins, subqueries, and recursive CTEs are all
 row-equivalent to native PostgreSQL.
 
-### Suboptimal plans (top priority performance gap)
-**Ra emits a `SeqScan` for selective equality predicates on indexed
-columns** instead of an index scan. Measured: 200× `SELECT id,v FROM big
-WHERE id=1234567` on a 2M-row indexed table took 0.08 s with Ra vs 0.01 s
-native (8× slower). The plan builder *has* `build_index_scan` /
-`build_index_only_scan` / `build_bitmap_heap_scan` / `build_merge_join`,
-but `IndexScan`/`IndexOnlyScan`/`BitmapScan` `RelExpr`s are gated to
-fallback, and the optimizer does not emit them for indexed predicates.
-Forcing `INDEX_SCAN` advice produced correct results but no speedup.
+### Index scans (single-column btree equality) — IMPLEMENTED 2026-06-01
 
-**Precise root cause (2026-06-01).** *Every* index-access builder
-(`build_index_scan`, `build_index_only_scan`, `build_bitmap_index_scan`)
-sets only `scanrelid` + `indexid` and **never sets `indexqual`**. With no
-index condition the executor scans the whole index, so the result is
-correct but no faster than a SeqScan. The predicate currently survives only
-as a recheck `qual` folded onto the scan by the `Filter` arm of
-`build_plan`. Worse, `RelExpr::IndexScan` carries only `{ table, column }`
-— it has **no field to represent the index condition** (unlike
-`BitmapIndexScan`/`IndexOnlyScan`, which do carry a `predicate`).
+**Ra now emits a real `IndexScan` for `col = const` on a btree-indexed
+column.** `try_build_index_scan` (a `Filter`-over-`Scan` peephole in
+`plan_builder.rs`) detects a single-column btree equality conjunct, pushes
+it into `indexqual` (canonical `INDEX_VAR` form, key on the left, operator
+verified as the `BTEqualStrategyNumber` member of the index's
+`rd_opfamily[0]`, commuted via `get_commutator` when written `const = col`),
+emits `indexqualorig` (heap-Var form), and leaves any residual conjuncts as
+the heap recheck `qual`. It is strictly conservative: anything unproven
+(no index, non-btree, non-equality, non-`Const` other side, key not a Var of
+the scanned rel, untranslatable residual) bails to the standard SeqScan
+path, so a wrong/crashing index condition is never produced.
 
-**Why this is RFC-scale, not a wiring fix.** Closing it requires all of:
-1. A way to carry the index condition to the builder — either add a
-   `condition` field to `RelExpr::IndexScan` (ripples through `to_rec`/
-   `from_rec`, optimizer, every match site) or plumb the parent `Filter`
-   predicate through a peephole.
-2. Canonical-form `indexqual` construction: an `OpExpr` whose indexed side
-   is `Var(varno=INDEX_VAR, varattno=indexcol+1)` and whose operator comes
-   from the index's **opfamily** (e.g. btree `=` strategy), plus
-   `indexqualorig` (heap-Var form) and `indexqualcols`. This is
-   executor-coupled: `ExecIndexBuildScanKeys` is strict about the form, and
-   a malformed qual crashes the backend or returns wrong rows.
-3. Optimizer support to actually emit index access paths for selective
-   indexed predicates (cost-based), then gate admission + exhaustive A/B +
-   crash testing.
+Validated on PG18.3: 13/13 row-equivalence vs Ra-off; `auto_explain`
+confirms `Index Scan … Index Cond: (col = const)` with residual conjuncts as
+a recheck `Filter` (equality, commuted, text, leading column of a
+multi-column index); no-index tables correctly produce `Seq Scan`; 7000+
+mixed-shape stress queries with 0 crashes; equality lookups run at
+index speed (300 lookups in <0.1 s vs ~15 s for the prior SeqScan).
 
-This is the same executor-coupled class that the removed scan-strategy
-advice peephole fell into — the `Filter` arm comment records it "produced
-backend-crashing plans." Per the correctness mandate (prefer safe fallback
-over a wrong/crashing plan), this should be done as a focused,
-verification-first effort (single-column btree equality first, behind the
-opt-in advice path, validated by `scripts/replan-equivalence-test.sh` for
-correctness *and* timing) — not rushed. Until then Ra is
-correctness-complete but produces simpler (SeqScan/NestLoop) physical plans
-than PG for indexed / large-table queries.
+Two latent bugs were found and fixed while validating: a NULL-deref in
+`index_resolver` (it read `(*index_list).length` without guarding the
+empty/NIL list returned for a table with no indexes — exposed because the
+peephole now calls `resolve_index` on every `Filter`-over-`Scan`), and the
+monitor's `poll_hardware_metrics` querying `pg_stat_bgwriter.buffers_backend`
+(removed in PG17/18 → a per-refresh panic that overflowed the error stack
+under load) — now reads `pg_stat_io`.
+
+**Remaining scope (follow-ups; all currently bail to a correct SeqScan):**
+range predicates (`<`, `>`, `BETWEEN`), `Param`/expression right-hand sides
+(prepared statements `id = $1`), multi-column index prefixes, `IndexOnlyScan`
+/ `BitmapScan` emission, and the optimizer choosing index access by cost.
+Cosmetic: `set_index_costs` reports `plan_rows = reltuples * 0.1` rather than
+~1 for a unique-equality scan — harmless for the single-table case (the
+`Index Cond` is exact) but worth refining before index scans feed joins.
+
+### Prior root cause (now resolved)
+The plan builder *has* `build_index_scan` / `build_index_only_scan` /
+`build_bitmap_heap_scan` / `build_merge_join`, but every index-access builder
+set only `scanrelid` + `indexid` and **never set `indexqual`**, so the
+executor scanned the whole index (correct, but no faster than a SeqScan);
+the predicate survived only as a recheck `qual`. `try_build_index_scan`
+(see above) now constructs the canonical `indexqual` for the equality case.
+`RelExpr::IndexScan` still carries only `{ table, column }` (no condition
+field) — the peephole reads the condition from the parent `Filter` instead
+of changing the algebra, which is why it is scoped to `Filter`-over-`Scan`.
 
 ### EXPLAIN transparency
 `EXPLAIN` is a utility statement, so the planner hook skips it and EXPLAIN

@@ -67,7 +67,7 @@ use pgrx::prelude::*;
 use tracing::debug;
 
 use ra_core::algebra::{AggregateExpr, JoinType, OnConflict, ProjectionColumn, RelExpr, SortKey};
-use ra_core::expr::Expr;
+use ra_core::expr::{BinOp, Expr};
 use ra_core::statistics::Statistics;
 
 use crate::expr_translator::{self, CteCol, CteScope, ExprContext};
@@ -504,6 +504,16 @@ impl PlanBuilder {
                 self.build_scan_with_advice(table, alias.as_deref())
             }
             RelExpr::Filter { predicate, input } => {
+                // Fast path: Filter directly over a base Scan with a
+                // single-column btree equality conjunct becomes a real
+                // IndexScan (the equality moves into indexqual; any residual
+                // conjuncts stay as the heap recheck qual). Strictly
+                // conservative — falls through to the SeqScan path otherwise.
+                if let RelExpr::Scan { table, .. } = &**input {
+                    if let Some(plan) = self.try_build_index_scan(table, predicate)? {
+                        return Ok(plan);
+                    }
+                }
                 // 1.0 safety: fold the predicate into the child scan's
                 // qual as a plain SeqScan filter. The previous TID_SCAN
                 // / BITMAP_HEAP_SCAN advice peephole here produced
@@ -1116,6 +1126,161 @@ impl PlanBuilder {
         (*bis).scan.plan.plan_rows = 1.0;
         (*bis).scan.plan.plan_width = 0;
         Ok(&mut (*bis).scan.plan as *mut pg_sys::Plan)
+    }
+
+    /// Try to emit a real `IndexScan` for `Filter(predicate) over Scan(table)`
+    /// by pushing a single-column btree **equality** conjunct (`col = const`)
+    /// into `indexqual`, leaving any other conjuncts as a recheck `qual`.
+    ///
+    /// Returns `Ok(Some(plan))` on success, `Ok(None)` to fall back to the
+    /// standard SeqScan+qual path. Strictly conservative: it bails (→ `None`)
+    /// on anything it cannot prove, so a wrong or executor-crashing index
+    /// condition is never produced. The resulting node behaves exactly like
+    /// the SeqScan it replaces (same `scanrelid`, same targetlist path, same
+    /// residual qual) — only the equality conjunct moves into `indexqual`.
+    unsafe fn try_build_index_scan(
+        &mut self,
+        table: &str,
+        predicate: &Expr,
+    ) -> Result<Option<*mut pg_sys::Plan>, PlanBuilderError> {
+        let (Ok(rel_oid), Ok(rtindex)) = (self.rel_oid_for(table), self.rtindex_for(table)) else {
+            return Ok(None);
+        };
+
+        // Split into top-level AND conjuncts and find the first `col = const`
+        // (or `const = col`) whose column is the leading key of a btree index.
+        let mut conjuncts: Vec<&Expr> = Vec::new();
+        split_conjuncts(predicate, &mut conjuncts);
+        let mut chosen: Option<(usize, crate::index_resolver::IndexInfo, bool)> = None;
+        for (i, c) in conjuncts.iter().enumerate() {
+            let Expr::BinOp {
+                op: BinOp::Eq,
+                left,
+                right,
+            } = c
+            else {
+                continue;
+            };
+            let (cref, col_on_left, other): (&ra_core::expr::ColumnRef, bool, &Expr) =
+                match (&**left, &**right) {
+                    (Expr::Column(cr), o) => (cr, true, o),
+                    (o, Expr::Column(cr)) => (cr, false, o),
+                    _ => continue,
+                };
+            // The non-key side must be a constant: this guarantees it cannot
+            // reference the scanned relation (a key-vs-other-column clause is
+            // not an index condition).
+            if !matches!(other, Expr::Const(_)) {
+                continue;
+            }
+            if let Some(t) = &cref.table {
+                if !t.eq_ignore_ascii_case(table) {
+                    continue;
+                }
+            }
+            let Some(info) = crate::index_resolver::resolve_index(rel_oid, &cref.column) else {
+                continue;
+            };
+            if info.am_type != "btree" {
+                continue;
+            }
+            chosen = Some((i, info, col_on_left));
+            break;
+        }
+        let Some((conj_idx, info, col_on_left)) = chosen else {
+            return Ok(None);
+        };
+
+        // Operator family of the index's leading column (copied out before
+        // closing the relcache entry).
+        let idx_rel = pg_sys::index_open(info.oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        if idx_rel.is_null() || (*idx_rel).rd_opfamily.is_null() {
+            if !idx_rel.is_null() {
+                pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            }
+            return Ok(None);
+        }
+        let opfamily = *(*idx_rel).rd_opfamily;
+        pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+
+        // Translate the chosen conjunct to its heap-Var OpExpr form.
+        let orig = expr_translator::translate(conjuncts[conj_idx], &self.expr_ctx);
+        if orig.is_null() || (*orig).type_ != pg_sys::NodeTag::T_OpExpr {
+            return Ok(None);
+        }
+        let op = orig.cast::<pg_sys::OpExpr>();
+        if pg_sys::list_length((*op).args) != 2 {
+            return Ok(None);
+        }
+        let key_node = pg_sys::list_nth((*op).args, if col_on_left { 0 } else { 1 }).cast::<pg_sys::Node>();
+        let other_node = pg_sys::list_nth((*op).args, if col_on_left { 1 } else { 0 }).cast::<pg_sys::Node>();
+        if key_node.is_null() || (*key_node).type_ != pg_sys::NodeTag::T_Var {
+            return Ok(None);
+        }
+        if (*key_node.cast::<pg_sys::Var>()).varno != rtindex as i32 {
+            return Ok(None);
+        }
+        // Defensive: the non-key side must not reference the scanned relation.
+        if !other_node.is_null() && (*other_node).type_ == pg_sys::NodeTag::T_Var {
+            return Ok(None);
+        }
+
+        // Canonicalize: the index key must be on the LEFT (the executor's
+        // ExecIndexBuildScanKeys requires it), commuting the operator if the
+        // column appeared on the right. Verify the operator is the btree
+        // equality member of the index's opfamily.
+        let opno = if col_on_left {
+            (*op).opno
+        } else {
+            pg_sys::get_commutator((*op).opno)
+        };
+        if opno == pg_sys::InvalidOid
+            || pg_sys::get_op_opfamily_strategy(opno, opfamily)
+                != pg_sys::BTEqualStrategyNumber as i32
+        {
+            return Ok(None);
+        }
+        if !col_on_left {
+            (*op).opno = opno;
+            (*op).opfuncid = pg_sys::get_opcode(opno);
+            (*op).args = list2(key_node, other_node);
+        }
+
+        // indexqual = copy of the canonical heap form with the key rewritten
+        // to an INDEX_VAR reference at index attno 1 (the leading column).
+        let iq = pg_sys::copyObjectImpl(op.cast()).cast::<pg_sys::OpExpr>();
+        let iq_key = pg_sys::list_nth((*iq).args, 0).cast::<pg_sys::Var>();
+        (*iq_key).varno = pg_sys::INDEX_VAR;
+        (*iq_key).varattno = 1;
+
+        let node = self.alloc_node::<pg_sys::IndexScan>();
+        if node.is_null() {
+            return Err(PlanBuilderError::NullPointer("IndexScan allocation".to_owned()));
+        }
+        (*node).scan.plan.type_ = pg_sys::NodeTag::T_IndexScan;
+        (*node).scan.scanrelid = rtindex;
+        (*node).indexid = info.oid;
+        (*node).indexqual = list1(iq.cast());
+        (*node).indexqualorig = list1(op.cast());
+        (*node).indexorderdir = pg_sys::ScanDirection::ForwardScanDirection;
+
+        // Residual conjuncts become the heap recheck qual. An untranslatable
+        // residual must NOT be dropped — fall back so the standard Filter path
+        // can defer the whole query to the native planner.
+        let mut qual = std::ptr::null_mut::<pg_sys::List>();
+        for (i, c) in conjuncts.iter().enumerate() {
+            if i == conj_idx {
+                continue;
+            }
+            let q = expr_translator::translate(c, &self.expr_ctx);
+            if q.is_null() {
+                return Ok(None);
+            }
+            qual = pg_sys::lappend(qual, q.cast());
+        }
+        (*node).scan.plan.qual = qual;
+        self.set_index_costs(&mut (*node).scan.plan, table, 0.1);
+        Ok(Some(&mut (*node).scan.plan as *mut pg_sys::Plan))
     }
 
     /// Build an `IndexScan` node for MIN/MAX index optimization.
@@ -4548,6 +4713,33 @@ impl PlanBuilder {
 // ---------------------------------------------------------------------------
 // Utility functions
 // ---------------------------------------------------------------------------
+
+/// Collect the top-level AND conjuncts of `expr` into `out` (a non-AND
+/// expression yields a single element). Used to isolate an indexable
+/// equality conjunct from the rest of a `WHERE` clause.
+fn split_conjuncts<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+    if let Expr::BinOp {
+        op: BinOp::And,
+        left,
+        right,
+    } = expr
+    {
+        split_conjuncts(left, out);
+        split_conjuncts(right, out);
+    } else {
+        out.push(expr);
+    }
+}
+
+/// Build a single-element PostgreSQL `List` of node pointers.
+unsafe fn list1(a: *mut pg_sys::Node) -> *mut pg_sys::List {
+    pg_sys::lappend(std::ptr::null_mut(), a.cast())
+}
+
+/// Build a two-element PostgreSQL `List` of node pointers.
+unsafe fn list2(a: *mut pg_sys::Node, b: *mut pg_sys::Node) -> *mut pg_sys::List {
+    pg_sys::lappend(list1(a), b.cast())
+}
 
 /// Convert a Ra `JoinType` to the corresponding PostgreSQL `JoinType`.
 fn ra_join_type_to_pg(jt: JoinType) -> pg_sys::JoinType::Type {
