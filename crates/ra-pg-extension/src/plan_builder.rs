@@ -4769,21 +4769,34 @@ fn split_conjuncts<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
 }
 
 /// PostgreSQL cost parameters derived from the host's calibrated hardware
-/// model rather than hardcoded planner constants. Returns
-/// `(seq_page_cost, random_page_cost, cpu_tuple_cost, cpu_index_tuple_cost)`,
-/// each a ratio of detected/measured physical quantities with the sequential
-/// 8 KiB page read as the unit. On the reference machine these reduce to
-/// PostgreSQL's historical defaults.
+/// model and the live monitoring dataflow — no estimated constants. The
+/// static hardware capability (storage bandwidth, CPU speed) sets the base
+/// rates; the continuously-monitored `SystemFingerprint` then auto-tunes
+/// them to current conditions: page I/O is paid only on the measured
+/// cache-miss fraction and scaled by measured I/O saturation, and CPU cost
+/// is scaled by measured CPU load. Returns
+/// `(seq_page_cost, random_page_cost, cpu_tuple_cost, cpu_index_tuple_cost)`.
 fn host_cost_params() -> (f64, f64, f64, f64) {
     let cal = crate::extension_state::calibrated_cost_model();
     let seq_mbps = cal.measurements.sequential_read_mbps.max(1.0);
     // Nanoseconds to read one 8 KiB page sequentially on this host.
     let page_seq_ns = 8192.0 * 1000.0 / seq_mbps;
-    let seq_page_cost = 1.0; // unit: one sequential page read
-    let random_page_cost = cal.random_io_ratio.max(1.0); // measured random:seq ratio
-    let cpu_tuple_cost = (cal.measurements.cpu_tuple_cost_ns / page_seq_ns).max(0.0);
-    let cpu_index_tuple_cost = cpu_tuple_cost * 0.5; // index tuples are narrower
-    (seq_page_cost, random_page_cost, cpu_tuple_cost, cpu_index_tuple_cost)
+    let base_seq = 1.0; // unit: one sequential page read
+    let base_random = cal.random_io_ratio.max(1.0); // measured random:seq ratio
+    let base_cpu = (cal.measurements.cpu_tuple_cost_ns / page_seq_ns).max(0.0);
+
+    // Live host conditions from the monitoring dataflow.
+    let fp = crate::monitor::current_fingerprint();
+    let miss = (1.0 - f64::from(fp.shared_buffers_hit_rate)).clamp(0.0, 1.0);
+    let io_factor = miss * (1.0 + f64::from(fp.io_saturation));
+    let cpu_factor = 1.0 + f64::from(fp.cpu_load_fraction);
+
+    (
+        base_seq * io_factor,
+        base_random * io_factor,
+        base_cpu * cpu_factor,
+        base_cpu * 0.5 * cpu_factor, // index tuples are narrower
+    )
 }
 
 /// True if `op` is a comparison that can map to a btree index strategy.
