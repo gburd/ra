@@ -157,16 +157,20 @@ fn poll_hardware_metrics() -> (f32, f32, f32, f32) {
         }
     });
 
-    // Estimate I/O saturation from checkpoint and backend write activity.
-    // A high ratio of buffers_backend to buffers_clean indicates I/O pressure.
+    // Estimate I/O saturation from the share of writes performed by client
+    // backends (vs background workers): a high backend-write share indicates
+    // I/O pressure. Reads from pg_stat_io (PG16+); the columns referenced here
+    // are stable across PG18/19, unlike the pg_stat_bgwriter.buffers_backend
+    // column removed in PG17 (whose absence previously raised a per-refresh
+    // error that, under load, overflowed the error stack and crashed the
+    // backend).
     let io_saturation = Spi::connect(|client| {
         let result = client.select(
-            "SELECT CASE \
-                WHEN (buffers_backend + buffers_clean + buffers_checkpoint) = 0 THEN 0.0 \
-                ELSE buffers_backend::float8 / \
-                     (buffers_backend + buffers_clean + buffers_checkpoint)::float8 \
+            "SELECT CASE WHEN COALESCE(sum(writes), 0) = 0 THEN 0.0 \
+                ELSE COALESCE(sum(writes) FILTER (WHERE backend_type = 'client backend'), 0)::float8 \
+                     / sum(writes)::float8 \
              END \
-             FROM pg_stat_bgwriter",
+             FROM pg_stat_io",
             None,
             &[],
         );
