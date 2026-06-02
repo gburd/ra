@@ -275,3 +275,33 @@ shows PostgreSQL's native plan, not the plan Ra actually builds for
 execution. For an extension that advertises new planner behaviour this is a
 transparency gap worth closing (e.g. an `EXPLAIN (RA_PROVENANCE)` option, as
 sketched in planner_hook.rs).
+
+## Coverage-gap inventory (differential search 2026-06-01)
+
+Differential harness (Ra-on vs Ra-off, sorted-md5 set equality + decision
+log) over diverse SQL on PG18. **Correctness: clean** — no wrong results and
+no Ra-side errors across ~30 shapes; every gap below falls back to PG
+correctly. These are shapes PG plans but Ra does **not** (it defers), in
+rough priority order:
+
+| Shape | Ra decision (reason) | Layer |
+|-------|----------------------|-------|
+| 3+ table join (`a JOIN b JOIN c`) | plan-build: `Join not yet supported` (join side is itself a join) | plan_builder build_join only handles a scan on each side |
+| Window funcs (`lag/row_number OVER`) | plan-build: `window function` | plan_builder has no Window builder |
+| `string_agg`/`array_agg` in target | plan-build: `aggregate output expression` | plan_builder build_agg_out_expr |
+| Correlated `EXISTS` (→ SemiJoin) | plan-build: `join condition` | semijoin condition translation |
+| Scalar subquery `b = (SELECT max..)` (→ join) | plan-build: `join side not a scan` | join side is an Aggregate |
+| `FULL JOIN` | plan-build: `join type` | plan_builder join_type mapping (no FULL) |
+| `= ANY(ARRAY[...])` | parse: `unexpected ARRAY` | Lime grammar (ANY+ARRAY) |
+| Scalar subquery + alias in select list `(SELECT ..) AS x` | parse: `unexpected IDENT` | Lime grammar (aliased scalar subquery) |
+
+Ra **does** plan (verified row-equivalent): single/aliased scans, equality &
+range index scans, 2-table equi-joins (incl. extra non-equi ON conjunct),
+`IN (subquery)` semijoin, `GROUP BY ... HAVING`, set ops (`UNION`/`EXCEPT`/
+`INTERSECT`), `DISTINCT`, simple aggregates, `CASE`, `COALESCE`, `LIKE`,
+`ORDER BY ... NULLS LAST`, `LIMIT/OFFSET`, single-level CTE.
+
+Highest-value to close: **3+ table joins** (ubiquitous) and **window
+functions**. NOTE: execution-time ("slower") comparison needs a
+direct-execution harness — `EXPLAIN ANALYZE` cannot measure Ra's plan because
+the `EXPLAIN ...` text fails Lime parse and falls back to PG.
