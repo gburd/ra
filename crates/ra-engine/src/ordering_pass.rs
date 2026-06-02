@@ -832,10 +832,7 @@ mod tests {
         }
 
         fn hardware_profile(&self) -> &ra_core::facts::HardwareProfile {
-            // Reuse a static-ish value
-            static HARDWARE: std::sync::OnceLock<ra_core::facts::HardwareProfile> =
-                std::sync::OnceLock::new();
-            HARDWARE.get_or_init(|| ra_core::facts::HardwareProfile {
+            static HARDWARE: ra_core::facts::HardwareProfile = ra_core::facts::HardwareProfile {
                 cpu_cores: 8,
                 available_memory: 16 * 1024 * 1024 * 1024,
                 total_memory: 16 * 1024 * 1024 * 1024,
@@ -846,7 +843,8 @@ mod tests {
                 l2_cache_size: 256 * 1024,
                 l3_cache_size: 8 * 1024 * 1024,
                 cpu_architecture: ra_core::facts::CpuArchitecture::X86_64,
-            })
+            };
+            &HARDWARE
         }
 
         fn get_schema(&self, table: &str) -> Option<&TableInfo> {
