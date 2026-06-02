@@ -21,6 +21,8 @@ pub struct FactsContext {
     column_stats: Arc<RwLock<HashMap<String, HashMap<String, StatsColumnStats>>>>,
     /// Hardware profile
     hardware: HardwareProfile,
+    /// Owned core hardware profile returned by `hardware_profile` (no global).
+    core_hardware: CoreHardwareProfile,
     /// Schema information
     schema: Arc<RwLock<HashMap<String, TableInfo>>>,
     /// Runtime statistics
@@ -45,6 +47,18 @@ impl FactsContext {
             table_stats: Arc::new(RwLock::new(HashMap::new())),
             column_stats: Arc::new(RwLock::new(HashMap::new())),
             hardware,
+            core_hardware: CoreHardwareProfile {
+                cpu_cores: 8,
+                available_memory: 16 * 1024 * 1024 * 1024,
+                total_memory: 16 * 1024 * 1024 * 1024,
+                simd_width: 256,
+                has_gpu: false,
+                gpu_memory: None,
+                l1_cache_size: 32 * 1024,
+                l2_cache_size: 256 * 1024,
+                l3_cache_size: 8 * 1024 * 1024,
+                cpu_architecture: ra_core::facts::CpuArchitecture::X86_64,
+            },
             schema: Arc::new(RwLock::new(HashMap::new())),
             runtime_stats: Arc::new(RwLock::new(HashMap::new())),
             database_name: "generic".to_string(),
@@ -157,22 +171,7 @@ impl FactsProvider for FactsContext {
     }
 
     fn hardware_profile(&self) -> &CoreHardwareProfile {
-        // This is also problematic - we need to convert on the fly
-        // For a real implementation, we'd cache the converted profile
-        // For now, use a thread-local or lazy_static
-        static EMPTY: CoreHardwareProfile = CoreHardwareProfile {
-            cpu_cores: 8,
-            available_memory: 16 * 1024 * 1024 * 1024,
-            total_memory: 16 * 1024 * 1024 * 1024,
-            simd_width: 256,
-            has_gpu: false,
-            gpu_memory: None,
-            l1_cache_size: 32 * 1024,
-            l2_cache_size: 256 * 1024,
-            l3_cache_size: 8 * 1024 * 1024,
-            cpu_architecture: ra_core::facts::CpuArchitecture::X86_64,
-        };
-        &EMPTY
+        &self.core_hardware
     }
 
     fn available_memory(&self) -> u64 {

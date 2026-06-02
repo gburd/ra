@@ -12,7 +12,6 @@
 //! - Zero overhead in production (`PostgreSQL`, Stoolap) when disabled
 
 use crate::sparsemap::SparseMap;
-use std::sync::OnceLock;
 
 /// Rule ID type (supports up to 65,536 rules).
 pub type RuleId = u16;
@@ -69,11 +68,12 @@ impl RuleSet {
         self.bitmap.iter().map(|id| id as RuleId)
     }
 
-    /// Convert to a list of rule names for display.
+    /// Convert to a list of rule names for display, resolving IDs against the
+    /// supplied registry (which the caller owns).
     #[must_use]
-    pub fn to_names(&self) -> Vec<String> {
+    pub fn to_names(&self, registry: &RuleRegistry) -> Vec<String> {
         self.iter()
-            .filter_map(|id| registry().id_to_name(id))
+            .filter_map(|id| registry.id_to_name(id))
             .map(std::borrow::ToOwned::to_owned)
             .collect()
     }
@@ -101,6 +101,16 @@ pub struct RuleRegistry {
 impl RuleRegistry {
     const fn new() -> Self {
         Self { rules: Vec::new() }
+    }
+
+    /// Build a fully-initialized rule registry. Callers own the instance —
+    /// there is no process-global registry — so the library stays free of
+    /// mutable shared state and is safe to embed in multi-threaded hosts.
+    #[must_use]
+    pub fn initialized() -> Self {
+        let mut reg = Self::new();
+        reg.init();
+        reg
     }
 
     #[expect(clippy::too_many_lines, reason = "rule registration for all optimizer rules")]
@@ -258,34 +268,21 @@ impl RuleRegistry {
     }
 }
 
-/// Global rule registry instance.
-static RULE_REGISTRY: OnceLock<RuleRegistry> = OnceLock::new();
-
-/// Get the global rule registry.
-#[must_use]
-pub fn registry() -> &'static RuleRegistry {
-    RULE_REGISTRY.get_or_init(|| {
-        let mut reg = RuleRegistry::new();
-        reg.init();
-        reg
-    })
-}
-
-/// Get a rule ID by name, returning Result instead of panicking.
+/// Get a rule ID by name from `$reg` (a `&RuleRegistry`), returning a Result.
 ///
 /// # Example
 /// ```
 /// # fn main() -> Result<(), anyhow::Error> {
-/// use ra_engine::rule_id;
-/// let id = rule_id!("and-true-left")?;
+/// use ra_engine::{rule_id, rule_registry::RuleRegistry};
+/// let reg = RuleRegistry::initialized();
+/// let id = rule_id!(reg, "and-true-left")?;
 /// # Ok(())
 /// # }
 /// ```
 #[macro_export]
 macro_rules! rule_id {
-    ($name:literal) => {{
-        $crate::rule_registry::registry()
-            .name_to_id($name)
+    ($reg:expr, $name:literal) => {{
+        $reg.name_to_id($name)
             .ok_or_else(|| anyhow::anyhow!("rule not found: {}", $name))
     }};
 }
@@ -297,14 +294,14 @@ macro_rules! rule_id {
 ///
 /// # Example
 /// ```
-/// use ra_engine::rule_id_unchecked;
-/// let id = rule_id_unchecked!("and-true-left");
+/// use ra_engine::{rule_id_unchecked, rule_registry::RuleRegistry};
+/// let reg = RuleRegistry::initialized();
+/// let id = rule_id_unchecked!(reg, "and-true-left");
 /// ```
 #[macro_export]
 macro_rules! rule_id_unchecked {
-    ($name:literal) => {{
-        $crate::rule_registry::registry()
-            .name_to_id($name)
+    ($reg:expr, $name:literal) => {{
+        $reg.name_to_id($name)
             .expect(concat!("rule not found: ", $name))
     }};
 }
@@ -364,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_registry_lookup() {
-        let reg = registry();
+        let reg = RuleRegistry::initialized();
 
         // Should have registered rules
         assert!(!reg.all_rules().is_empty());
@@ -382,27 +379,30 @@ mod tests {
 
     #[test]
     fn test_rule_id_macro() {
+        let reg = RuleRegistry::initialized();
         // Test successful lookup
-        let id = rule_id!("and-true-left");
+        let id = rule_id!(reg, "and-true-left");
         assert!(id.is_ok());
-        assert_eq!(id.unwrap(), registry().name_to_id("and-true-left").unwrap());
+        assert_eq!(id.unwrap(), reg.name_to_id("and-true-left").unwrap());
 
         // Test failed lookup
-        let id = rule_id!("nonexistent-rule");
+        let id = rule_id!(reg, "nonexistent-rule");
         assert!(id.is_err());
         assert!(id.unwrap_err().to_string().contains("rule not found"));
     }
 
     #[test]
     fn test_rule_id_unchecked_macro() {
+        let reg = RuleRegistry::initialized();
         // Test successful lookup
-        let id = rule_id_unchecked!("and-true-left");
-        assert_eq!(id, registry().name_to_id("and-true-left").unwrap());
+        let id = rule_id_unchecked!(reg, "and-true-left");
+        assert_eq!(id, reg.name_to_id("and-true-left").unwrap());
     }
 
     #[test]
     #[should_panic(expected = "rule not found: nonexistent-rule")]
     fn test_rule_id_unchecked_panic() {
-        let _id = rule_id_unchecked!("nonexistent-rule");
+        let reg = RuleRegistry::initialized();
+        let _id = rule_id_unchecked!(reg, "nonexistent-rule");
     }
 }
