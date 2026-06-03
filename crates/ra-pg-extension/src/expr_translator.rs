@@ -400,7 +400,19 @@ pub(crate) unsafe fn op_expr_from_nodes(
 
     let opno = pg_sys::OpernameGetOprid(opname_list, left_type, right_type);
     if opno == pg_sys::InvalidOid {
-        return std::ptr::null_mut();
+        // No operator for these exact types (e.g. `int4 < numeric`, as produced
+        // by comparing an int column to `avg(...)`). Defer to PostgreSQL's own
+        // operator resolution, which selects the best candidate and inserts the
+        // same implicit coercions the parser would. Returns a fully-formed
+        // OpExpr with coerced arguments.
+        return pg_sys::make_op(
+            std::ptr::null_mut(),
+            opname_list,
+            left_pg.cast(),
+            right_pg.cast(),
+            std::ptr::null_mut(),
+            -1,
+        );
     }
 
     let opfuncid = pg_sys::get_opcode(opno);
