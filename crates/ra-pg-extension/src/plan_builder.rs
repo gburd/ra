@@ -2289,6 +2289,12 @@ impl PlanBuilder {
         // uses a HashJoin (a NestLoop is O(n*m) — unusable on large inputs and
         // impossible for FULL/RIGHT). Cross and non-equi joins use NestLoop;
         // FULL/RIGHT without a hashable condition defer to PG.
+        // Pick the join method. Feasibility (is the condition a hashable `=`?)
+        // needs the PG catalog and is decided here; the hash-vs-nestloop
+        // *preference* is a cost decision made in layer 2 (ra-engine) and
+        // carried on `physical_choices`, keyed by the inner relation's alias.
+        // This builder only renders that choice, falling back to "hash when
+        // feasible" when layer 2 expressed no preference.
         let is_equi = !cond_q.is_null()
             && (*cond_q).type_ == pg_sys::NodeTag::T_OpExpr
             && pg_sys::op_hashjoinable(
@@ -2301,8 +2307,17 @@ impl PlanBuilder {
         if needs_hash && !is_equi {
             return Err(unsupported("full/right join needs a hashable equi-condition"));
         }
+        let cost_prefers_nestloop = ra_engine::plan_advice_physical::inner_join_alias(right)
+            .and_then(|a| self.physical_choices.join_for(&a).cloned())
+            .is_some_and(|s| {
+                use ra_engine::plan_advice_physical::JoinInnerStrategy::{
+                    NestedLoopMaterialize, NestedLoopMemoize, NestedLoopPlain,
+                };
+                matches!(s, NestedLoopPlain | NestedLoopMaterialize | NestedLoopMemoize)
+            });
         let use_hash = is_equi
-            && !matches!(join_type, JoinType::Cross);
+            && !matches!(join_type, JoinType::Cross)
+            && (needs_hash || !cost_prefers_nestloop);
         let join_plan = if use_hash {
             let node = self.alloc_node::<pg_sys::HashJoin>();
             if node.is_null() {
@@ -2352,7 +2367,6 @@ impl PlanBuilder {
         &mut self,
         expr: &RelExpr,
     ) -> Result<(*mut pg_sys::Plan, JoinColMap, *mut pg_sys::List), PlanBuilderError> {
-        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
         if let RelExpr::Join {
             join_type,
             condition,

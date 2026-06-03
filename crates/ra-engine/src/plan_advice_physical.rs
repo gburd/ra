@@ -281,7 +281,21 @@ impl PhysicalChoices {
         table_stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
     ) {
         cost_driven::walk_for_scans(expr, table_stats, self);
-        cost_driven::walk_for_joins(expr, self);
+        cost_driven::walk_for_joins(expr, table_stats, self);
+    }
+
+    /// Populate cost-based join strategies (hash vs nested-loop) from table
+    /// statistics, leaving scan/parallel choices untouched. Used on the
+    /// production planner path, where scan-strategy augmentation is
+    /// intentionally withheld (a concrete PG `IndexScan` with a fixed
+    /// selectivity guess bypasses PG's own path-costing). Existing entries
+    /// (from supplied advice) are preserved.
+    pub fn augment_join_strategies_from_stats(
+        &mut self,
+        expr: &ra_core::algebra::RelExpr,
+        table_stats: &std::collections::HashMap<String, ra_core::statistics::Statistics>,
+    ) {
+        cost_driven::walk_for_joins(expr, table_stats, self);
     }
 }
 
@@ -327,19 +341,16 @@ mod cost_driven {
 
     /// Walk `expr` and assign `JoinInnerStrategy` to every join's
     /// inner-side alias not already present in `choices.joins`.
-    pub(super) fn walk_for_joins(expr: &RelExpr, choices: &mut PhysicalChoices) {
-        let mut joins: Vec<(String, bool)> = Vec::new();
-        collect_joins(expr, &mut joins);
-        for (inner_alias, is_equi) in joins {
-            if choices.joins.contains_key(&inner_alias) {
-                continue;
-            }
-            let strategy = if is_equi {
-                JoinInnerStrategy::Hash
-            } else {
-                JoinInnerStrategy::NestedLoopPlain
-            };
-            choices.joins.insert(inner_alias, strategy);
+    pub(super) fn walk_for_joins(
+        expr: &RelExpr,
+        table_stats: &HashMap<String, Statistics>,
+        choices: &mut PhysicalChoices,
+    ) {
+        let mut joins: Vec<(String, JoinInnerStrategy)> = Vec::new();
+        collect_joins(expr, table_stats, &mut joins);
+        for (inner_alias, strategy) in joins {
+            // Advice (already-present keys) wins over cost-based defaults.
+            choices.joins.entry(inner_alias).or_insert(strategy);
         }
     }
 
@@ -602,14 +613,45 @@ mod cost_driven {
 
     /// Walk `expr` collecting `(inner_alias, is_equi_join)` per
     /// join.
-    fn collect_joins(expr: &RelExpr, out: &mut Vec<(String, bool)>) {
-        if let RelExpr::Join { condition, right, .. } = expr {
-            if let Some(alias) = leaf_alias(right) {
-                out.push((alias, is_equi_join(condition)));
+    fn collect_joins(
+        expr: &RelExpr,
+        table_stats: &HashMap<String, Statistics>,
+        out: &mut Vec<(String, JoinInnerStrategy)>,
+    ) {
+        if let RelExpr::Join { condition, left, right, .. } = expr {
+            if let Some(inner_alias) = super::inner_join_alias(right) {
+                let outer_rows = leaf_table(left).and_then(|t| row_count(table_stats, &t));
+                let inner_rows = leaf_table(right).and_then(|t| row_count(table_stats, &t));
+                let strategy =
+                    decide_join_strategy(outer_rows, inner_rows, is_equi_join(condition));
+                out.push((inner_alias, strategy));
             }
         }
         for child in expr.children() {
-            collect_joins(child, out);
+            collect_joins(child, table_stats, out);
+        }
+    }
+
+    /// Cost-based hash-vs-nested-loop choice for a join's inner side.
+    ///
+    /// A non-equi join can only nested-loop. For an equi-join, a plain
+    /// nested loop rescans the inner relation once per outer row
+    /// (cost ~ `outer*inner`) while a hash join builds the inner once and
+    /// probes (cost ~ `outer+inner`); hash wins for all but degenerate
+    /// (<=1 row) inputs. Cardinality-driven, no magic constants. When row
+    /// counts are unknown, defaults to `Hash` for equi-joins — the safe
+    /// choice that avoids an O(n*m) nested loop on large inputs.
+    fn decide_join_strategy(
+        outer_rows: Option<f64>,
+        inner_rows: Option<f64>,
+        is_equi: bool,
+    ) -> JoinInnerStrategy {
+        if !is_equi {
+            return JoinInnerStrategy::NestedLoopPlain;
+        }
+        match (outer_rows, inner_rows) {
+            (Some(o), Some(i)) if o * i < o + i => JoinInnerStrategy::NestedLoopPlain,
+            _ => JoinInnerStrategy::Hash,
         }
     }
 
@@ -629,18 +671,40 @@ mod cost_driven {
         }
     }
 
-    fn leaf_alias(expr: &RelExpr) -> Option<String> {
+    /// Base-table name of a relation, descending through pass-through
+    /// nodes. Used to look up the relation's row count for cost decisions.
+    fn leaf_table(expr: &RelExpr) -> Option<String> {
         match expr {
-            RelExpr::Scan { table, alias } => {
-                Some(alias.clone().unwrap_or_else(|| table.clone()))
-            }
+            RelExpr::Scan { table, .. } => Some(table.clone()),
             RelExpr::Filter { input, .. }
             | RelExpr::Project { input, .. }
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
-            | RelExpr::Distinct { input } => leaf_alias(input),
+            | RelExpr::Distinct { input } => leaf_table(input),
             _ => None,
         }
+    }
+
+    fn row_count(table_stats: &HashMap<String, Statistics>, table: &str) -> Option<f64> {
+        table_stats.get(&table.to_lowercase()).map(|s| s.row_count)
+    }
+}
+
+/// The alias used to key a join's inner (right) relation in
+/// [`PhysicalChoices`], descending through pass-through nodes to the base
+/// scan. Shared by the cost-driven join walk and the plan builder so both
+/// agree on the lookup key.
+#[must_use]
+pub fn inner_join_alias(expr: &ra_core::algebra::RelExpr) -> Option<String> {
+    use ra_core::algebra::RelExpr;
+    match expr {
+        RelExpr::Scan { table, alias } => Some(alias.clone().unwrap_or_else(|| table.clone())),
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input } => inner_join_alias(input),
+        _ => None,
     }
 }
 
