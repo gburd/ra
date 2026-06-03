@@ -305,3 +305,35 @@ Highest-value to close: **3+ table joins** (ubiquitous) and **window
 functions**. NOTE: execution-time ("slower") comparison needs a
 direct-execution harness — `EXPLAIN ANALYZE` cannot measure Ra's plan because
 the `EXPLAIN ...` text fails Lime parse and falls back to PG.
+
+## Coverage-gap closure (2026-06-03) — 7 of 8 closed
+
+Worked the differential coverage-gap inventory one at a time (design / build /
+verify on PG18, each committed separately):
+
+- **#1 3+ table joins** — recursive `build_join_tree`/`build_join_node`,
+  `(rtindex,attno)` Var remap, HashJoin for hashable equi-joins (NestLoop was
+  O(n*m)), `Filter(Join)` post-join qual fix. Aggregate-over-join kept as a
+  fallback. (main 376d14aa)
+- **#2 window functions** — lag/lead/first_value/last_value/ntile/percent_rank.
+  (b5d13750)
+- **#3 string_agg / array_agg** — multi-arg + polymorphic `anyarray` return in
+  `build_aggref`. (7adfdef0)
+- **#6 FULL / RIGHT joins** — unified join builder, hashable equi required.
+  (1d687b1a)
+- **#4 correlated EXISTS with sub-query alias** — `flatten_rtes` now captures
+  the SubLink relation's alias. (02763f99)
+- **#8 implicit column alias** (`expr alias`, no `AS`) — grammar
+  `target_item ::= expr IDENT`. (9d04d9e8)
+- **#7 `OP ANY/ALL (array)`** — grammar + `build_sao_array` →
+  `ScalarArrayOpExpr`. (ac3d75b7)
+
+**Remaining: #5 scalar subquery compared to an aggregate** (e.g.
+`WHERE x < (SELECT avg(y) FROM t)`). The optimizer decorrelates it to
+`Filter(x < avg(y), CrossJoin(outer, Project(Aggregate)))`. Rendering this
+natively needs either SubPlan/InitPlan + `PARAM_EXEC` (the general scalar
+sub-query mechanism) or matching the aggregate expression in the filter to the
+cross-joined aggregate's output column and rewriting it to an `INNER_VAR` —
+both RFC-scale and executor-coupled. It falls back to PG correctly today.
+(Note: `WHERE b = (SELECT max(b) FROM <same table>)` is additionally a
+self-join, which `flatten_rtes` declines on duplicate relids.)
