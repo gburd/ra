@@ -70,6 +70,11 @@ use ra_core::algebra::{AggregateExpr, JoinType, OnConflict, ProjectionColumn, Re
 use ra_core::expr::{BinOp, Expr};
 use ra_core::statistics::Statistics;
 
+/// Maps a base relation's `(rtindex, attno)` to its 1-based output position in
+/// a join node's targetlist, so nested-join Vars can be rewritten to
+/// `OUTER_VAR`/`INNER_VAR` references (Ra bypasses the planner setrefs pass).
+type JoinColMap = HashMap<(i32, i16), i32>;
+
 use crate::expr_translator::{self, CteCol, CteScope, ExprContext};
 
 // ---------------------------------------------------------------------------
@@ -229,6 +234,20 @@ impl PlanBuilder {
     /// supported. Makes every native-planner fallback name the exact
     /// gap so logs map directly to a coverage backlog task (see
     /// docs/planner-fallback-backlog.md).
+    ///
+    /// Stricter check for an Aggregate's input: a join under an aggregate
+    /// defers to PG, since `build_grouped_aggregate` references its input by
+    /// scan attno, not by a join's remapped output position.
+    fn agg_input_unsupported(expr: &RelExpr) -> Option<&'static str> {
+        match expr {
+            RelExpr::Join { .. } => Some("Aggregate over Join"),
+            RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
+                Self::agg_input_unsupported(input)
+            }
+            _ => Self::first_unsupported_op(expr),
+        }
+    }
+
     fn first_unsupported_op(expr: &RelExpr) -> Option<&'static str> {
         match expr {
             RelExpr::Scan { .. } => None,
@@ -239,7 +258,7 @@ impl PlanBuilder {
             // handle (HAVING's nested form, expressions over aggregates,
             // DISTINCT/unsupported aggregates).
             RelExpr::Project { input, .. } => match &**input {
-                RelExpr::Aggregate { input: agg_in, .. } => Self::first_unsupported_op(agg_in),
+                RelExpr::Aggregate { input: agg_in, .. } => Self::agg_input_unsupported(agg_in),
                 // Project over Join (or over a WHERE Filter over Join) is built
                 // as one NestLoop; build_projected_join returns Err (→ fallback)
                 // for unsupported join shapes.
@@ -252,7 +271,7 @@ impl PlanBuilder {
                     // one Agg node with the HAVING as its qual; recurse into
                     // the aggregate's input rather than the bare Aggregate.
                     RelExpr::Aggregate { input: agg_in, .. } => {
-                        Self::first_unsupported_op(agg_in)
+                        Self::agg_input_unsupported(agg_in)
                     }
                     _ => Self::first_unsupported_op(input),
                 },
@@ -279,7 +298,9 @@ impl PlanBuilder {
                 RelExpr::Project { input: pin, .. } => Self::first_unsupported_op(pin),
                 _ => Some("Window"),
             },
-            RelExpr::Join { .. } => Some("Join"),
+            RelExpr::Join { left, right, .. } => {
+                Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
+            }
             RelExpr::Aggregate { .. } => Some("Aggregate"),
             // Distinct (SELECT DISTINCT): build_unique sorts its input on all
             // output columns before the Unique, so adjacent-dedup is correct.
@@ -504,6 +525,29 @@ impl PlanBuilder {
                 self.build_scan_with_advice(table, alias.as_deref())
             }
             RelExpr::Filter { predicate, input } => {
+                // Filter directly over a Join: build the join with the
+                // predicate as its post-join qual (remapped to the join's
+                // OUTER/INNER frame). The generic fold below would attach a
+                // base-relation-Var qual to the join node, which the join
+                // executor mis-evaluates (segfault).
+                if matches!(&**input, RelExpr::Join { .. }) {
+                    if let RelExpr::Join {
+                        join_type,
+                        condition,
+                        left,
+                        right,
+                    } = &**input
+                    {
+                        let (plan, _, _) = self.build_join_node(
+                            *join_type,
+                            condition,
+                            left,
+                            right,
+                            Some(predicate),
+                        )?;
+                        return Ok(plan);
+                    }
+                }
                 // Fast path: Filter directly over a base Scan with a
                 // single-column btree equality conjunct becomes a real
                 // IndexScan (the equality moves into indexqual; any residual
@@ -604,12 +648,7 @@ impl PlanBuilder {
                 self.set_targetlist(child, columns)?;
                 Ok(child)
             }
-            RelExpr::Join {
-                join_type,
-                condition,
-                left,
-                right,
-            } => self.build_join(*join_type, condition, left, right),
+            RelExpr::Join { .. } => self.build_join_tree(expr).map(|(p, _, _)| p),
             RelExpr::Aggregate {
                 group_by,
                 aggregates,
@@ -1592,10 +1631,8 @@ impl PlanBuilder {
     unsafe fn remap_join_vars(
         &self,
         node: *mut pg_sys::Node,
-        lrti: pg_sys::Index,
-        rrti: pg_sys::Index,
-        lmap: &HashMap<i16, i32>,
-        rmap: &HashMap<i16, i32>,
+        lmap: &JoinColMap,
+        rmap: &JoinColMap,
     ) -> bool {
         if node.is_null() {
             return true;
@@ -1603,18 +1640,12 @@ impl PlanBuilder {
         match (*node).type_ {
             pg_sys::NodeTag::T_Var => {
                 let var = node.cast::<pg_sys::Var>();
-                let varno = (*var).varno;
-                if varno == lrti as i32 {
-                    let Some(&pos) = lmap.get(&(*var).varattno) else {
-                        return false;
-                    };
+                let key = ((*var).varno, (*var).varattno);
+                if let Some(&pos) = lmap.get(&key) {
                     (*var).varno = pg_sys::OUTER_VAR;
                     (*var).varattno = pos as i16;
                     true
-                } else if varno == rrti as i32 {
-                    let Some(&pos) = rmap.get(&(*var).varattno) else {
-                        return false;
-                    };
+                } else if let Some(&pos) = rmap.get(&key) {
                     (*var).varno = pg_sys::INNER_VAR;
                     (*var).varattno = pos as i16;
                     true
@@ -1624,32 +1655,26 @@ impl PlanBuilder {
             }
             pg_sys::NodeTag::T_Const | pg_sys::NodeTag::T_Param => true,
             pg_sys::NodeTag::T_OpExpr | pg_sys::NodeTag::T_DistinctExpr => {
-                self.remap_var_list((*node.cast::<pg_sys::OpExpr>()).args, lrti, rrti, lmap, rmap)
+                self.remap_var_list((*node.cast::<pg_sys::OpExpr>()).args, lmap, rmap)
             }
             pg_sys::NodeTag::T_ScalarArrayOpExpr => self.remap_var_list(
                 (*node.cast::<pg_sys::ScalarArrayOpExpr>()).args,
-                lrti,
-                rrti,
                 lmap,
                 rmap,
             ),
             pg_sys::NodeTag::T_BoolExpr => {
-                self.remap_var_list((*node.cast::<pg_sys::BoolExpr>()).args, lrti, rrti, lmap, rmap)
+                self.remap_var_list((*node.cast::<pg_sys::BoolExpr>()).args, lmap, rmap)
             }
             pg_sys::NodeTag::T_FuncExpr => {
-                self.remap_var_list((*node.cast::<pg_sys::FuncExpr>()).args, lrti, rrti, lmap, rmap)
+                self.remap_var_list((*node.cast::<pg_sys::FuncExpr>()).args, lmap, rmap)
             }
             pg_sys::NodeTag::T_NullTest => self.remap_join_vars(
                 (*node.cast::<pg_sys::NullTest>()).arg.cast(),
-                lrti,
-                rrti,
                 lmap,
                 rmap,
             ),
             pg_sys::NodeTag::T_RelabelType => self.remap_join_vars(
                 (*node.cast::<pg_sys::RelabelType>()).arg.cast(),
-                lrti,
-                rrti,
                 lmap,
                 rmap,
             ),
@@ -1660,10 +1685,8 @@ impl PlanBuilder {
     unsafe fn remap_var_list(
         &self,
         list: *mut pg_sys::List,
-        lrti: pg_sys::Index,
-        rrti: pg_sys::Index,
-        lmap: &HashMap<i16, i32>,
-        rmap: &HashMap<i16, i32>,
+        lmap: &JoinColMap,
+        rmap: &JoinColMap,
     ) -> bool {
         if list.is_null() {
             return true;
@@ -1671,7 +1694,7 @@ impl PlanBuilder {
         let elements = (*list).elements;
         for i in 0..(*list).length {
             let item = (*elements.add(i as usize)).ptr_value as *mut pg_sys::Node;
-            if !self.remap_join_vars(item, lrti, rrti, lmap, rmap) {
+            if !self.remap_join_vars(item, lmap, rmap) {
                 return false;
             }
         }
@@ -2195,6 +2218,173 @@ impl PlanBuilder {
         Ok((rti, tlist, map))
     }
 
+    /// Build one `NestLoop` join node over two (possibly nested) join inputs,
+    /// with the ON `condition` as joinqual and an optional `where_pred` as the
+    /// post-join `plan.qual` (both remapped to the children's OUTER/INNER
+    /// frame). Returns the node, its full-passthrough output
+    /// `(rtindex,attno)->position` map, and output targetlist.
+    unsafe fn build_join_node(
+        &mut self,
+        join_type: JoinType,
+        condition: &Expr,
+        left: &RelExpr,
+        right: &RelExpr,
+        where_pred: Option<&Expr>,
+    ) -> Result<(*mut pg_sys::Plan, JoinColMap, *mut pg_sys::List), PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::Cross => {}
+            _ => return Err(unsupported("nested join type")),
+        }
+        let (lplan, lmap, _) = self.build_join_tree(left)?;
+        let (rplan, rmap, _) = self.build_join_tree(right)?;
+
+        // Translate + remap (to OUTER/INNER) the ON condition and any WHERE.
+        let mut cond_q = std::ptr::null_mut::<pg_sys::Node>();
+        if !matches!(condition, Expr::Const(ra_core::expr::Const::Bool(true))) {
+            let q = expr_translator::translate(condition, &self.expr_ctx);
+            if q.is_null() || !self.remap_join_vars(q.cast(), &lmap, &rmap) {
+                return Err(unsupported("join condition"));
+            }
+            cond_q = q.cast();
+        }
+        let mut where_q = std::ptr::null_mut::<pg_sys::Node>();
+        if let Some(w) = where_pred {
+            let q = expr_translator::translate(w, &self.expr_ctx);
+            if q.is_null() || !self.remap_join_vars(q.cast(), &lmap, &rmap) {
+                return Err(unsupported("join WHERE predicate"));
+            }
+            where_q = q.cast();
+        }
+        let (out_tl, out_map) =
+            self.concat_join_tlist(&lmap, (*lplan).targetlist, &rmap, (*rplan).targetlist);
+
+        // Use a HashJoin for an inner equi-join whose ON condition is a single
+        // hashable `=` OpExpr — a NestLoop here is O(n*m) and unusably slow on
+        // large relations. Everything else stays a NestLoop (correct).
+        let hashable = matches!(join_type, JoinType::Inner)
+            && !cond_q.is_null()
+            && (*cond_q).type_ == pg_sys::NodeTag::T_OpExpr
+            && pg_sys::op_hashjoinable(
+                (*cond_q.cast::<pg_sys::OpExpr>()).opno,
+                pg_sys::exprType(
+                    pg_sys::list_nth((*cond_q.cast::<pg_sys::OpExpr>()).args, 0).cast(),
+                ),
+            );
+        let join_plan = if hashable {
+            let node = self.alloc_node::<pg_sys::HashJoin>();
+            if node.is_null() {
+                return Err(PlanBuilderError::NullPointer("HashJoin".to_owned()));
+            }
+            let hash = self.alloc_node::<pg_sys::Hash>();
+            if hash.is_null() {
+                return Err(PlanBuilderError::NullPointer("Hash".to_owned()));
+            }
+            (*hash).plan.type_ = pg_sys::NodeTag::T_Hash;
+            (*hash).plan.lefttree = rplan;
+            (*hash).plan.targetlist = (*rplan).targetlist;
+            (*node).join.plan.type_ = pg_sys::NodeTag::T_HashJoin;
+            (*node).join.jointype = ra_join_type_to_pg(join_type);
+            (*node).join.plan.lefttree = lplan;
+            (*node).join.plan.righttree = &mut (*hash).plan as *mut pg_sys::Plan;
+            (*node).hashclauses = pg_sys::lappend(std::ptr::null_mut(), cond_q.cast());
+            &mut (*node).join.plan as *mut pg_sys::Plan
+        } else {
+            let node = self.alloc_node::<pg_sys::NestLoop>();
+            if node.is_null() {
+                return Err(PlanBuilderError::NullPointer("NestLoop".to_owned()));
+            }
+            (*node).join.plan.type_ = pg_sys::NodeTag::T_NestLoop;
+            (*node).join.jointype = ra_join_type_to_pg(join_type);
+            (*node).join.plan.lefttree = lplan;
+            (*node).join.plan.righttree = rplan;
+            if !cond_q.is_null() {
+                (*node).join.joinqual = pg_sys::lappend(std::ptr::null_mut(), cond_q.cast());
+            }
+            &mut (*node).join.plan as *mut pg_sys::Plan
+        };
+        if !where_q.is_null() {
+            (*join_plan).qual = pg_sys::lappend((*join_plan).qual, where_q.cast());
+        }
+        (*join_plan).targetlist = out_tl;
+        self.propagate_costs_binary(&mut *join_plan, lplan, rplan);
+        Ok((join_plan, out_map, out_tl))
+    }
+
+    /// Build a join input that may be a single base relation OR a (possibly
+    /// nested) join. Returns the plan, a `(rtindex, attno) -> output-position`
+    /// map, and the full passthrough output targetlist so a parent join can
+    /// reference every base column. Recurses for nested joins, emitting
+    /// `OUTER_VAR`/`INNER_VAR` refs at each level (Ra bypasses setrefs).
+    unsafe fn build_join_tree(
+        &mut self,
+        expr: &RelExpr,
+    ) -> Result<(*mut pg_sys::Plan, JoinColMap, *mut pg_sys::List), PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        if let RelExpr::Join {
+            join_type,
+            condition,
+            left,
+            right,
+        } = expr
+        {
+            self.build_join_node(*join_type, condition, left, right, None)
+        } else {
+            // Leaf: a single base relation (scan / Filter-over-scan / CTE).
+            let (rti, tlist, attmap) = self.join_side_cols(expr)?;
+            let plan = self.build_plan(expr)?;
+            (*plan).targetlist = tlist;
+            let map = attmap
+                .into_iter()
+                .map(|(att, pos)| ((rti as i32, att), pos))
+                .collect();
+            Ok((plan, map, tlist))
+        }
+    }
+
+    /// Build a join node's output targetlist (left child columns as
+    /// `OUTER_VAR` refs, then right child columns as `INNER_VAR` refs) plus
+    /// the combined `(rtindex, attno) -> position` map (left positions, then
+    /// right positions offset by the left column count).
+    unsafe fn concat_join_tlist(
+        &self,
+        lmap: &JoinColMap,
+        ltl: *mut pg_sys::List,
+        rmap: &JoinColMap,
+        rtl: *mut pg_sys::List,
+    ) -> (*mut pg_sys::List, JoinColMap) {
+        let llen = pg_sys::list_length(ltl);
+        let mut out: *mut pg_sys::List = std::ptr::null_mut();
+        for (varno, src, tl, len) in [
+            (pg_sys::OUTER_VAR, ltl, ltl, llen),
+            (pg_sys::INNER_VAR, rtl, rtl, pg_sys::list_length(rtl)),
+        ] {
+            let _ = src;
+            for p in 1..=len {
+                let te = pg_sys::list_nth(tl, p - 1).cast::<pg_sys::TargetEntry>();
+                let var = self.alloc_node::<pg_sys::Var>();
+                (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+                (*var).varno = varno;
+                (*var).varattno = p as i16;
+                (*var).vartype = pg_sys::exprType((*te).expr.cast());
+                (*var).vartypmod = pg_sys::exprTypmod((*te).expr.cast());
+                (*var).varcollid = pg_sys::exprCollation((*te).expr.cast());
+                (*var).varlevelsup = 0;
+                let resno = (pg_sys::list_length(out) + 1) as i16;
+                let nt = pg_sys::makeTargetEntry(var.cast(), resno, (*te).resname, false);
+                out = pg_sys::lappend(out, nt.cast());
+            }
+        }
+        let mut map: JoinColMap = HashMap::new();
+        for (&k, &pos) in lmap {
+            map.insert(k, pos);
+        }
+        for (&k, &pos) in rmap {
+            map.insert(k, llen + pos);
+        }
+        (out, map)
+    }
+
     /// Build a `Project` over a two-relation `Join` as a single `NestLoop`
     /// plan node. Supports Inner / Left / Cross joins over two `Scan`
     /// relations. The join output targetlist and the ON / WHERE quals are
@@ -2220,17 +2410,12 @@ impl PlanBuilder {
             | JoinType::Anti => {}
             _ => return Err(unsupported("join type")),
         }
-        // Each side must reduce to a single base relation (optionally under
-        // Filters — build_plan folds those into the scan qual) OR to the
-        // in-scope recursive CTE (built as a WorkTableScan / CteScan). The
-        // per-side resolver returns the scan rtindex, output targetlist, and
-        // attno→position map for join-Var remapping.
-        let (lrti, l_tlist, lmap) = self.join_side_cols(left)?;
-        let (rrti, r_tlist, rmap) = self.join_side_cols(right)?;
-        let left_plan = self.build_plan(left)?;
-        let right_plan = self.build_plan(right)?;
-        (*left_plan).targetlist = l_tlist;
-        (*right_plan).targetlist = r_tlist;
+        // Each side may be a single base relation OR a (possibly nested)
+        // join; build_join_tree returns the side plan, its
+        // (rtindex,attno)->position map for join-Var remapping, and (already
+        // assigned) its output targetlist.
+        let (left_plan, lmap, _) = self.build_join_tree(left)?;
+        let (right_plan, rmap, _) = self.build_join_tree(right)?;
 
         let node = self.alloc_node::<pg_sys::NestLoop>();
         if node.is_null() {
@@ -2244,7 +2429,7 @@ impl PlanBuilder {
         // ON condition → joinqual (skip a trivial TRUE for cross join).
         if !matches!(condition, Expr::Const(ra_core::expr::Const::Bool(true))) {
             let q = expr_translator::translate(condition, &self.expr_ctx);
-            if q.is_null() || !self.remap_join_vars(q.cast(), lrti, rrti, &lmap, &rmap) {
+            if q.is_null() || !self.remap_join_vars(q.cast(), &lmap, &rmap) {
                 return Err(unsupported("join condition"));
             }
             (*node).join.joinqual = pg_sys::lappend(std::ptr::null_mut(), q.cast());
@@ -2252,7 +2437,7 @@ impl PlanBuilder {
         // WHERE → plan.qual (applied after the join).
         if let Some(w) = where_pred {
             let q = expr_translator::translate(w, &self.expr_ctx);
-            if q.is_null() || !self.remap_join_vars(q.cast(), lrti, rrti, &lmap, &rmap) {
+            if q.is_null() || !self.remap_join_vars(q.cast(), &lmap, &rmap) {
                 return Err(unsupported("join WHERE predicate"));
             }
             (*node).join.plan.qual = pg_sys::lappend(std::ptr::null_mut(), q.cast());
@@ -2261,7 +2446,7 @@ impl PlanBuilder {
         let mut tlist: *mut pg_sys::List = std::ptr::null_mut();
         for (i, pc) in out_columns.iter().enumerate() {
             let e = expr_translator::translate(&pc.expr, &self.expr_ctx);
-            if e.is_null() || !self.remap_join_vars(e.cast(), lrti, rrti, &lmap, &rmap) {
+            if e.is_null() || !self.remap_join_vars(e.cast(), &lmap, &rmap) {
                 return Err(unsupported("join output column"));
             }
             let resname = pc
