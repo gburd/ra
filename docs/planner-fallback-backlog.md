@@ -306,7 +306,7 @@ functions**. NOTE: execution-time ("slower") comparison needs a
 direct-execution harness — `EXPLAIN ANALYZE` cannot measure Ra's plan because
 the `EXPLAIN ...` text fails Lime parse and falls back to PG.
 
-## Coverage-gap closure (2026-06-03) — 7 of 8 closed
+## Coverage-gap closure (2026-06-03) — 8 of 8 closed
 
 Worked the differential coverage-gap inventory one at a time (design / build /
 verify on PG18, each committed separately):
@@ -328,15 +328,30 @@ verify on PG18, each committed separately):
 - **#7 `OP ANY/ALL (array)`** — grammar + `build_sao_array` →
   `ScalarArrayOpExpr`. (ac3d75b7)
 
-**Remaining: #5 scalar subquery compared to an aggregate** (e.g.
-`WHERE x < (SELECT avg(y) FROM t)`). The optimizer decorrelates it to
-`Filter(x < avg(y), CrossJoin(outer, Project(Aggregate)))`. Rendering this
-natively needs either SubPlan/InitPlan + `PARAM_EXEC` (the general scalar
-sub-query mechanism) or matching the aggregate expression in the filter to the
-cross-joined aggregate's output column and rewriting it to an `INNER_VAR` —
-both RFC-scale and executor-coupled. It falls back to PG correctly today.
-(Note: `WHERE b = (SELECT max(b) FROM <same table>)` is additionally a
-self-join, which `flatten_rtes` declines on duplicate relids.)
+**Remaining: none.** All eight known coverage-gap shapes are now closed.
+
+### #5 scalar subquery compared to an aggregate — CLOSED (0399eac9)
+
+`WHERE x < (SELECT avg(y) FROM t)` and friends. Two changes routed these
+through the plan builder's existing scalar-subquery path instead of a
+non-renderable CrossJoin-with-Aggregate:
+
+- **decorrelation** (`decorrelate_scalar_comparison`): no longer rewrites an
+  *uncorrelated* scalar comparison subquery into `Filter(x op col,
+  CrossJoin(input, Q))`. Declining leaves `Filter(x op (SELECT ...))` intact so
+  `prepare_subplans` builds an `EXPR_SUBLINK` SubPlan — uncorrelated lowers to
+  an `InitPlan` (evaluated once, identical plan to PG), correlated uses
+  `PARAM_EXEC` via `paramify_plan`. Correlated *aggregate* decorrelation to a
+  LeftJoin (TPC-H Q20) is unchanged.
+- **expr_translator** (`op_expr_from_nodes`): when no operator exists for the
+  exact operand types (e.g. `int4 < numeric` from comparing an int column to
+  `avg()`), defer to PostgreSQL's `make_op`, which selects the best candidate
+  and inserts the same implicit coercions the parser would. Exact-match cases
+  are unchanged. General fix, not subquery-specific.
+
+Self-table scalar subqueries (`b = (SELECT max(b) FROM <same table>)`) also
+plan natively — the SubPlan carries its own range table, so the old
+`flatten_rtes` self-join limitation does not apply.
 
 ## Deferred: Lime parser-generator update to v0.10.0
 
