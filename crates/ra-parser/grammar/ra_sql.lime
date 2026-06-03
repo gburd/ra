@@ -463,6 +463,7 @@ target_list(A) ::= target_list(B) COMMA target_item(C). {
 
 target_item(A) ::= expr(B).                 { A = B; }
 target_item(A) ::= expr(B) AS IDENT(C).     { A = ra_alias_target(pstate, B, C.text); }
+target_item(A) ::= expr(B) IDENT(C).         { A = ra_alias_target(pstate, B, C.text); }
 target_item(A) ::= STAR. {
     A = ra_column(pstate, "*");
 }
