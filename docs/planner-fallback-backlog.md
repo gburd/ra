@@ -356,12 +356,17 @@ plan natively — the SubPlan carries its own range table, so the old
 ## Deferred: Lime parser-generator update to v0.10.0
 
 Lime v0.10.0 (current submodule pin: v0.8.7) restructured the generator into
-~40 source files and a separate lex-compiler static library, and changed the
-host-tool CLI/grammar-directive behavior (the tool builds once `build.rs`
-links the full `src/lex/*.c` set + `emit_c_skin_bison.c` + `jit_inline.c` with
-`-DLIME_HAS_LEX_COMPILER -DLIME_HAS_RUST_OUTPUT`, but then exits non-zero on
-our grammar — flags/directives changed). A correct update needs: (1) the
-build.rs source-set/include/define changes, (2) reconciling the run-time CLI
-flags + `limpar.c` template, (3) verifying the generated `ra_sql.c` format is
-still compatible with `lime-rs`. Deferred to keep the parser (which all of Ra
-depends on) functional; tracked as its own focused task.
+~40 source files and a separate lex-compiler static library, so the host-tool
+build recipe grew (build.rs must link the full `src/lex/*.c` set +
+`emit_c_skin_bison.c` + `jit_inline.c` with `-DLIME_HAS_LEX_COMPILER
+-DLIME_HAS_RUST_OUTPUT`). After that, the **actual blocker** is a spurious
+`warning: --enable=safe has no effect without --target=rust` that v0.10.0
+emits on every C-target build (the `safe` feature defaults ON yet is marked
+rust-only). That extra stderr line defeats `build.rs`'s conflict-tolerance
+check (which expects every stderr line to be a resolved-conflict line) and
+aborts the build. Full reproducible root-cause analysis (with `lime.c` line
+numbers) and a suggested upstream fix are written up for the Lime team in
+[`docs/lime-v0.10-upgrade-blocker.md`](lime-v0.10-upgrade-blocker.md).
+Holding at v0.8.7 until the upstream warning is fixed; special-casing the
+warning string in `build.rs` was rejected as brittle (it would mask future
+legitimate warnings).
