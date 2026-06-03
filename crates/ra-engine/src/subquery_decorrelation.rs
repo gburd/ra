@@ -450,10 +450,6 @@ fn decorrelate_negated_subquery(
 /// For **correlated** scalar aggregate subqueries (e.g., TPC-H Q20):
 /// `x > (SELECT agg(...) FROM T WHERE t.a = outer.b AND local_preds)`
 /// becomes `Filter(x > __agg, LeftJoin(input, Aggregate(...), on correlation))`
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "Option<...> is the natural shape: the function may decline to rewrite"
-)]
 fn decorrelate_scalar_comparison(
     op: BinOp,
     other_side: &Expr,
@@ -461,37 +457,17 @@ fn decorrelate_scalar_comparison(
     input: RelExpr,
 ) -> Option<RelExpr> {
     // Try correlated aggregate decorrelation first
-    if let Some(result) =
-        try_decorrelate_correlated_scalar(op, other_side, subquery, input.clone())
-    {
+    if let Some(result) = try_decorrelate_correlated_scalar(op, other_side, subquery, input) {
         return Some(result);
     }
 
-    // Fallback: uncorrelated scalar → CrossJoin
-    let decorrelated_query = decorrelate(subquery);
-
-    // Extract the output column of the scalar subquery
-    let subquery_col = first_output_column(&decorrelated_query);
-
-    // Build comparison: other_side op subquery_col
-    let condition = Expr::BinOp {
-        op,
-        left: Box::new(other_side.clone()),
-        right: Box::new(subquery_col),
-    };
-
-    // CrossJoin(input, subquery) then Filter
-    let cross = RelExpr::Join {
-        join_type: JoinType::Cross,
-        condition: Expr::Const(Const::Bool(true)),
-        left: Box::new(input),
-        right: Box::new(decorrelated_query),
-    };
-
-    Some(RelExpr::Filter {
-        predicate: condition,
-        input: Box::new(cross),
-    })
+    // Fallback: uncorrelated (or non-aggregate-correlatable) scalar subquery.
+    // Decline — leaving `Filter(x op (SELECT ...))` intact routes it to the
+    // plan builder's scalar-subquery path (EXPR_SUBLINK SubPlan / InitPlan +
+    // PARAM_EXEC), which renders natively and mirrors PostgreSQL. A CrossJoin
+    // with the subquery is not renderable when the join side is an Aggregate
+    // (and is unsafe for correlated cases), so it is no longer emitted.
+    None
 }
 
 /// Build an equality condition for IN/ANY/ALL subqueries.
@@ -1437,7 +1413,7 @@ mod tests {
     }
 
     #[test]
-    fn scalar_subquery_becomes_cross_join_filter() {
+    fn scalar_subquery_comparison_preserved_for_subplan() {
         // SELECT * FROM t WHERE 1 = (SELECT 1)
         let subquery = RelExpr::scan("dual");
         let predicate = Expr::BinOp {
@@ -1452,17 +1428,21 @@ mod tests {
         let input = RelExpr::scan("t").filter(predicate);
 
         let result = decorrelate(&input);
+        // Uncorrelated scalar comparison subqueries are no longer rewritten
+        // into a CrossJoin; they are preserved in the predicate and lowered by
+        // the plan builder's SubPlan/InitPlan path (matches PostgreSQL).
         match &result {
-            RelExpr::Filter {
-                input: cross_join, ..
-            } => match cross_join.as_ref() {
-                RelExpr::Join {
-                    join_type: JoinType::Cross,
-                    ..
-                } => {} // Success
-                other => panic!("Expected CrossJoin inside filter, got: {other:?}"),
-            },
-            other => panic!("Expected Filter over CrossJoin, got: {other:?}"),
+            RelExpr::Filter { predicate, input } => {
+                assert!(
+                    matches!(input.as_ref(), RelExpr::Scan { .. }),
+                    "expected Filter directly over Scan (no join introduced), got: {input:?}"
+                );
+                assert!(
+                    contains_subquery(predicate),
+                    "scalar subquery should be preserved in the predicate: {predicate:?}"
+                );
+            }
+            other => panic!("Expected Filter over Scan, got: {other:?}"),
         }
     }
 
@@ -1589,10 +1569,22 @@ mod tests {
         assert!(has_anti, "expected AntiJoin, got {result:?}");
     }
 
-    /// D2: a subquery embedded in a JOIN's ON-condition must be
-    /// hoisted/decorrelated, not left in place. The current strategy
-    /// is to lift the subquery into a `CrossJoin` + Filter and then
-    /// re-decorrelate; the result must contain no subquery at all.
+    /// Walk a plan tree; true if any JOIN node's condition contains a subquery.
+    fn join_condition_contains_subquery(rel: &RelExpr) -> bool {
+        if let RelExpr::Join { condition, .. } = rel {
+            if contains_subquery(condition) {
+                return true;
+            }
+        }
+        rel.children()
+            .into_iter()
+            .any(join_condition_contains_subquery)
+    }
+
+    /// D2: a subquery embedded in a JOIN's ON-condition must be hoisted out of
+    /// the join condition. It is lifted into a `CrossJoin` + Filter; the scalar
+    /// subquery itself is then preserved in the filter predicate for the plan
+    /// builder's SubPlan path, but no JOIN condition may still contain it.
     #[test]
     fn subquery_inside_join_condition_is_decorrelated() {
         let inner_sq = Expr::SubQuery {
@@ -1613,8 +1605,8 @@ mod tests {
 
         let result = decorrelate(&join);
         assert!(
-            !tree_contains_subquery(&result),
-            "JOIN-condition subquery should be lifted: {result:?}"
+            !join_condition_contains_subquery(&result),
+            "subquery must be hoisted out of every JOIN condition: {result:?}"
         );
     }
 
