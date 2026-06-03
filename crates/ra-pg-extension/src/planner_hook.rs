@@ -229,12 +229,25 @@ unsafe fn ra_planner_hook_inner(
     // tests, benchmarks) until the Ra-vs-PG plan-quality comparison
     // validates it. Supplied advice is explicit user intent, so it
     // is always honored here.
-    if let Some(advice_str) = crate::extension_state::effective_plan_advice() {
-        if let Ok(parsed) = ra_plan_advice::parse_advice(&advice_str) {
-            let choices = ra_engine::plan_advice_physical::PhysicalChoices::from_advice(&parsed);
-            if !choices.is_empty() {
-                builder.set_physical_choices(choices);
-            }
+    // Physical-strategy choices handed to the plan builder:
+    //  - Supplied scan/join/parallel advice (explicit user intent), and
+    //  - Cost-based join-method selection (layer 2): HashJoin vs NestLoop
+    //    chosen per join from cardinalities, carried here for the builder to
+    //    render (it applies catalog feasibility). Advice wins over the
+    //    cost-based default. Scan-strategy augmentation stays withheld on the
+    //    production path (it bypasses PG's own path-costing).
+    {
+        use ra_engine::plan_advice_physical::PhysicalChoices;
+        let mut choices = crate::extension_state::effective_plan_advice()
+            .and_then(|a| ra_plan_advice::parse_advice(&a).ok())
+            .map_or_else(PhysicalChoices::new, |p| PhysicalChoices::from_advice(&p));
+        let stats_map: std::collections::HashMap<String, ra_core::Statistics> = stats
+            .iter()
+            .map(|(t, s)| (t.to_lowercase(), s.clone()))
+            .collect();
+        choices.augment_join_strategies_from_stats(&optimized, &stats_map);
+        if !choices.is_empty() {
+            builder.set_physical_choices(choices);
         }
     }
 
