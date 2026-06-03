@@ -1069,6 +1069,20 @@ expr(A) ::= expr(B) GE ANY LPAREN select_stmt(S) RPAREN. {
     A = ra_func(pstate, "__ge_any", args);
 }
 
+/* OP ANY/ALL (array expression): a = ANY(ARRAY[...]) etc. -> ScalarArrayOpExpr */
+expr(A) ::= expr(B) EQ ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_eq_any",a); }
+expr(A) ::= expr(B) NE ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_ne_any",a); }
+expr(A) ::= expr(B) LT ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_lt_any",a); }
+expr(A) ::= expr(B) LE ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_le_any",a); }
+expr(A) ::= expr(B) GT ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_gt_any",a); }
+expr(A) ::= expr(B) GE ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_ge_any",a); }
+expr(A) ::= expr(B) EQ ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_eq_all",a); }
+expr(A) ::= expr(B) NE ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_ne_all",a); }
+expr(A) ::= expr(B) LT ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_lt_all",a); }
+expr(A) ::= expr(B) LE ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_le_all",a); }
+expr(A) ::= expr(B) GT ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_gt_all",a); }
+expr(A) ::= expr(B) GE ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_ge_all",a); }
+
 /* SOME is a synonym for ANY */
 expr(A) ::= expr(B) EQ SOME LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
