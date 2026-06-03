@@ -2344,6 +2344,45 @@ impl PlanBuilder {
             (*node).join.plan.lefttree = lplan;
             (*node).join.plan.righttree = &mut (*hash).plan as *mut pg_sys::Plan;
             (*node).hashclauses = pg_sys::lappend(std::ptr::null_mut(), cond_q.cast());
+            // The hashclauses only drive the per-match equality *recheck*.
+            // The executor builds its hash functions and key expressions from
+            // the HashJoin's hashoperators / hashcollations / hashkeys (outer)
+            // and the Hash node's hashkeys (inner). Without them every row
+            // computes a constant hash value -> one bucket -> O(n*m) probe
+            // (results stay correct via the recheck, just catastrophically
+            // slow). Wire all of them from the single hashable equi-OpExpr.
+            let op = cond_q.cast::<pg_sys::OpExpr>();
+            let a0 = pg_sys::list_nth((*op).args, 0).cast::<pg_sys::Node>();
+            let a1 = pg_sys::list_nth((*op).args, 1).cast::<pg_sys::Node>();
+            let is_inner = |n: *mut pg_sys::Node| {
+                !n.is_null()
+                    && (*n).type_ == pg_sys::NodeTag::T_Var
+                    && (*n.cast::<pg_sys::Var>()).varno == pg_sys::INNER_VAR as i32
+            };
+            let (outer_key, inner_key) = if is_inner(a0) { (a1, a0) } else { (a0, a1) };
+            (*node).hashoperators =
+                pg_sys::lappend_oid(std::ptr::null_mut(), (*op).opno);
+            (*node).hashcollations =
+                pg_sys::lappend_oid(std::ptr::null_mut(), (*op).inputcollid);
+            // Outer (probe) key: evaluated against the outer tuple — the
+            // OUTER_VAR operand is already correct.
+            (*node).hashkeys = pg_sys::lappend(std::ptr::null_mut(), outer_key.cast());
+            // Inner (build) key: ExecHash evaluates the Hash node's hashkeys
+            // against its child tuple, which occupies the *outer* slot of the
+            // Hash node's expr context — so rewrite varno INNER_VAR -> OUTER_VAR
+            // (same attno) on a copy (mutating the shared clause would corrupt
+            // the equality recheck).
+            let hk = if !inner_key.is_null()
+                && (*inner_key).type_ == pg_sys::NodeTag::T_Var
+            {
+                let v = self.alloc_node::<pg_sys::Var>();
+                *v = *inner_key.cast::<pg_sys::Var>();
+                (*v).varno = pg_sys::OUTER_VAR as i32;
+                v.cast::<pg_sys::Node>()
+            } else {
+                inner_key
+            };
+            (*hash).hashkeys = pg_sys::lappend(std::ptr::null_mut(), hk.cast());
             &mut (*node).join.plan as *mut pg_sys::Plan
         } else {
             let node = self.alloc_node::<pg_sys::NestLoop>();
