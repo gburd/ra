@@ -2901,20 +2901,17 @@ impl PlanBuilder {
     unsafe fn build_aggref(
         &self,
         name: &str,
-        arg: Option<(*mut pg_sys::Expr, pg_sys::Oid, pg_sys::Oid)>,
+        args: &[(*mut pg_sys::Expr, pg_sys::Oid, pg_sys::Oid)],
         aggno: i32,
     ) -> Result<*mut pg_sys::Expr, PlanBuilderError> {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
         let lower = name.to_lowercase();
-        let nargs = i32::from(arg.is_some());
-        let mut argtypes = [pg_sys::InvalidOid; 1];
-        if let Some((_, ty, _)) = arg {
-            argtypes[0] = ty;
-        }
+        let nargs = args.len() as i32;
+        let mut argtypes: Vec<pg_sys::Oid> = args.iter().map(|&(_, ty, _)| ty).collect();
         // `count(col)` resolves to the polymorphic `count("any")` aggregate;
         // LookupFuncName needs the declared ANYOID, not the column's type
         // (type-specific aggregates like max/sum match their exact type).
-        if lower == "count" && arg.is_some() {
+        if lower == "count" && !args.is_empty() {
             argtypes[0] = pg_sys::ANYOID;
         }
         let fname = CString::new(lower.as_str()).map_err(|_| unsupported("agg name"))?;
@@ -2949,24 +2946,33 @@ impl PlanBuilder {
         }
         let aggtranstype = pg_sys::Oid::from(transtype_datum.value() as u32);
 
-        let aggtype = pg_sys::get_func_rettype(aggfnoid);
+        let rettype = pg_sys::get_func_rettype(aggfnoid);
+        // Resolve a polymorphic array return (e.g. array_agg's `anyarray`) to
+        // the concrete array type of the first argument.
+        let aggtype = if rettype == pg_sys::ANYARRAYOID && !args.is_empty() {
+            pg_sys::get_array_type(args[0].1)
+        } else {
+            rettype
+        };
         let node = self.alloc_node::<pg_sys::Aggref>();
         (*node).xpr.type_ = pg_sys::NodeTag::T_Aggref;
         (*node).aggfnoid = aggfnoid;
         (*node).aggtype = aggtype;
         (*node).aggcollid = pg_sys::get_typcollation(aggtype);
         (*node).aggtranstype = aggtranstype;
-        (*node).aggstar = arg.is_none();
+        (*node).aggstar = args.is_empty();
         (*node).aggkind = b'n' as i8; // AGGKIND_NORMAL
         (*node).aggsplit = pg_sys::AggSplit::AGGSPLIT_SIMPLE;
         (*node).aggno = aggno;
         (*node).aggtransno = aggno;
         (*node).agglevelsup = 0;
-        if let Some((arg_expr, ty, coll)) = arg {
+        if let Some(&(_, _, coll)) = args.first() {
             (*node).inputcollid = coll;
-            (*node).aggargtypes = pg_sys::lappend_oid(std::ptr::null_mut(), ty);
-            let te = pg_sys::makeTargetEntry(arg_expr, 1, std::ptr::null_mut(), false);
-            (*node).args = pg_sys::lappend(std::ptr::null_mut(), te.cast());
+        }
+        for (i, &(arg_expr, ty, _)) in args.iter().enumerate() {
+            (*node).aggargtypes = pg_sys::lappend_oid((*node).aggargtypes, ty);
+            let te = pg_sys::makeTargetEntry(arg_expr, (i + 1) as i16, std::ptr::null_mut(), false);
+            (*node).args = pg_sys::lappend((*node).args, te.cast());
         }
         Ok(node.cast())
     }
@@ -2983,9 +2989,11 @@ impl PlanBuilder {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
         if let Expr::Function { name, args } = expr {
             if Self::is_supported_agg(name) {
-                if let Some(arg) = Self::agg_column_arg(args) {
-                    if self.add_input_col(arg, in_tlist, colmap).is_none() {
-                        return Err(unsupported("aggregate arg not a column"));
+                for a in args {
+                    if matches!(a, Expr::Column(c) if c.column != "*") {
+                        if self.add_input_col(a, in_tlist, colmap).is_none() {
+                            return Err(unsupported("aggregate arg not a column"));
+                        }
                     }
                 }
                 return Ok(());
@@ -3035,14 +3043,30 @@ impl PlanBuilder {
     ) -> Option<*mut pg_sys::Expr> {
         match expr {
             Expr::Function { name, args } if Self::is_supported_agg(name) => {
-                let arg = match Self::agg_column_arg(args) {
-                    Some(c) => {
-                        let (pos, ty, coll) = self.add_input_col(c, in_tlist, colmap)?;
-                        Some((self.outer_var(pos, ty, coll), ty, coll))
+                // Build each argument: a column becomes an input-tlist column
+                // referenced by OUTER_VAR; a constant (e.g. string_agg's
+                // delimiter) is translated in place. `count(*)` has no args.
+                let mut arglist: Vec<(*mut pg_sys::Expr, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
+                let is_star = matches!(args.as_slice(), [Expr::Column(c)] if c.column == "*");
+                if !is_star {
+                    for a in args {
+                        match a {
+                            Expr::Column(_) => {
+                                let (pos, ty, coll) = self.add_input_col(a, in_tlist, colmap)?;
+                                arglist.push((self.outer_var(pos, ty, coll), ty, coll));
+                            }
+                            Expr::Const(_) => {
+                                let e = expr_translator::translate(a, &self.expr_ctx);
+                                if e.is_null() {
+                                    return None;
+                                }
+                                arglist.push((e, pg_sys::exprType(e.cast()), pg_sys::exprCollation(e.cast())));
+                            }
+                            _ => return None,
+                        }
                     }
-                    None => None,
-                };
-                let aggref = self.build_aggref(name, arg, *aggno).ok()?;
+                }
+                let aggref = self.build_aggref(name, &arglist, *aggno).ok()?;
                 *aggno += 1;
                 Some(aggref)
             }
@@ -3200,20 +3224,8 @@ impl PlanBuilder {
     fn is_supported_agg(name: &str) -> bool {
         matches!(
             name.to_lowercase().as_str(),
-            "count" | "sum" | "avg" | "min" | "max"
+            "count" | "sum" | "avg" | "min" | "max" | "string_agg" | "array_agg"
         )
-    }
-
-    /// The single column argument of an aggregate, or `None` for a star
-    /// aggregate (`count(*)`) or no-arg form.
-    fn agg_column_arg(args: &[Expr]) -> Option<&Expr> {
-        match args {
-            [arg] => match arg {
-                Expr::Column(c) if c.column == "*" => None,
-                _ => Some(arg),
-            },
-            _ => None,
-        }
     }
 
     unsafe fn build_aggregate(
