@@ -5669,7 +5669,18 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
             } else {
                 std::ptr::null_mut()
             };
-            out.push(FlatRel { rte, perminfo, alias: None });
+            // Capture the sub-query relation's alias (e.g. `multi m`) so
+            // alias-qualified correlation columns (`m.a`) resolve.
+            let alias = if !(*rte).eref.is_null() && !(*(*rte).eref).aliasname.is_null() {
+                Some(
+                    std::ffi::CStr::from_ptr((*(*rte).eref).aliasname)
+                        .to_string_lossy()
+                        .to_lowercase(),
+                )
+            } else {
+                None
+            };
+            out.push(FlatRel { rte, perminfo, alias });
         }
     }
     // Safety: if any pulled-up relation name collides with a relation already
