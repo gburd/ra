@@ -158,7 +158,14 @@ unsafe fn ra_planner_hook_inner(
         // native planner rather than failing a query PG could
         // plan. Ra must be a strict drop-in: never break a
         // working query.
-        match ra_parser::sql_to_relexpr(&sql) {
+        //
+        // EXPLAIN/EXPLAIN ANALYZE: PostgreSQL plans the *inner* query but
+        // hands the planner the full "EXPLAIN ... <query>" text. Strip the
+        // leading EXPLAIN clause so Lime parses the inner query; PG's EXPLAIN
+        // machinery then renders Ra's returned plan in the requested format
+        // (TEXT/JSON/etc., ANALYZE, BUFFERS, ...) just like any native plan.
+        let parse_sql = strip_explain_prefix(&sql).unwrap_or(sql.as_str());
+        match ra_parser::sql_to_relexpr(parse_sql) {
             Ok(expr) => expr,
             Err(e) => {
                 if log {
@@ -547,6 +554,61 @@ unsafe fn get_rel_name(relid: pg_sys::Oid) -> Option<String> {
         return None;
     }
     Some(CStr::from_ptr(name_ptr).to_string_lossy().into_owned())
+}
+
+/// If `sql` is an `EXPLAIN` command, return the inner statement text.
+///
+/// PostgreSQL hands the planner the full `EXPLAIN ... <query>` source string
+/// even though it only plans the inner query, so Ra (which re-parses text)
+/// must strip the EXPLAIN clause to reach the query. Handles the parenthesized
+/// option form `EXPLAIN ( ... ) stmt` (covering every option: ANALYZE,
+/// VERBOSE, BUFFERS, COSTS, SETTINGS, WAL, TIMING, SUMMARY, MEMORY, SERIALIZE,
+/// GENERIC_PLAN, FORMAT ...) and the legacy `EXPLAIN [ANALYZE] [VERBOSE] stmt`
+/// form. Returns `None` when `sql` is not an EXPLAIN command.
+fn strip_explain_prefix(sql: &str) -> Option<&str> {
+    let s = sql.trim_start();
+    let bytes = s.as_bytes();
+    if bytes.len() < 7 || !bytes[..7].eq_ignore_ascii_case(b"explain") {
+        return None;
+    }
+    let rest = &s[7..];
+    // Require a word boundary after EXPLAIN (whitespace or the option paren).
+    match rest.chars().next() {
+        Some(c) if c.is_whitespace() => {}
+        Some('(') => {}
+        _ => return None,
+    }
+    let mut rest = rest.trim_start();
+    if let Some(after) = rest.strip_prefix('(') {
+        let mut depth = 1usize;
+        for (i, c) in after.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(after[i + 1..].trim_start());
+                    }
+                }
+                _ => {}
+            }
+        }
+        return None; // unbalanced parens — let PG handle it
+    }
+    // Legacy form: skip a run of ANALYZE / VERBOSE keywords.
+    loop {
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let word = &rest[..end];
+        if word.eq_ignore_ascii_case("analyze")
+            || word.eq_ignore_ascii_case("analyse")
+            || word.eq_ignore_ascii_case("verbose")
+        {
+            rest = rest[end..].trim_start();
+        } else {
+            break;
+        }
+    }
+    Some(rest)
 }
 
 /// Truncate a SQL string for logging.

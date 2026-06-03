@@ -2330,6 +2330,15 @@ impl PlanBuilder {
             (*hash).plan.type_ = pg_sys::NodeTag::T_Hash;
             (*hash).plan.lefttree = rplan;
             (*hash).plan.targetlist = (*rplan).targetlist;
+            // The executor sizes the hash table from the Hash node's own
+            // plan_rows/plan_width (ExecChooseHashTableSize). Without the
+            // build-side estimate it allocates a single bucket, collapsing the
+            // probe into an O(n*m) chain walk. Propagate the build child's
+            // cardinality so the table is sized correctly.
+            (*hash).plan.plan_rows = (*rplan).plan_rows;
+            (*hash).plan.plan_width = (*rplan).plan_width;
+            (*hash).plan.startup_cost = (*rplan).total_cost;
+            (*hash).plan.total_cost = (*rplan).total_cost;
             (*node).join.plan.type_ = pg_sys::NodeTag::T_HashJoin;
             (*node).join.jointype = ra_join_type_to_pg(join_type);
             (*node).join.plan.lefttree = lplan;
