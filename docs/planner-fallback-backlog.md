@@ -337,3 +337,16 @@ cross-joined aggregate's output column and rewriting it to an `INNER_VAR` —
 both RFC-scale and executor-coupled. It falls back to PG correctly today.
 (Note: `WHERE b = (SELECT max(b) FROM <same table>)` is additionally a
 self-join, which `flatten_rtes` declines on duplicate relids.)
+
+## Deferred: Lime parser-generator update to v0.10.0
+
+Lime v0.10.0 (current submodule pin: v0.8.7) restructured the generator into
+~40 source files and a separate lex-compiler static library, and changed the
+host-tool CLI/grammar-directive behavior (the tool builds once `build.rs`
+links the full `src/lex/*.c` set + `emit_c_skin_bison.c` + `jit_inline.c` with
+`-DLIME_HAS_LEX_COMPILER -DLIME_HAS_RUST_OUTPUT`, but then exits non-zero on
+our grammar — flags/directives changed). A correct update needs: (1) the
+build.rs source-set/include/define changes, (2) reconciling the run-time CLI
+flags + `limpar.c` template, (3) verifying the generated `ra_sql.c` format is
+still compatible with `lime-rs`. Deferred to keep the parser (which all of Ra
+depends on) functional; tracked as its own focused task.
