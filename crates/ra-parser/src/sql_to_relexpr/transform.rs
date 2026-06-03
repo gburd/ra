@@ -279,7 +279,7 @@ fn extract_window_exprs(
                         // An explicit (non-default) frame was specified. We do
                         // not build frame semantics directly; recording it as
                         // Some makes the plan-builder defer to native PG.
-                        frame: has_frame.then(|| ra_core::algebra::WindowFrame {
+                        frame: has_frame.then_some(ra_core::algebra::WindowFrame {
                             mode: ra_core::algebra::WindowFrameMode::Range,
                             start: ra_core::algebra::WindowFrameBound::UnboundedPreceding,
                             end: ra_core::algebra::WindowFrameBound::CurrentRow,
@@ -507,7 +507,7 @@ fn transform_scalar_aggregates(rel: RelExpr) -> RelExpr {
 }
 
 /// Apply [`apply_all`] to every sub-query inner query reachable in `rel`'s own
-/// expressions, recursing into RelExpr children via `map_children`.
+/// expressions, recursing into `RelExpr` children via `map_children`.
 fn normalize_subqueries(rel: RelExpr) -> RelExpr {
     let mut rel = map_children(rel, normalize_subqueries);
     match &mut rel {
@@ -528,7 +528,7 @@ fn normalize_expr_subqueries(e: &mut Expr) {
     match e {
         Expr::SubQuery { query, test_expr, .. } => {
             let inner = std::mem::replace(query.as_mut(), RelExpr::Values { rows: Vec::new() });
-            *query = Box::new(apply_all(inner));
+            *query.as_mut() = apply_all(inner);
             if let Some(t) = test_expr {
                 normalize_expr_subqueries(t);
             }
