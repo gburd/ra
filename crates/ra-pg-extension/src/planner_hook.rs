@@ -874,6 +874,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn strip_explain_handles_all_qualifier_forms() {
+        // PG19 plan-advice form (parenthesized option) — must reach the query.
+        assert_eq!(
+            strip_explain_prefix("EXPLAIN (PLAN_ADVICE) SELECT a FROM t"),
+            Some("SELECT a FROM t")
+        );
+        assert_eq!(
+            strip_explain_prefix("EXPLAIN (PLAN_ADVICE, FORMAT JSON) SELECT 1"),
+            Some("SELECT 1")
+        );
+        // Other parenthesized options, no space before paren, case-insensitive.
+        assert_eq!(
+            strip_explain_prefix("EXPLAIN (ANALYZE, BUFFERS, VERBOSE) SELECT 1"),
+            Some("SELECT 1")
+        );
+        assert_eq!(strip_explain_prefix("explain(verbose) select 1"), Some("select 1"));
+        // Legacy keyword form.
+        assert_eq!(strip_explain_prefix("EXPLAIN ANALYZE SELECT 1"), Some("SELECT 1"));
+        assert_eq!(
+            strip_explain_prefix("EXPLAIN ANALYZE VERBOSE SELECT 1"),
+            Some("SELECT 1")
+        );
+        assert_eq!(strip_explain_prefix("EXPLAIN SELECT 1"), Some("SELECT 1"));
+        // Not an EXPLAIN: must not strip (column/identifier named "explain").
+        assert_eq!(strip_explain_prefix("SELECT explain FROM t"), None);
+        assert_eq!(strip_explain_prefix("SELECT 1"), None);
+    }
+
+    #[test]
     fn truncate_short_string() {
         let s = truncate_sql("SELECT 1", 100);
         assert_eq!(s, "SELECT 1");
