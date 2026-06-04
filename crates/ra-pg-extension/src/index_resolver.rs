@@ -50,8 +50,7 @@ pub unsafe fn resolve_index(rel_oid: pg_sys::Oid, column_name: &str) -> Option<I
     let mut best: Option<IndexInfo> = None;
 
     for i in 0..n_indexes {
-        let cell = pg_sys::list_nth(index_list, i);
-        let idx_oid = pg_sys::Oid::from(cell as u32);
+        let idx_oid = pg_sys::list_nth_oid(index_list, i);
 
         if let Some(info) = read_index_info(idx_oid, rel_oid) {
             // Check if the first column matches
@@ -97,8 +96,7 @@ pub unsafe fn resolve_index_by_name(rel_oid: pg_sys::Oid, index_name: &str) -> O
     };
 
     for i in 0..n_indexes {
-        let cell = pg_sys::list_nth(index_list, i);
-        let idx_oid = pg_sys::Oid::from(cell as u32);
+        let idx_oid = pg_sys::list_nth_oid(index_list, i);
 
         // Check if this index's name matches
         let class_tuple = pg_sys::SearchSysCache1(

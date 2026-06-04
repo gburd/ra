@@ -1745,11 +1745,22 @@ impl PlanBuilder {
     unsafe fn prepare_expr_subplans(&mut self, e: &Expr) -> Result<(), PlanBuilderError> {
         match e {
             Expr::SubQuery { subquery_type, query, test_expr } => {
-                if matches!(subquery_type, ra_core::expr::SubQueryType::Scalar) {
-                    let key = std::ptr::from_ref::<RelExpr>(query.as_ref()) as usize;
+                use ra_core::expr::SubQueryType;
+                let key = std::ptr::from_ref::<RelExpr>(query.as_ref()) as usize;
+                if matches!(subquery_type, SubQueryType::Scalar) {
                     if !self.expr_ctx.subplans.borrow().contains_key(&key) {
                         let sp = self.build_scalar_subplan(query)?;
                         self.expr_ctx.subplans.borrow_mut().insert(key, sp);
+                    }
+                } else if matches!(subquery_type, SubQueryType::In) {
+                    // IN / NOT IN that survived decorrelation (NOT IN is left as
+                    // a sub-query for NULL-correctness): build an ANY_SUBLINK
+                    // SubPlan. Requires the test expression.
+                    if let Some(t) = test_expr {
+                        if !self.expr_ctx.subplans.borrow().contains_key(&key) {
+                            let sp = self.build_in_subplan(query, t)?;
+                            self.expr_ctx.subplans.borrow_mut().insert(key, sp);
+                        }
                     }
                 }
                 if let Some(t) = test_expr {
@@ -1834,6 +1845,93 @@ impl PlanBuilder {
         (*node).firstColTypmod = first_typmod;
         (*node).firstColCollation = first_coll;
         (*node).useHashTable = false;
+        (*node).parallel_safe = false;
+        let mut par_param: *mut pg_sys::List = std::ptr::null_mut();
+        let mut args: *mut pg_sys::List = std::ptr::null_mut();
+        for (pid, var) in params {
+            par_param = pg_sys::lappend_int(par_param, pid);
+            args = pg_sys::lappend(args, var.cast());
+        }
+        (*node).parParam = par_param;
+        (*node).args = args;
+        Ok(node.cast())
+    }
+
+    /// Build an `ANY_SUBLINK` `SubPlan` for `test IN (subquery)` (and, negated
+    /// by a surrounding `NOT`, for `NOT IN`). Unlike an anti-join this honors
+    /// SQL NULL semantics: the executor evaluates `test = <param>` per inner
+    /// row, where `<param>` is loaded with each row's first column; the ANY
+    /// result is NULL when no row matches but a NULL is present, so `NOT IN`
+    /// correctly yields no rows in that case.
+    unsafe fn build_in_subplan(
+        &mut self,
+        query: &RelExpr,
+        test_expr: &Expr,
+    ) -> Result<*mut pg_sys::Expr, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        self.prepare_subplans(query)?;
+        let mut inner_rtis = std::collections::HashSet::new();
+        let mut tables = Vec::new();
+        Self::collect_scan_tables(query, &mut tables);
+        for t in tables {
+            if let Ok(rti) = self.rtindex_for(&t) {
+                inner_rtis.insert(rti as i32);
+            }
+        }
+        let plan = self.build_plan(query)?;
+        if plan.is_null() || (*plan).targetlist.is_null() {
+            return Err(unsupported("IN subquery plan"));
+        }
+        let mut params: Vec<(i32, *mut pg_sys::Var)> = Vec::new();
+        self.paramify_plan(plan, &inner_rtis, &mut params);
+
+        let first_te = (*(*plan).targetlist).elements;
+        let te0 = (*first_te.add(0)).ptr_value as *mut pg_sys::TargetEntry;
+        if te0.is_null() || (*te0).expr.is_null() {
+            return Err(unsupported("IN subquery output"));
+        }
+        let first_type = pg_sys::exprType((*te0).expr.cast());
+        let first_typmod = pg_sys::exprTypmod((*te0).expr.cast());
+        let first_coll = pg_sys::exprCollation((*te0).expr.cast());
+
+        self.subplans.push(plan);
+        let plan_id = self.subplans.len() as i32;
+
+        // Result param: the executor loads each inner row's first column here,
+        // and the testexpr compares the outer value against it.
+        let result_pid = self.alloc_param(first_type);
+        let param = self.alloc_node::<pg_sys::Param>();
+        (*param).xpr.type_ = pg_sys::NodeTag::T_Param;
+        (*param).paramkind = pg_sys::ParamKind::PARAM_EXEC;
+        (*param).paramid = result_pid;
+        (*param).paramtype = first_type;
+        (*param).paramtypmod = first_typmod;
+        (*param).paramcollid = first_coll;
+        (*param).location = -1;
+
+        // testexpr: <test> = <param>. op_expr_from_nodes resolves the operator
+        // (inserting coercions via make_op when the types differ).
+        let lhs = expr_translator::translate(test_expr, &self.expr_ctx);
+        if lhs.is_null() {
+            return Err(unsupported("IN test expression"));
+        }
+        let testexpr = expr_translator::op_expr_from_nodes("=", lhs, param.cast());
+        if testexpr.is_null() {
+            return Err(unsupported("IN test operator"));
+        }
+
+        let node = self.alloc_node::<pg_sys::SubPlan>();
+        (*node).xpr.type_ = pg_sys::NodeTag::T_SubPlan;
+        (*node).subLinkType = pg_sys::SubLinkType::ANY_SUBLINK;
+        (*node).testexpr = testexpr.cast();
+        (*node).paramIds = pg_sys::lappend_int(std::ptr::null_mut(), result_pid);
+        (*node).plan_id = plan_id;
+        (*node).firstColType = first_type;
+        (*node).firstColTypmod = first_typmod;
+        (*node).firstColCollation = first_coll;
+        (*node).useHashTable = false;
+        // Keep UNKNOWN distinct from FALSE so NOT IN's NULL semantics hold.
+        (*node).unknownEqFalse = false;
         (*node).parallel_safe = false;
         let mut par_param: *mut pg_sys::List = std::ptr::null_mut();
         let mut args: *mut pg_sys::List = std::ptr::null_mut();
