@@ -431,9 +431,11 @@ unsafe fn read_stanumbers(tuple: pg_sys::HeapTuple, slot_idx: usize) -> Option<V
         }
     }
 
-    pg_sys::pfree(elems as *mut std::ffi::c_void);
-    pg_sys::pfree(nulls as *mut std::ffi::c_void);
-
+    // Do not pfree elems/nulls: deconstruct_array allocated them in the
+    // current (planning) memory context, which is reset when planning ends.
+    // Manual frees here have been observed to double-free under PG's
+    // CLOBBER_FREED_MEMORY assert build; leaking these short-lived arrays is
+    // harmless and removes that risk.
     Some(result)
 }
 
@@ -520,14 +522,12 @@ unsafe fn read_stavalues_as_strings(
             if !text_ptr.is_null() {
                 let s = CStr::from_ptr(text_ptr).to_string_lossy().into_owned();
                 result.push(s);
-                pg_sys::pfree(text_ptr as *mut std::ffi::c_void);
             }
         }
     }
 
-    pg_sys::pfree(elems as *mut std::ffi::c_void);
-    pg_sys::pfree(nulls as *mut std::ffi::c_void);
-
+    // See note above: planner-context arrays are reclaimed at planning end;
+    // skip manual pfree to avoid the CLOBBER_FREED_MEMORY double-free.
     Some(result)
 }
 
@@ -745,7 +745,6 @@ unsafe fn resolve_am_type(am_oid: pg_sys::Oid) -> ra_core::IndexType {
 
     let result = parse_index_type(&name).unwrap_or(ra_core::IndexType::Unknown);
 
-    pg_sys::pfree(am_name_ptr as *mut std::ffi::c_void);
 
     result
 }
@@ -1080,8 +1079,6 @@ unsafe fn decode_attnum_array(datum: pg_sys::Datum, rel_oid: pg_sys::Oid) -> Opt
         }
     }
 
-    pg_sys::pfree(elems as *mut std::ffi::c_void);
-    pg_sys::pfree(elem_nulls as *mut std::ffi::c_void);
 
     if failed {
         None
@@ -1097,7 +1094,6 @@ unsafe fn get_rel_name_safe(relid: pg_sys::Oid) -> Option<String> {
         return None;
     }
     let s = CStr::from_ptr(name_ptr).to_string_lossy().into_owned();
-    pg_sys::pfree(name_ptr as *mut std::ffi::c_void);
     Some(s)
 }
 
