@@ -652,7 +652,12 @@ fn gather_index_stats_inner(rel_oid: pg_sys::Oid, stats: &mut Statistics) {
                     stats.indexes.insert(name, idx_stats);
                 }
             }
-            pg_sys::list_free(index_list);
+            // Do not list_free(index_list): read_single_index performs syscache
+            // / relcache work that can invalidate and free the underlying list,
+            // so an explicit free here intermittently double-frees under PG's
+            // assert build (and the surrounding catch_unwind does NOT contain a
+            // PG elog longjmp). The list lives in the planning context and is
+            // reclaimed when planning ends.
         }
 
         pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);

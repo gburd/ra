@@ -248,57 +248,16 @@ impl PlanBuilder {
         }
     }
 
-    /// True if `e` contains a scalar sub-query anywhere in its tree.
-    fn expr_has_scalar_subquery(e: &ra_core::expr::Expr) -> bool {
-        use ra_core::expr::{Expr, SubQueryType};
-        match e {
-            Expr::SubQuery { subquery_type: SubQueryType::Scalar, .. } => true,
-            Expr::BinOp { left, right, .. } => {
-                Self::expr_has_scalar_subquery(left) || Self::expr_has_scalar_subquery(right)
-            }
-            Expr::UnaryOp { operand, .. } => Self::expr_has_scalar_subquery(operand),
-            Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => {
-                Self::expr_has_scalar_subquery(expr)
-            }
-            Expr::Function { args, .. } | Expr::Array(args) => {
-                args.iter().any(Self::expr_has_scalar_subquery)
-            }
-            Expr::ArrayIndex(a, b) => {
-                Self::expr_has_scalar_subquery(a) || Self::expr_has_scalar_subquery(b)
-            }
-            Expr::Case { operand, when_clauses, else_result } => {
-                operand.as_deref().is_some_and(Self::expr_has_scalar_subquery)
-                    || when_clauses.iter().any(|(w, t)| {
-                        Self::expr_has_scalar_subquery(w) || Self::expr_has_scalar_subquery(t)
-                    })
-                    || else_result.as_deref().is_some_and(Self::expr_has_scalar_subquery)
-            }
-            _ => false,
-        }
-    }
-
     fn first_unsupported_op(expr: &RelExpr) -> Option<&'static str> {
         match expr {
             RelExpr::Scan { .. } => None,
-            RelExpr::Filter { input, predicate } => {
-                // The scalar-subquery SubPlan path is not yet correct (the
-                // sub-plan result parameter is not wired through, so the
-                // predicate sees NULL and the query returns no rows). Defer any
-                // filter carrying a scalar sub-query to PG until it is fixed.
-                if Self::expr_has_scalar_subquery(predicate) {
-                    return Some("scalar subquery in filter");
-                }
-                Self::first_unsupported_op(input)
-            }
+            RelExpr::Filter { input, .. } => Self::first_unsupported_op(input),
             // Project over Aggregate is built as a single Agg node
             // (build_grouped_aggregate); check the aggregate's input. The
             // builder itself returns Err (→ fallback) for shapes it cannot
             // handle (HAVING's nested form, expressions over aggregates,
             // DISTINCT/unsupported aggregates).
-            RelExpr::Project { input, columns } => {
-                if columns.iter().any(|c| Self::expr_has_scalar_subquery(&c.expr)) {
-                    return Some("scalar subquery in projection");
-                }
+            RelExpr::Project { input, .. } => {
                 match &**input {
                 RelExpr::Aggregate { input: agg_in, .. } => Self::agg_input_unsupported(agg_in),
                 // Project over Join (or over a WHERE Filter over Join) is built
