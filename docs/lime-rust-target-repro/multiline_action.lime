@@ -1,0 +1,20 @@
+/* Minimal Lime grammar for the --target=rust action-drop reproducer.
+ *
+ * Two reachable rules for `stmt` that differ ONLY in action-body layout:
+ *   - the `NUM PLUS NUM` rule's `{` is followed by a newline -> body DROPPED
+ *   - the `NUM` rule's action is on ONE line                  -> body kept
+ *
+ * See README.md for commands, actual vs expected output, and the .rs excerpts. */
+
+%name calc
+%token_type {int}
+%default_type {int}
+
+%token NUM.
+%token PLUS.
+
+stmt(A) ::= NUM(B) PLUS NUM(C). {
+    A = B + C;
+}
+
+stmt(A) ::= NUM(B). { A = B; }
