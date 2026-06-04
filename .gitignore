@@ -113,3 +113,9 @@ cargo-flamegraph.trace/
 *.profdata
 docs/.vitepress/dist
 docs/.vitepress/cache
+
+# Agent tool config / state (local only)
+.agent/
+.kiro/
+.claude/
+.mcp.json
