@@ -402,15 +402,14 @@ fn decorrelate_negated_subquery(
             })
         }
         SubQueryType::In => {
-            // NOT IN (SELECT col FROM Q WHERE corr) → AntiJoin(x = col AND corr)
-            let in_cond = build_in_condition(test_expr, &decorrelated_query);
-            let (inner_query, corr) = extract_correlation_predicate(&decorrelated_query);
-            Some(RelExpr::Join {
-                join_type: JoinType::Anti,
-                condition: and_exprs(in_cond, corr),
-                left: Box::new(input),
-                right: Box::new(inner_query),
-            })
+            // NOT IN is NOT a plain anti-join: SQL NULL semantics make
+            // `x NOT IN (S)` yield NULL (→ no row) whenever S contains a NULL
+            // or x is NULL, which an anti-join does not reproduce. PostgreSQL
+            // only rewrites it to an anti-join when both sides are provably
+            // NOT NULL. Decline to decorrelate so the predicate stays a
+            // sub-query and the plan builder falls back to PG (correct NULL
+            // handling) rather than emitting an unsound anti-join.
+            None
         }
         SubQueryType::Any => {
             // NOT (x op ANY (...)) → AntiJoin(x op col AND corr)
@@ -508,9 +507,20 @@ fn build_in_condition(test_expr: Option<&Expr>, subquery: &RelExpr) -> Expr {
 /// Falls back to a generic column reference if structure is unclear.
 fn first_output_column(query: &RelExpr) -> Expr {
     match query {
-        RelExpr::Project { columns, .. } => {
+        RelExpr::Project { columns, input } => {
             if let Some(first) = columns.first() {
-                first.expr.clone()
+                // Qualify a bare output column with the sub-query's own
+                // relation so a join condition built from it resolves to the
+                // inner table — not a same-named column of the outer relation
+                // (which produced `outer.a = outer.a`, an always-true clause
+                // that silently broke IN / NOT IN).
+                match &first.expr {
+                    Expr::Column(c) if c.table.is_none() => match leaf_scan_rel(input) {
+                        Some(rel) => Expr::Column(ColumnRef::qualified(rel, c.column.clone())),
+                        None => first.expr.clone(),
+                    },
+                    _ => first.expr.clone(),
+                }
             } else {
                 Expr::Column(ColumnRef::new("__subquery_col"))
             }
@@ -524,6 +534,20 @@ fn first_output_column(query: &RelExpr) -> Expr {
             // placeholder that downstream passes can resolve.
             Expr::Column(ColumnRef::new("__subquery_col"))
         }
+    }
+}
+
+/// Alias (or table name) of the sub-query's leaf scan, used to qualify a bare
+/// output column. Returns `None` for multi-relation bodies (ambiguous).
+fn leaf_scan_rel(query: &RelExpr) -> Option<String> {
+    match query {
+        RelExpr::Scan { table, alias } => Some(alias.clone().unwrap_or_else(|| table.clone())),
+        RelExpr::Filter { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Distinct { input }
+        | RelExpr::Project { input, .. } => leaf_scan_rel(input),
+        _ => None,
     }
 }
 
@@ -1327,8 +1351,10 @@ mod tests {
     }
 
     #[test]
-    fn not_in_subquery_becomes_anti_join() {
-        // SELECT * FROM orders WHERE id NOT IN (SELECT order_id FROM returns)
+    fn not_in_subquery_is_not_decorrelated() {
+        // NOT IN must NOT become a plain anti-join: SQL NULL semantics differ.
+        // Decorrelation declines, leaving the predicate intact so the plan
+        // builder defers to PostgreSQL (correct NULL handling).
         let subquery = RelExpr::scan("returns");
         let predicate = Expr::UnaryOp {
             op: UnaryOp::Not,
@@ -1338,15 +1364,15 @@ mod tests {
                 test_expr: Some(Box::new(Expr::Column(ColumnRef::new("id")))),
             }),
         };
-        let input = RelExpr::scan("orders").filter(predicate);
+        let input = RelExpr::scan("orders").filter(predicate.clone());
 
         let result = decorrelate(&input);
+        // Unchanged: still a Filter carrying the NOT IN sub-query (no anti-join).
         match &result {
-            RelExpr::Join {
-                join_type: JoinType::Anti,
-                ..
-            } => {} // Success
-            other => panic!("Expected AntiJoin, got: {other:?}"),
+            RelExpr::Filter { predicate: p, .. } => {
+                assert_eq!(*p, predicate, "NOT IN predicate should be preserved");
+            }
+            other => panic!("Expected Filter preserving NOT IN, got: {other:?}"),
         }
     }
 
