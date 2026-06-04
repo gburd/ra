@@ -1,12 +1,19 @@
 # Lime v0.10.0 upgrade blocker — spurious `--enable=safe` warning breaks C-target builds
+# Lime v0.10.0 — issues integrating the new release and the Rust-generated parser
 
 **To:** Lime maintainers (codeberg.org/gregburd/lime)
 **From:** Ra (PostgreSQL planner replacement) — `crates/ra-parser`
 **Severity:** Blocks upgrade from v0.8.7 → v0.10.0
 **Affected versions:** v0.9.3 through v0.10.0 (the `--enable`/`--target` feature-flag scheme)
-**Target in use:** C skin (via `-T limpar.c`), i.e. *not* `--target=rust`
 
-## Summary
+This report covers two things: (1) the **C-target** build blocker that keeps us
+pinned at v0.8.7, and (2) the **Rust-generated parser** (`--target=rust`), which
+we evaluated as the strategic direction for a Rust project but cannot yet adopt.
+Part 1 is below; Part 2 is the "Rust-generated parser" section near the end.
+
+## Part 1 — C-target build blocker (spurious `--enable=safe` warning)
+
+**Target in use:** C skin (via `-T limpar.c`), i.e. *not* `--target=rust`.
 
 When generating a **C** parser (the default/`-T <template>` path, no `--target=rust`),
 the v0.10.0 `lime` tool prints an unconditional, spurious line to stderr:
@@ -136,3 +143,85 @@ Secondary, non-blocking note for the upgrade: v0.10.0 split the generator into
 recipe changed (see the `cc` line above, derived from `meson.build`). A
 documented "canonical host-tool source set" (or a stable build target /
 amalgamation) would make consumer build scripts robust across releases.
+
+## Part 2 — Rust-generated parser (`--target=rust`)
+
+We evaluated migrating Ra from the C-generated parser (`ra_sql.c` compiled by
+`cc` and linked through `lime-sys`) to Lime's new Rust output, which would
+eliminate the C build step and FFI. The generated API is clean and
+self-contained — `pub struct raParser` with `new()` / `push(token_code, value)`
+/ `finalize() -> Result<bool, ParseError>`, a `ReduceCtx`, and overridable
+`on_syntax_error` / `on_parse_accept` callbacks, with no external runtime crate
+dependency. Three issues block adoption.
+
+### 2a. Semantic action blocks are emitted verbatim — a C-action grammar yields non-compiling Rust (blocker)
+
+Lime copies each production's action block verbatim into the generated reduce
+code. Ra's grammar (`ra_sql.lime`, ~1000 productions) has **C** action bodies,
+e.g.
+
+```
+expr(A) ::= expr(B) EQ ANY LPAREN expr(E) RPAREN. {
+    RaNode *a = ra_list_new(pstate);
+    a = ra_list_push(pstate, a, B);
+    a = ra_list_push(pstate, a, E);
+    A = ra_func(pstate, "__saoarr_eq_any", a);
+}
+```
+
+`lime --target=rust ra_sql.lime` emits that body **unchanged** into `ra_sql.rs`
+(inside the reduce logic), producing Rust that cannot compile (`RaNode *a`, `->`,
+C calls, `C.text`, etc.). There is no C→Rust translation and **no diagnostic** —
+the tool reports success writing the Rust file. In practice the Rust target is
+only usable if every action is written in Rust, so a grammar with C actions has
+no migration path short of a full hand-port of all action blocks. This is the
+single reason Ra cannot move to the Rust parser today.
+
+**Ask:** document that `--target=rust` requires Rust action bodies, and ideally
+(a) emit a hard error (not silent success) when a grammar's actions are not
+valid for the chosen target, and/or (b) offer a migration story — e.g. a way to
+keep per-target action blocks in one grammar (`%target_c { ... } %target_rust
+{ ... }`) so a grammar can be ported incrementally while both targets build.
+
+### 2b. `--target=rust` still requires a C template and uses the wrong default name
+
+`lime --target=rust ra_sql.lime` writes `ra_sql.rs` and then attempts to open a
+C template:
+
+```
+Wrote Rust parser to ra_sql.rs
+Can't open the template file "./lempar.c".
+59 parsing conflicts.
+```
+
+Two problems: a pure Rust target should not need the C parser template at all;
+and the default name it looks for is `lempar.c` (the historic Lemon name) while
+the repository ships `limpar.c`. So even after the Rust parser is written, the
+run fails on a C-template lookup with a mismatched default filename.
+
+**Ask:** under `--target=rust`, skip C-template emission entirely (or make it
+opt-in via `--target=rust:bison`-style skins), and align the default template
+name with the shipped `limpar.c`.
+
+### 2c. Non-zero exit on success (same as Part 1)
+
+As with the C target, the run exits non-zero even though `ra_sql.rs` was written
+correctly — here mixing the resolved-conflict exit with the `lempar.c` template
+error. A build system cannot distinguish "Rust parser generated successfully,
+only resolved conflicts remain" from a genuine failure.
+
+**Ask:** exit 0 when the requested artifact was produced and the only
+diagnostics are resolved shift/reduce conflicts; reserve non-zero for genuine
+errors (and route conflict counts / the `--enable=safe` notice to stdout or
+make them suppressible).
+
+### Reproduction (Rust target)
+
+```sh
+git checkout v0.10.0
+# build host tool with the Rust emitter (see Part 1 reproduction for the full
+# source set) plus -DLIME_HAS_RUST_OUTPUT, then:
+lime --target=rust ra_sql.lime
+# -> writes ra_sql.rs (containing verbatim C action bodies), then errors on
+#    ./lempar.c and exits 1.
+```
