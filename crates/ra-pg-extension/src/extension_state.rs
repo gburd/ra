@@ -26,44 +26,31 @@ pub static RA_LOG_DECISIONS: GucSetting<bool> = GucSetting::<bool>::new(false);
 pub static RA_MODEL_PATH: GucSetting<Option<CString>> =
     GucSetting::<Option<CString>>::new(Some(c"models/cost_model.bitnet.json"));
 
-/// GUC: plan-advice string (`ra_planner.plan_advice`).
-///
-/// Mirrors PostgreSQL's `pg_plan_advice.advice`. When non-empty,
-/// the optimizer parses the string in PG's plan-advice
-/// mini-language and demotes rule categories that would conflict
-/// with the supplied advice. See the `ra-plan-advice` crate for
-/// the full grammar and `ra_engine::plan_advice_honor` for the
-/// tag → rule-group mapping. Invalid advice strings emit a
-/// warning and the planner proceeds without advice.
-pub static RA_PLAN_ADVICE: GucSetting<Option<CString>> =
-    GucSetting::<Option<CString>>::new(None);
-
-/// GUC: compatibility alias for `pg_plan_advice.advice`.
-///
-/// When ra-pg-extension is loaded standalone (without the
-/// upstream `pg_plan_advice` contrib module), this GUC accepts
-/// the exact same `pg_plan_advice.advice` GUC name PG users
-/// type, so existing clients work unchanged. If both extensions
-/// are loaded simultaneously, PostgreSQL will refuse the
-/// duplicate registration; users in that configuration should
-/// set `ra_planner.plan_advice` directly.
-///
-/// At read time (in `effective_plan_advice`), the compat alias
-/// only applies when `RA_PLAN_ADVICE` is unset, so explicit
-/// `ra_planner.plan_advice` always wins.
-pub static PG_PLAN_ADVICE_COMPAT: GucSetting<Option<CString>> =
-    GucSetting::<Option<CString>>::new(None);
-
-/// Resolve the active plan-advice string from the two GUCs.
-/// Returns `None` when neither is set or both are empty.
+/// Active plan-advice string, read from PostgreSQL's own
+/// `pg_plan_advice.advice` GUC (the feature's setting) rather than a separate
+/// Ra-specific GUC. PostgreSQL retains a value set for an as-yet-unloaded
+/// custom GUC as a placeholder, so `SET pg_plan_advice.advice = '...'` is
+/// honored whether or not the `pg_plan_advice` module itself is loaded.
+/// Returns `None` when unset or empty.
 #[must_use]
 pub fn effective_plan_advice() -> Option<String> {
-    fn read(g: &GucSetting<Option<CString>>) -> Option<String> {
-        let raw = g.get()?;
-        let s = raw.into_string().ok()?;
-        if s.is_empty() { None } else { Some(s) }
+    // SAFETY: `GetConfigOption(name, missing_ok=true, restrict_privileged=false)`
+    // returns NULL for an undefined GUC, otherwise a pointer into GUC-owned
+    // memory which we copy out immediately.
+    let ptr = unsafe {
+        pgrx::pg_sys::GetConfigOption(c"pg_plan_advice.advice".as_ptr(), true, false)
+    };
+    if ptr.is_null() {
+        return None;
     }
-    read(&RA_PLAN_ADVICE).or_else(|| read(&PG_PLAN_ADVICE_COMPAT))
+    let s = unsafe { std::ffi::CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 /// GUC: always include "Supplied Plan Advice" in EXPLAIN output
@@ -235,31 +222,6 @@ pub fn register_gucs() {
           the RA_MODEL_PATH environment variable if unset.",
         &RA_MODEL_PATH,
         GucContext::Postmaster,
-        GucFlags::default(),
-    );
-
-    GucRegistry::define_string_guc(
-        c"ra_planner.plan_advice",
-        c"Plan-advice string honored during query planning.",
-        c"PostgreSQL plan-advice mini-language; mirrors \
-          pg_plan_advice.advice. Invalid advice emits a WARNING \
-          and the planner proceeds without advice.",
-        &RA_PLAN_ADVICE,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
-
-    GucRegistry::define_string_guc(
-        c"pg_plan_advice.advice",
-        c"Plan-advice string (compatibility alias).",
-        c"Same syntax and semantics as ra_planner.plan_advice. \
-          Provided so that existing clients targeting upstream \
-          pg_plan_advice work unchanged when only ra-pg-extension \
-          is loaded. If pg_plan_advice itself is also loaded, \
-          this duplicate registration is rejected by PostgreSQL \
-          and clients should use ra_planner.plan_advice instead.",
-        &PG_PLAN_ADVICE_COMPAT,
-        GucContext::Userset,
         GucFlags::default(),
     );
 
