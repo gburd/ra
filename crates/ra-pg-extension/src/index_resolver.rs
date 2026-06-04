@@ -59,7 +59,6 @@ pub unsafe fn resolve_index(rel_oid: pg_sys::Oid, column_name: &str) -> Option<I
                 if first_col.eq_ignore_ascii_case(column_name) {
                     // Prefer unique indexes
                     if info.is_unique {
-                        pg_sys::list_free(index_list);
                         pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
                         return Some(info);
                     }
@@ -71,7 +70,6 @@ pub unsafe fn resolve_index(rel_oid: pg_sys::Oid, column_name: &str) -> Option<I
         }
     }
 
-    pg_sys::list_free(index_list);
     pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
     best
 }
@@ -119,14 +117,12 @@ pub unsafe fn resolve_index_by_name(rel_oid: pg_sys::Oid, index_name: &str) -> O
 
         if matches {
             if let Some(info) = read_index_info(idx_oid, rel_oid) {
-                pg_sys::list_free(index_list);
                 pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
                 return Some(info);
             }
         }
     }
 
-    pg_sys::list_free(index_list);
     pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
     None
 }
