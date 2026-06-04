@@ -112,13 +112,38 @@ impl LeftDeepBuilder {
             current_tables.extend(new_tables);
         }
 
-        // Re-apply any predicate not consumed as a join edge as a Filter.
+        // Re-apply any predicate not consumed as a join edge. Single-table
+        // residuals (e.g. a `WHERE col < k`) are pushed onto that table's base
+        // relation so the join processes fewer rows (predicate pushdown);
+        // multi-table leftovers stay as a top filter.
         let residuals: Vec<Expr> = conditions
             .into_iter()
             .zip(used)
             .filter_map(|(c, u)| (!u).then_some(c))
             .collect();
-        if let Some(pred) = residuals.into_iter().reduce(|acc, c| Expr::BinOp {
+        let mut top: Vec<Expr> = Vec::new();
+        for c in residuals {
+            let refs = condition_tables(&c);
+            let pushed = if refs.len() == 1 {
+                let target = refs.into_iter().next().expect("len()==1");
+                match Self::push_single_table_filter(current, &c, &target) {
+                    Ok(t) => {
+                        current = t;
+                        true
+                    }
+                    Err(t) => {
+                        current = t;
+                        false
+                    }
+                }
+            } else {
+                false
+            };
+            if !pushed {
+                top.push(c);
+            }
+        }
+        if let Some(pred) = top.into_iter().reduce(|acc, c| Expr::BinOp {
             op: ra_core::expr::BinOp::And,
             left: Box::new(acc),
             right: Box::new(c),
@@ -265,6 +290,54 @@ impl LeftDeepBuilder {
         let mut out = Vec::new();
         Self::collect_tables(expr, &mut out);
         out
+    }
+
+    /// Push a single-table predicate onto the matching base relation within a
+    /// left-deep Inner/Cross join tree (predicate pushdown). Returns `Ok(new)`
+    /// if pushed onto `target`'s relation, else `Err(unchanged)`. Only descends
+    /// Inner/Cross joins — pushing into the nullable side of an outer join
+    /// would change semantics.
+    fn push_single_table_filter(
+        tree: RelExpr,
+        pred: &Expr,
+        target: &str,
+    ) -> Result<RelExpr, RelExpr> {
+        match tree {
+            RelExpr::Join {
+                join_type: jt @ (JoinType::Inner | JoinType::Cross),
+                condition,
+                left,
+                right,
+            } => match Self::push_single_table_filter(*left, pred, target) {
+                Ok(nl) => Ok(RelExpr::Join {
+                    join_type: jt,
+                    condition,
+                    left: Box::new(nl),
+                    right,
+                }),
+                Err(ol) => match Self::push_single_table_filter(*right, pred, target) {
+                    Ok(nr) => Ok(RelExpr::Join {
+                        join_type: jt,
+                        condition,
+                        left: Box::new(ol),
+                        right: Box::new(nr),
+                    }),
+                    Err(or) => Err(RelExpr::Join {
+                        join_type: jt,
+                        condition,
+                        left: Box::new(ol),
+                        right: Box::new(or),
+                    }),
+                },
+            },
+            // Base relation (scan, or a scan already carrying a pushed filter):
+            // attach the predicate if this leaf is exactly `target`.
+            leaf if Self::expr_tables(&leaf) == [target] => Ok(RelExpr::Filter {
+                predicate: pred.clone(),
+                input: Box::new(leaf),
+            }),
+            other => Err(other),
+        }
     }
 
     fn collect_tables(expr: &RelExpr, out: &mut Vec<String>) {
