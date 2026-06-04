@@ -65,18 +65,53 @@ fn build_lime_tool(lime_root: &Path, out_dir: &Path) -> PathBuf {
 
     let lime_bin = out_dir.join("lime");
 
-    // As of Lime v0.8, lime.c references the Rust emitter (`emit_rust_parser`
-    // / `emit_rust_crate`) implemented in src/emit_rust.c, so the host tool
-    // must link it too (mirrors the `lime` executable in lime/meson.build).
-    let emit_rust_src = lime_root.join("src/emit_rust.c");
-    let status = Command::new("cc")
-        .arg("-O2")
+    // The lime host tool links several sources (mirrors lime/meson.build's
+    // `lime` executable + the lex-compiler static library). The set grew in
+    // Lime v0.10/v0.11 (skin emitters + lex compiler), so compile lime.c plus
+    // the Rust/bison emitters, jit_inline, and the full lex compiler library.
+    let mut sources: Vec<PathBuf> = vec![
+        lime_src.clone(),
+        lime_root.join("src/emit_rust.c"),
+        lime_root.join("src/emit_c_skin_bison.c"),
+        lime_root.join("src/jit_inline.c"),
+    ];
+    for f in [
+        "lex_tokenize.c",
+        "lex_ast.c",
+        "lex_parse.c",
+        "lex_resolve.c",
+        "lex_pretty.c",
+        "lex_main.c",
+        "lex_regex.c",
+        "lex_nfa.c",
+        "lex_dfa.c",
+        "lex_dfa_min.c",
+        "lex_compile.c",
+        "lex_emit.c",
+        "emit_rust_lex.c",
+        "emit_rust_skin_logos.c",
+        "emit_c_skin_flex.c",
+        "lex_introspect.c",
+    ] {
+        let p = lime_root.join("src/lex").join(f);
+        if p.exists() {
+            sources.push(p);
+        }
+    }
+    let mut cmd = Command::new("cc");
+    cmd.arg("-O2")
+        .arg("-w")
+        .arg("-DLIME_HAS_LEX_COMPILER")
+        .arg("-DLIME_HAS_RUST_OUTPUT")
         .arg("-o")
         .arg(&lime_bin)
         .arg(format!("-I{}", lime_root.join("src").display()))
-        .arg(format!("-I{}", lime_root.join("include").display()))
-        .arg(&lime_src)
-        .arg(&emit_rust_src)
+        .arg(format!("-I{}", lime_root.join("src/lex").display()))
+        .arg(format!("-I{}", lime_root.join("include").display()));
+    for s in &sources {
+        cmd.arg(s);
+    }
+    let status = cmd
         .status()
         .expect("failed to invoke C compiler for lime tool");
 
