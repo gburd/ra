@@ -549,7 +549,12 @@ impl LazyRuleCompiler {
             }
 
             RuleCategory::JoinReordering => {
-                crate::rewrite::generated_logical_join_reordering_core_rules()
+                let mut rules = crate::rewrite::generated_logical_join_reordering_core_rules();
+                // RFC 0090 Phase 3 chunk 4: cost-driven physical join lowering
+                // (join -> hash/merge/nest-loop) now runs in the production
+                // e-graph path; the extractor chooses by per-method cost.
+                rules.extend(crate::rewrite::generated_physical_join_lowering_core_rules());
+                rules
             }
             RuleCategory::JoinElimination => {
                 let mut rules = crate::rewrite::generated_logical_join_elimination_core_rules();

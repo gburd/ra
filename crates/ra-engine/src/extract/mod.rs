@@ -15,7 +15,7 @@ mod scalar;
 #[cfg(test)]
 mod tests;
 
-pub use api::{extract_best, extract_best_bitnet, extract_best_with_staleness};
+pub use api::{clear_last_physical_choices, extract_best, extract_best_bitnet, extract_best_with_staleness, take_last_physical_choices};
 #[cfg(feature = "ml")]
 pub use api::extract_best_with_cardinality;
 pub use convert::rec_expr_to_rel_expr;

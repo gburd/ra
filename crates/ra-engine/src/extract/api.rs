@@ -16,6 +16,39 @@ use super::convert::rec_expr_to_rel_expr;
 use super::cost::RelCostFn;
 use super::hybrid_cost::HybridCostFn;
 
+use crate::plan_advice_physical::{physical_choices_from_recexpr, PhysicalChoices};
+
+thread_local! {
+    /// Per-query side-channel carrying the cost-driven physical-join choices the
+    /// extractor made (RFC 0090 Phase 3 chunk 4). `from_rec` collapses physical
+    /// join variants back to a logical `RelExpr::Join`, so the chosen method is
+    /// stashed here for the caller (planner_hook) to route to the plan-builder
+    /// via the sidecar. PG plans a query per backend thread, so a thread-local
+    /// is a safe transient channel; callers clear it before optimizing and take
+    /// it after (an empty value means a fast path skipped extraction).
+    static LAST_PHYSICAL_CHOICES: std::cell::RefCell<PhysicalChoices> =
+        std::cell::RefCell::new(PhysicalChoices::new());
+}
+
+/// Record the physical choices derived from a just-extracted plan.
+fn record_physical_choices(best: &egg::RecExpr<RelLang>) {
+    let choices = physical_choices_from_recexpr(best);
+    LAST_PHYSICAL_CHOICES.with(|c| *c.borrow_mut() = choices);
+}
+
+/// Take (and clear) the physical choices from the last extraction on this
+/// thread. Returns empty when the last `optimize` took a non-e-graph fast path.
+#[must_use]
+pub fn take_last_physical_choices() -> PhysicalChoices {
+    LAST_PHYSICAL_CHOICES.with(|c| std::mem::take(&mut *c.borrow_mut()))
+}
+
+/// Clear the physical-choices side-channel. Call before `optimize` so a fast
+/// path that skips extraction doesn't surface a previous query's choices.
+pub fn clear_last_physical_choices() {
+    LAST_PHYSICAL_CHOICES.with(|c| *c.borrow_mut() = PhysicalChoices::new());
+}
+
 /// Extract the lowest-cost plan from the e-graph.
 ///
 /// Uses both the hardware profile and table statistics to compute
@@ -37,6 +70,7 @@ pub fn extract_best<S: BuildHasher>(
         let cost_fn = RelCostFn::new(hardware.clone());
         let extractor = egg::Extractor::new(egraph, cost_fn);
         let (_, best_expr) = extractor.find_best(root);
+        record_physical_choices(&best_expr);
         rec_expr_to_rel_expr(&best_expr)
     } else {
         // Pre-resolve: scan the e-graph to build a mapping from
@@ -62,6 +96,7 @@ pub fn extract_best<S: BuildHasher>(
                 .with_live_conditions(live);
         let extractor = egg::Extractor::new(egraph, cost_fn);
         let (_, best_expr) = extractor.find_best(root);
+        record_physical_choices(&best_expr);
         rec_expr_to_rel_expr(&best_expr)
     }
 }
@@ -118,6 +153,7 @@ pub fn extract_best_with_staleness<S: BuildHasher, S2: BuildHasher>(
     );
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (_, best_expr) = extractor.find_best(root);
+    record_physical_choices(&best_expr);
     rec_expr_to_rel_expr(&best_expr)
 }
 
@@ -165,6 +201,7 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (cost, best_expr) = extractor.find_best(root);
     tracing::debug!("Extracted plan with cardinality-aware cost: {}", cost);
+    record_physical_choices(&best_expr);
     rec_expr_to_rel_expr(&best_expr)
 }
 
@@ -209,5 +246,6 @@ pub fn extract_best_bitnet<S: BuildHasher, S2: BuildHasher>(
 
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (_, best_expr) = extractor.find_best(root);
+    record_physical_choices(&best_expr);
     rec_expr_to_rel_expr(&best_expr)
 }

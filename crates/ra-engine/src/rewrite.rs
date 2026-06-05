@@ -101,6 +101,7 @@ pub(crate) use generated::{
 };
 pub(crate) use generated::generated_physical_index_selection_core_rules;
 pub(crate) use generated::generated_logical_constant_folding_core_rules;
+pub(crate) use generated::generated_physical_join_lowering_core_rules;
 pub(crate) use generated::{
     generated_database_specific_documentdb_core_rules,
     generated_database_specific_oracle_json_duality_core_rules,
