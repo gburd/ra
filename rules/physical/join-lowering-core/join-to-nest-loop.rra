@@ -1,0 +1,21 @@
+---
+id: join-to-nest-loop
+name: "join-to-nest-loop"
+category: physical/join-lowering-core
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [physical, lowering, join]
+---
+
+# join-to-nest-loop
+
+## Description
+
+Cost-driven physical join lowering (RFC 0090 Phase 3). One-way: introduces a
+physical join operator the cost extractor chooses among. Never rewrites back.
+
+## Rewrite
+
+lhs: (join inner ?cond ?l ?r)
+rhs: (nest-loop inner ?cond ?l ?r)
