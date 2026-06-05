@@ -12,9 +12,12 @@
 //! Note: `project-merge` and `project-through-union` are already
 //! defined in rewrite.rs and are not duplicated here.
 
+#[cfg(test)]
 use egg::{rewrite, Rewrite};
 
+#[cfg(test)]
 use crate::analysis::RelAnalysis;
+#[cfg(test)]
 use crate::egraph::RelLang;
 
 /// Return column pruning rules.
@@ -23,6 +26,7 @@ use crate::egraph::RelLang;
 /// unused columns as early as possible. Only rules not already
 /// present in rewrite.rs are included.
 #[must_use]
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 pub fn column_pruning_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push projection through intersect

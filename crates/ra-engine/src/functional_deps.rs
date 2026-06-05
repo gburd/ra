@@ -14,9 +14,12 @@
 //! - COUNT(*) with unique key optimization
 //! - Aggregate-to-DISTINCT conversion
 
+#[cfg(test)]
 use egg::{rewrite, Rewrite};
 
+#[cfg(test)]
 use crate::analysis::RelAnalysis;
+#[cfg(test)]
 use crate::egraph::RelLang;
 
 /// Return functional dependency exploitation rules.
@@ -25,6 +28,7 @@ use crate::egraph::RelLang;
 /// produces unique groups, DISTINCT is idempotent) to eliminate
 /// redundant operations. Only unconditional rules are included.
 #[must_use]
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 pub fn functional_dependency_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // GROUP BY already produces unique groups, so DISTINCT is redundant

@@ -1,0 +1,21 @@
+---
+id: project-filter-scan-to-index-only
+name: "project-filter-scan-to-index-only"
+category: physical/covering-index-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# project-filter-scan-to-index-only
+
+## Description
+
+Migrated from the hand-coded `covering_index_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (project ?cols (filter ?pred (scan ?table)))
+rhs: (index-only-scan ?table auto ?cols ?pred)

@@ -1,0 +1,21 @@
+---
+id: parquet-filter-split-for-pushdown
+name: "parquet-filter-split-for-pushdown"
+category: physical/parquet-pushdown-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# parquet-filter-split-for-pushdown
+
+## Description
+
+Migrated from the hand-coded `parquet_pushdown_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter (and ?p1 ?p2) (scan ?table))
+rhs: (filter ?p1 (filter ?p2 (scan ?table)))

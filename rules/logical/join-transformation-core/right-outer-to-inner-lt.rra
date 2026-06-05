@@ -1,0 +1,21 @@
+---
+id: right-outer-to-inner-lt
+name: "right-outer-to-inner-lt"
+category: logical/join-transformation-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# right-outer-to-inner-lt
+
+## Description
+
+Migrated from the hand-coded `join_transformation_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter (lt ?col ?val) (join right-outer ?cond ?left ?right))
+rhs: (filter (lt ?col ?val) (join inner ?cond ?left ?right))

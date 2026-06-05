@@ -1,0 +1,21 @@
+---
+id: duckdb-sub-self
+name: "duckdb-sub-self"
+category: database-specific/duckdb-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# duckdb-sub-self
+
+## Description
+
+Migrated from the hand-coded `duckdb_inspired_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (sub ?x ?x)
+rhs: (const-int 0)

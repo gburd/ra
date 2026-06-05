@@ -1,0 +1,21 @@
+---
+id: sqlite-const-prop-join
+name: "sqlite-const-prop-join"
+category: database-specific/sqlite-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# sqlite-const-prop-join
+
+## Description
+
+Migrated from the hand-coded `sqlite_inspired_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter (eq ?col ?val) (join inner (eq ?col ?col2) ?left ?right))
+rhs: (filter (eq ?col ?val) (join inner (eq ?val ?col2) ?left ?right))

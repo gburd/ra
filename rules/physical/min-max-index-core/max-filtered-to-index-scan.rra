@@ -1,0 +1,21 @@
+---
+id: max-filtered-to-index-scan
+name: "max-filtered-to-index-scan"
+category: physical/min-max-index-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# max-filtered-to-index-scan
+
+## Description
+
+Migrated from the hand-coded `min_max_index_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (aggregate (list) (list (agg-expr (max (col ?col)) ?dist ?alias)) (filter ?pred (scan ?table)))
+rhs: (aggregate (list) (list (agg-expr (max (col ?col)) ?dist ?alias)) (limit (const-int 1) (const-int 0) (sort (list (sort-key (col ?col) desc nulls-last)) (filter ?pred (index-scan ?table ?col)))))

@@ -66,6 +66,21 @@ pub(crate) use generated::{
     generated_logical_set_operation_core_rules,
     generated_logical_subquery_optimization_core_rules,
 };
+// Phase 1b second wave: remaining pure-pattern categories.
+pub(crate) use generated::{
+    generated_database_specific_duckdb_core_rules,
+    generated_database_specific_sqlite_core_rules,
+    generated_logical_column_pruning_core_rules,
+    generated_logical_functional_dependencies_core_rules,
+    generated_logical_join_transformation_core_rules,
+    generated_logical_null_simplification_core_rules,
+    generated_logical_redundant_join_core_rules,
+    generated_logical_semi_join_core_rules,
+    generated_physical_covering_index_core_rules,
+    generated_physical_min_max_index_core_rules,
+    generated_physical_parquet_pushdown_core_rules,
+    generated_physical_runtime_filter_core_rules,
+};
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
 pub(crate) use generated::{generated_rule_stats, GeneratedRuleStats};
@@ -90,7 +105,7 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     // Typical total: ~200 rules across all categories
     let mut rules = Vec::with_capacity(200);
     // Null simplification rules
-    rules.extend(crate::null_simplification::null_simplification_rules());
+    rules.extend(generated_logical_null_simplification_core_rules());
 
     // Standard optimization rules
     rules.extend(generated_logical_predicate_pushdown_core_rules());
@@ -107,28 +122,28 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(generated_logical_cte_inlining_core_rules());
 
     // Column pruning rules (project through intersect/except/limit, etc.)
-    rules.extend(crate::column_pruning::column_pruning_rules());
+    rules.extend(generated_logical_column_pruning_core_rules());
 
     // Functional dependency rules (distinct/sort elimination)
-    rules.extend(crate::functional_deps::functional_dependency_rules());
+    rules.extend(generated_logical_functional_dependencies_core_rules());
 
     // Semi-join reduction rules (distinct elimination, filter merging)
-    rules.extend(crate::semi_join::semi_join_reduction_rules());
+    rules.extend(generated_logical_semi_join_core_rules());
 
     // Redundant join elimination rules (cross/inner/anti join patterns)
-    rules.extend(crate::redundant_join::redundant_join_elimination_rules());
+    rules.extend(generated_logical_redundant_join_core_rules());
 
     // Consensus rules (DataFusion + Calcite)
     rules.extend(crate::consensus_rules::consensus_rules());
 
     // Database-inspired rules
-    rules.extend(duckdb_inspired_rules());
-    rules.extend(sqlite_inspired_rules());
-    rules.extend(runtime_filter_rules());
-    rules.extend(crate::join_transformations::join_transformation_rules());
+    rules.extend(generated_database_specific_duckdb_core_rules());
+    rules.extend(generated_database_specific_sqlite_core_rules());
+    rules.extend(generated_physical_runtime_filter_core_rules());
+    rules.extend(generated_logical_join_transformation_core_rules());
 
     // File-format rules
-    rules.extend(crate::parquet_pushdown::parquet_pushdown_rules());
+    rules.extend(generated_physical_parquet_pushdown_core_rules());
 
     // Metadata shortcut rules
     rules.extend(crate::count_metadata::count_metadata_rules());
@@ -137,10 +152,10 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(crate::index_selection::index_selection_rules());
 
     // Covering index (index-only scan) rules
-    rules.extend(crate::covering_index::covering_index_rules());
+    rules.extend(generated_physical_covering_index_core_rules());
 
     // MIN/MAX index optimization rules
-    rules.extend(crate::shortcuts::min_max_index::min_max_index_rules());
+    rules.extend(generated_physical_min_max_index_core_rules());
 
     // DocumentDB / BSON query optimization rules (RFC 0062)
     rules.extend(crate::documentdb_optimizer::documentdb_rewrite_rules());
@@ -239,7 +254,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: crate::null_simplification::null_simplification_rules(),
+            rules: generated_logical_null_simplification_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "predicate-pushdown",
@@ -288,7 +303,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_JOIN,
                 databases: vec![],
             },
-            rules: crate::join_transformations::join_transformation_rules(),
+            rules: generated_logical_join_transformation_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "semi-join-reduction",
@@ -296,7 +311,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_JOIN,
                 databases: vec![],
             },
-            rules: crate::semi_join::semi_join_reduction_rules(),
+            rules: generated_logical_semi_join_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "redundant-join-elimination",
@@ -304,7 +319,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_JOIN,
                 databases: vec![],
             },
-            rules: crate::redundant_join::redundant_join_elimination_rules(),
+            rules: generated_logical_redundant_join_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "runtime-filters",
@@ -312,7 +327,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_JOIN,
                 databases: vec![],
             },
-            rules: runtime_filter_rules(),
+            rules: generated_physical_runtime_filter_core_rules(),
         },
         // -- Aggregate rules --
         AnnotatedRuleGroup {
@@ -365,7 +380,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: duckdb_inspired_rules(),
+            rules: generated_database_specific_duckdb_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "sqlite-inspired",
@@ -373,7 +388,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: sqlite_inspired_rules(),
+            rules: generated_database_specific_sqlite_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "consensus-rules",
@@ -390,7 +405,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: crate::column_pruning::column_pruning_rules(),
+            rules: generated_logical_column_pruning_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "functional-deps",
@@ -398,7 +413,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: crate::functional_deps::functional_dependency_rules(),
+            rules: generated_logical_functional_dependencies_core_rules(),
         },
         // -- File format --
         AnnotatedRuleGroup {
@@ -407,7 +422,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: crate::parquet_pushdown::parquet_pushdown_rules(),
+            rules: generated_physical_parquet_pushdown_core_rules(),
         },
         // -- Metadata shortcuts --
         AnnotatedRuleGroup {
@@ -432,7 +447,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: crate::covering_index::covering_index_rules(),
+            rules: generated_physical_covering_index_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "min-max-index",
@@ -440,7 +455,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_AGGREGATE,
                 databases: vec![],
             },
-            rules: crate::shortcuts::min_max_index::min_max_index_rules(),
+            rules: generated_physical_min_max_index_core_rules(),
         },
         // -- Specialty: DocumentDB / BSON (RFC 0062) --
         AnnotatedRuleGroup {
@@ -908,6 +923,7 @@ pub(crate) fn cte_inlining_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Sourced from: src/optimizer/ in the DuckDB repository
 // ---------------------------------------------------------------
 
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 fn duckdb_inspired_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Column elimination: remove unnecessary columns in project
@@ -968,6 +984,7 @@ fn duckdb_inspired_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Sourced from: src/where.c, src/select.c in the SQLite repository
 // ---------------------------------------------------------------
 
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 fn sqlite_inspired_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Term rewriting: a >= b AND a <= b => a = b
@@ -1021,6 +1038,7 @@ fn sqlite_inspired_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Inspired by: StarRocks, Spark, Presto runtime filters
 // ---------------------------------------------------------------
 
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 fn runtime_filter_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Convert hash join to semi-join + hash join pattern.
@@ -1233,6 +1251,70 @@ mod tests {
             "cte-inlining",
             &cte_inlining_rules(),
             &generated_logical_cte_inlining_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_second_wave_matches_hand_coded() {
+        assert_rules_identical(
+            "null-simplification",
+            &crate::null_simplification::null_simplification_rules(),
+            &generated_logical_null_simplification_core_rules(),
+        );
+        assert_rules_identical(
+            "column-pruning",
+            &crate::column_pruning::column_pruning_rules(),
+            &generated_logical_column_pruning_core_rules(),
+        );
+        assert_rules_identical(
+            "functional-dependencies",
+            &crate::functional_deps::functional_dependency_rules(),
+            &generated_logical_functional_dependencies_core_rules(),
+        );
+        assert_rules_identical(
+            "semi-join",
+            &crate::semi_join::semi_join_reduction_rules(),
+            &generated_logical_semi_join_core_rules(),
+        );
+        assert_rules_identical(
+            "redundant-join",
+            &crate::redundant_join::redundant_join_elimination_rules(),
+            &generated_logical_redundant_join_core_rules(),
+        );
+        assert_rules_identical(
+            "duckdb",
+            &duckdb_inspired_rules(),
+            &generated_database_specific_duckdb_core_rules(),
+        );
+        assert_rules_identical(
+            "sqlite",
+            &sqlite_inspired_rules(),
+            &generated_database_specific_sqlite_core_rules(),
+        );
+        assert_rules_identical(
+            "runtime-filter",
+            &runtime_filter_rules(),
+            &generated_physical_runtime_filter_core_rules(),
+        );
+        assert_rules_identical(
+            "join-transformation",
+            &crate::join_transformations::join_transformation_rules(),
+            &generated_logical_join_transformation_core_rules(),
+        );
+        assert_rules_identical(
+            "parquet-pushdown",
+            &crate::parquet_pushdown::parquet_pushdown_rules(),
+            &generated_physical_parquet_pushdown_core_rules(),
+        );
+        assert_rules_identical(
+            "covering-index",
+            &crate::covering_index::covering_index_rules(),
+            &generated_physical_covering_index_core_rules(),
+        );
+        assert_rules_identical(
+            "min-max-index",
+            &crate::shortcuts::min_max_index::min_max_index_rules(),
+            &generated_physical_min_max_index_core_rules(),
         );
     }
 

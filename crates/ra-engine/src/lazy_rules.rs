@@ -543,7 +543,7 @@ impl LazyRuleCompiler {
                 crate::rewrite::generated_logical_expression_simplification_core_rules()
             }
             RuleCategory::NullSimplification => {
-                crate::null_simplification::null_simplification_rules()
+                crate::rewrite::generated_logical_null_simplification_core_rules()
             }
 
             RuleCategory::JoinReordering => {
@@ -551,13 +551,13 @@ impl LazyRuleCompiler {
             }
             RuleCategory::JoinElimination => {
                 let mut rules = crate::rewrite::generated_logical_join_elimination_core_rules();
-                rules.extend(crate::redundant_join::redundant_join_elimination_rules());
+                rules.extend(crate::rewrite::generated_logical_redundant_join_core_rules());
                 rules
             }
             RuleCategory::JoinTransformation => {
-                crate::join_transformations::join_transformation_rules()
+                crate::rewrite::generated_logical_join_transformation_core_rules()
             }
-            RuleCategory::SemiJoinOptimization => crate::semi_join::semi_join_reduction_rules(),
+            RuleCategory::SemiJoinOptimization => crate::rewrite::generated_logical_semi_join_core_rules(),
 
             RuleCategory::AggregateOptimization => crate::rewrite::generated_logical_aggregate_optimization_core_rules(),
             RuleCategory::LimitSortOptimization => crate::rewrite::generated_logical_limit_sort_optimization_core_rules(),
@@ -565,12 +565,12 @@ impl LazyRuleCompiler {
             RuleCategory::SubqueryOptimization => crate::rewrite::generated_logical_subquery_optimization_core_rules(),
 
             RuleCategory::FileFormatOptimization => {
-                crate::parquet_pushdown::parquet_pushdown_rules()
+                crate::rewrite::generated_physical_parquet_pushdown_core_rules()
             }
             RuleCategory::MetadataShortcuts => {
                 let mut rules = crate::count_metadata::count_metadata_rules();
-                rules.extend(crate::shortcuts::min_max_index::min_max_index_rules());
-                rules.extend(crate::covering_index::covering_index_rules());
+                rules.extend(crate::rewrite::generated_physical_min_max_index_core_rules());
+                rules.extend(crate::rewrite::generated_physical_covering_index_core_rules());
                 rules
             }
         }
