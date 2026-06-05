@@ -1,0 +1,21 @@
+---
+id: empty-sort
+name: "empty-sort"
+category: logical/consensus-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# empty-sort
+
+## Description
+
+Migrated from the hand-coded `propagate_empty_relation_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (sort ?keys (filter (const-bool false) ?input))
+rhs: (filter (const-bool false) ?input)

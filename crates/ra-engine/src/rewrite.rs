@@ -87,6 +87,11 @@ pub(crate) use generated::{
     generated_logical_cast_optimization_core_rules,
     generated_physical_hybrid_search_core_rules,
 };
+pub(crate) use generated::{
+    generated_logical_consensus_core_rules,
+    generated_physical_fts_core_rules,
+    generated_physical_vector_core_rules,
+};
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
 pub(crate) use generated::{generated_rule_stats, GeneratedRuleStats};
@@ -140,7 +145,7 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(generated_logical_redundant_join_core_rules());
 
     // Consensus rules (DataFusion + Calcite)
-    rules.extend(crate::consensus_rules::consensus_rules());
+    rules.extend(generated_logical_consensus_core_rules());
 
     // Database-inspired rules
     rules.extend(generated_database_specific_duckdb_core_rules());
@@ -173,10 +178,10 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(crate::xml_optimizer::xml_optimization_rules());
 
     // Vector similarity search optimization rules (RFC 0064)
-    rules.extend(crate::vector_rules::vector_rewrite_rules());
+    rules.extend(generated_physical_vector_core_rules());
 
     // Full-text search optimization rules (RFC 0066)
-    rules.extend(crate::fts_rules::fts_optimization_rules());
+    rules.extend(generated_physical_fts_core_rules());
 
     // Hybrid search optimization rules (RFC 0073)
     rules.extend(generated_physical_hybrid_search_core_rules());
@@ -402,7 +407,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: crate::consensus_rules::consensus_rules(),
+            rules: generated_logical_consensus_core_rules(),
         },
         // -- Column pruning, functional deps --
         AnnotatedRuleGroup {
@@ -498,7 +503,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_VECTOR_DISTANCE,
                 databases: vec![],
             },
-            rules: crate::vector_rules::vector_rewrite_rules(),
+            rules: generated_physical_vector_core_rules(),
         },
         // -- Specialty: Full-text search (RFC 0066) --
         AnnotatedRuleGroup {
@@ -507,7 +512,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_FTS_MATCH,
                 databases: vec![],
             },
-            rules: crate::fts_rules::fts_optimization_rules(),
+            rules: generated_physical_fts_core_rules(),
         },
         // -- Specialty: Hybrid search (RFC 0073) --
         AnnotatedRuleGroup {
@@ -1332,6 +1337,21 @@ mod tests {
             "cast-optimization",
             &cast_optimization_rules(),
             &generated_logical_cast_optimization_core_rules(),
+        );
+        assert_rules_identical(
+            "vector",
+            &crate::vector_rules::vector_rewrite_rules(),
+            &generated_physical_vector_core_rules(),
+        );
+        assert_rules_identical(
+            "fts",
+            &crate::fts_rules::fts_optimization_rules(),
+            &generated_physical_fts_core_rules(),
+        );
+        assert_rules_identical(
+            "consensus",
+            &crate::consensus_rules::consensus_rules(),
+            &generated_logical_consensus_core_rules(),
         );
     }
 

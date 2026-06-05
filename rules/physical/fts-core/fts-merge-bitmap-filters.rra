@@ -1,0 +1,21 @@
+---
+id: fts-merge-bitmap-filters
+name: "fts-merge-bitmap-filters"
+category: physical/fts-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# fts-merge-bitmap-filters
+
+## Description
+
+Migrated from the hand-coded `fts_filter_pushdown` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter ?pred1 (filter ?pred2 (fts-index-scan ?table ?idx ?q)))
+rhs: (filter (and ?pred1 ?pred2) (fts-index-scan ?table ?idx ?q))

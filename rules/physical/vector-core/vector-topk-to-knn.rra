@@ -1,0 +1,21 @@
+---
+id: vector-topk-to-knn
+name: "vector-topk-to-knn"
+category: physical/vector-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# vector-topk-to-knn
+
+## Description
+
+Migrated from the hand-coded `vector_rewrite_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (limit ?k ?offset (sort (list (sort-key (vector-distance ?metric ?col ?target) ?order ?nulls)) (scan ?table)))
+rhs: (limit ?k ?offset (vector-knn ?table ?col ?target ?k))
