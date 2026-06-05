@@ -1357,14 +1357,32 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
                 1.0 * simd_factor * self.calibration.tuple_cost()
             }
-            // Physical join variants are placeholder-costed = logical Join until
-            // RFC 0090 Phase 3 chunk 3 adds per-method cost. They never appear
-            // until the lowering rules ship (chunk 2), so this is inert for now.
-            RelLang::Join(_)
-            | RelLang::HashJoinOp(_)
-            | RelLang::MergeJoinOp(_)
-            | RelLang::NestLoopOp(_)
-            | RelLang::IndexNestLoopOp(_) => 500.0 * self.calibration.tuple_cost(),
+            RelLang::Join(_) => 500.0 * self.calibration.tuple_cost(),
+            // Per-method physical join cost (RFC 0090 Phase 3 chunk 3). Child
+            // *costs* (cl, cr) are monotonic proxies for input size (scan cost
+            // scales with pages -> rows). The final `child_cost` sum below adds
+            // cl+cr equally to every method, so only these base terms order the
+            // methods. Hash/Merge are linear; NestLoop is quadratic (scan inner
+            // per outer row); IndexNestLoop is linear in the outer side (one
+            // index probe per outer row), so it wins for a small driving side.
+            RelLang::HashJoinOp([_, _, _l, r]) => {
+                let cr = costs(*r).max(1.0);
+                0.5 * cr * self.calibration.tuple_cost() // build hash on inner
+            }
+            RelLang::MergeJoinOp([_, _, l, r]) => {
+                let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
+                // Sort both sides (no interesting-orders tracking yet, so always
+                // pay the sort) — slightly pricier than a hash build.
+                0.6 * (cl + cr) * self.calibration.tuple_cost()
+            }
+            RelLang::NestLoopOp([_, _, l, r]) => {
+                let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
+                (cl * cr / 50.0) * self.calibration.tuple_cost() // O(n*m)
+            }
+            RelLang::IndexNestLoopOp([_, _, l, _r]) => {
+                let cl = costs(*l).max(1.0);
+                2.0 * cl * self.calibration.tuple_cost() // one index probe per outer row
+            }
             RelLang::Aggregate(_) => 200.0 * self.calibration.tuple_cost(),
             RelLang::Sort(_) => {
                 let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
@@ -1449,6 +1467,36 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
 #[expect(clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
+
+    /// RFC 0090 Phase 3 chunk 3: per-method physical join costs order correctly.
+    /// `NestLoop` (quadratic) must exceed `HashJoin` on large inputs but be
+    /// competitive on tiny inputs; `IndexNestLoop` (linear in the outer) must
+    /// beat `HashJoin` when the driving side is small.
+    #[test]
+    fn physical_join_costs_order_by_method() {
+        use crate::egraph::RelLang;
+        use egg::{CostFunction, Id};
+        let mut cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
+        // join children: [jt, cond, left, right] = ids 0,1,2,3
+        let ids = [Id::from(0), Id::from(1), Id::from(2), Id::from(3)];
+        // child-cost closures: large vs tiny inputs (left=id2, right=id3)
+        let big = |id: Id| if usize::from(id) >= 2 { 10_000.0 } else { 1.0 };
+        let tiny = |id: Id| if usize::from(id) >= 2 { 5.0 } else { 1.0 };
+        // small outer (left), large inner (right) — the index-NLJ sweet spot
+        let small_outer = |id: Id| if usize::from(id) == 2 { 3.0 } else if usize::from(id) == 3 { 10_000.0 } else { 1.0 };
+
+        let hash_big = cfn.cost(&RelLang::HashJoinOp(ids), big);
+        let nl_big = cfn.cost(&RelLang::NestLoopOp(ids), big);
+        assert!(nl_big > hash_big, "nest-loop {nl_big} should exceed hash {hash_big} on large inputs");
+
+        let hash_tiny = cfn.cost(&RelLang::HashJoinOp(ids), tiny);
+        let nl_tiny = cfn.cost(&RelLang::NestLoopOp(ids), tiny);
+        assert!(nl_tiny <= hash_tiny, "nest-loop {nl_tiny} should be competitive on tiny inputs vs hash {hash_tiny}");
+
+        let hash_so = cfn.cost(&RelLang::HashJoinOp(ids), small_outer);
+        let inl_so = cfn.cost(&RelLang::IndexNestLoopOp(ids), small_outer);
+        assert!(inl_so < hash_so, "index-nest-loop {inl_so} should beat hash {hash_so} for a small driving side");
+    }
     use ra_hardware::HardwareProfile;
     use ra_stats::accuracy::{StatisticsSource, StatisticsState};
     use ra_stats::profiles::StatisticsProfile;
