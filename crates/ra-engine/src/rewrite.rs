@@ -563,11 +563,13 @@ pub(crate) fn predicate_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("filter-through-join-left";
             "(filter ?pred (join inner ?cond ?left ?right))" =>
             "(join inner ?cond (filter ?pred ?left) ?right)"
+            if crate::conditions::references_only("?pred", "?left")
         ),
         // Push filter through inner join (right side)
         rewrite!("filter-through-join-right";
             "(filter ?pred (join inner ?cond ?left ?right))" =>
             "(join inner ?cond ?left (filter ?pred ?right))"
+            if crate::conditions::references_only("?pred", "?right")
         ),
         // Merge filter into join condition
         rewrite!("filter-into-join-condition";
