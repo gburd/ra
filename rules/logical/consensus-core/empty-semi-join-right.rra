@@ -1,0 +1,21 @@
+---
+id: empty-semi-join-right
+name: "empty-semi-join-right"
+category: logical/consensus-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# empty-semi-join-right
+
+## Description
+
+Migrated from the hand-coded `propagate_empty_relation_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (join semi ?cond ?left (filter (const-bool false) ?right))
+rhs: (filter (const-bool false) ?right)

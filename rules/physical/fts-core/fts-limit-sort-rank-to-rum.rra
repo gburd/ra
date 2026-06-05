@@ -1,0 +1,21 @@
+---
+id: fts-limit-sort-rank-to-rum
+name: "fts-limit-sort-rank-to-rum"
+category: physical/fts-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# fts-limit-sort-rank-to-rum
+
+## Description
+
+Migrated from the hand-coded `rank_aware_top_k` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (limit ?k ?offset (sort (list (sort-key (fts-rank ?col ?query ?algo) ?order ?nulls)) (filter (fts-match ?vendor ?cols ?query ?mode) (scan ?table))))
+rhs: (fts-ranked-scan ?table rum ?query ?k ?algo)

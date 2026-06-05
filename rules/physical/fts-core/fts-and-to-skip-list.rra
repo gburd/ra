@@ -1,0 +1,21 @@
+---
+id: fts-and-to-skip-list
+name: "fts-and-to-skip-list"
+category: physical/fts-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# fts-and-to-skip-list
+
+## Description
+
+Migrated from the hand-coded `boolean_query_to_skip_list` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter (and (fts-match ?vendor ?cols1 ?query1 ?mode1) (fts-match ?vendor ?cols2 ?query2 ?mode2)) (scan ?table))
+rhs: (fts-skip-list-and ?table (fts-match ?vendor ?cols1 ?query1 ?mode1) (fts-match ?vendor ?cols2 ?query2 ?mode2))

@@ -1,0 +1,21 @@
+---
+id: vector-prefilter
+name: "vector-prefilter"
+category: physical/vector-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# vector-prefilter
+
+## Description
+
+Migrated from the hand-coded `vector_rewrite_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (limit ?k ?offset (sort (list (sort-key (vector-distance ?metric ?col ?target) ?order ?nulls)) (filter ?pred (scan ?table))))
+rhs: (filter ?pred (limit ?k ?offset (vector-knn ?table ?col ?target ?k)))

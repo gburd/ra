@@ -1,0 +1,21 @@
+---
+id: extract-equijoin-from-and-left
+name: "extract-equijoin-from-and-left"
+category: logical/consensus-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# extract-equijoin-from-and-left
+
+## Description
+
+Migrated from the hand-coded `extract_equijoin_predicate_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (join inner (and (eq ?lk ?rk) ?rest) ?left ?right)
+rhs: (filter ?rest (join inner (eq ?lk ?rk) ?left ?right))
