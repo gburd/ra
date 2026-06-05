@@ -200,16 +200,31 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     // Type cast optimization rules
     rules.extend(generated_logical_cast_optimization_core_rules());
 
-    // Generated rules from .rra files (validated against RelLang, deduplicated by name).
-    // Hand-coded rules take priority; generated rules only added if their name is unique.
-    // We catch panics because some .rra rules may reference operators with wrong arity
-    // (valid operator name but incorrect number of children for the define_language! variant).
-    let hand_coded_names: std::collections::HashSet<&str> =
-        rules.iter().map(|r| r.name.as_str()).collect();
+    // Generated rules from .rra files. The explicit `-core` categories above are
+    // the canonical, validated source for their transforms; we add a generated
+    // rule only if its transform (LHS=>RHS pattern signature) hasn't already been
+    // contributed. Deduping by *transform* rather than by name eliminates the
+    // historical drift where an old corpus directory and its `-core` replacement
+    // expressed the same rewrite under different names (e.g. `filter-split` vs
+    // `filter-split-and`) — both used to slip through name-only dedup. Spec .rra
+    // files are preserved on disk; they simply don't double-fire here.
+    let transform_sig = |r: &Rewrite<RelLang, RelAnalysis>| -> String {
+        let lhs = r
+            .searcher
+            .get_pattern_ast()
+            .map_or_else(|| format!("dyn:{}", r.name), ToString::to_string);
+        let rhs = r
+            .applier
+            .get_pattern_ast()
+            .map_or_else(|| format!("dyn:{}", r.name), ToString::to_string);
+        format!("{lhs}=>{rhs}")
+    };
+    let mut seen: std::collections::HashSet<String> =
+        rules.iter().map(&transform_sig).collect();
     let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(all_generated_rules));
     if let Ok(gen_rules) = generated {
         for rule in gen_rules {
-            if !hand_coded_names.contains(rule.name.as_str()) {
+            if seen.insert(transform_sig(&rule)) {
                 rules.push(rule);
             }
         }
