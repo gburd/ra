@@ -12,6 +12,15 @@ define_language! {
         "filter" = Filter([Id; 2]),
         "project" = Project([Id; 2]),
         "join" = Join([Id; 4]),
+        // Physical join variants (RFC 0089 / RFC 0090 Phase 3). Same children as
+        // `join` ([type, cond, left, right]); produced by cost-driven physical
+        // lowering rules and chosen by the cost extractor. `from_rec` maps them
+        // back to the logical `RelExpr::Join`; the chosen method is carried to
+        // plan-builder via the PhysicalChoices sidecar.
+        "hash-join" = HashJoinOp([Id; 4]),
+        "merge-join" = MergeJoinOp([Id; 4]),
+        "nest-loop" = NestLoopOp([Id; 4]),
+        "index-nest-loop" = IndexNestLoopOp([Id; 4]),
         "aggregate" = Aggregate([Id; 3]),
         "sort" = Sort([Id; 2]),
         "incremental-sort" = IncrementalSort([Id; 3]),

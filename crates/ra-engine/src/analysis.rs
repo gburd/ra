@@ -65,6 +65,10 @@ impl Analysis<RelLang> for RelAnalysis {
                 }
             }
             RelLang::Join([_, _, left_id, right_id])
+            | RelLang::HashJoinOp([_, _, left_id, right_id])
+            | RelLang::MergeJoinOp([_, _, left_id, right_id])
+            | RelLang::NestLoopOp([_, _, left_id, right_id])
+            | RelLang::IndexNestLoopOp([_, _, left_id, right_id])
             | RelLang::Union([_, left_id, right_id])
             | RelLang::Intersect([_, left_id, right_id])
             | RelLang::Except([_, left_id, right_id]) => {
