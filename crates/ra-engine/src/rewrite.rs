@@ -49,6 +49,7 @@ mod generated {
         not_zero, pred_references_only, predicate_references_only, references_only,
         single_reference,
     };
+    use crate::appliers::{fold_add, fold_mul, fold_sub};
     use crate::egraph::RelLang;
 
     include!(concat!(env!("OUT_DIR"), "/generated_rules.rs"));
@@ -99,6 +100,7 @@ pub(crate) use generated::{
     generated_logical_xml_core_rules,
 };
 pub(crate) use generated::generated_physical_index_selection_core_rules;
+pub(crate) use generated::generated_logical_constant_folding_core_rules;
 pub(crate) use generated::{
     generated_database_specific_documentdb_core_rules,
     generated_database_specific_oracle_json_duality_core_rules,
@@ -199,6 +201,9 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 
     // Type cast optimization rules
     rules.extend(generated_logical_cast_optimization_core_rules());
+
+    // Constant folding (computed-RHS appliers, RFC 0090 Phase 2)
+    rules.extend(generated_logical_constant_folding_core_rules());
 
     // Generated rules from .rra files. The explicit `-core` categories above are
     // the canonical, validated source for their transforms; we add a generated
@@ -1415,6 +1420,33 @@ mod tests {
             &crate::oracle_json_duality::duality_rewrite_rules(),
             &generated_database_specific_oracle_json_duality_core_rules(),
         );
+    }
+
+    #[test]
+    fn constant_folding_applier_folds_arithmetic() {
+        // The applier vocabulary (RFC 0090 Phase 2): a computed-RHS rule folds
+        // (add (const-int 2) (const-int 3)) into (const-int 5). The identity
+        // test can't validate a computed applier, so check behavior directly.
+        let cases = [
+            ("(add (const-int 2) (const-int 3))", "(const-int 5)"),
+            ("(sub (const-int 10) (const-int 4))", "(const-int 6)"),
+            ("(mul (const-int 6) (const-int 7))", "(const-int 42)"),
+        ];
+        for (start_s, goal_s) in cases {
+            let start: egg::RecExpr<RelLang> =
+                start_s.parse().expect("valid start expr");
+            let runner = Runner::default()
+                .with_expr(&start)
+                .with_iter_limit(5)
+                .run(&generated_logical_constant_folding_core_rules());
+            let goal: egg::RecExpr<RelLang> = goal_s.parse().expect("valid goal expr");
+            let start_id = runner.egraph.lookup_expr(&start);
+            let goal_id = runner.egraph.lookup_expr(&goal);
+            assert!(
+                goal_id.is_some() && start_id == goal_id,
+                "expected {start_s} to fold to {goal_s} (start={start_id:?} goal={goal_id:?})"
+            );
+        }
     }
 
     fn run_optimization(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
