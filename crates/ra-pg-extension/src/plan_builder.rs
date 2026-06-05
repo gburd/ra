@@ -2319,6 +2319,250 @@ impl PlanBuilder {
         Ok((rti, tlist, map))
     }
 
+    /// Attempt an index nested-loop join: for `outer JOIN inner ON
+    /// outer.X = inner.Y` where `inner` is a single base relation whose btree
+    /// index leads with `Y`, and the outer side is restricted by a filter (so
+    /// it drives few rows), build a `NestLoop` whose inner is a *parameterized*
+    /// `IndexScan` (`Y = $param`) fed from the outer row via `nestParams`. This
+    /// matches PostgreSQL's plan for selective joins and avoids hashing the
+    /// whole inner relation. Returns `None` (→ caller uses hash/nestloop) for
+    /// anything it cannot handle, so it can never produce a wrong plan.
+    unsafe fn try_index_nestloop(
+        &mut self,
+        join_type: JoinType,
+        condition: &Expr,
+        left: &RelExpr,
+        right: &RelExpr,
+        where_pred: Option<&Expr>,
+        out_columns: Option<&[ProjectionColumn]>,
+    ) -> Result<Option<(*mut pg_sys::Plan, JoinColMap, *mut pg_sys::List)>, PlanBuilderError> {
+        use ra_core::expr::{BinOp, Expr as RaExpr};
+        if !matches!(join_type, JoinType::Inner) {
+            return Ok(None);
+        }
+        let RaExpr::BinOp { op: BinOp::Eq, left: cl, right: cr } = condition else {
+            return Ok(None);
+        };
+        let (RaExpr::Column(ca), RaExpr::Column(cb)) = (&**cl, &**cr) else {
+            return Ok(None);
+        };
+        // Inner must be a single base relation; only drive an index NLJ when
+        // the outer is filtered (small driving side — where index NLJ wins).
+        let (Some(inner_tbl), Some(outer_tbl)) =
+            (single_base_table(right), single_base_table(left))
+        else {
+            return Ok(None);
+        };
+        if !subtree_has_filter(left) {
+            return Ok(None);
+        }
+        let inner_alias =
+            ra_engine::plan_advice_physical::inner_join_alias(right).unwrap_or(inner_tbl.clone());
+        let outer_alias =
+            ra_engine::plan_advice_physical::inner_join_alias(left).unwrap_or(outer_tbl.clone());
+        let belongs = |c: &ra_core::expr::ColumnRef, al: &str| {
+            c.table.as_deref().is_some_and(|t| t.eq_ignore_ascii_case(al))
+        };
+        let (outer_col, inner_col) = if belongs(cb, &inner_alias) && belongs(ca, &outer_alias) {
+            (ca, cb)
+        } else if belongs(ca, &inner_alias) && belongs(cb, &outer_alias) {
+            (cb, ca)
+        } else {
+            return Ok(None);
+        };
+        let (Ok(inner_oid), Ok(inner_rti), Ok(outer_oid)) = (
+            self.rel_oid_for(&inner_tbl),
+            self.rtindex_for(&inner_tbl),
+            self.rel_oid_for(&outer_tbl),
+        ) else {
+            return Ok(None);
+        };
+        let Some(info) = crate::index_resolver::resolve_index(inner_oid, &inner_col.column) else {
+            return Ok(None);
+        };
+        if info.am_type != "btree"
+            || info.columns.first().is_none_or(|c| !c.eq_ignore_ascii_case(&inner_col.column))
+        {
+            return Ok(None);
+        }
+        let inner_attno = pg_sys::get_attnum(
+            inner_oid,
+            match CString::new(inner_col.column.as_str()) {
+                Ok(c) => c,
+                Err(_) => return Ok(None),
+            }
+            .as_ptr(),
+        );
+        let outer_attno = pg_sys::get_attnum(
+            outer_oid,
+            match CString::new(outer_col.column.as_str()) {
+                Ok(c) => c,
+                Err(_) => return Ok(None),
+            }
+            .as_ptr(),
+        );
+        if inner_attno <= 0 || outer_attno <= 0 {
+            return Ok(None);
+        }
+        let inner_type = pg_sys::get_atttype(inner_oid, inner_attno);
+        let outer_type = pg_sys::get_atttype(outer_oid, outer_attno);
+        // Same-type equi-join only (avoid index-side coercion).
+        if inner_type == pg_sys::InvalidOid || inner_type != outer_type {
+            return Ok(None);
+        }
+        // `=` operator + its btree strategy in the index's leading opfamily.
+        let eq_cstr = match CString::new("=") {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+        let opname = pg_sys::lappend(
+            std::ptr::null_mut(),
+            pg_sys::makeString(eq_cstr.as_ptr().cast_mut()).cast(),
+        );
+        let eq_op = pg_sys::OpernameGetOprid(opname, inner_type, inner_type);
+        if eq_op == pg_sys::InvalidOid {
+            return Ok(None);
+        }
+        let idx_rel = pg_sys::index_open(info.oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        if idx_rel.is_null() || (*idx_rel).rd_opfamily.is_null() {
+            if !idx_rel.is_null() {
+                pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            }
+            return Ok(None);
+        }
+        let opfamily = *(*idx_rel).rd_opfamily;
+        pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        if pg_sys::get_op_opfamily_strategy(eq_op, opfamily)
+            != pg_sys::BTEqualStrategyNumber as i32
+        {
+            return Ok(None);
+        }
+
+        // ---- Build the outer side and locate the outer key's output column ----
+        let (lplan, lmap, ltl) = self.build_join_tree(left)?;
+        let Some(&outer_pos) = lmap.get(&(self.rtindex_for(&outer_tbl)? as i32, outer_attno))
+        else {
+            return Ok(None);
+        };
+
+        // ---- Parameter carrying outer.X into the inner index scan ----
+        let pid = self.alloc_param(inner_type);
+        let mk_param = || {
+            let p = self.alloc_node::<pg_sys::Param>();
+            (*p).xpr.type_ = pg_sys::NodeTag::T_Param;
+            (*p).paramkind = pg_sys::ParamKind::PARAM_EXEC;
+            (*p).paramid = pid;
+            (*p).paramtype = inner_type;
+            (*p).paramtypmod = -1;
+            (*p).paramcollid = pg_sys::get_typcollation(inner_type);
+            (*p).location = -1;
+            p
+        };
+        let mk_eq = |key_varno: i32, key_attno: i16, rhs: *mut pg_sys::Node| {
+            let key = self.alloc_node::<pg_sys::Var>();
+            (*key).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*key).varno = key_varno;
+            (*key).varattno = key_attno;
+            (*key).vartype = inner_type;
+            (*key).vartypmod = -1;
+            (*key).varcollid = pg_sys::get_typcollation(inner_type);
+            (*key).varlevelsup = 0;
+            let op = self.alloc_node::<pg_sys::OpExpr>();
+            (*op).xpr.type_ = pg_sys::NodeTag::T_OpExpr;
+            (*op).opno = eq_op;
+            (*op).opfuncid = pg_sys::get_opcode(eq_op);
+            (*op).opresulttype = pg_sys::BOOLOID;
+            (*op).opretset = false;
+            (*op).inputcollid = (*key).varcollid;
+            (*op).args = list2(key.cast(), rhs);
+            (*op).location = -1;
+            op
+        };
+        // indexqual uses INDEX_VAR at the index's leading attno (1); indexqualorig
+        // uses the heap Var (for EXPLAIN / recheck). Both compare to $param.
+        let idx_op = mk_eq(pg_sys::INDEX_VAR, 1, mk_param().cast());
+        let orig_op = mk_eq(inner_rti as i32, inner_attno, mk_param().cast());
+
+        // Inner index scan exposing all the inner relation's columns.
+        let (inner_tl, inner_attmap) = self
+            .expose_relation_columns(inner_rti, inner_oid)
+            .ok_or_else(|| PlanBuilderError::UnsupportedVariant("index NLJ inner cols".to_owned()))?;
+        let mut rmap: JoinColMap = JoinColMap::new();
+        for (attno, pos) in inner_attmap {
+            rmap.insert((inner_rti as i32, attno), pos);
+        }
+        let iscan = self.alloc_node::<pg_sys::IndexScan>();
+        (*iscan).scan.plan.type_ = pg_sys::NodeTag::T_IndexScan;
+        (*iscan).scan.scanrelid = inner_rti;
+        (*iscan).scan.plan.targetlist = inner_tl;
+        (*iscan).indexid = info.oid;
+        (*iscan).indexqual = pg_sys::lappend(std::ptr::null_mut(), idx_op.cast());
+        (*iscan).indexqualorig = pg_sys::lappend(std::ptr::null_mut(), orig_op.cast());
+        (*iscan).indexorderdir = pg_sys::ScanDirection::ForwardScanDirection;
+        self.set_index_costs(&mut (*iscan).scan.plan, &inner_tbl, 0.0);
+
+        // ---- Output targetlist (projected or full passthrough) ----
+        let (out_tl, out_map) = if let Some(cols) = out_columns {
+            let mut tlist: *mut pg_sys::List = std::ptr::null_mut();
+            for (i, pc) in cols.iter().enumerate() {
+                let e = expr_translator::translate(&pc.expr, &self.expr_ctx);
+                if e.is_null() || !self.remap_join_vars(e.cast(), &lmap, &rmap) {
+                    return Ok(None);
+                }
+                let rn = pc
+                    .alias
+                    .as_deref()
+                    .or_else(|| crate::sort_utils::extract_column_name(&pc.expr))
+                    .and_then(|n| CString::new(n).ok())
+                    .map_or(std::ptr::null_mut(), |c| pg_sys::pstrdup(c.as_ptr()));
+                let te = pg_sys::makeTargetEntry(e, (i + 1) as i16, rn, false);
+                tlist = pg_sys::lappend(tlist, te.cast());
+            }
+            (tlist, JoinColMap::new())
+        } else {
+            self.concat_join_tlist(&lmap, ltl, &rmap, inner_tl)
+        };
+
+        // Optional residual WHERE (remapped to OUTER/INNER) on the join node.
+        let mut where_q = std::ptr::null_mut::<pg_sys::Node>();
+        if let Some(w) = where_pred {
+            let q = expr_translator::translate(w, &self.expr_ctx);
+            if q.is_null() || !self.remap_join_vars(q.cast(), &lmap, &rmap) {
+                return Ok(None);
+            }
+            where_q = q.cast();
+        }
+
+        // ---- NestLoop with nestParams: outer.X -> $param ----
+        let nlp = self.alloc_node::<pg_sys::NestLoopParam>();
+        (*nlp).type_ = pg_sys::NodeTag::T_NestLoopParam;
+        (*nlp).paramno = pid;
+        let pv = self.alloc_node::<pg_sys::Var>();
+        (*pv).xpr.type_ = pg_sys::NodeTag::T_Var;
+        (*pv).varno = pg_sys::OUTER_VAR;
+        (*pv).varattno = outer_pos as i16;
+        (*pv).vartype = outer_type;
+        (*pv).vartypmod = -1;
+        (*pv).varcollid = pg_sys::get_typcollation(outer_type);
+        (*pv).varlevelsup = 0;
+        (*nlp).paramval = pv;
+
+        let node = self.alloc_node::<pg_sys::NestLoop>();
+        (*node).join.plan.type_ = pg_sys::NodeTag::T_NestLoop;
+        (*node).join.jointype = ra_join_type_to_pg(join_type);
+        (*node).join.plan.lefttree = lplan;
+        (*node).join.plan.righttree = &mut (*iscan).scan.plan as *mut pg_sys::Plan;
+        // The equality is enforced by the parameterized index scan, so no joinqual.
+        (*node).nestParams = pg_sys::lappend(std::ptr::null_mut(), nlp.cast());
+        let join_plan = &mut (*node).join.plan as *mut pg_sys::Plan;
+        if !where_q.is_null() {
+            (*join_plan).qual = pg_sys::lappend((*join_plan).qual, where_q.cast());
+        }
+        (*join_plan).targetlist = out_tl;
+        self.propagate_costs_binary(&mut *join_plan, lplan, &mut (*iscan).scan.plan);
+        Ok(Some((join_plan, out_map, out_tl)))
+    }
+
     /// Build one `NestLoop` join node over two (possibly nested) join inputs,
     /// with the ON `condition` as joinqual and an optional `where_pred` as the
     /// post-join `plan.qual` (both remapped to the children's OUTER/INNER
@@ -2339,6 +2583,14 @@ impl PlanBuilder {
             JoinType::FullOuter | JoinType::RightOuter | JoinType::Semi | JoinType::Anti
                 if out_columns.is_some() => {}
             _ => return Err(unsupported("nested join type")),
+        }
+        // Prefer an index nested-loop when the inner is indexed on the join key
+        // and the outer is filtered (selective). Falls through to hash/nestloop
+        // when not applicable.
+        if let Some(r) =
+            self.try_index_nestloop(join_type, condition, left, right, where_pred, out_columns)?
+        {
+            return Ok(r);
         }
         let (lplan, lmap, _) = self.build_join_tree(left)?;
         let (rplan, rmap, _) = self.build_join_tree(right)?;
@@ -5087,6 +5339,34 @@ impl PlanBuilder {
 // ---------------------------------------------------------------------------
 
 /// Collect the top-level AND conjuncts of `expr` into `out` (a non-AND
+
+/// The single base relation a subtree scans (descending through pass-through
+/// nodes), or `None` if it is a join, set-op, or otherwise not one relation.
+fn single_base_table(expr: &RelExpr) -> Option<String> {
+    match expr {
+        RelExpr::Scan { table, .. } => Some(table.clone()),
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input } => single_base_table(input),
+        _ => None,
+    }
+}
+
+/// True if a single-relation subtree carries a Filter (a restricting WHERE),
+/// used as a cheap proxy for "the driving side is selective" when deciding to
+/// use an index nested-loop join.
+fn subtree_has_filter(expr: &RelExpr) -> bool {
+    match expr {
+        RelExpr::Filter { .. } => true,
+        RelExpr::Project { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input } => subtree_has_filter(input),
+        _ => false,
+    }
+}
 /// expression yields a single element). Used to isolate an indexable
 /// equality conjunct from the rest of a `WHERE` clause.
 fn split_conjuncts<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
