@@ -1,0 +1,21 @@
+---
+id: fold-const-int-eq
+name: "fold-const-int-eq"
+category: logical/cte-inlining-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# fold-const-int-eq
+
+## Description
+
+Migrated from the hand-coded `cte_inlining_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (eq (const-int ?n) (const-int ?n))
+rhs: (const-bool true)

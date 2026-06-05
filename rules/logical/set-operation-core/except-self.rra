@@ -1,0 +1,21 @@
+---
+id: except-self
+name: "except-self"
+category: logical/set-operation-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# except-self
+
+## Description
+
+Migrated from the hand-coded `set_operation_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (except ?all ?x ?x)
+rhs: (filter (const-bool false) ?x)

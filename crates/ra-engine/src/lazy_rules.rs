@@ -550,7 +550,7 @@ impl LazyRuleCompiler {
                 crate::rewrite::generated_logical_join_reordering_core_rules()
             }
             RuleCategory::JoinElimination => {
-                let mut rules = crate::rewrite::join_elimination_rules();
+                let mut rules = crate::rewrite::generated_logical_join_elimination_core_rules();
                 rules.extend(crate::redundant_join::redundant_join_elimination_rules());
                 rules
             }
@@ -559,10 +559,10 @@ impl LazyRuleCompiler {
             }
             RuleCategory::SemiJoinOptimization => crate::semi_join::semi_join_reduction_rules(),
 
-            RuleCategory::AggregateOptimization => crate::rewrite::aggregate_optimization_rules(),
-            RuleCategory::LimitSortOptimization => crate::rewrite::limit_sort_optimization_rules(),
-            RuleCategory::SetOperationOptimization => crate::rewrite::set_operation_rules(),
-            RuleCategory::SubqueryOptimization => crate::rewrite::subquery_optimization_rules(),
+            RuleCategory::AggregateOptimization => crate::rewrite::generated_logical_aggregate_optimization_core_rules(),
+            RuleCategory::LimitSortOptimization => crate::rewrite::generated_logical_limit_sort_optimization_core_rules(),
+            RuleCategory::SetOperationOptimization => crate::rewrite::generated_logical_set_operation_core_rules(),
+            RuleCategory::SubqueryOptimization => crate::rewrite::generated_logical_subquery_optimization_core_rules(),
 
             RuleCategory::FileFormatOptimization => {
                 crate::parquet_pushdown::parquet_pushdown_rules()

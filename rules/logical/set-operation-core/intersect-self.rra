@@ -1,0 +1,21 @@
+---
+id: intersect-self
+name: "intersect-self"
+category: logical/set-operation-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# intersect-self
+
+## Description
+
+Migrated from the hand-coded `set_operation_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (intersect ?all ?x ?x)
+rhs: ?x
