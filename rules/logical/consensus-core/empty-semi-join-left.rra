@@ -2,7 +2,7 @@
 id: empty-semi-join-left
 name: "empty-semi-join-left"
 category: logical/consensus-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

@@ -2,7 +2,7 @@
 id: extract-equijoin-from-and-right
 name: "extract-equijoin-from-and-right"
 category: logical/consensus-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

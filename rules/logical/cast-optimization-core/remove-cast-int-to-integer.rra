@@ -2,7 +2,7 @@
 id: remove-cast-int-to-integer
 name: "remove-cast-int-to-integer"
 category: logical/cast-optimization-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]
