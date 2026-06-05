@@ -19,3 +19,4 @@ Migrated from the hand-coded `predicate_pushdown_rules()` to a declarative
 
 lhs: (filter ?pred (project ?cols ?input))
 rhs: (project ?cols (filter ?pred ?input))
+when: references_subset("?pred", "?cols")
