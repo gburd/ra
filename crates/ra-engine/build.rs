@@ -264,7 +264,7 @@ fn extract_implementation_code(body: &str) -> Vec<String> {
 fn extract_structured_rewrites(body: &str, id: &str) -> Vec<String> {
     let mut lhs: Option<String> = None;
     let mut rhs: Option<String> = None;
-    let mut when: Option<String> = None;
+    let mut whens: Vec<String> = Vec::new();
     let mut in_section = false;
 
     for line in body.lines() {
@@ -289,14 +289,26 @@ fn extract_structured_rewrites(body: &str, id: &str) -> Vec<String> {
         } else if let Some(v) = line_no_comment.strip_prefix("when:") {
             let w = v.trim();
             if !w.is_empty() {
-                when = Some(w.to_string());
+                // A single `when:` may carry several conditions separated by
+                // `;` (each becomes its own egg `if` clause); multiple `when:`
+                // lines also accumulate.
+                for part in w.split(';') {
+                    let p = part.trim();
+                    if !p.is_empty() {
+                        whens.push(p.to_string());
+                    }
+                }
             }
         }
     }
 
     match (lhs, rhs) {
         (Some(l), Some(r)) if !l.is_empty() && !r.is_empty() => {
-            let cond = when.map_or(String::new(), |w| format!("\n    if {w}"));
+            let mut cond = String::new();
+            for w in &whens {
+                cond.push_str("\n    if ");
+                cond.push_str(w);
+            }
             vec![format!("rewrite!(\"{id}\";\n    \"{l}\" =>\n    \"{r}\"{cond}\n)")]
         }
         _ => Vec::new(),
@@ -349,6 +361,9 @@ const KNOWN_CONDITIONS: &[&str] = &[
     "not_zero",
     "is_canonical_scan",
     "is_uncorrelated",
+    "is_xml_function_filter",
+    "is_ungrouped_count_star",
+    "is_not_const_bool",
 ];
 
 // Strip `if is_database("X")` lines from a rewrite block. The

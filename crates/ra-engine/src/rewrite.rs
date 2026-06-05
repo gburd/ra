@@ -43,7 +43,8 @@ mod generated {
                   the build robust against future activations"
     )]
     use crate::conditions::{
-        is_canonical_scan, is_constant, is_deterministic, is_uncorrelated, not_nullable,
+        is_canonical_scan, is_constant, is_deterministic, is_not_const_bool,
+        is_ungrouped_count_star, is_uncorrelated, is_xml_function_filter, not_nullable,
         not_zero, pred_references_only, predicate_references_only, references_only,
         single_reference,
     };
@@ -91,6 +92,10 @@ pub(crate) use generated::{
     generated_logical_consensus_core_rules,
     generated_physical_fts_core_rules,
     generated_physical_vector_core_rules,
+};
+pub(crate) use generated::{
+    generated_logical_count_metadata_core_rules,
+    generated_logical_xml_core_rules,
 };
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
@@ -157,7 +162,7 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(generated_physical_parquet_pushdown_core_rules());
 
     // Metadata shortcut rules
-    rules.extend(crate::count_metadata::count_metadata_rules());
+    rules.extend(generated_logical_count_metadata_core_rules());
 
     // Basic index scan selection rules
     rules.extend(crate::index_selection::index_selection_rules());
@@ -175,7 +180,7 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(crate::oracle_json_duality::duality_rewrite_rules());
 
     // XPath/XQuery optimization rules (RFC 0083)
-    rules.extend(crate::xml_optimizer::xml_optimization_rules());
+    rules.extend(generated_logical_xml_core_rules());
 
     // Vector similarity search optimization rules (RFC 0064)
     rules.extend(generated_physical_vector_core_rules());
@@ -442,7 +447,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_AGGREGATE,
                 databases: vec![],
             },
-            rules: crate::count_metadata::count_metadata_rules(),
+            rules: generated_logical_count_metadata_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "index-selection",
@@ -494,7 +499,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_XML_FUNC,
                 databases: vec![],
             },
-            rules: crate::xml_optimizer::xml_optimization_rules(),
+            rules: generated_logical_xml_core_rules(),
         },
         // -- Specialty: Vector search (RFC 0064) --
         AnnotatedRuleGroup {
@@ -1352,6 +1357,16 @@ mod tests {
             "consensus",
             &crate::consensus_rules::consensus_rules(),
             &generated_logical_consensus_core_rules(),
+        );
+        assert_rules_identical(
+            "count-metadata",
+            &crate::count_metadata::count_metadata_rules(),
+            &generated_logical_count_metadata_core_rules(),
+        );
+        assert_rules_identical(
+            "xml",
+            &crate::xml_optimizer::xml_optimization_rules(),
+            &generated_logical_xml_core_rules(),
         );
     }
 

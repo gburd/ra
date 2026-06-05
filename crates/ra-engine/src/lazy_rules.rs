@@ -568,7 +568,7 @@ impl LazyRuleCompiler {
                 crate::rewrite::generated_physical_parquet_pushdown_core_rules()
             }
             RuleCategory::MetadataShortcuts => {
-                let mut rules = crate::count_metadata::count_metadata_rules();
+                let mut rules = crate::rewrite::generated_logical_count_metadata_core_rules();
                 rules.extend(crate::rewrite::generated_physical_min_max_index_core_rules());
                 rules.extend(crate::rewrite::generated_physical_covering_index_core_rules());
                 rules

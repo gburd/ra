@@ -1209,7 +1209,7 @@ fn is_xml_function_filter(
 }
 
 /// Recursively check if an e-class contains XML function patterns.
-fn contains_xml_function(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
+pub(crate) fn contains_xml_function(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
     if depth == 0 {
         return false;
     }

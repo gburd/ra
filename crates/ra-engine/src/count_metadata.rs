@@ -14,14 +14,18 @@
 //!
 //! See: `research/database-shortcuts.md` section 1.
 
-use egg::{rewrite, Id, Rewrite, Subst, Var};
+use egg::Id;
+#[cfg(test)]
+use egg::{rewrite, Rewrite, Subst, Var};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+#[cfg(test)]
 use crate::parse_var;
 
 /// Return rewrite rules for COUNT(*) metadata optimization.
 #[must_use]
+#[cfg(test)] // RFC 0090 Phase 2: test oracle; production uses generated rules
 pub fn count_metadata_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Match: (aggregate ?groups ?aggs (scan ?table))
@@ -41,6 +45,7 @@ pub fn count_metadata_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 
 /// Condition: the aggregate has no grouping keys and a single
 /// `COUNT(*)` aggregate expression (count with nil arg, non-distinct).
+#[cfg(test)]
 fn is_ungrouped_count_star(
     groups_var: Var,
     aggs_var: Var,
@@ -54,7 +59,7 @@ fn is_ungrouped_count_star(
 }
 
 /// Check that a node is `nil` or an empty `(list)`.
-fn is_nil_or_empty_list(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
+pub(crate) fn is_nil_or_empty_list(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
         match node {
@@ -67,7 +72,7 @@ fn is_nil_or_empty_list(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> b
 }
 
 /// Check that the aggs list is `(list (agg-expr (count nil) all ?alias))`.
-fn is_single_count_star(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
+pub(crate) fn is_single_count_star(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> bool {
     let canonical = egraph.find(id);
     for node in &egraph[canonical].nodes {
         if let RelLang::List(ids) = node {
