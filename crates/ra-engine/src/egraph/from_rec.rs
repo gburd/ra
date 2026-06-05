@@ -63,7 +63,14 @@ fn from_node(
                 input: Box::new(input),
             })
         }
-        RelLang::Join([jt_id, cond_id, left_id, right_id]) => {
+        RelLang::Join([jt_id, cond_id, left_id, right_id])
+        | RelLang::HashJoinOp([jt_id, cond_id, left_id, right_id])
+        | RelLang::MergeJoinOp([jt_id, cond_id, left_id, right_id])
+        | RelLang::NestLoopOp([jt_id, cond_id, left_id, right_id])
+        | RelLang::IndexNestLoopOp([jt_id, cond_id, left_id, right_id]) => {
+            // Physical join variants lower back to the logical RelExpr::Join;
+            // the physical method reaches plan-builder via the PhysicalChoices
+            // sidecar (RFC 0090 Phase 3), keeping RelExpr unchanged.
             let join_type = extract_join_type(egraph, *jt_id)?;
             let condition = extract_scalar_expr(egraph, *cond_id)?;
             let left = from_egraph_node(egraph, *left_id)?;
@@ -1011,4 +1018,34 @@ fn decode_case_expr(
         when_clauses,
         else_result,
     })
+}
+
+#[cfg(test)]
+#[expect(clippy::expect_used, reason = "test code")]
+mod physical_lowering_tests {
+    use super::from_egraph_node;
+    use crate::analysis::RelAnalysis;
+    use crate::egraph::RelLang;
+    use egg::{EGraph, RecExpr};
+    use ra_core::algebra::RelExpr;
+
+    /// RFC 0090 Phase 3 chunk 1: the new physical join variants in `RelLang`
+    /// round-trip back to the logical `RelExpr::Join` (the physical method is
+    /// carried separately via the sidecar). Confirms the e-graph language can
+    /// hold physical variants without changing extracted-plan shape.
+    #[test]
+    fn physical_join_variants_lower_to_logical_join() {
+        for head in ["join", "hash-join", "merge-join", "nest-loop", "index-nest-loop"] {
+            let s = format!("({head} inner (eq (qcol t a) (qcol s b)) (scan t) (scan s))");
+            let rec: RecExpr<RelLang> = s.parse().expect("valid expr");
+            let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
+            let root = egraph.add_expr(&rec);
+            egraph.rebuild();
+            let expr = from_egraph_node(&egraph, root).expect("lowering succeeds");
+            assert!(
+                matches!(expr, RelExpr::Join { .. }),
+                "{head} should lower to RelExpr::Join, got {expr:?}"
+            );
+        }
+    }
 }

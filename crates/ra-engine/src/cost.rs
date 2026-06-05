@@ -1357,7 +1357,14 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
                 1.0 * simd_factor * self.calibration.tuple_cost()
             }
-            RelLang::Join(_) => 500.0 * self.calibration.tuple_cost(),
+            // Physical join variants are placeholder-costed = logical Join until
+            // RFC 0090 Phase 3 chunk 3 adds per-method cost. They never appear
+            // until the lowering rules ship (chunk 2), so this is inert for now.
+            RelLang::Join(_)
+            | RelLang::HashJoinOp(_)
+            | RelLang::MergeJoinOp(_)
+            | RelLang::NestLoopOp(_)
+            | RelLang::IndexNestLoopOp(_) => 500.0 * self.calibration.tuple_cost(),
             RelLang::Aggregate(_) => 200.0 * self.calibration.tuple_cost(),
             RelLang::Sort(_) => {
                 let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
