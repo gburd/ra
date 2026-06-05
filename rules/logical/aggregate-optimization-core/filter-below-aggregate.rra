@@ -1,0 +1,21 @@
+---
+id: filter-below-aggregate
+name: "filter-below-aggregate"
+category: logical/aggregate-optimization-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# filter-below-aggregate
+
+## Description
+
+Migrated from the hand-coded `aggregate_optimization_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter ?pred (aggregate ?groups ?aggs ?input))
+rhs: (aggregate ?groups ?aggs (filter ?pred ?input))

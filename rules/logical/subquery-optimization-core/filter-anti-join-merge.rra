@@ -1,0 +1,21 @@
+---
+id: filter-anti-join-merge
+name: "filter-anti-join-merge"
+category: logical/subquery-optimization-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# filter-anti-join-merge
+
+## Description
+
+Migrated from the hand-coded `subquery_optimization_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter ?pred (join anti ?cond ?left ?right))
+rhs: (join anti (and ?cond ?pred) ?left ?right)

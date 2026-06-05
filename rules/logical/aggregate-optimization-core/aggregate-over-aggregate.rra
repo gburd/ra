@@ -1,0 +1,21 @@
+---
+id: aggregate-over-aggregate
+name: "aggregate-over-aggregate"
+category: logical/aggregate-optimization-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# aggregate-over-aggregate
+
+## Description
+
+Migrated from the hand-coded `aggregate_optimization_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (aggregate ?g1 ?a1 (aggregate ?g1 ?a2 ?input))
+rhs: (aggregate ?g1 ?a1 ?input)

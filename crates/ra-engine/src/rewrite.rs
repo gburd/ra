@@ -56,9 +56,15 @@ pub(crate) use generated::all_generated_rules;
 // `generated_predicate_pushdown_matches_hand_coded` identity test).
 pub(crate) use generated::generated_logical_predicate_pushdown_core_rules;
 pub(crate) use generated::{
+    generated_logical_aggregate_optimization_core_rules,
+    generated_logical_cte_inlining_core_rules,
     generated_logical_expression_simplification_core_rules,
+    generated_logical_join_elimination_core_rules,
     generated_logical_join_reordering_core_rules,
+    generated_logical_limit_sort_optimization_core_rules,
     generated_logical_projection_pushdown_core_rules,
+    generated_logical_set_operation_core_rules,
+    generated_logical_subquery_optimization_core_rules,
 };
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
@@ -91,14 +97,14 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(generated_logical_join_reordering_core_rules());
     rules.extend(generated_logical_projection_pushdown_core_rules());
     rules.extend(generated_logical_expression_simplification_core_rules());
-    rules.extend(join_elimination_rules());
-    rules.extend(aggregate_optimization_rules());
-    rules.extend(limit_sort_optimization_rules());
-    rules.extend(set_operation_rules());
-    rules.extend(subquery_optimization_rules());
+    rules.extend(generated_logical_join_elimination_core_rules());
+    rules.extend(generated_logical_aggregate_optimization_core_rules());
+    rules.extend(generated_logical_limit_sort_optimization_core_rules());
+    rules.extend(generated_logical_set_operation_core_rules());
+    rules.extend(generated_logical_subquery_optimization_core_rules());
 
     // CTE inlining rules
-    rules.extend(cte_inlining_rules());
+    rules.extend(generated_logical_cte_inlining_core_rules());
 
     // Column pruning rules (project through intersect/except/limit, etc.)
     rules.extend(crate::column_pruning::column_pruning_rules());
@@ -274,7 +280,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_JOIN,
                 databases: vec![],
             },
-            rules: join_elimination_rules(),
+            rules: generated_logical_join_elimination_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "join-transformations",
@@ -315,7 +321,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_AGGREGATE,
                 databases: vec![],
             },
-            rules: aggregate_optimization_rules(),
+            rules: generated_logical_aggregate_optimization_core_rules(),
         },
         // -- Limit/Sort rules --
         AnnotatedRuleGroup {
@@ -324,7 +330,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_LIMIT.union(QueryFeatureSet::HAS_SORT),
                 databases: vec![],
             },
-            rules: limit_sort_optimization_rules(),
+            rules: generated_logical_limit_sort_optimization_core_rules(),
         },
         // -- Set operation rules --
         AnnotatedRuleGroup {
@@ -333,7 +339,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_SET_OPS,
                 databases: vec![],
             },
-            rules: set_operation_rules(),
+            rules: generated_logical_set_operation_core_rules(),
         },
         // -- Subquery rules --
         AnnotatedRuleGroup {
@@ -342,7 +348,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_SUBQUERY.union(QueryFeatureSet::HAS_JOIN),
                 databases: vec![],
             },
-            rules: subquery_optimization_rules(),
+            rules: generated_logical_subquery_optimization_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "cte-inlining",
@@ -350,7 +356,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_CTE,
                 databases: vec![],
             },
-            rules: cte_inlining_rules(),
+            rules: generated_logical_cte_inlining_core_rules(),
         },
         // -- Database-inspired universal rules --
         AnnotatedRuleGroup {
@@ -737,6 +743,7 @@ fn commutativity_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Join elimination rules
 // ---------------------------------------------------------------
 
+#[cfg(test)] // RFC 0090: test oracle; production uses generated_logical_join_elimination_core_rules
 pub(crate) fn join_elimination_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Self-join with true condition on same table is identity
@@ -754,6 +761,7 @@ pub(crate) fn join_elimination_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // ---------------------------------------------------------------
 
 #[must_use]
+#[cfg(test)] // RFC 0090: test oracle; production uses generated_logical_aggregate_optimization_core_rules
 pub fn aggregate_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push filter below aggregate when filter only
@@ -774,6 +782,7 @@ pub fn aggregate_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Limit and sort optimization rules
 // ---------------------------------------------------------------
 
+#[cfg(test)] // RFC 0090: test oracle; production uses generated_logical_limit_sort_optimization_core_rules
 pub(crate) fn limit_sort_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push limit through project
@@ -798,6 +807,7 @@ pub(crate) fn limit_sort_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysi
 // Set operation rules
 // ---------------------------------------------------------------
 
+#[cfg(test)] // RFC 0090: test oracle; production uses generated_logical_set_operation_core_rules
 pub(crate) fn set_operation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Union commutativity
@@ -831,6 +841,7 @@ pub(crate) fn set_operation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Subquery / decorrelation optimization rules
 // ---------------------------------------------------------------
 
+#[cfg(test)] // RFC 0090: test oracle; production uses generated_logical_subquery_optimization_core_rules
 pub(crate) fn subquery_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Convert semi join + filter to semi join with combined condition
@@ -855,6 +866,7 @@ pub(crate) fn subquery_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>
 /// Inlines trivial CTEs where the body directly references the CTE
 /// by name. For `WITH x AS (def) SELECT * FROM x`, replaces the
 /// entire CTE+body with just the definition.
+#[cfg(test)] // RFC 0090: test oracle; production uses generated_logical_cte_inlining_core_rules
 pub(crate) fn cte_inlining_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Inline CTE when the body is just a scan of the CTE name.
@@ -1167,6 +1179,60 @@ mod tests {
             "expression-simplification",
             &expression_simplification_rules(),
             &generated_logical_expression_simplification_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_join_elimination_matches_hand_coded() {
+        assert_rules_identical(
+            "join-elimination",
+            &join_elimination_rules(),
+            &generated_logical_join_elimination_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_aggregate_optimization_matches_hand_coded() {
+        assert_rules_identical(
+            "aggregate-optimization",
+            &aggregate_optimization_rules(),
+            &generated_logical_aggregate_optimization_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_limit_sort_optimization_matches_hand_coded() {
+        assert_rules_identical(
+            "limit-sort-optimization",
+            &limit_sort_optimization_rules(),
+            &generated_logical_limit_sort_optimization_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_set_operation_matches_hand_coded() {
+        assert_rules_identical(
+            "set-operation",
+            &set_operation_rules(),
+            &generated_logical_set_operation_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_subquery_optimization_matches_hand_coded() {
+        assert_rules_identical(
+            "subquery-optimization",
+            &subquery_optimization_rules(),
+            &generated_logical_subquery_optimization_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_cte_inlining_matches_hand_coded() {
+        assert_rules_identical(
+            "cte-inlining",
+            &cte_inlining_rules(),
+            &generated_logical_cte_inlining_core_rules(),
         );
     }
 

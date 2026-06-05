@@ -1,0 +1,21 @@
+---
+id: sort-below-sort
+name: "sort-below-sort"
+category: logical/limit-sort-optimization-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# sort-below-sort
+
+## Description
+
+Migrated from the hand-coded `limit_sort_optimization_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (sort ?k1 (sort ?k2 ?input))
+rhs: (sort ?k1 ?input)
