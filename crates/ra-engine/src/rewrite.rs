@@ -15,7 +15,9 @@
 //! - **DuckDB-inspired rules**: from `DuckDB` optimizer source
 //! - **SQLite-inspired rules**: from `SQLite` query planner source
 
-use egg::{rewrite, Rewrite};
+use egg::Rewrite;
+#[cfg(test)]
+use egg::rewrite;
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
@@ -80,6 +82,10 @@ pub(crate) use generated::{
     generated_physical_min_max_index_core_rules,
     generated_physical_parquet_pushdown_core_rules,
     generated_physical_runtime_filter_core_rules,
+};
+pub(crate) use generated::{
+    generated_logical_cast_optimization_core_rules,
+    generated_physical_hybrid_search_core_rules,
 };
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
@@ -173,10 +179,10 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(crate::fts_rules::fts_optimization_rules());
 
     // Hybrid search optimization rules (RFC 0073)
-    rules.extend(crate::hybrid_search::hybrid_search_rules());
+    rules.extend(generated_physical_hybrid_search_core_rules());
 
     // Type cast optimization rules
-    rules.extend(cast_optimization_rules());
+    rules.extend(generated_logical_cast_optimization_core_rules());
 
     // Generated rules from .rra files (validated against RelLang, deduplicated by name).
     // Hand-coded rules take priority; generated rules only added if their name is unique.
@@ -511,7 +517,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                     .union(QueryFeatureSet::HAS_VECTOR_DISTANCE),
                 databases: vec![],
             },
-            rules: crate::hybrid_search::hybrid_search_rules(),
+            rules: generated_physical_hybrid_search_core_rules(),
         },
         // -- Cast optimization --
         AnnotatedRuleGroup {
@@ -520,7 +526,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_CAST,
                 databases: vec![],
             },
-            rules: cast_optimization_rules(),
+            rules: generated_logical_cast_optimization_core_rules(),
         },
     ]
 }
@@ -1079,6 +1085,7 @@ fn runtime_filter_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 /// - Eliminate double casts: cast(cast(x, t1), t2) → cast(x, t2)
 /// - Remove identity casts: cast(const-int(x), int) → const-int(x)
 /// - Push casts through operations when safe
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 fn cast_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Eliminate consecutive casts (cast(cast(x, t1), t2) → cast(x, t2))
@@ -1315,6 +1322,16 @@ mod tests {
             "min-max-index",
             &crate::shortcuts::min_max_index::min_max_index_rules(),
             &generated_physical_min_max_index_core_rules(),
+        );
+        assert_rules_identical(
+            "hybrid-search",
+            &crate::hybrid_search::hybrid_search_rules(),
+            &generated_physical_hybrid_search_core_rules(),
+        );
+        assert_rules_identical(
+            "cast-optimization",
+            &cast_optimization_rules(),
+            &generated_logical_cast_optimization_core_rules(),
         );
     }
 
