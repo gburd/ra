@@ -50,6 +50,8 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated_rules.rs"));
 }
 pub(crate) use generated::all_generated_rules;
+#[cfg(any(test, feature = "rules-authoritative"))]
+pub(crate) use generated::generated_logical_predicate_pushdown_core_rules;
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
 pub(crate) use generated::{generated_rule_stats, GeneratedRuleStats};
@@ -1067,6 +1069,46 @@ mod tests {
     use egg::Runner;
     use ra_core::algebra::{JoinType, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+
+    /// RFC 0090 Phase 1: the declarative `.rra` predicate-pushdown rules
+    /// (compiled by build.rs from `rules/logical/predicate-pushdown-core/`)
+    /// must reproduce the hand-coded `predicate_pushdown_rules()` exactly —
+    /// same rule names and same LHS/RHS patterns. This gates retiring the
+    /// hand-coded function in favor of the rule files.
+    #[test]
+    fn generated_predicate_pushdown_matches_hand_coded() {
+        let fmt = |r: &Rewrite<RelLang, RelAnalysis>| {
+            let lhs = r
+                .searcher
+                .get_pattern_ast()
+                .map_or_else(|| "<dynamic>".to_string(), ToString::to_string);
+            let rhs = r
+                .applier
+                .get_pattern_ast()
+                .map_or_else(|| "<dynamic>".to_string(), ToString::to_string);
+            (r.name.to_string(), format!("{lhs} => {rhs}"))
+        };
+        let mut hand: Vec<(String, String)> =
+            predicate_pushdown_rules().iter().map(fmt).collect();
+        let mut gen: Vec<(String, String)> =
+            generated_logical_predicate_pushdown_core_rules().iter().map(fmt).collect();
+        hand.sort();
+        gen.sort();
+
+        let hand_names: Vec<&String> = hand.iter().map(|(n, _)| n).collect();
+        let gen_names: Vec<&String> = gen.iter().map(|(n, _)| n).collect();
+        assert_eq!(
+            hand_names, gen_names,
+            "rule name sets diverged between hand-coded and .rra-compiled \
+             predicate-pushdown rules"
+        );
+        for ((hn, hp), (_gn, gp)) in hand.iter().zip(gen.iter()) {
+            assert_eq!(
+                hp, gp,
+                "pattern for rule `{hn}` diverged: hand=[{hp}] generated=[{gp}]"
+            );
+        }
+    }
 
     fn run_optimization(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
         let rec = to_rec_expr(expr).expect("conversion should succeed");

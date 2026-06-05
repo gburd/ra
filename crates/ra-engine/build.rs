@@ -103,7 +103,18 @@ fn parse_rra_file(path: &Path) -> Option<RuleInfo> {
     let benefit_range = extract_benefit_range(frontmatter);
 
     // Extract code from the ## Implementation section
-    let code_blocks = extract_implementation_code(body);
+    // Prefer a structured `## Rewrite` block (declarative lhs/rhs/when data)
+    // over a legacy embedded `rewrite!` code block. This lets a `.rra` carry
+    // the rule as structured data rather than Rust source (RFC 0090). During
+    // migration either form is accepted.
+    let code_blocks = {
+        let structured = extract_structured_rewrites(body, &id);
+        if structured.is_empty() {
+            extract_implementation_code(body)
+        } else {
+            structured
+        }
+    };
 
     // Skip rules without rewrite macros
     if code_blocks.is_empty() {
@@ -231,6 +242,67 @@ fn extract_implementation_code(body: &str) -> Vec<String> {
 
     blocks
 }
+
+/// Extract a structured `## Rewrite` block and synthesize the equivalent
+/// `rewrite!` macro source, which then flows through the same validation and
+/// code-generation path as a legacy embedded block.
+///
+/// The structured form carries the rule as data, not Rust:
+///
+/// ```text
+/// ## Rewrite
+///
+/// lhs: (filter ?pred (join inner ?cond ?left ?right))
+/// rhs: (join inner ?cond (filter ?pred ?left) ?right)
+/// when: references_only("?pred", "?left")     # optional, egg condition syntax
+/// ```
+///
+/// `lhs`/`rhs` are S-expression patterns over `RelLang`; `when` (optional) is a
+/// single named condition from `crate::conditions`. The synthesized macro is
+/// named by the file's frontmatter `id`. Returns an empty vec when the file has
+/// no `## Rewrite` section (callers then fall back to the legacy extractor).
+fn extract_structured_rewrites(body: &str, id: &str) -> Vec<String> {
+    let mut lhs: Option<String> = None;
+    let mut rhs: Option<String> = None;
+    let mut when: Option<String> = None;
+    let mut in_section = false;
+
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") {
+            if trimmed == "## Rewrite" {
+                in_section = true;
+                continue;
+            } else if in_section {
+                break; // left the section
+            }
+        }
+        if !in_section {
+            continue;
+        }
+        // Ignore code fences / comments / blanks inside the section.
+        let line_no_comment = trimmed.split_once('#').map_or(trimmed, |(c, _)| c.trim_end());
+        if let Some(v) = line_no_comment.strip_prefix("lhs:") {
+            lhs = Some(v.trim().to_string());
+        } else if let Some(v) = line_no_comment.strip_prefix("rhs:") {
+            rhs = Some(v.trim().to_string());
+        } else if let Some(v) = line_no_comment.strip_prefix("when:") {
+            let w = v.trim();
+            if !w.is_empty() {
+                when = Some(w.to_string());
+            }
+        }
+    }
+
+    match (lhs, rhs) {
+        (Some(l), Some(r)) if !l.is_empty() && !r.is_empty() => {
+            let cond = when.map_or(String::new(), |w| format!("\n    if {w}"));
+            vec![format!("rewrite!(\"{id}\";\n    \"{l}\" =>\n    \"{r}\"{cond}\n)")]
+        }
+        _ => Vec::new(),
+    }
+}
+
 
 /// Extract condition function names from code blocks.
 /// Looks for patterns like `if some_function("?var", "?var2")`
