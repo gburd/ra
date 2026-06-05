@@ -50,7 +50,10 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated_rules.rs"));
 }
 pub(crate) use generated::all_generated_rules;
-#[cfg(any(test, feature = "rules-authoritative"))]
+// RFC 0090: the predicate-pushdown category is sourced authoritatively from the
+// compiled .rra corpus (rules/logical/predicate-pushdown-core/). The hand-coded
+// `predicate_pushdown_rules()` is retained only as a test oracle (see the
+// `generated_predicate_pushdown_matches_hand_coded` identity test).
 pub(crate) use generated::generated_logical_predicate_pushdown_core_rules;
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
@@ -79,7 +82,7 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(crate::null_simplification::null_simplification_rules());
 
     // Standard optimization rules
-    rules.extend(predicate_pushdown_rules());
+    rules.extend(generated_logical_predicate_pushdown_core_rules());
     rules.extend(join_reordering_rules());
     rules.extend(projection_pushdown_rules());
     rules.extend(expression_simplification_rules());
@@ -233,7 +236,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: predicate_pushdown_rules(),
+            rules: generated_logical_predicate_pushdown_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "projection-pushdown",
@@ -500,6 +503,12 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
 // Predicate pushdown rules
 // ---------------------------------------------------------------
 
+/// Hand-coded predicate-pushdown rules, retained as the **test oracle** for the
+/// `.rra`-sourced authoritative set (RFC 0090). Not used in the production rule
+/// path — `load_category(FilterOptimization)` and `all_rules_unsorted()` use
+/// `generated_logical_predicate_pushdown_core_rules()`. Removed entirely once
+/// the identity guard is replaced by a snapshot (Phase 5).
+#[cfg(test)]
 pub(crate) fn predicate_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push filter through inner join (left side)

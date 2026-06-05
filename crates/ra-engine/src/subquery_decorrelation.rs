@@ -1610,7 +1610,7 @@ mod tests {
     /// D2: a subquery embedded in a JOIN's ON-condition must be hoisted out of
     /// the join condition. It is lifted into a `CrossJoin` + Filter; the scalar
     /// subquery itself is then preserved in the filter predicate for the plan
-    /// builder's SubPlan path, but no JOIN condition may still contain it.
+    /// builder's `SubPlan` path, but no JOIN condition may still contain it.
     #[test]
     fn subquery_inside_join_condition_is_decorrelated() {
         let inner_sq = Expr::SubQuery {

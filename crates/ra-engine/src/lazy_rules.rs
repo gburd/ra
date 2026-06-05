@@ -532,12 +532,10 @@ impl LazyRuleCompiler {
     /// Load rules for a specific category.
     fn load_category(category: RuleCategory) -> Vec<Rewrite<RelLang, RelAnalysis>> {
         match category {
-            #[cfg(feature = "rules-authoritative")]
+            // RFC 0090: predicate-pushdown is sourced from the .rra corpus.
             RuleCategory::FilterOptimization => {
                 crate::rewrite::generated_logical_predicate_pushdown_core_rules()
             }
-            #[cfg(not(feature = "rules-authoritative"))]
-            RuleCategory::FilterOptimization => crate::rewrite::predicate_pushdown_rules(),
             RuleCategory::ProjectionOptimization => crate::rewrite::projection_pushdown_rules(),
             RuleCategory::ExpressionSimplification => {
                 crate::rewrite::expression_simplification_rules()

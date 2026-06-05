@@ -14,10 +14,6 @@ streaming = ["timely", "differential-dataflow"]
 file-discovery = ["walkdir"]
 timeline = ["ra-stats/timeline"]
 ml = ["ra-ml"]
-# RFC 0090: source rule categories from the compiled .rra corpus instead of
-# the hand-coded rewrite.rs functions. Migrated category-by-category; each is
-# gated behind a behavioral-identity test before the hand-coded fn is removed.
-rules-authoritative = []
 
 [dependencies]
 anyhow = { workspace = true }
