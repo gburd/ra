@@ -55,6 +55,11 @@ pub(crate) use generated::all_generated_rules;
 // `predicate_pushdown_rules()` is retained only as a test oracle (see the
 // `generated_predicate_pushdown_matches_hand_coded` identity test).
 pub(crate) use generated::generated_logical_predicate_pushdown_core_rules;
+pub(crate) use generated::{
+    generated_logical_expression_simplification_core_rules,
+    generated_logical_join_reordering_core_rules,
+    generated_logical_projection_pushdown_core_rules,
+};
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
 pub(crate) use generated::{generated_rule_stats, GeneratedRuleStats};
@@ -83,9 +88,9 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 
     // Standard optimization rules
     rules.extend(generated_logical_predicate_pushdown_core_rules());
-    rules.extend(join_reordering_rules());
-    rules.extend(projection_pushdown_rules());
-    rules.extend(expression_simplification_rules());
+    rules.extend(generated_logical_join_reordering_core_rules());
+    rules.extend(generated_logical_projection_pushdown_core_rules());
+    rules.extend(generated_logical_expression_simplification_core_rules());
     rules.extend(join_elimination_rules());
     rules.extend(aggregate_optimization_rules());
     rules.extend(limit_sort_optimization_rules());
@@ -244,7 +249,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: projection_pushdown_rules(),
+            rules: generated_logical_projection_pushdown_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "expression-simplification",
@@ -252,7 +257,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: expression_simplification_rules(),
+            rules: generated_logical_expression_simplification_core_rules(),
         },
         // -- Join rules --
         AnnotatedRuleGroup {
@@ -261,7 +266,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_JOIN,
                 databases: vec![],
             },
-            rules: join_reordering_rules(),
+            rules: generated_logical_join_reordering_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "join-elimination",
@@ -563,6 +568,9 @@ pub(crate) fn predicate_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Join reordering rules
 // ---------------------------------------------------------------
 
+/// Test oracle for the `.rra`-sourced authoritative set (RFC 0090); not in the
+/// production path (see `generated_logical_join_reordering_core_rules`).
+#[cfg(test)]
 pub(crate) fn join_reordering_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Inner join commutativity
@@ -606,6 +614,8 @@ pub(crate) fn join_reordering_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Projection pushdown rules
 // ---------------------------------------------------------------
 
+/// Test oracle (RFC 0090); production uses `generated_logical_projection_pushdown_core_rules`.
+#[cfg(test)]
 pub(crate) fn projection_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Eliminate redundant project over project
@@ -620,6 +630,8 @@ pub(crate) fn projection_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> 
 // Expression simplification rules
 // ---------------------------------------------------------------
 
+/// Test oracle (RFC 0090); production uses `generated_logical_expression_simplification_core_rules`.
+#[cfg(test)]
 pub(crate) fn expression_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     let mut rules = boolean_simplification_rules();
     rules.extend(arithmetic_simplification_rules());
@@ -627,6 +639,7 @@ pub(crate) fn expression_simplification_rules() -> Vec<Rewrite<RelLang, RelAnaly
     rules
 }
 
+#[cfg(test)]
 fn boolean_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         rewrite!("and-true-left";
@@ -672,6 +685,7 @@ fn boolean_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     ]
 }
 
+#[cfg(test)]
 fn arithmetic_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         rewrite!("add-zero-right";
@@ -693,6 +707,7 @@ fn arithmetic_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     ]
 }
 
+#[cfg(test)]
 fn commutativity_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         rewrite!("add-commutative";
@@ -1084,8 +1099,11 @@ mod tests {
     /// must reproduce the hand-coded `predicate_pushdown_rules()` exactly —
     /// same rule names and same LHS/RHS patterns. This gates retiring the
     /// hand-coded function in favor of the rule files.
-    #[test]
-    fn generated_predicate_pushdown_matches_hand_coded() {
+    fn assert_rules_identical(
+        category: &str,
+        hand: &[Rewrite<RelLang, RelAnalysis>],
+        generated: &[Rewrite<RelLang, RelAnalysis>],
+    ) {
         let fmt = |r: &Rewrite<RelLang, RelAnalysis>| {
             let lhs = r
                 .searcher
@@ -1097,26 +1115,59 @@ mod tests {
                 .map_or_else(|| "<dynamic>".to_string(), ToString::to_string);
             (r.name.to_string(), format!("{lhs} => {rhs}"))
         };
-        let mut hand: Vec<(String, String)> =
-            predicate_pushdown_rules().iter().map(fmt).collect();
-        let mut gen: Vec<(String, String)> =
-            generated_logical_predicate_pushdown_core_rules().iter().map(fmt).collect();
+        let mut hand: Vec<(String, String)> = hand.iter().map(fmt).collect();
+        let mut generated: Vec<(String, String)> = generated.iter().map(fmt).collect();
         hand.sort();
-        gen.sort();
+        generated.sort();
 
         let hand_names: Vec<&String> = hand.iter().map(|(n, _)| n).collect();
-        let gen_names: Vec<&String> = gen.iter().map(|(n, _)| n).collect();
+        let gen_names: Vec<&String> = generated.iter().map(|(n, _)| n).collect();
         assert_eq!(
             hand_names, gen_names,
-            "rule name sets diverged between hand-coded and .rra-compiled \
-             predicate-pushdown rules"
+            "[{category}] rule name sets diverged between hand-coded and .rra-compiled rules"
         );
-        for ((hn, hp), (_gn, gp)) in hand.iter().zip(gen.iter()) {
+        for ((hn, hp), (_gn, gp)) in hand.iter().zip(generated.iter()) {
             assert_eq!(
                 hp, gp,
-                "pattern for rule `{hn}` diverged: hand=[{hp}] generated=[{gp}]"
+                "[{category}] pattern for rule `{hn}` diverged: hand=[{hp}] generated=[{gp}]"
             );
         }
+    }
+
+    #[test]
+    fn generated_predicate_pushdown_matches_hand_coded() {
+        assert_rules_identical(
+            "predicate-pushdown",
+            &predicate_pushdown_rules(),
+            &generated_logical_predicate_pushdown_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_projection_pushdown_matches_hand_coded() {
+        assert_rules_identical(
+            "projection-pushdown",
+            &projection_pushdown_rules(),
+            &generated_logical_projection_pushdown_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_join_reordering_matches_hand_coded() {
+        assert_rules_identical(
+            "join-reordering",
+            &join_reordering_rules(),
+            &generated_logical_join_reordering_core_rules(),
+        );
+    }
+
+    #[test]
+    fn generated_expression_simplification_matches_hand_coded() {
+        assert_rules_identical(
+            "expression-simplification",
+            &expression_simplification_rules(),
+            &generated_logical_expression_simplification_core_rules(),
+        );
     }
 
     fn run_optimization(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {

@@ -1,0 +1,21 @@
+---
+id: or-true-right
+name: "or-true-right"
+category: logical/expression-simplification-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# or-true-right
+
+## Description
+
+Migrated from the hand-coded `boolean_simplification_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (or (const-bool true) ?x)
+rhs: (const-bool true)

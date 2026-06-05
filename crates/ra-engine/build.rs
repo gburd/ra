@@ -975,7 +975,7 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
             "/// Source: {} .rra files\n",
             cat_rules.len()
         ));
-        output.push_str("#[allow(unused)]\n");
+        output.push_str("#[allow(unused, clippy::too_many_lines)]\n");
         output.push_str(&format!(
             "pub(crate) fn {fn_name}() -> Vec<Rewrite<RelLang, RelAnalysis>> {{\n"
         ));

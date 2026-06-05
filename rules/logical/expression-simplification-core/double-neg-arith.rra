@@ -1,0 +1,21 @@
+---
+id: double-neg-arith
+name: "double-neg-arith"
+category: logical/expression-simplification-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# double-neg-arith
+
+## Description
+
+Migrated from the hand-coded `arithmetic_simplification_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (neg (neg ?x))
+rhs: ?x
