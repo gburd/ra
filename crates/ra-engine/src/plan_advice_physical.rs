@@ -297,6 +297,15 @@ impl PhysicalChoices {
     ) {
         cost_driven::walk_for_joins(expr, table_stats, self);
     }
+
+    /// Fill in join strategies from `other` only for inner aliases this map
+    /// doesn't already constrain. Used to layer cost-driven e-graph choices
+    /// (RFC 0090 Phase 3) under supplied advice without overriding it.
+    pub fn fill_missing_joins(&mut self, other: &PhysicalChoices) {
+        for (alias, strategy) in &other.joins {
+            self.joins.entry(alias.clone()).or_insert_with(|| strategy.clone());
+        }
+    }
 }
 
 /// Build [`PhysicalChoices`] from a cost-extracted `RecExpr` that may contain

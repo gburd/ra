@@ -189,6 +189,9 @@ unsafe fn ra_planner_hook_inner(
     let stats = stats_bridge::gather_all_stats(&table_names);
     let facts = SimpleFactsProvider::new(&table_names, &stats);
 
+    // Clear the e-graph physical-choice side-channel before optimizing so a
+    // fast path that skips extraction can't surface a prior query's choices.
+    ra_engine::extract::clear_last_physical_choices();
     let optimized = match optimize_relexpr(&rel_expr, &facts) {
         Ok(expr) => expr,
         Err(e) => {
@@ -237,6 +240,12 @@ unsafe fn ra_planner_hook_inner(
         let mut choices = crate::extension_state::effective_plan_advice()
             .and_then(|a| ra_plan_advice::parse_advice(&a).ok())
             .map_or_else(PhysicalChoices::new, |p| PhysicalChoices::from_advice(&p));
+        // Layer cost-driven join methods from the e-graph's physical lowering
+        // (RFC 0090 Phase 3) under supplied advice — advice wins, e-graph fills
+        // gaps. Then the stats heuristic fills any aliases neither constrained
+        // (e.g. fast-path queries that skipped the e-graph).
+        let eg_choices = ra_engine::extract::take_last_physical_choices();
+        choices.fill_missing_joins(&eg_choices);
         let stats_map: std::collections::HashMap<String, ra_core::Statistics> = stats
             .iter()
             .map(|(t, s)| (t.to_lowercase(), s.clone()))
