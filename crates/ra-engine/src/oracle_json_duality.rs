@@ -565,7 +565,7 @@ fn is_json_field_predicate(
 }
 
 /// Recursively check if an e-class contains JSON access patterns.
-fn contains_json_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
+pub(crate) fn contains_json_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
     if depth == 0 {
         return false;
     }

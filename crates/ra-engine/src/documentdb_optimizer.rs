@@ -618,7 +618,7 @@ fn is_bson_operator_filter(
 /// - `func` nodes (documentdb custom operators)
 /// - `json-access` nodes (BSON path extraction)
 /// - Comparison operators with BSON operands
-fn contains_bson_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
+pub(crate) fn contains_bson_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
     if depth == 0 {
         return false;
     }

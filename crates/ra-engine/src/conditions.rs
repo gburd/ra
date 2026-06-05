@@ -566,6 +566,56 @@ pub fn is_not_const_bool(var: &str) -> SafeCondition<NotConstBool> {
     SafeCondition::new(NotConstBool::new(var), "is_not_const_bool")
 }
 
+/// Condition: the predicate e-class contains a BSON/MongoDB operator pattern.
+/// Delegates to `documentdb_optimizer::contains_bson_pattern`.
+pub struct BsonOperatorFilter {
+    pred_var: Var,
+}
+
+impl BsonOperatorFilter {
+    #[must_use]
+    pub fn new(pred: &str) -> Self {
+        Self { pred_var: parse_var(pred, "?pred") }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for BsonOperatorFilter {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        crate::documentdb_optimizer::contains_bson_pattern(egraph, subst[self.pred_var], 3)
+    }
+}
+
+/// Returns a condition that checks if a predicate contains a BSON operator.
+#[must_use]
+pub fn is_bson_operator_filter(pred: &str) -> SafeCondition<BsonOperatorFilter> {
+    SafeCondition::new(BsonOperatorFilter::new(pred), "is_bson_operator_filter")
+}
+
+/// Condition: the predicate e-class contains a JSON-field pattern (Oracle JSON
+/// Relational Duality). Delegates to `oracle_json_duality::contains_json_pattern`.
+pub struct JsonFieldPredicate {
+    pred_var: Var,
+}
+
+impl JsonFieldPredicate {
+    #[must_use]
+    pub fn new(pred: &str) -> Self {
+        Self { pred_var: parse_var(pred, "?pred") }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for JsonFieldPredicate {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        crate::oracle_json_duality::contains_json_pattern(egraph, subst[self.pred_var], 3)
+    }
+}
+
+/// Returns a condition that checks if a predicate references a JSON field.
+#[must_use]
+pub fn is_json_field_predicate(pred: &str) -> SafeCondition<JsonFieldPredicate> {
+    SafeCondition::new(JsonFieldPredicate::new(pred), "is_json_field_predicate")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

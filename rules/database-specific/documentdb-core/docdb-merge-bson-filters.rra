@@ -1,0 +1,21 @@
+---
+id: docdb-merge-bson-filters
+name: "docdb-merge-bson-filters"
+category: database-specific/documentdb-core
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated, conditional]
+---
+
+# docdb-merge-bson-filters
+
+## Description
+
+Migrated to a declarative `.rra` rule with a precondition (RFC 0090 Phase 2).
+
+## Rewrite
+
+lhs: (filter ?p1 (filter ?p2 ?input))
+rhs: (filter (and ?p1 ?p2) ?input)
+when: is_bson_operator_filter("?p1")

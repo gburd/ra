@@ -1,0 +1,21 @@
+---
+id: docdb-filter-through-join-left
+name: "docdb-filter-through-join-left"
+category: database-specific/documentdb-core
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated, conditional]
+---
+
+# docdb-filter-through-join-left
+
+## Description
+
+Migrated to a declarative `.rra` rule with a precondition (RFC 0090 Phase 2).
+
+## Rewrite
+
+lhs: (filter ?pred (join inner ?cond ?left ?right))
+rhs: (join inner ?cond (filter ?pred ?left) ?right)
+when: is_bson_operator_filter("?pred")

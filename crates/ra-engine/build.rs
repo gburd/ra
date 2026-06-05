@@ -364,6 +364,8 @@ const KNOWN_CONDITIONS: &[&str] = &[
     "is_xml_function_filter",
     "is_ungrouped_count_star",
     "is_not_const_bool",
+    "is_bson_operator_filter",
+    "is_json_field_predicate",
 ];
 
 // Strip `if is_database("X")` lines from a rewrite block. The
