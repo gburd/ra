@@ -1,0 +1,21 @@
+---
+id: left-outer-to-inner-with-filter
+name: "left-outer-to-inner-with-filter"
+category: logical/join-reordering-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# left-outer-to-inner-with-filter
+
+## Description
+
+Migrated from the hand-coded `join_reordering_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter (is-not-null ?col) (join left-outer ?cond ?left ?right))
+rhs: (filter (is-not-null ?col) (join inner ?cond ?left ?right))

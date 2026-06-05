@@ -1,0 +1,21 @@
+---
+id: or-false-left
+name: "or-false-left"
+category: logical/expression-simplification-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# or-false-left
+
+## Description
+
+Migrated from the hand-coded `boolean_simplification_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (or ?x (const-bool false))
+rhs: ?x

@@ -1,0 +1,21 @@
+---
+id: join-associativity-left
+name: "join-associativity-left"
+category: logical/join-reordering-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# join-associativity-left
+
+## Description
+
+Migrated from the hand-coded `join_reordering_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (join inner ?c1 (join inner ?c2 ?a ?b) ?c)
+rhs: (join inner ?c2 ?a (join inner ?c1 ?b ?c))

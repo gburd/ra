@@ -1,0 +1,21 @@
+---
+id: cross-join-commutativity
+name: "cross-join-commutativity"
+category: logical/join-reordering-core
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# cross-join-commutativity
+
+## Description
+
+Migrated from the hand-coded `join_reordering_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (join cross ?cond ?left ?right)
+rhs: (join cross ?cond ?right ?left)

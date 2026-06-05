@@ -536,15 +536,19 @@ impl LazyRuleCompiler {
             RuleCategory::FilterOptimization => {
                 crate::rewrite::generated_logical_predicate_pushdown_core_rules()
             }
-            RuleCategory::ProjectionOptimization => crate::rewrite::projection_pushdown_rules(),
+            RuleCategory::ProjectionOptimization => {
+                crate::rewrite::generated_logical_projection_pushdown_core_rules()
+            }
             RuleCategory::ExpressionSimplification => {
-                crate::rewrite::expression_simplification_rules()
+                crate::rewrite::generated_logical_expression_simplification_core_rules()
             }
             RuleCategory::NullSimplification => {
                 crate::null_simplification::null_simplification_rules()
             }
 
-            RuleCategory::JoinReordering => crate::rewrite::join_reordering_rules(),
+            RuleCategory::JoinReordering => {
+                crate::rewrite::generated_logical_join_reordering_core_rules()
+            }
             RuleCategory::JoinElimination => {
                 let mut rules = crate::rewrite::join_elimination_rules();
                 rules.extend(crate::redundant_join::redundant_join_elimination_rules());
