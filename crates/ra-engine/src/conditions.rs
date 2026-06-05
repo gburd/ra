@@ -616,6 +616,48 @@ pub fn is_json_field_predicate(pred: &str) -> SafeCondition<JsonFieldPredicate> 
     SafeCondition::new(JsonFieldPredicate::new(pred), "is_json_field_predicate")
 }
 
+/// Condition: a join condition that contains at least one equality comparison
+/// (`eq`), i.e. an equi-join — the precondition for hash- and merge-join
+/// lowering (RFC 0090 Phase 3). Nest-loop needs no such guard.
+pub struct IsEquiJoin {
+    cond_var: Var,
+}
+
+impl IsEquiJoin {
+    #[must_use]
+    pub fn new(cond: &str) -> Self {
+        Self { cond_var: parse_var(cond, "?cond") }
+    }
+}
+
+/// Depth-limited search for an `eq` node reachable from `id` (descending through
+/// `and`/`or` boolean structure).
+fn contains_eq(egraph: &EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
+    if depth == 0 {
+        return false;
+    }
+    let canonical = egraph.find(id);
+    egraph[canonical].nodes.iter().any(|node| match node {
+        RelLang::Eq(_) => true,
+        RelLang::And([l, r]) | RelLang::Or([l, r]) => {
+            contains_eq(egraph, *l, depth - 1) || contains_eq(egraph, *r, depth - 1)
+        }
+        _ => false,
+    })
+}
+
+impl Condition<RelLang, RelAnalysis> for IsEquiJoin {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        contains_eq(egraph, subst[self.cond_var], 4)
+    }
+}
+
+/// Returns a condition that checks a join condition is an equi-join.
+#[must_use]
+pub fn is_equi_join(cond: &str) -> SafeCondition<IsEquiJoin> {
+    SafeCondition::new(IsEquiJoin::new(cond), "is_equi_join")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
