@@ -478,6 +478,94 @@ pub fn is_uncorrelated(subq: &str) -> SafeCondition<IsUncorrelated> {
 }
 
 
+// -- Phase 2 (RFC 0090) conditions ---------------------------------
+// Constructors that let the .rra `when:` field reference conditions whose
+// check logic lives in feature modules. Each delegates to the module's
+// `pub(crate)` helper so the logic is not duplicated.
+
+/// Condition: the predicate e-class contains an XML function (xpath,
+/// xmlexists, ...). Delegates to `xml_optimizer::contains_xml_function`.
+pub struct XmlFunctionFilter {
+    pred_var: Var,
+}
+
+impl XmlFunctionFilter {
+    #[must_use]
+    pub fn new(pred: &str) -> Self {
+        Self { pred_var: parse_var(pred, "?pred") }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for XmlFunctionFilter {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        crate::xml_optimizer::contains_xml_function(egraph, subst[self.pred_var], 4)
+    }
+}
+
+/// Returns a condition that checks if a predicate contains an XML function.
+#[must_use]
+pub fn is_xml_function_filter(pred: &str) -> SafeCondition<XmlFunctionFilter> {
+    SafeCondition::new(XmlFunctionFilter::new(pred), "is_xml_function_filter")
+}
+
+/// Condition: no GROUP BY (`?groups` is nil/empty) and `?aggs` is a single
+/// `count(*)`. Delegates to `count_metadata` helpers.
+pub struct UngroupedCountStar {
+    groups_var: Var,
+    aggs_var: Var,
+}
+
+impl UngroupedCountStar {
+    #[must_use]
+    pub fn new(groups: &str, aggs: &str) -> Self {
+        Self {
+            groups_var: parse_var(groups, "?groups"),
+            aggs_var: parse_var(aggs, "?aggs"),
+        }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for UngroupedCountStar {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        crate::count_metadata::is_nil_or_empty_list(egraph, subst[self.groups_var])
+            && crate::count_metadata::is_single_count_star(egraph, subst[self.aggs_var])
+    }
+}
+
+/// Returns a condition matching an ungrouped `COUNT(*)` aggregate.
+#[must_use]
+pub fn is_ungrouped_count_star(groups: &str, aggs: &str) -> SafeCondition<UngroupedCountStar> {
+    SafeCondition::new(UngroupedCountStar::new(groups, aggs), "is_ungrouped_count_star")
+}
+
+/// Condition: the e-class for `?var` contains no `const-bool` node (i.e. the
+/// predicate is not a constant boolean, so an index probe is worthwhile).
+pub struct NotConstBool {
+    var: Var,
+}
+
+impl NotConstBool {
+    #[must_use]
+    pub fn new(var: &str) -> Self {
+        Self { var: parse_var(var, "?pred") }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for NotConstBool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        !egraph[subst[self.var]]
+            .nodes
+            .iter()
+            .any(|n| matches!(n, RelLang::ConstBool(_)))
+    }
+}
+
+/// Returns a condition that checks a predicate is not a constant boolean.
+#[must_use]
+pub fn is_not_const_bool(var: &str) -> SafeCondition<NotConstBool> {
+    SafeCondition::new(NotConstBool::new(var), "is_not_const_bool")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,21 @@
+---
+id: count-star-to-metadata
+name: "count-star-to-metadata"
+category: logical/count-metadata-core
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated, conditional]
+---
+
+# count-star-to-metadata
+
+## Description
+
+Migrated to a declarative `.rra` rule with a precondition (RFC 0090 Phase 2).
+
+## Rewrite
+
+lhs: (aggregate ?groups ?aggs (scan ?table))
+rhs: (metadata-lookup ?table row-count)
+when: is_ungrouped_count_star("?groups", "?aggs")

@@ -1,0 +1,21 @@
+---
+id: xml-filter-below-project
+name: "xml-filter-below-project"
+category: logical/xml-core
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated, conditional]
+---
+
+# xml-filter-below-project
+
+## Description
+
+Migrated to a declarative `.rra` rule with a precondition (RFC 0090 Phase 2).
+
+## Rewrite
+
+lhs: (filter ?pred (project ?cols ?input))
+rhs: (project ?cols (filter ?pred ?input))
+when: is_xml_function_filter("?pred")

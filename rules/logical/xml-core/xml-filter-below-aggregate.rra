@@ -1,0 +1,21 @@
+---
+id: xml-filter-below-aggregate
+name: "xml-filter-below-aggregate"
+category: logical/xml-core
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated, conditional]
+---
+
+# xml-filter-below-aggregate
+
+## Description
+
+Migrated to a declarative `.rra` rule with a precondition (RFC 0090 Phase 2).
+
+## Rewrite
+
+lhs: (filter ?pred (aggregate ?groups ?aggs ?input))
+rhs: (aggregate ?groups ?aggs (filter ?pred ?input))
+when: is_xml_function_filter("?pred")
