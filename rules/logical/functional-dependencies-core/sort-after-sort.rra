@@ -1,0 +1,21 @@
+---
+id: sort-after-sort
+name: "sort-after-sort"
+category: logical/functional-dependencies-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# sort-after-sort
+
+## Description
+
+Migrated from the hand-coded `functional_dependency_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (sort ?keys1 (sort ?keys2 ?input))
+rhs: (sort ?keys1 ?input)

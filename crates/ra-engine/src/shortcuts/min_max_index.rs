@@ -19,9 +19,12 @@
 //! - `MIN(col)` = first row when sorted ascending
 //! - `MAX(col)` = first row when sorted descending
 
+#[cfg(test)]
 use egg::{rewrite, Rewrite};
 
+#[cfg(test)]
 use crate::analysis::RelAnalysis;
+#[cfg(test)]
 use crate::egraph::RelLang;
 
 /// Rewrite rules for MIN/MAX index optimization.
@@ -33,6 +36,7 @@ use crate::egraph::RelLang;
 /// The `index-scan` node signals to the cost model that a B-tree
 /// traversal is used instead of a full table scan.
 #[must_use]
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 pub fn min_max_index_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // MIN(col) with no GROUP BY on a table scan =>

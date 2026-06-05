@@ -1,0 +1,21 @@
+---
+id: left-outer-to-inner-and
+name: "left-outer-to-inner-and"
+category: logical/join-transformation-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# left-outer-to-inner-and
+
+## Description
+
+Migrated from the hand-coded `join_transformation_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter (and ?p1 ?p2) (join left-outer ?cond ?left ?right))
+rhs: (filter (and ?p1 ?p2) (join inner ?cond ?left ?right))

@@ -1,0 +1,21 @@
+---
+id: merge-duplicate-semi-joins
+name: "merge-duplicate-semi-joins"
+category: logical/semi-join-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# merge-duplicate-semi-joins
+
+## Description
+
+Migrated from the hand-coded `semi_join_reduction_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (join semi ?cond1 (join semi ?cond2 ?left ?right) ?right)
+rhs: (join semi (and ?cond1 ?cond2) ?left ?right)

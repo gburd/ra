@@ -1,0 +1,21 @@
+---
+id: sqlite-or-distribute
+name: "sqlite-or-distribute"
+category: database-specific/sqlite-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# sqlite-or-distribute
+
+## Description
+
+Migrated from the hand-coded `sqlite_inspired_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (or (and ?a ?b) (and ?a ?c))
+rhs: (and ?a (or ?b ?c))

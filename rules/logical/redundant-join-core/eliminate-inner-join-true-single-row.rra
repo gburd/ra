@@ -1,0 +1,21 @@
+---
+id: eliminate-inner-join-true-single-row
+name: "eliminate-inner-join-true-single-row"
+category: logical/redundant-join-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# eliminate-inner-join-true-single-row
+
+## Description
+
+Migrated from the hand-coded `redundant_join_elimination_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (join inner (const-bool true) ?left (limit 1 0 ?right))
+rhs: ?left

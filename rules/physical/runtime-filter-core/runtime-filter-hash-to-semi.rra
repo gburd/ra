@@ -1,0 +1,21 @@
+---
+id: runtime-filter-hash-to-semi
+name: "runtime-filter-hash-to-semi"
+category: physical/runtime-filter-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# runtime-filter-hash-to-semi
+
+## Description
+
+Migrated from the hand-coded `runtime_filter_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (join inner (eq ?lcol ?rcol) ?build ?probe)
+rhs: (join inner (eq ?lcol ?rcol) ?build (join semi (eq ?rcol ?lcol) ?probe ?build))

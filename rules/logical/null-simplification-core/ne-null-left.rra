@@ -1,0 +1,21 @@
+---
+id: ne-null-left
+name: "ne-null-left"
+category: logical/null-simplification-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# ne-null-left
+
+## Description
+
+Migrated from the hand-coded `null_simplification_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (ne const-null ?x)
+rhs: const-null

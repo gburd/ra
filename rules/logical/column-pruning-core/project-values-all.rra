@@ -1,0 +1,21 @@
+---
+id: project-values-all
+name: "project-values-all"
+category: logical/column-pruning-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# project-values-all
+
+## Description
+
+Migrated from the hand-coded `column_pruning_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (project ?cols (values ?rows))
+rhs: (values ?rows)

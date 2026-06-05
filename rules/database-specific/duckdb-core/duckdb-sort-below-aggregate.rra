@@ -1,0 +1,21 @@
+---
+id: duckdb-sort-below-aggregate
+name: "duckdb-sort-below-aggregate"
+category: database-specific/duckdb-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# duckdb-sort-below-aggregate
+
+## Description
+
+Migrated from the hand-coded `duckdb_inspired_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (aggregate ?g ?a (sort ?k ?input))
+rhs: (aggregate ?g ?a ?input)

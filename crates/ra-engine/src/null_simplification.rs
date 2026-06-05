@@ -10,9 +10,12 @@
 //! - `x IS NULL` when x is const-null -> TRUE
 //! - `x IS NOT NULL` when x is const-null -> FALSE
 
+#[cfg(test)]
 use egg::{rewrite, Rewrite};
 
+#[cfg(test)]
 use crate::analysis::RelAnalysis;
+#[cfg(test)]
 use crate::egraph::RelLang;
 
 /// Return null constant simplification rules.
@@ -21,6 +24,7 @@ use crate::egraph::RelLang;
 /// according to SQL's three-valued logic semantics.
 #[must_use]
 #[expect(clippy::too_many_lines, reason = "rule collection for NULL simplification patterns")]
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 pub fn null_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // ---------------------------------------------------------------

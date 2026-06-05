@@ -1,0 +1,21 @@
+---
+id: eliminate-distinct-after-groupby
+name: "eliminate-distinct-after-groupby"
+category: logical/functional-dependencies-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# eliminate-distinct-after-groupby
+
+## Description
+
+Migrated from the hand-coded `functional_dependency_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (distinct-rel (aggregate ?groups ?aggs ?input))
+rhs: (aggregate ?groups ?aggs ?input)

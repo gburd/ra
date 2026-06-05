@@ -9,9 +9,12 @@
 //! - Self-join elimination on unique columns
 //! - Unused cross/left join elimination via column tracking
 
+#[cfg(test)]
 use egg::{rewrite, Rewrite};
 
+#[cfg(test)]
 use crate::analysis::RelAnalysis;
+#[cfg(test)]
 use crate::egraph::RelLang;
 
 /// Return redundant join elimination rules.
@@ -20,6 +23,7 @@ use crate::egraph::RelLang;
 /// meaningful data or filtering to the query result.
 /// Only unconditional (always-valid) rules are included.
 #[must_use]
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 pub fn redundant_join_elimination_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Cross join with single-row right side (limit pattern)

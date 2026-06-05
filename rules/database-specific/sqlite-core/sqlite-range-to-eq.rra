@@ -1,0 +1,21 @@
+---
+id: sqlite-range-to-eq
+name: "sqlite-range-to-eq"
+category: database-specific/sqlite-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# sqlite-range-to-eq
+
+## Description
+
+Migrated from the hand-coded `sqlite_inspired_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (and (ge ?a ?b) (le ?a ?b))
+rhs: (eq ?a ?b)

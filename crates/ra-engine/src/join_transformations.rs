@@ -513,6 +513,7 @@ fn transform_children(expr: &RelExpr, schema: &SchemaInfo) -> RelExpr {
 /// comprehensive outer-to-inner conversion patterns beyond just
 /// IS NOT NULL.
 #[must_use]
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 pub fn join_transformation_rules(
 ) -> Vec<egg::Rewrite<crate::egraph::RelLang, crate::analysis::RelAnalysis>> {
     use egg::rewrite;

@@ -13,9 +13,12 @@
 //! - Conditional filter pushdown through semi-joins
 //! - ANY/ALL to semi/anti-join conversion
 
+#[cfg(test)]
 use egg::{rewrite, Rewrite};
 
+#[cfg(test)]
 use crate::analysis::RelAnalysis;
+#[cfg(test)]
 use crate::egraph::RelLang;
 
 /// Return semi-join reduction rules.
@@ -23,6 +26,7 @@ use crate::egraph::RelLang;
 /// These rules optimize semi-join and anti-join patterns.
 /// Only unconditional (always-valid) rules are included.
 #[must_use]
+#[cfg(test)] // RFC 0090 Phase 1b: test oracle; production uses generated rules
 pub fn semi_join_reduction_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Semi-join already produces distinct results on the left side

@@ -1,0 +1,21 @@
+---
+id: eliminate-cross-join-single-row-right
+name: "eliminate-cross-join-single-row-right"
+category: logical/redundant-join-core
+databases: [postgresql, mysql, duckdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# eliminate-cross-join-single-row-right
+
+## Description
+
+Migrated from the hand-coded `redundant_join_elimination_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (join cross ?cond ?left (limit 1 0 ?right))
+rhs: ?left
