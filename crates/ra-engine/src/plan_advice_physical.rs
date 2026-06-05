@@ -299,6 +299,58 @@ impl PhysicalChoices {
     }
 }
 
+/// Build [`PhysicalChoices`] from a cost-extracted `RecExpr` that may contain
+/// physical join variants (RFC 0090 Phase 3 chunk 4). For each physical join
+/// node, the inner side's relation alias is mapped to the chosen strategy, so
+/// the plan-builder can honor the e-graph's cost-driven physical choice instead
+/// of the `augment_from_stats` heuristic. The physical method survives even
+/// though `from_rec` collapses the variants back to a logical `RelExpr::Join`.
+#[must_use]
+pub fn physical_choices_from_recexpr(rec: &egg::RecExpr<crate::egraph::RelLang>) -> PhysicalChoices {
+    use crate::egraph::RelLang;
+    let nodes = rec.as_ref();
+    let mut out = PhysicalChoices::new();
+    for node in nodes {
+        let (strategy, right) = match node {
+            RelLang::HashJoinOp([_, _, _, r]) => (JoinInnerStrategy::Hash, *r),
+            RelLang::MergeJoinOp([_, _, _, r]) => (JoinInnerStrategy::MergeJoinPlain, *r),
+            RelLang::NestLoopOp([_, _, _, r]) | RelLang::IndexNestLoopOp([_, _, _, r]) => {
+                (JoinInnerStrategy::NestedLoopPlain, *r)
+            }
+            _ => continue,
+        };
+        if let Some(alias) = first_relation_alias(nodes, right) {
+            out.joins.insert(alias, strategy);
+        }
+    }
+    out
+}
+
+/// First relation alias/name reachable from `id` in the extracted expr (the
+/// inner relation of a join), descending through pass-through operators and,
+/// for a nested inner join, its own inner side.
+fn first_relation_alias(nodes: &[crate::egraph::RelLang], id: egg::Id) -> Option<String> {
+    use crate::egraph::RelLang;
+    let symbol_at = |sid: egg::Id| match nodes.get(usize::from(sid)) {
+        Some(RelLang::Symbol(s)) => Some(s.to_string()),
+        _ => None,
+    };
+    match nodes.get(usize::from(id))? {
+        RelLang::Scan([t]) | RelLang::IndexScan([t, _]) => symbol_at(*t),
+        RelLang::ScanAlias([_, a]) => symbol_at(*a),
+        RelLang::Filter([_, c]) | RelLang::Project([_, c]) | RelLang::Sort([_, c]) => {
+            first_relation_alias(nodes, *c)
+        }
+        RelLang::Limit([_, _, c]) | RelLang::Aggregate([_, _, c]) => first_relation_alias(nodes, *c),
+        RelLang::Join([_, _, _, r])
+        | RelLang::HashJoinOp([_, _, _, r])
+        | RelLang::MergeJoinOp([_, _, _, r])
+        | RelLang::NestLoopOp([_, _, _, r])
+        | RelLang::IndexNestLoopOp([_, _, _, r]) => first_relation_alias(nodes, *r),
+        _ => None,
+    }
+}
+
 /// Cost-driven helpers used by [`PhysicalChoices::augment_from_stats`].
 /// Kept in a private submodule so the heuristics can evolve
 /// without touching the public API.
@@ -787,6 +839,33 @@ fn walk(target: &AdviceTarget, out: &mut Vec<String>) {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn physical_choices_derived_from_extracted_recexpr() {
+        use crate::egraph::RelLang;
+        // A cost-extracted expr where the optimizer chose hash-join for the
+        // inner relation `c`. The bridge maps inner alias -> strategy.
+        let rec: egg::RecExpr<RelLang> =
+            "(hash-join inner (eq (qcol o a) (qcol c b)) (scan o) (scan c))"
+                .parse()
+                .expect("valid expr");
+        let choices = physical_choices_from_recexpr(&rec);
+        assert_eq!(choices.join_for("c"), Some(&JoinInnerStrategy::Hash));
+
+        let rec_nl: egg::RecExpr<RelLang> =
+            "(nest-loop inner (eq (qcol o a) (qcol c b)) (scan o) (scan c))"
+                .parse()
+                .expect("valid expr");
+        let nl = physical_choices_from_recexpr(&rec_nl);
+        assert_eq!(nl.join_for("c"), Some(&JoinInnerStrategy::NestedLoopPlain));
+
+        // A purely logical join produces no physical choice.
+        let rec_logical: egg::RecExpr<RelLang> =
+            "(join inner (eq (qcol o a) (qcol c b)) (scan o) (scan c))"
+                .parse()
+                .expect("valid expr");
+        assert!(physical_choices_from_recexpr(&rec_logical).is_empty());
+    }
     use ra_plan_advice::parse_advice;
 
     #[test]
