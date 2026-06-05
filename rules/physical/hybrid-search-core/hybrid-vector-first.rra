@@ -1,0 +1,21 @@
+---
+id: hybrid-vector-first
+name: "hybrid-vector-first"
+category: physical/hybrid-search-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# hybrid-vector-first
+
+## Description
+
+Migrated from the hand-coded `hybrid_search_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (filter (fts-match ?vendor ?fcols ?fquery ?mode) (limit ?k ?offset (vector-knn ?table ?vcol ?target ?vk)))
+rhs: (hybrid-scan ?table (fts-match ?vendor ?fcols ?fquery ?mode) (vector-distance l2 ?vcol ?target) vector_first ?k ?k)

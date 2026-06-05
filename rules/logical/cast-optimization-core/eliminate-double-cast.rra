@@ -1,0 +1,21 @@
+---
+id: eliminate-double-cast
+name: "eliminate-double-cast"
+category: logical/cast-optimization-core
+databases: [pg]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# eliminate-double-cast
+
+## Description
+
+Migrated from the hand-coded `cast_optimization_rules` to a declarative `.rra` rule
+(RFC 0090). The rewrite is expressed as structured data below.
+
+## Rewrite
+
+lhs: (cast (cast ?expr ?type1) ?type2)
+rhs: (cast ?expr ?type2)
