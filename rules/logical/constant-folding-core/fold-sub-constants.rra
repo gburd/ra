@@ -1,0 +1,21 @@
+---
+id: fold-sub-constants
+name: "fold-sub-constants"
+category: logical/constant-folding-core
+databases: [postgresql, mysql, duckdb, sqlite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, applier]
+---
+
+# fold-sub-constants
+
+## Description
+
+Constant folding via a computed-RHS applier (RFC 0090 Phase 2 applier
+vocabulary). The replacement value is computed from the matched constants.
+
+## Rewrite
+
+lhs: (sub (const-int ?a) (const-int ?b))
+apply: fold_sub("?a", "?b")

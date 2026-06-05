@@ -264,6 +264,7 @@ fn extract_implementation_code(body: &str) -> Vec<String> {
 fn extract_structured_rewrites(body: &str, id: &str) -> Vec<String> {
     let mut lhs: Option<String> = None;
     let mut rhs: Option<String> = None;
+    let mut apply: Option<String> = None;
     let mut whens: Vec<String> = Vec::new();
     let mut in_section = false;
 
@@ -286,6 +287,11 @@ fn extract_structured_rewrites(body: &str, id: &str) -> Vec<String> {
             lhs = Some(v.trim().to_string());
         } else if let Some(v) = line_no_comment.strip_prefix("rhs:") {
             rhs = Some(v.trim().to_string());
+        } else if let Some(v) = line_no_comment.strip_prefix("apply:") {
+            let a = v.trim();
+            if !a.is_empty() {
+                apply = Some(a.to_string());
+            }
         } else if let Some(v) = line_no_comment.strip_prefix("when:") {
             let w = v.trim();
             if !w.is_empty() {
@@ -302,13 +308,18 @@ fn extract_structured_rewrites(body: &str, id: &str) -> Vec<String> {
         }
     }
 
-    match (lhs, rhs) {
-        (Some(l), Some(r)) if !l.is_empty() && !r.is_empty() => {
-            let mut cond = String::new();
-            for w in &whens {
-                cond.push_str("\n    if ");
-                cond.push_str(w);
-            }
+    let mut cond = String::new();
+    for w in &whens {
+        cond.push_str("\n    if ");
+        cond.push_str(w);
+    }
+    match (lhs, rhs, apply) {
+        // Computed RHS via a named applier (apply: takes precedence over rhs:).
+        (Some(l), _, Some(a)) if !l.is_empty() && !a.is_empty() => {
+            vec![format!("rewrite!(\"{id}\";\n    \"{l}\" => {{ {a} }}{cond}\n)")]
+        }
+        // Static pattern RHS.
+        (Some(l), Some(r), None) if !l.is_empty() && !r.is_empty() => {
             vec![format!("rewrite!(\"{id}\";\n    \"{l}\" =>\n    \"{r}\"{cond}\n)")]
         }
         _ => Vec::new(),

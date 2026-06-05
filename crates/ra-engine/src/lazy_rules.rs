@@ -540,7 +540,9 @@ impl LazyRuleCompiler {
                 crate::rewrite::generated_logical_projection_pushdown_core_rules()
             }
             RuleCategory::ExpressionSimplification => {
-                crate::rewrite::generated_logical_expression_simplification_core_rules()
+                let mut rules = crate::rewrite::generated_logical_expression_simplification_core_rules();
+                rules.extend(crate::rewrite::generated_logical_constant_folding_core_rules());
+                rules
             }
             RuleCategory::NullSimplification => {
                 crate::rewrite::generated_logical_null_simplification_core_rules()

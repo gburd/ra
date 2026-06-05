@@ -38,6 +38,7 @@
 
 pub mod adaptive_calibration;
 pub mod analysis;
+pub mod appliers;
 pub mod conditions;
 pub mod beam_search;
 pub mod cost_model;
