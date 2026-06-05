@@ -2,7 +2,7 @@
 id: empty-cross-join-right
 name: "empty-cross-join-right"
 category: logical/consensus-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

@@ -2,7 +2,7 @@
 id: vector-topk-to-knn
 name: "vector-topk-to-knn"
 category: physical/vector-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

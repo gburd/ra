@@ -2,7 +2,7 @@
 id: fts-merge-bitmap-filters
 name: "fts-merge-bitmap-filters"
 category: physical/fts-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

@@ -2,7 +2,7 @@
 id: filter-null-join-key-right
 name: "filter-null-join-key-right"
 category: logical/consensus-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

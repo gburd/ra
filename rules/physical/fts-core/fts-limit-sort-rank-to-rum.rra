@@ -2,7 +2,7 @@
 id: fts-limit-sort-rank-to-rum
 name: "fts-limit-sort-rank-to-rum"
 category: physical/fts-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

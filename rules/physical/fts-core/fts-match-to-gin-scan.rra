@@ -2,7 +2,7 @@
 id: fts-match-to-gin-scan
 name: "fts-match-to-gin-scan"
 category: physical/fts-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

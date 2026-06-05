@@ -2,7 +2,7 @@
 id: empty-except-right
 name: "empty-except-right"
 category: logical/consensus-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

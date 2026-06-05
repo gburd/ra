@@ -2,7 +2,7 @@
 id: eliminate-double-cast
 name: "eliminate-double-cast"
 category: logical/cast-optimization-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

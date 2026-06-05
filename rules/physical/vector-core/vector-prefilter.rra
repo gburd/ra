@@ -2,7 +2,7 @@
 id: vector-prefilter
 name: "vector-prefilter"
 category: physical/vector-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]

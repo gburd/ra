@@ -2,7 +2,7 @@
 id: hybrid-vector-first
 name: "hybrid-vector-first"
 category: physical/hybrid-search-core
-databases: [pg]
+databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [core, migrated]
