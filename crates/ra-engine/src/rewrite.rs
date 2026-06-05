@@ -43,8 +43,9 @@ mod generated {
                   the build robust against future activations"
     )]
     use crate::conditions::{
-        is_canonical_scan, is_constant, is_deterministic, is_not_const_bool,
-        is_ungrouped_count_star, is_uncorrelated, is_xml_function_filter, not_nullable,
+        is_bson_operator_filter, is_canonical_scan, is_constant, is_deterministic,
+        is_json_field_predicate, is_not_const_bool, is_ungrouped_count_star, is_uncorrelated,
+        is_xml_function_filter, not_nullable,
         not_zero, pred_references_only, predicate_references_only, references_only,
         single_reference,
     };
@@ -98,6 +99,10 @@ pub(crate) use generated::{
     generated_logical_xml_core_rules,
 };
 pub(crate) use generated::generated_physical_index_selection_core_rules;
+pub(crate) use generated::{
+    generated_database_specific_documentdb_core_rules,
+    generated_database_specific_oracle_json_duality_core_rules,
+};
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
 pub(crate) use generated::{generated_rule_stats, GeneratedRuleStats};
@@ -175,10 +180,10 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(generated_physical_min_max_index_core_rules());
 
     // DocumentDB / BSON query optimization rules (RFC 0062)
-    rules.extend(crate::documentdb_optimizer::documentdb_rewrite_rules());
+    rules.extend(generated_database_specific_documentdb_core_rules());
 
     // Oracle JSON Relational Duality view rules (RFC 0084)
-    rules.extend(crate::oracle_json_duality::duality_rewrite_rules());
+    rules.extend(generated_database_specific_oracle_json_duality_core_rules());
 
     // XPath/XQuery optimization rules (RFC 0083)
     rules.extend(generated_logical_xml_core_rules());
@@ -482,7 +487,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                     .union(QueryFeatureSet::HAS_JSON_ACCESS),
                 databases: vec!["documentdb"],
             },
-            rules: crate::documentdb_optimizer::documentdb_rewrite_rules(),
+            rules: generated_database_specific_documentdb_core_rules(),
         },
         // -- Specialty: Oracle JSON Relational Duality (RFC 0084) --
         AnnotatedRuleGroup {
@@ -491,7 +496,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::HAS_JSON_ACCESS,
                 databases: vec!["oracle"],
             },
-            rules: crate::oracle_json_duality::duality_rewrite_rules(),
+            rules: generated_database_specific_oracle_json_duality_core_rules(),
         },
         // -- Specialty: XML optimization (RFC 0083) --
         AnnotatedRuleGroup {
@@ -1281,6 +1286,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines, reason = "flat list of per-category identity assertions")]
     fn generated_second_wave_matches_hand_coded() {
         assert_rules_identical(
             "null-simplification",
@@ -1381,6 +1387,16 @@ mod tests {
             "index-selection",
             &crate::index_selection::index_selection_rules(),
             &generated_physical_index_selection_core_rules(),
+        );
+        assert_rules_identical(
+            "documentdb",
+            &crate::documentdb_optimizer::documentdb_rewrite_rules(),
+            &generated_database_specific_documentdb_core_rules(),
+        );
+        assert_rules_identical(
+            "oracle-json-duality",
+            &crate::oracle_json_duality::duality_rewrite_rules(),
+            &generated_database_specific_oracle_json_duality_core_rules(),
         );
     }
 
