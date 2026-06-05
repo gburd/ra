@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use egg::{Analysis, DidMerge, EGraph, Id};
+use egg::{Analysis, DidMerge, EGraph, Id, Language};
 use ra_core::facts::TableInfo;
 
 use crate::egraph::RelLang;
@@ -17,6 +17,11 @@ use crate::egraph::RelLang;
 pub struct RelData {
     /// Table names referenced by this e-class.
     pub tables: HashSet<String>,
+    /// Column names referenced anywhere in this e-class's subtree (the `col` /
+    /// `qcol` leaves). For a scalar/predicate e-class this is the columns it
+    /// reads; for a relational e-class it is the columns read by its operators.
+    /// Used by column-aware conditions (e.g. `references_subset`).
+    pub columns: HashSet<String>,
     /// Whether this e-class contains a relational operator.
     pub is_relational: bool,
     /// Estimated row count (if computable).
@@ -79,12 +84,30 @@ impl Analysis<RelLang> for RelAnalysis {
             _ => {}
         }
 
+        // Column tracking (RFC 0090): record the column a `col`/`qcol` leaf
+        // references, then propagate the union of all children's columns so
+        // every e-class carries the columns referenced in its subtree.
+        match enode {
+            RelLang::Col([c_id]) | RelLang::QCol([_, c_id]) => {
+                if let Some(sym) = get_symbol(egraph, *c_id) {
+                    data.columns.insert(sym);
+                }
+            }
+            _ => {}
+        }
+        for child in enode.children() {
+            let canonical = egraph.find(*child);
+            data.columns.extend(egraph[canonical].data.columns.iter().cloned());
+        }
+
         data
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
         let before_len = to.tables.len();
+        let before_cols = to.columns.len();
         to.tables.extend(from.tables);
+        to.columns.extend(from.columns);
         to.is_relational |= from.is_relational;
 
         if from.estimated_rows.is_some() && to.estimated_rows.is_none() {
@@ -92,7 +115,7 @@ impl Analysis<RelLang> for RelAnalysis {
         }
 
         DidMerge(
-            to.tables.len() != before_len,
+            to.tables.len() != before_len || to.columns.len() != before_cols,
             false, // from is consumed, nothing to report
         )
     }
@@ -171,5 +194,26 @@ mod tests {
         let data = &runner.egraph[root].data;
         assert!(data.is_relational);
         assert!(data.tables.contains("products"));
+    }
+
+    #[test]
+    fn analysis_tracks_columns_referenced() {
+        // RFC 0090 column tracking: the predicate's column ("price") propagates
+        // up to the filter e-class so references_subset-style conditions can use
+        // it.
+        let expr = RelExpr::scan("products").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("price"))),
+            right: Box::new(Expr::Const(Const::Int(100))),
+        });
+        let rec = to_rec_expr(&expr).expect("conversion should succeed");
+        let runner: Runner<RelLang, RelAnalysis> = Runner::default().with_expr(&rec).run(&[]);
+        let root = runner.roots[0];
+        let data = &runner.egraph[root].data;
+        assert!(
+            data.columns.contains("price"),
+            "columns should track referenced column, got {:?}",
+            data.columns
+        );
     }
 }

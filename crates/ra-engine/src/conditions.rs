@@ -658,6 +658,38 @@ pub fn is_equi_join(cond: &str) -> SafeCondition<IsEquiJoin> {
     SafeCondition::new(IsEquiJoin::new(cond), "is_equi_join")
 }
 
+/// Condition: every column referenced by `?pred` is also referenced by `?cols`
+/// (RFC 0090 column tracking). For `filter-through-project` this guards
+/// soundness — a filter may be pushed below a projection only when it reads
+/// columns the projection reads (i.e. columns present in the projection's
+/// input), never a column the projection *computes*. Conservative: declines
+/// when the predicate touches a column the child doesn't reference.
+pub struct ReferencesSubset {
+    pred_var: Var,
+    cols_var: Var,
+}
+
+impl ReferencesSubset {
+    #[must_use]
+    pub fn new(pred: &str, cols: &str) -> Self {
+        Self { pred_var: parse_var(pred, "?pred"), cols_var: parse_var(cols, "?cols") }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for ReferencesSubset {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        let pred_cols = &egraph[subst[self.pred_var]].data.columns;
+        let avail_cols = &egraph[subst[self.cols_var]].data.columns;
+        pred_cols.is_subset(avail_cols)
+    }
+}
+
+/// Returns a condition that a predicate references only columns in `cols`.
+#[must_use]
+pub fn references_subset(pred: &str, cols: &str) -> SafeCondition<ReferencesSubset> {
+    SafeCondition::new(ReferencesSubset::new(pred, cols), "references_subset")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

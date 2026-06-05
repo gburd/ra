@@ -47,7 +47,7 @@ mod generated {
         is_json_field_predicate, is_not_const_bool, is_ungrouped_count_star, is_uncorrelated,
         is_xml_function_filter, not_nullable,
         not_zero, pred_references_only, predicate_references_only, references_only,
-        single_reference,
+        references_subset, single_reference,
     };
     use crate::appliers::{fold_add, fold_mul, fold_sub};
     use crate::egraph::RelLang;
@@ -611,6 +611,7 @@ pub(crate) fn predicate_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("filter-through-project";
             "(filter ?pred (project ?cols ?input))" =>
             "(project ?cols (filter ?pred ?input))"
+            if crate::conditions::references_subset("?pred", "?cols")
         ),
         // Push filter through union
         rewrite!("filter-through-union";
