@@ -38,9 +38,12 @@
 //! IndexScan(orders, idx_orders_customer, customer_id = 123)
 //! ```
 
+#[cfg(test)]
 use egg::{rewrite, EGraph, Id, Rewrite, Subst, Var};
 
+#[cfg(test)]
 use crate::analysis::RelAnalysis;
+#[cfg(test)]
 use crate::egraph::RelLang;
 
 /// Condition that rejects constant-boolean predicates.
@@ -48,10 +51,12 @@ use crate::egraph::RelLang;
 /// Prevents index selection rules from creating bitmap-index-scans
 /// for trivial predicates like `true` or `false`, which should be
 /// handled by expression simplification rules instead.
+#[cfg(test)]
 struct IsNotConstBool {
     var: Var,
 }
 
+#[cfg(test)]
 impl egg::Condition<RelLang, RelAnalysis> for IsNotConstBool {
     fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let pred_id = subst[self.var];
@@ -85,6 +90,7 @@ impl egg::Condition<RelLang, RelAnalysis> for IsNotConstBool {
 /// string parse inside the `rewrite!` macro.
 #[must_use]
 #[expect(clippy::expect_used, reason = "constant string parse inside rewrite! macro cannot fail")]
+#[cfg(test)] // RFC 0090 Phase 2: test oracle; production uses generated rules
 pub fn index_selection_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Basic bitmap index scan introduction:

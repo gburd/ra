@@ -97,6 +97,7 @@ pub(crate) use generated::{
     generated_logical_count_metadata_core_rules,
     generated_logical_xml_core_rules,
 };
+pub(crate) use generated::generated_physical_index_selection_core_rules;
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
 pub(crate) use generated::{generated_rule_stats, GeneratedRuleStats};
@@ -165,7 +166,7 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(generated_logical_count_metadata_core_rules());
 
     // Basic index scan selection rules
-    rules.extend(crate::index_selection::index_selection_rules());
+    rules.extend(generated_physical_index_selection_core_rules());
 
     // Covering index (index-only scan) rules
     rules.extend(generated_physical_covering_index_core_rules());
@@ -455,7 +456,7 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
                 required_features: QueryFeatureSet::UNIVERSAL,
                 databases: vec![],
             },
-            rules: crate::index_selection::index_selection_rules(),
+            rules: generated_physical_index_selection_core_rules(),
         },
         AnnotatedRuleGroup {
             label: "covering-index",
@@ -1164,6 +1165,14 @@ mod tests {
         };
         let mut hand: Vec<(String, String)> = hand.iter().map(fmt).collect();
         let mut generated: Vec<(String, String)> = generated.iter().map(fmt).collect();
+        // Drop no-op rules (LHS==RHS) from the oracle: build.rs rejects them, so
+        // they can never appear in the generated set, and a rewrite-to-self is
+        // dead weight (egg never derives anything new from it).
+        let is_noop = |(_, p): &(String, String)| {
+            p.split_once(" => ").is_some_and(|(l, r)| l == r)
+        };
+        hand.retain(|e| !is_noop(e));
+        generated.retain(|e| !is_noop(e));
         hand.sort();
         generated.sort();
 
@@ -1367,6 +1376,11 @@ mod tests {
             "xml",
             &crate::xml_optimizer::xml_optimization_rules(),
             &generated_logical_xml_core_rules(),
+        );
+        assert_rules_identical(
+            "index-selection",
+            &crate::index_selection::index_selection_rules(),
+            &generated_physical_index_selection_core_rules(),
         );
     }
 

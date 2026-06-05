@@ -1,0 +1,21 @@
+---
+id: filter-scan-to-bitmap-index
+name: "filter-scan-to-bitmap-index"
+category: physical/index-selection-core
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [core, migrated]
+---
+
+# filter-scan-to-bitmap-index
+
+## Description
+
+Migrated to a declarative `.rra` rule (RFC 0090 Phase 2).
+
+## Rewrite
+
+lhs: (filter ?pred (scan ?table))
+rhs: (bitmap-index-scan ?table auto ?pred)
+when: is_not_const_bool("?pred")
