@@ -19,3 +19,4 @@ Migrated from the hand-coded `predicate_pushdown_rules()` to a declarative
 
 lhs: (filter ?pred (join inner ?cond ?left ?right))
 rhs: (join inner ?cond (filter ?pred ?left) ?right)
+when: references_only("?pred", "?left")
