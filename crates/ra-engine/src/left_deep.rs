@@ -132,7 +132,7 @@ impl LeftDeepBuilder {
                         true
                     }
                     Err(t) => {
-                        current = t;
+                        current = *t;
                         false
                     }
                 }
@@ -301,7 +301,7 @@ impl LeftDeepBuilder {
         tree: RelExpr,
         pred: &Expr,
         target: &str,
-    ) -> Result<RelExpr, RelExpr> {
+    ) -> Result<RelExpr, Box<RelExpr>> {
         match tree {
             RelExpr::Join {
                 join_type: jt @ (JoinType::Inner | JoinType::Cross),
@@ -319,15 +319,15 @@ impl LeftDeepBuilder {
                     Ok(nr) => Ok(RelExpr::Join {
                         join_type: jt,
                         condition,
-                        left: Box::new(ol),
+                        left: ol,
                         right: Box::new(nr),
                     }),
-                    Err(or) => Err(RelExpr::Join {
+                    Err(or) => Err(Box::new(RelExpr::Join {
                         join_type: jt,
                         condition,
-                        left: Box::new(ol),
-                        right: Box::new(or),
-                    }),
+                        left: ol,
+                        right: or,
+                    })),
                 },
             },
             // Base relation (scan, or a scan already carrying a pushed filter):
@@ -336,7 +336,7 @@ impl LeftDeepBuilder {
                 predicate: pred.clone(),
                 input: Box::new(leaf),
             }),
-            other => Err(other),
+            other => Err(Box::new(other)),
         }
     }
 
