@@ -19,6 +19,7 @@ jobs:
       - uses: https://github.com/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
+          submodules: recursive
 
       - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a  # v21
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
@@ -36,6 +37,7 @@ jobs:
       - uses: https://github.com/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
+          submodules: recursive
 
       - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a  # v21
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
@@ -50,6 +52,7 @@ jobs:
       - uses: https://github.com/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Install MSRV toolchain
         uses: https://github.com/dtolnay/rust-toolchain@a54c7afe936401765a4ab0e1fd40fba07f26969c  # master
@@ -66,6 +69,7 @@ jobs:
       - uses: https://github.com/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Install cargo-deny
         uses: https://github.com/EmbarkStudios/cargo-deny-action@34899fc7ba81ca63853986b039e4aca3b87fff4a  # v2
@@ -81,6 +85,7 @@ jobs:
       - uses: https://github.com/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
+          submodules: recursive
 
       - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a  # v21
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13

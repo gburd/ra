@@ -142,3 +142,16 @@ docs/node_modules.bak/
 .memelord/
 .mcp.json
 agent/
+
+# Accidentally-committed developer/home-local dotfiles (untracked 2026-06-06)
+/.bashrc
+/.bash_profile
+/.zshrc
+/.zprofile
+/.profile
+/.gitconfig
+/.ripgreprc
+/.direnvrc
+/.idea/
+/.vscode/
+/.envrc
