@@ -41,7 +41,6 @@ fn main() {
 
     // Re-run triggers.
     println!("cargo:rerun-if-changed=grammar/ra_sql.lime");
-    println!("cargo:rerun-if-changed=grammar/ra_ffi.h");
     println!(
         "cargo:rerun-if-changed={}",
         lime_root.join("lime.c").display()
