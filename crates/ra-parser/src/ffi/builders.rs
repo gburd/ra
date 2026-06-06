@@ -1,11 +1,12 @@
-//! `#[no_mangle] extern "C"` builder functions called by the Lime parser.
+//! Native AST builder functions for the parser's reduction actions.
 //!
 //! Every function here takes `*mut RaParseState` as its first argument and
 //! returns `*mut RaNode`. If the state pointer is null, the function returns
 //! null. If a child pointer cannot be decoded, the function records an error
 //! on the state and returns null.
 //!
-//! The Lime grammar's reduction actions call these functions to build up the
+//! The generated parser's reduction actions reach these through the thin
+//! wrappers in [`crate::rust_parser::builders`], which build up the
 //! `RelExpr` / `Expr` AST in the arenas managed by `RaParseState`.
 
 use std::ffi::CStr;
@@ -103,8 +104,7 @@ fn decode_list(state: &RaParseState, ptr: *mut RaNode) -> Option<Vec<usize>> {
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `table` must be null or a valid NUL-terminated C string.
-#[no_mangle]
-pub unsafe extern "C" fn ra_scan(state: *mut RaParseState, table: *const c_char) -> *mut RaNode {
+pub unsafe fn ra_scan(state: *mut RaParseState, table: *const c_char) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -120,8 +120,7 @@ pub unsafe extern "C" fn ra_scan(state: *mut RaParseState, table: *const c_char)
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `table` and `alias` must be null or valid NUL-terminated C strings.
-#[no_mangle]
-pub unsafe extern "C" fn ra_scan_alias(
+pub unsafe fn ra_scan_alias(
     state: *mut RaParseState,
     table: *const c_char,
     alias: *const c_char,
@@ -147,8 +146,7 @@ pub unsafe extern "C" fn ra_scan_alias(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `func_name` must be a valid NUL-terminated C string.
 /// - `args_list` must be a valid list node, `filter_cond` a valid expr node.
-#[no_mangle]
-pub unsafe extern "C" fn ra_filter_agg(
+pub unsafe fn ra_filter_agg(
     state: *mut RaParseState,
     func_name: *const c_char,
     args_list: *mut RaNode,
@@ -199,8 +197,7 @@ pub unsafe extern "C" fn ra_filter_agg(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `input` and `predicate` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_filter(
+pub unsafe fn ra_filter(
     state: *mut RaParseState,
     input: *mut RaNode,
     predicate: *mut RaNode,
@@ -230,8 +227,7 @@ pub unsafe extern "C" fn ra_filter(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `input` and `columns_list` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_project(
+pub unsafe fn ra_project(
     state: *mut RaParseState,
     input: *mut RaNode,
     columns_list: *mut RaNode,
@@ -272,8 +268,7 @@ pub unsafe extern "C" fn ra_project(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `expr_node` must be a valid tagged expr pointer.
 /// - `alias` must be a valid NUL-terminated C string.
-#[no_mangle]
-pub unsafe extern "C" fn ra_alias_target(
+pub unsafe fn ra_alias_target(
     state: *mut RaParseState,
     expr_node: *mut RaNode,
     alias: *const c_char,
@@ -296,8 +291,7 @@ pub unsafe extern "C" fn ra_alias_target(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `left`, `right`, `condition` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_join(
+pub unsafe fn ra_join(
     state: *mut RaParseState,
     join_type: u32,
     left: *mut RaNode,
@@ -350,8 +344,7 @@ pub unsafe extern "C" fn ra_join(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - All pointer args must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_aggregate(
+pub unsafe fn ra_aggregate(
     state: *mut RaParseState,
     input: *mut RaNode,
     group_by_list: *mut RaNode,
@@ -389,8 +382,7 @@ pub unsafe extern "C" fn ra_aggregate(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `input` and `keys_list` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_sort(
+pub unsafe fn ra_sort(
     state: *mut RaParseState,
     input: *mut RaNode,
     keys_list: *mut RaNode,
@@ -425,8 +417,7 @@ pub unsafe extern "C" fn ra_sort(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `input` must be a valid tagged pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_limit(
+pub unsafe fn ra_limit(
     state: *mut RaParseState,
     input: *mut RaNode,
     count: u64,
@@ -453,8 +444,7 @@ pub unsafe extern "C" fn ra_limit(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `left` and `right` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_union(
+pub unsafe fn ra_union(
     state: *mut RaParseState,
     left: *mut RaNode,
     right: *mut RaNode,
@@ -485,8 +475,7 @@ pub unsafe extern "C" fn ra_union(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `left` and `right` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_intersect(
+pub unsafe fn ra_intersect(
     state: *mut RaParseState,
     left: *mut RaNode,
     right: *mut RaNode,
@@ -517,8 +506,7 @@ pub unsafe extern "C" fn ra_intersect(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `left` and `right` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_except(
+pub unsafe fn ra_except(
     state: *mut RaParseState,
     left: *mut RaNode,
     right: *mut RaNode,
@@ -550,8 +538,7 @@ pub unsafe extern "C" fn ra_except(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `rows_list` must be a valid tagged pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_values(
+pub unsafe fn ra_values(
     state: *mut RaParseState,
     rows_list: *mut RaNode,
 ) -> *mut RaNode {
@@ -587,8 +574,7 @@ pub unsafe extern "C" fn ra_values(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `name` must point to at least `name_len` valid bytes.
 /// - `base`, `recursive`, `body` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_recursive_cte(
+pub unsafe fn ra_recursive_cte(
     state: *mut RaParseState,
     name: *const c_char,
     name_len: usize,
@@ -638,8 +624,7 @@ pub unsafe extern "C" fn ra_recursive_cte(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `name` must be a valid C string of length `name_len`.
 /// - `cte_body` and `query_body` must be valid tagged relational nodes or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_recursive_cte_auto(
+pub unsafe fn ra_recursive_cte_auto(
     state: *mut RaParseState,
     name: *const c_char,
     name_len: usize,
@@ -701,8 +686,7 @@ pub unsafe extern "C" fn ra_recursive_cte_auto(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `name` must be null or a valid NUL-terminated C string.
 /// - `definition` and `body` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_cte(
+pub unsafe fn ra_cte(
     state: *mut RaParseState,
     name: *const c_char,
     definition: *mut RaNode,
@@ -736,8 +720,7 @@ pub unsafe extern "C" fn ra_cte(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `input` and `functions_list` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_window(
+pub unsafe fn ra_window(
     state: *mut RaParseState,
     input: *mut RaNode,
     functions_list: *mut RaNode,
@@ -772,8 +755,7 @@ pub unsafe extern "C" fn ra_window(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `input` must be a valid tagged pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_distinct(state: *mut RaParseState, input: *mut RaNode) -> *mut RaNode {
+pub unsafe fn ra_distinct(state: *mut RaParseState, input: *mut RaNode) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -801,8 +783,7 @@ pub unsafe extern "C" fn ra_distinct(state: *mut RaParseState, input: *mut RaNod
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - All pointer args must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_insert(
+pub unsafe fn ra_insert(
     state: *mut RaParseState,
     table: *const c_char,
     columns: *mut RaNode,
@@ -853,8 +834,7 @@ pub unsafe extern "C" fn ra_insert(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - All pointer args must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_update(
+pub unsafe fn ra_update(
     state: *mut RaParseState,
     table: *const c_char,
     assignments: *mut RaNode,
@@ -905,8 +885,7 @@ pub unsafe extern "C" fn ra_update(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - All pointer args must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_delete(
+pub unsafe fn ra_delete(
     state: *mut RaParseState,
     table: *const c_char,
     filter: *mut RaNode,
@@ -949,8 +928,8 @@ pub unsafe extern "C" fn ra_delete(
 ///
 /// # Safety
 /// - `ident` must be null or a valid NUL-terminated C string.
-#[no_mangle]
-pub unsafe extern "C" fn ra_merge_kind_by(ident: *const c_char) -> c_int {
+#[must_use]
+pub unsafe fn ra_merge_kind_by(ident: *const c_char) -> c_int {
     if ident.is_null() {
         return 1;
     }
@@ -986,8 +965,7 @@ fn merge_cond(state: &RaParseState, cond: *mut RaNode) -> Option<Expr> {
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `cond` / `assignments` must be null or valid tagged pointers.
-#[no_mangle]
-pub unsafe extern "C" fn ra_merge_when_update(
+pub unsafe fn ra_merge_when_update(
     state: *mut RaParseState,
     kind: c_int,
     cond: *mut RaNode,
@@ -1011,8 +989,7 @@ pub unsafe extern "C" fn ra_merge_when_update(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `cond` must be null or a valid tagged pointer.
-#[no_mangle]
-pub unsafe extern "C" fn ra_merge_when_delete(
+pub unsafe fn ra_merge_when_delete(
     state: *mut RaParseState,
     kind: c_int,
     cond: *mut RaNode,
@@ -1033,8 +1010,7 @@ pub unsafe extern "C" fn ra_merge_when_delete(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `cond` must be null or a valid tagged pointer.
-#[no_mangle]
-pub unsafe extern "C" fn ra_merge_when_nothing(
+pub unsafe fn ra_merge_when_nothing(
     state: *mut RaParseState,
     kind: c_int,
     cond: *mut RaNode,
@@ -1055,8 +1031,7 @@ pub unsafe extern "C" fn ra_merge_when_nothing(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `cond` / `columns` / `values` must be null or valid tagged pointers.
-#[no_mangle]
-pub unsafe extern "C" fn ra_merge_when_insert(
+pub unsafe fn ra_merge_when_insert(
     state: *mut RaParseState,
     kind: c_int,
     cond: *mut RaNode,
@@ -1091,8 +1066,7 @@ pub unsafe extern "C" fn ra_merge_when_insert(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `source` / `on` / `when_clauses` / `returning` must be valid
 ///   tagged pointers or null where optional.
-#[no_mangle]
-pub unsafe extern "C" fn ra_merge(
+pub unsafe fn ra_merge(
     state: *mut RaParseState,
     target: *const c_char,
     source: *mut RaNode,
@@ -1169,8 +1143,7 @@ unsafe fn opt_c_string(ptr: *const c_char) -> Option<String> {
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `variable` / `label` must be null or valid C strings.
-#[no_mangle]
-pub unsafe extern "C" fn ra_graph_vertex(
+pub unsafe fn ra_graph_vertex(
     state: *mut RaParseState,
     variable: *const c_char,
     label: *const c_char,
@@ -1189,8 +1162,7 @@ pub unsafe extern "C" fn ra_graph_vertex(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `variable` / `label` must be null or valid C strings.
-#[no_mangle]
-pub unsafe extern "C" fn ra_graph_edge(
+pub unsafe fn ra_graph_edge(
     state: *mut RaParseState,
     variable: *const c_char,
     label: *const c_char,
@@ -1222,8 +1194,7 @@ pub unsafe extern "C" fn ra_graph_edge(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `graph` / `alias` must be null or valid C strings.
 /// - `pattern` / `columns` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_graph_table(
+pub unsafe fn ra_graph_table(
     state: *mut RaParseState,
     graph: *const c_char,
     pattern: *mut RaNode,
@@ -1263,8 +1234,7 @@ fn decode_graph_pattern(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<Grap
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
-#[no_mangle]
-pub unsafe extern "C" fn ra_on_conflict_nothing(state: *mut RaParseState) -> *mut RaNode {
+pub unsafe fn ra_on_conflict_nothing(state: *mut RaParseState) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1279,8 +1249,7 @@ pub unsafe extern "C" fn ra_on_conflict_nothing(state: *mut RaParseState) -> *mu
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `target_cols` and `assignments` must be valid tagged list pointers.
-#[no_mangle]
-pub unsafe extern "C" fn ra_on_conflict_update(
+pub unsafe fn ra_on_conflict_update(
     state: *mut RaParseState,
     target_cols: *mut RaNode,
     assignments: *mut RaNode,
@@ -1313,8 +1282,7 @@ pub unsafe extern "C" fn ra_on_conflict_update(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `target_cols` must be null or a valid tagged list pointer.
-#[no_mangle]
-pub unsafe extern "C" fn ra_on_conflict_select(
+pub unsafe fn ra_on_conflict_select(
     state: *mut RaParseState,
     target_cols: *mut RaNode,
 ) -> *mut RaNode {
@@ -1345,8 +1313,7 @@ pub unsafe extern "C" fn ra_on_conflict_select(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `column` must be a valid NUL-terminated C string.
 /// - `value` must be a valid tagged expr pointer.
-#[no_mangle]
-pub unsafe extern "C" fn ra_assignment(
+pub unsafe fn ra_assignment(
     state: *mut RaParseState,
     column: *const c_char,
     value: *mut RaNode,
@@ -1382,8 +1349,7 @@ pub unsafe extern "C" fn ra_assignment(
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
-#[no_mangle]
-pub unsafe extern "C" fn ra_default_values(state: *mut RaParseState) -> *mut RaNode {
+pub unsafe fn ra_default_values(state: *mut RaParseState) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1529,8 +1495,7 @@ fn decode_returning(state: &RaParseState, ptr: *mut RaNode) -> Option<Vec<Projec
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `name` must be null or a valid NUL-terminated C string.
-#[no_mangle]
-pub unsafe extern "C" fn ra_column(state: *mut RaParseState, name: *const c_char) -> *mut RaNode {
+pub unsafe fn ra_column(state: *mut RaParseState, name: *const c_char) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1543,8 +1508,7 @@ pub unsafe extern "C" fn ra_column(state: *mut RaParseState, name: *const c_char
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `table` and `column` must be null or valid NUL-terminated C strings.
-#[no_mangle]
-pub unsafe extern "C" fn ra_qualified_column(
+pub unsafe fn ra_qualified_column(
     state: *mut RaParseState,
     table: *const c_char,
     column: *const c_char,
@@ -1561,8 +1525,7 @@ pub unsafe extern "C" fn ra_qualified_column(
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
-#[no_mangle]
-pub unsafe extern "C" fn ra_const_int(state: *mut RaParseState, value: i64) -> *mut RaNode {
+pub unsafe fn ra_const_int(state: *mut RaParseState, value: i64) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1573,8 +1536,7 @@ pub unsafe extern "C" fn ra_const_int(state: *mut RaParseState, value: i64) -> *
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
-#[no_mangle]
-pub unsafe extern "C" fn ra_const_float(state: *mut RaParseState, value: f64) -> *mut RaNode {
+pub unsafe fn ra_const_float(state: *mut RaParseState, value: f64) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1586,8 +1548,7 @@ pub unsafe extern "C" fn ra_const_float(state: *mut RaParseState, value: f64) ->
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `value` must be null or a valid NUL-terminated C string.
-#[no_mangle]
-pub unsafe extern "C" fn ra_const_str(
+pub unsafe fn ra_const_str(
     state: *mut RaParseState,
     value: *const c_char,
 ) -> *mut RaNode {
@@ -1602,8 +1563,7 @@ pub unsafe extern "C" fn ra_const_str(
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
-#[no_mangle]
-pub unsafe extern "C" fn ra_const_null(state: *mut RaParseState) -> *mut RaNode {
+pub unsafe fn ra_const_null(state: *mut RaParseState) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1616,8 +1576,7 @@ pub unsafe extern "C" fn ra_const_null(state: *mut RaParseState) -> *mut RaNode 
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
-#[no_mangle]
-pub unsafe extern "C" fn ra_const_bool(state: *mut RaParseState, value: u32) -> *mut RaNode {
+pub unsafe fn ra_const_bool(state: *mut RaParseState, value: u32) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1632,8 +1591,7 @@ pub unsafe extern "C" fn ra_const_bool(state: *mut RaParseState, value: u32) -> 
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `left` and `right` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_binop(
+pub unsafe fn ra_binop(
     state: *mut RaParseState,
     op: u32,
     left: *mut RaNode,
@@ -1685,8 +1643,7 @@ pub unsafe extern "C" fn ra_binop(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `operand` must be a valid tagged pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_unary_op(
+pub unsafe fn ra_unary_op(
     state: *mut RaParseState,
     op_code: u32,
     operand: *mut RaNode,
@@ -1724,8 +1681,7 @@ pub unsafe extern "C" fn ra_unary_op(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `operand`, `when_list`, `else_expr` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_case(
+pub unsafe fn ra_case(
     state: *mut RaParseState,
     operand: *mut RaNode,
     when_list: *mut RaNode,
@@ -1790,8 +1746,7 @@ pub unsafe extern "C" fn ra_case(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `expr` must be a valid tagged pointer or null.
 /// - `type_str` must point to at least `type_len` valid bytes.
-#[no_mangle]
-pub unsafe extern "C" fn ra_cast(
+pub unsafe fn ra_cast(
     state: *mut RaParseState,
     expr: *mut RaNode,
     type_str: *const c_char,
@@ -1821,8 +1776,7 @@ pub unsafe extern "C" fn ra_cast(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `rel_node` must be a valid tagged Rel pointer or null.
 /// - `test_expr` must be a valid tagged Expr pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_subquery(
+pub unsafe fn ra_subquery(
     state: *mut RaParseState,
     type_code: u32,
     rel_node: *mut RaNode,
@@ -1870,8 +1824,7 @@ pub unsafe extern "C" fn ra_subquery(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `name` must be null or a valid NUL-terminated C string.
 /// - `args_list` must be a valid tagged pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_func(
+pub unsafe fn ra_func(
     state: *mut RaParseState,
     name: *const c_char,
     args_list: *mut RaNode,
@@ -1894,8 +1847,7 @@ pub unsafe extern "C" fn ra_func(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `elem_list` must be a valid tagged pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_array(state: *mut RaParseState, elem_list: *mut RaNode) -> *mut RaNode {
+pub unsafe fn ra_array(state: *mut RaParseState, elem_list: *mut RaNode) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1908,8 +1860,7 @@ pub unsafe extern "C" fn ra_array(state: *mut RaParseState, elem_list: *mut RaNo
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `array_expr` and `index_expr` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_array_index(
+pub unsafe fn ra_array_index(
     state: *mut RaParseState,
     array_expr: *mut RaNode,
     index_expr: *mut RaNode,
@@ -1933,8 +1884,7 @@ pub unsafe extern "C" fn ra_array_index(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `array_expr` must be a valid tagged expression pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_unnest(
+pub unsafe fn ra_unnest(
     state: *mut RaParseState,
     array_expr: *mut RaNode,
 ) -> *mut RaNode {
@@ -1953,8 +1903,7 @@ pub unsafe extern "C" fn ra_unnest(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `array_expr` must be a valid tagged expression pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_unnest_ord(
+pub unsafe fn ra_unnest_ord(
     state: *mut RaParseState,
     array_expr: *mut RaNode,
 ) -> *mut RaNode {
@@ -1979,8 +1928,7 @@ pub unsafe extern "C" fn ra_unnest_ord(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `name` must be a valid C string of length `name_len`.
 /// - `args_list` must be a valid tagged list pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_table_function(
+pub unsafe fn ra_table_function(
     state: *mut RaParseState,
     name: *const c_char,
     name_len: usize,
@@ -2003,8 +1951,7 @@ pub unsafe extern "C" fn ra_table_function(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `name` must be a valid NUL-terminated C string.
 /// - `args_list` must be a valid tagged list pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_window_marker(
+pub unsafe fn ra_window_marker(
     state: *mut RaParseState,
     name: *const c_char,
     args_list: *mut RaNode,
@@ -2036,8 +1983,7 @@ pub unsafe extern "C" fn ra_window_marker(
 /// - `name` must be a valid NUL-terminated C string.
 /// - `args_list`, `partition_list`, `order_list` must be valid tagged list
 ///   pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_window_marker_full(
+pub unsafe fn ra_window_marker_full(
     state: *mut RaParseState,
     name: *const c_char,
     args_list: *mut RaNode,
@@ -2096,8 +2042,7 @@ pub unsafe extern "C" fn ra_window_marker_full(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `expr` must be a valid tagged pointer or null.
 /// - `field_name` must point to at least `field_len` valid bytes.
-#[no_mangle]
-pub unsafe extern "C" fn ra_field_access(
+pub unsafe fn ra_field_access(
     state: *mut RaParseState,
     expr: *mut RaNode,
     field_name: *const c_char,
@@ -2133,8 +2078,7 @@ pub unsafe extern "C" fn ra_field_access(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `arg` must be a valid tagged Expr pointer or null.
 /// - `alias` must point to at least `alias_len` valid bytes, or be null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_agg_expr(
+pub unsafe fn ra_agg_expr(
     state: *mut RaParseState,
     func_code: u32,
     arg: *mut RaNode,
@@ -2197,8 +2141,7 @@ pub unsafe extern "C" fn ra_agg_expr(
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `arg`, `partition_list`, `order_list` must be valid tagged ptrs or null.
 /// - `alias` must point to at least `alias_len` valid bytes, or be null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_window_expr(
+pub unsafe fn ra_window_expr(
     state: *mut RaParseState,
     func_code: u32,
     arg: *mut RaNode,
@@ -2266,8 +2209,7 @@ pub unsafe extern "C" fn ra_window_expr(
 ///
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
-#[no_mangle]
-pub unsafe extern "C" fn ra_list_new(state: *mut RaParseState) -> *mut RaNode {
+pub unsafe fn ra_list_new(state: *mut RaParseState) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -2282,8 +2224,7 @@ pub unsafe extern "C" fn ra_list_new(state: *mut RaParseState) -> *mut RaNode {
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `list` and `item` must be valid tagged pointers or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_list_push(
+pub unsafe fn ra_list_push(
     state: *mut RaParseState,
     list: *mut RaNode,
     item: *mut RaNode,
@@ -2312,8 +2253,7 @@ pub unsafe extern "C" fn ra_list_push(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `list` must be a valid List tagged pointer; `item` a valid tagged pointer.
-#[no_mangle]
-pub unsafe extern "C" fn ra_list_prepend(
+pub unsafe fn ra_list_prepend(
     state: *mut RaParseState,
     list: *mut RaNode,
     item: *mut RaNode,
@@ -2345,8 +2285,7 @@ pub unsafe extern "C" fn ra_list_prepend(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `expr` must be a valid tagged pointer or null.
-#[no_mangle]
-pub unsafe extern "C" fn ra_sort_key(
+pub unsafe fn ra_sort_key(
     state: *mut RaParseState,
     expr: *mut RaNode,
     ascending: u32,

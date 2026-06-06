@@ -1,15 +1,16 @@
-//! FFI layer for Lime parser callbacks.
+//! Arena-based AST builder layer for the parser.
 //!
-//! This module provides the `extern "C"` builder functions that the
-//! Lime-generated parser calls as reduction actions. The parser calls
-//! `ra_scan`, `ra_filter`, `ra_join`, etc. to construct the `RelExpr`
-//! and `Expr` AST nodes in an arena-based `RaParseState`.
+//! This module provides the builder functions the generated parser's
+//! reduction actions invoke (via the wrappers in
+//! [`crate::rust_parser::builders`]) to construct the `RelExpr` and `Expr`
+//! AST nodes in an arena-based `RaParseState`: `ra_scan`, `ra_filter`,
+//! `ra_join`, etc.
 //!
 //! # Architecture
 //!
 //! - [`node::RaParseState`] — arena-based state holding all AST nodes
-//! - [`node::RaNode`] — opaque tagged pointer returned to C code
-//! - [`builders`] — `#[no_mangle] extern "C"` functions called by Lime
+//! - [`node::RaNode`] — opaque tagged pointer (numeric handle, never deref'd)
+//! - [`builders`] — the node-building functions
 
 pub mod builders;
 pub mod node;
