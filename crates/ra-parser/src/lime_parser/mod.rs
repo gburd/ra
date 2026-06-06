@@ -14,151 +14,24 @@
 //! let rel = lime_parser::parse_sql("SELECT id FROM users WHERE age > 21")?;
 //! ```
 
-#[cfg(not(feature = "rust-parser"))]
-pub mod diagnostics;
 pub mod lexer;
 pub mod lime_tokenizer;
-
-#[cfg(not(feature = "rust-parser"))]
-use std::os::raw::{c_char, c_int, c_void};
 
 use ra_core::algebra::RelExpr;
 
 use crate::ffi::node::ParseErrors;
-#[cfg(not(feature = "rust-parser"))]
-use crate::ffi::node::RaParseState;
-#[cfg(not(feature = "rust-parser"))]
-use lexer::RaToken;
 
-// ---------------------------------------------------------------------------
-// FFI declarations for the Lime-generated parser.
-//
-// The grammar uses `%name ra`, so the generated functions are:
-//   raAlloc  -- allocate parser state
-//   raFree   -- free parser state
-//   ra       -- feed one token
-//
-// The `%extra_argument` is `RaParseState *pstate`, which becomes the
-// last parameter of `ra()`.
-// ---------------------------------------------------------------------------
-// RaParseState is passed as an opaque pointer (`void *`) in the C API
-// and is never dereferenced by the generated C code.
-#[cfg(not(feature = "rust-parser"))]
-#[expect(improper_ctypes)]
-extern "C" {
-    fn raAlloc(alloc: Option<unsafe extern "C" fn(usize) -> *mut c_void>) -> *mut c_void;
-
-    fn raFree(parser: *mut c_void, free_fn: Option<unsafe extern "C" fn(*mut c_void)>);
-
-    fn ra(parser: *mut c_void, token_type: c_int, token_value: RaToken, state: *mut RaParseState);
-}
-
-// Diagnostics helpers from the C parser (legacy path only).
-#[cfg(not(feature = "rust-parser"))]
-extern "C" {
-    /// Return the string name of a terminal token code, or NULL.
-    fn raTokenName(token_code: c_int) -> *const c_char;
-
-    /// Return the current parser state number, or -1 if invalid.
-    fn raState(parser: *mut c_void) -> c_int;
-
-    /// Fill `out` with token codes valid at `stateno`.
-    /// Returns total count (may exceed `max`).
-    fn raExpectedTokens(stateno: c_int, out: *mut c_int, max: c_int) -> c_int;
-}
-
-#[cfg(not(feature = "rust-parser"))]
-extern "C" {
-    fn malloc(size: usize) -> *mut c_void;
-    fn free(ptr: *mut c_void);
-}
-
-/// Allocator callback for `raAlloc` (wraps C `malloc`).
-#[cfg(not(feature = "rust-parser"))]
-unsafe extern "C" fn parser_malloc(size: usize) -> *mut c_void {
-    // SAFETY: delegates to the C runtime allocator.
-    unsafe { malloc(size) }
-}
-
-/// Deallocator callback for `raFree` (wraps C `free`).
-#[cfg(not(feature = "rust-parser"))]
-unsafe extern "C" fn parser_free(ptr: *mut c_void) {
-    // SAFETY: ptr was allocated by `malloc` via `parser_malloc`.
-    unsafe { free(ptr) };
-}
-
-/// Parse a SQL string into a `RelExpr` using the Lime parser.
+/// Parse a SQL string into a `RelExpr` using the Lime-generated Rust parser.
 ///
-/// Uses the SIMD-accelerated lime tokenizer for tokenization,
-/// falling back to the pure-Rust tokenizer on failure.
+/// Tokenizes with the SIMD-accelerated Lime tokenizer (pure-Rust lexer
+/// fallback) and feeds the tokens to the generated `raParser`. See
+/// [`crate::rust_parser::driver`] for the parse loop and structured
+/// syntax-error construction.
 ///
 /// # Errors
-///
-/// Returns a list of error messages if the SQL cannot be parsed.
+/// Returns the accumulated parse/builder errors if the SQL cannot be parsed.
 pub fn parse_sql(sql: &str) -> Result<RelExpr, ParseErrors> {
-    // Under the `rust-parser` feature, delegate to the native-Rust parse path
-    // (Lime `--target=rust` output). This routes the entire test suite through
-    // the Rust parser to prove behavioral identity with the C path.
-    #[cfg(feature = "rust-parser")]
-    {
-        crate::rust_parser::parse_sql(sql)
-    }
-    #[cfg(not(feature = "rust-parser"))]
-    {
-        parse_sql_c(sql)
-    }
-}
-
-/// The C FFI parse path (Lime `--target=c` output via `lime-sys`).
-#[cfg(not(feature = "rust-parser"))]
-fn parse_sql_c(sql: &str) -> Result<RelExpr, ParseErrors> {
-    // Tokenize using SIMD-accelerated lime tokenizer, falling
-    // back to the pure-Rust lexer if the C tokenizer fails.
-    let tokens = lime_tokenizer::tokenize_simd(sql)
-        .or_else(|_| lexer::tokenize(sql))
-        .map_err(|e| ParseErrors::Strings(vec![e]))?;
-
-    // Allocate the generated parser.
-    //
-    // SAFETY: parser_malloc is a valid allocation function.
-    let parser = unsafe { raAlloc(Some(parser_malloc)) };
-    if parser.is_null() {
-        return Err(ParseErrors::Strings(vec![
-            "failed to allocate parser".to_owned()
-        ]));
-    }
-
-    let mut state = RaParseState::new();
-
-    // Feed each token to the parser.
-    for tok in &tokens {
-        // SAFETY: parser is a valid raAlloc handle, state is valid.
-        unsafe {
-            ra(parser, tok.code, tok.value.clone(), &raw mut state);
-        }
-    }
-
-    // Feed EOF (token code 0) to finalize parsing.
-    // Set location to end of input so any error at EOF points to
-    // the right position.
-    let eof_token = RaToken {
-        location: i32::try_from(sql.len()).unwrap_or(0),
-        length: 0,
-        ..RaToken::default()
-    };
-    // SAFETY: same as above.
-    unsafe {
-        ra(parser, 0, eof_token, &raw mut state);
-    }
-
-    // Free the parser.
-    // SAFETY: parser was allocated by raAlloc.
-    unsafe {
-        raFree(parser, Some(parser_free));
-    }
-
-    // Extract the result from the parse state.
-    state.take_result()
+    crate::rust_parser::parse_sql(sql)
 }
 
 #[cfg(test)]

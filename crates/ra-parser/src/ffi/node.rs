@@ -379,17 +379,6 @@ impl RaParseState {
         self.structured_errors.push(err);
     }
 
-    /// Record a syntax error from the Rust parser's `%rust_syntax_error` hook.
-    ///
-    /// The Rust hook only sees the offending token code and parser state (not
-    /// the source position or expected-token set the C path's `yypParser`
-    /// exposes), so this records a minimal message. The Rust driver enriches
-    /// it with position/expected info from the token stream it controls.
-    pub fn record_rust_syntax_error(&mut self, token: u16, state: u16) {
-        self.errors
-            .push(format!("syntax error at token {token} (parser state {state})"));
-    }
-
     /// Return the accumulated structured syntax errors.
     #[must_use]
     pub fn structured_errors(&self) -> &[StructuredParseError] {

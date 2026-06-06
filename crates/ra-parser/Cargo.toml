@@ -23,14 +23,6 @@ tracing = { workspace = true }
 
 [features]
 bigdecimal = ["sqlparser/bigdecimal"]
-# The native-Rust parse path (Lime --target=rust) is the default. The legacy
-# C FFI path remains available via --no-default-features for one release as a
-# fallback; it is slated for removal.
-default = ["rust-parser"]
-rust-parser = []
-
-[build-dependencies]
-cc = "1.2"
 
 [lints]
 workspace = true
