@@ -54,7 +54,10 @@ typedef struct RaToken {
 %rust_value_type {crate::rust_parser::Value}
 %rust_extra_argument {crate::ffi::RaParseState}
 %rust_syntax_error {
-    self.user.record_rust_syntax_error(_token, _state);
+    /* No-op: the Rust driver (rust_parser::driver) builds a rich
+     * StructuredParseError from push()'s ParseError::SyntaxError return,
+     * using token_name + expected_tokens_in_state and the offending token's
+     * source position. Recording here too would duplicate it. */
 }
 
 /* ================================================================== */
