@@ -35,16 +35,9 @@ fn main() {
     // Step 1: Build the lime tool from source.
     let lime_tool = build_lime_tool(&lime_root, &out_dir);
 
-    if env::var_os("CARGO_FEATURE_RUST_PARSER").is_some() {
-        // Native-Rust path (default): emit only ra_sql.rs. The C parser is not
-        // generated or compiled.
-        run_lime_rust(&lime_tool, &lime_root, &grammar_file, &out_dir);
-    } else {
-        // Legacy C FFI path (--no-default-features): generate + compile the C
-        // parser and link it into the crate.
-        let generated_c = run_lime(&lime_tool, &lime_root, &grammar_file, &out_dir);
-        compile_generated_parser(&generated_c, &grammar_dir, &lime_root, &out_dir);
-    }
+    // Step 2: Emit the native-Rust parser (ra_sql.rs). The C parser is fully
+    // retired; only the Rust target is generated.
+    run_lime_rust(&lime_tool, &lime_root, &grammar_file, &out_dir);
 
     // Re-run triggers.
     println!("cargo:rerun-if-changed=grammar/ra_sql.lime");
@@ -126,81 +119,6 @@ fn build_lime_tool(lime_root: &Path, out_dir: &Path) -> PathBuf {
     );
 
     lime_bin
-}
-
-/// Run the lime tool on the grammar file to produce `ra_sql.c` and `ra_sql.h`.
-fn run_lime(lime_tool: &Path, lime_root: &Path, grammar_file: &Path, out_dir: &Path) -> PathBuf {
-    let template = lime_root.join("limpar.c");
-    assert!(
-        template.exists(),
-        "limpar.c template not found at {}",
-        template.display()
-    );
-
-    // Copy grammar to OUT_DIR so lime generates output there.
-    let work_grammar = out_dir.join("ra_sql.lime");
-    std::fs::copy(grammar_file, &work_grammar)
-        .unwrap_or_else(|e| panic!("failed to copy grammar to OUT_DIR: {e}"));
-
-    let output = Command::new(lime_tool)
-        .arg(format!("-T{}", template.display()))
-        .arg("-q")
-        .arg(&work_grammar)
-        .output()
-        .unwrap_or_else(|e| panic!("failed to run lime tool: {e}"));
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        // Lime exits with code 1 for EITHER real grammar errors OR resolved
-        // shift-reduce conflicts.  Allow the build to proceed if the only
-        // issue is conflicts (which are resolved by Lime's default SHIFT rule)
-        // and the generated output was produced.
-        let only_conflicts = stderr
-            .lines()
-            .all(|l| l.trim().is_empty() || l.contains("parsing conflict"));
-
-        let generated_ok = out_dir.join("ra_sql.c").exists();
-
-        if only_conflicts && generated_ok {
-            // ~30 resolved shift/reduce conflicts are expected (IDENT SCONST
-            // typed literals, -> vs ->>) and correct.  Lime's default SHIFT
-            // resolution handles them.  No action needed.
-        } else {
-            panic!(
-                "lime tool failed (exit {}):\nstdout: {stdout}\nstderr: {stderr}",
-                output.status
-            );
-        }
-    }
-
-    let generated = out_dir.join("ra_sql.c");
-    assert!(
-        generated.exists(),
-        "lime did not produce ra_sql.c in {}",
-        out_dir.display()
-    );
-
-    generated
-}
-
-/// Compile the generated C parser and link it into the crate.
-fn compile_generated_parser(
-    generated_c: &Path,
-    grammar_dir: &Path,
-    lime_root: &Path,
-    out_dir: &Path,
-) {
-    cc::Build::new()
-        .file(generated_c)
-        .include(grammar_dir)
-        .include(lime_root.join("include"))
-        .include(out_dir)
-        .std("c11")
-        .warnings(true)
-        .extra_warnings(true)
-        .compile("ra_sql_parser");
 }
 
 /// Run lime with `--target=rust` to additionally emit `ra_sql.rs` next to the

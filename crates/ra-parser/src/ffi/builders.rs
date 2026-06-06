@@ -10,13 +10,6 @@
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
-#[cfg(not(feature = "rust-parser"))]
-use std::os::raw::c_void;
-
-#[cfg(not(feature = "rust-parser"))]
-use crate::lime_parser::diagnostics;
-#[cfg(not(feature = "rust-parser"))]
-use crate::lime_parser::lexer::RaToken;
 
 use ra_core::algebra::{
     AggregateExpr, AggregateFunction, CycleDetection, EdgeDirection, GraphPatternElement, JoinType,
@@ -26,8 +19,6 @@ use ra_core::algebra::{
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
 use super::node::{decode, NodeTag, RaNode, RaParseState};
-#[cfg(not(feature = "rust-parser"))]
-use super::node::StructuredParseError;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2423,102 +2414,6 @@ fn collect_sort_keys(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<SortKey
         }
     }
     result
-}
-
-// ---------------------------------------------------------------------------
-// Error recording (called from %syntax_error / %parse_failure)
-// ---------------------------------------------------------------------------
-
-/// Record a structured syntax error from the Lime `%syntax_error` hook.
-///
-/// This is called from the generated C parser when a token cannot be
-/// shifted or reduced. It uses the diagnostics API to query the parser
-/// state for expected tokens and builds a `StructuredParseError`.
-///
-/// # Safety
-/// - `pstate` must be null or a valid `*mut RaParseState`.
-/// - `parser` must be a valid Lime parser handle from `raAlloc`.
-/// - `token` must be a valid `RaToken` (passed by value from C).
-#[cfg(not(feature = "rust-parser"))]
-#[no_mangle]
-pub unsafe extern "C" fn ra_record_parse_error(
-    pstate: *mut RaParseState,
-    token_code: c_int,
-    token: RaToken,
-    parser: *mut c_void,
-) {
-    let Some(st) = (unsafe { state_ref(pstate) }) else {
-        return;
-    };
-
-    let rejected_name = if token_code == 0 {
-        "end of input".to_owned()
-    } else {
-        diagnostics::token_name(token_code)
-            .unwrap_or("unknown")
-            .to_owned()
-    };
-
-    // SAFETY: parser is a valid Lime parser handle from the
-    // %syntax_error block — it's the `yypParser` pointer.
-    let expected = if let Some(stateno) = unsafe { diagnostics::parser_state(parser) } {
-        diagnostics::expected_tokens(stateno)
-            .into_iter()
-            .map(String::from)
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    let token_text = if token.text.is_null() {
-        None
-    } else {
-        // SAFETY: token.text is a valid NUL-terminated C string.
-        Some(
-            unsafe { CStr::from_ptr(token.text) }
-                .to_string_lossy()
-                .into_owned(),
-        )
-    };
-
-    let position = usize::try_from(token.location).unwrap_or(0);
-    let token_length = usize::try_from(token.length).unwrap_or(1);
-
-    let message = if let Some(ref text) = token_text {
-        format!("syntax error: unexpected {rejected_name} '{text}'")
-    } else {
-        format!("syntax error: unexpected {rejected_name}")
-    };
-
-    st.push_structured_error(StructuredParseError {
-        position,
-        token_length,
-        token_text,
-        token_name: rejected_name,
-        message,
-        expected_tokens: expected,
-    });
-}
-
-/// Record a parse failure (unrecoverable) from the `%parse_failure` hook.
-///
-/// # Safety
-/// - `pstate` must be null or a valid `*mut RaParseState`.
-#[cfg(not(feature = "rust-parser"))]
-#[no_mangle]
-pub unsafe extern "C" fn ra_record_parse_failure(pstate: *mut RaParseState) {
-    let Some(st) = (unsafe { state_ref(pstate) }) else {
-        return;
-    };
-
-    st.push_structured_error(StructuredParseError {
-        position: 0,
-        token_length: 0,
-        token_text: None,
-        token_name: String::new(),
-        message: "parse failed: unable to recover from syntax error".to_owned(),
-        expected_tokens: Vec::new(),
-    });
 }
 
 #[cfg(test)]

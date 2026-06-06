@@ -1,3 +1,10 @@
+> **RESOLVED in Lime v1.1.0 (2026-06-06).** Lime shipped `YY_TOKEN_NAMES`,
+> `token_name(code)`, `expected_tokens_in_state(state)`, and
+> `yy_find_shift_action` on the Rust target (default-on for `--target=rust`).
+> Ra now builds the structured "expected one of …" diagnostics from these in
+> `rust_parser::driver`, and the legacy C parser has been fully retired. The
+> original request follows for the record.
+
 Re: Lime v1.0.0 — Rust target shipped in production; one diagnostics gap left
 =============================================================================
 
