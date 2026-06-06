@@ -20,6 +20,8 @@ pub mod parser;
 pub mod profile;
 pub mod rule_file_parser;
 pub mod rule_registry;
+#[cfg(feature = "rust-parser")]
+pub mod rust_parser;
 pub mod sql_to_relexpr;
 pub mod test_case;
 pub mod validator;

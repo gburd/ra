@@ -41,6 +41,13 @@ fn main() {
     // Step 3: Compile the generated C parser.
     compile_generated_parser(&generated_c, &grammar_dir, &lime_root, &out_dir);
 
+    // Step 4 (staging): when the `rust-parser` feature is on, additionally
+    // emit the Rust parser (ra_sql.rs) from the same grammar. The C path
+    // above is left untouched so both targets coexist during migration.
+    if env::var_os("CARGO_FEATURE_RUST_PARSER").is_some() {
+        run_lime_rust(&lime_tool, &lime_root, &grammar_file, &out_dir);
+    }
+
     // Re-run triggers.
     println!("cargo:rerun-if-changed=grammar/ra_sql.lime");
     println!("cargo:rerun-if-changed=grammar/ra_ffi.h");
@@ -196,4 +203,45 @@ fn compile_generated_parser(
         .warnings(true)
         .extra_warnings(true)
         .compile("ra_sql_parser");
+}
+
+/// Run lime with `--target=rust` to additionally emit `ra_sql.rs` next to the
+/// C output in `OUT_DIR`. The Rust source is `include!`d by the crate's
+/// `rust-parser` module; it is not compiled here. Conflict tolerance mirrors
+/// `run_lime` (resolved shift/reduce conflicts are expected and benign).
+fn run_lime_rust(lime_tool: &Path, lime_root: &Path, grammar_file: &Path, out_dir: &Path) {
+    let template = lime_root.join("limpar.c");
+    let work_grammar = out_dir.join("ra_sql.lime");
+    // run_lime already copied the grammar into OUT_DIR, but copy defensively
+    // in case generation order changes.
+    if !work_grammar.exists() {
+        std::fs::copy(grammar_file, &work_grammar)
+            .unwrap_or_else(|e| panic!("failed to copy grammar to OUT_DIR: {e}"));
+    }
+
+    let output = Command::new(lime_tool)
+        .arg("--target=rust")
+        .arg(format!("-T{}", template.display()))
+        .arg("-q")
+        .arg(&work_grammar)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run lime --target=rust: {e}"));
+
+    let generated_ok = out_dir.join("ra_sql.rs").exists();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let only_conflicts = stderr
+            .lines()
+            .all(|l| l.trim().is_empty() || l.contains("parsing conflict"));
+        assert!(
+            only_conflicts && generated_ok,
+            "lime --target=rust failed (exit {}):\nstderr: {stderr}",
+            output.status
+        );
+    }
+    assert!(
+        generated_ok,
+        "lime --target=rust did not produce ra_sql.rs in {}",
+        out_dir.display()
+    );
 }
