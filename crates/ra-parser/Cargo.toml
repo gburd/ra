@@ -23,10 +23,10 @@ tracing = { workspace = true }
 
 [features]
 bigdecimal = ["sqlparser/bigdecimal"]
-# Staging flag for the migration to Lime's generated-Rust parser. When on,
-# build.rs additionally emits ra_sql.rs (lime --target=rust) and the crate
-# compiles the native-Rust parse path instead of the C FFI path. Off by
-# default: the C path remains authoritative until the Rust path is proven.
+# The native-Rust parse path (Lime --target=rust) is the default. The legacy
+# C FFI path remains available via --no-default-features for one release as a
+# fallback; it is slated for removal.
+default = ["rust-parser"]
 rust-parser = []
 
 [build-dependencies]
