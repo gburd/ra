@@ -1,8 +1,0 @@
-# Use nix-direnv if available for better Nix integration
-if has nix_direnv_version; then
-  use_flake() {
-    watch_file flake.nix
-    watch_file flake.lock
-    eval "$(nix print-dev-env --profile "$(direnv_layout_dir)/flake-profile")"
-  }
-fi
