@@ -280,3 +280,37 @@ Cache functionality is split into two crates:
 ## Rust Version
 
 Minimum: 1.88.0 (set in `workspace.package.rust-version`). Edition 2021.
+
+## Repository Hygiene — never commit generated/dependency/scratch files
+
+This repo is mirrored Codeberg → GitHub. GitHub **hard-rejects any file >100 MB**,
+so a single bad commit anywhere in history blocks the entire mirror. In June 2026
+a committed `docs/node_modules.bak/` (a 112 MB rollup binary) blocked the mirror
+and forced a full history rewrite + force-push of all 27 branches. Don't repeat
+it.
+
+**Never `git add` / commit these** (all are gitignored — keep it that way):
+- **Dependency dirs:** any `node_modules/` (npm/pnpm), `vendor/` non-submodule
+  copies. Regenerate with `pnpm install` / `npm ci`; never commit, never make a
+  `node_modules.bak`.
+- **Build output:** `target/`, `docs/.vitepress/{dist,cache,.temp}/`, `web/dist/`,
+  `**/*.rs.bk`.
+- **Test/coverage/bench artifacts:** `coverage/`, `**/tarpaulin-report.*`,
+  timestamped `benchmarks/results/<timestamp>/` and `benchmarks/test_results/`,
+  `cpu-profile-*.txt`, raw `*.jsonl` result dumps, `*.proptest-regressions`.
+  Curated human-written `benchmarks/**/*.md` summaries are fine to commit.
+- **Agent / tool scratch:** `.kiro/`, `.claude/`, `.agent/`, `agent/`,
+  `.memelord/`, `.mcp.json`, `.direnv/`. (Steering docs that are real project
+  documentation belong in `docs/`, not `.kiro/`.)
+- **Secrets:** never commit `.env`, tokens, keys, `credential.helper` blocks.
+
+**Before every commit:**
+1. `git status` and review the file list — if you see a dependency/build/scratch
+   path, stop and gitignore it instead of committing.
+2. Prefer staging explicit files over `git add -A`/`git add .`; the latter is how
+   stray artifacts sneak in.
+3. Be wary of any single file larger than a few MB (`git diff --cached --stat`):
+   anything large is almost certainly generated and does not belong in git.
+
+The `.gitignore` "Repository hygiene" block is the enforcement; if you create a
+new kind of generated output, add its path there in the same change.
