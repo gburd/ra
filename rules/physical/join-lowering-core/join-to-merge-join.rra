@@ -6,6 +6,7 @@ databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [physical, lowering, join]
+costs_operator: merge-join
 ---
 
 # join-to-merge-join
@@ -20,3 +21,18 @@ physical join operator the cost extractor chooses among. Never rewrites back.
 lhs: (join inner ?cond ?l ?r)
 rhs: (merge-join inner ?cond ?l ?r)
 when: is_equi_join("?cond")
+
+## Cost Model
+
+Sort both inputs, then merge in one linear pass. With no interesting-orders
+tracking yet, the sort is always paid, making merge-join slightly pricier than a
+hash build but cheaper than a nested loop on large inputs. The per-method base
+term (linear in both child costs) is what orders the join methods during
+extraction; the equal `cl+cr` child-cost sum is added by the cost function for
+every method. `ctx` is an [`OperatorCostCtx`]: `left_cost`/`right_cost` are the
+egg child costs (size proxies) and `tuple_cost` is the calibrated per-tuple CPU
+cost.
+
+```rust
+0.6 * (ctx.left_cost + ctx.right_cost) * ctx.tuple_cost
+```

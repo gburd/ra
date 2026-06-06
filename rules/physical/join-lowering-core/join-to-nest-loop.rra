@@ -6,6 +6,7 @@ databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [physical, lowering, join]
+costs_operator: nest-loop
 ---
 
 # join-to-nest-loop
@@ -19,3 +20,17 @@ physical join operator the cost extractor chooses among. Never rewrites back.
 
 lhs: (join inner ?cond ?l ?r)
 rhs: (nest-loop inner ?cond ?l ?r)
+
+## Cost Model
+
+Scan the inner input once per outer row — quadratic in the input sizes, so this
+method wins only for tiny inputs. The per-method base term is what orders the
+join methods during extraction; the equal `cl+cr` child-cost sum is added by the
+cost function for every method. `ctx` is an [`OperatorCostCtx`]: `left_cost`/
+`right_cost` are the egg child costs (size proxies) and `tuple_cost` is the
+calibrated per-tuple CPU cost. The `/ 50.0` damping keeps the quadratic term on
+the same scale as the linear methods for mid-sized inputs.
+
+```rust
+(ctx.left_cost * ctx.right_cost / 50.0) * ctx.tuple_cost
+```

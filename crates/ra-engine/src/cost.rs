@@ -1371,6 +1371,18 @@ impl IntegratedCostFn {
             .copied()
             .unwrap_or(self.avg_row_count)
     }
+
+    /// Build the [`OperatorCostCtx`] passed to rule-provided operator cost
+    /// models (RFC 0091) from two child costs and the calibrated rates.
+    fn op_cost_ctx(&self, left_cost: f64, right_cost: f64) -> OperatorCostCtx {
+        OperatorCostCtx {
+            left_cost,
+            right_cost,
+            tuple_cost: self.calibration.tuple_cost(),
+            seq_page_cost: self.calibration.seq_page_cost(),
+            rand_page_cost: self.calibration.rand_page_cost(),
+        }
+    }
 }
 
 impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
@@ -1415,25 +1427,26 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let cr = costs(*r).max(1.0);
                 // RFC 0091: prefer the rule-provided cost model; fall back to
                 // the built-in formula when no rule supplies one.
-                let ctx = OperatorCostCtx {
-                    left_cost: cl,
-                    right_cost: cr,
-                    tuple_cost: self.calibration.tuple_cost(),
-                    seq_page_cost: self.calibration.seq_page_cost(),
-                    rand_page_cost: self.calibration.rand_page_cost(),
-                };
+                let ctx = self.op_cost_ctx(cl, cr);
                 rule_operator_cost("hash-join", &ctx)
                     .unwrap_or(0.5 * cr * self.calibration.tuple_cost()) // build hash on inner
             }
             RelLang::MergeJoinOp([_, _, l, r]) => {
                 let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
                 // Sort both sides (no interesting-orders tracking yet, so always
-                // pay the sort) — slightly pricier than a hash build.
-                0.6 * (cl + cr) * self.calibration.tuple_cost()
+                // pay the sort) — slightly pricier than a hash build. RFC 0091:
+                // prefer the rule-provided cost model; fall back to the built-in.
+                let ctx = self.op_cost_ctx(cl, cr);
+                rule_operator_cost("merge-join", &ctx)
+                    .unwrap_or(0.6 * (cl + cr) * self.calibration.tuple_cost())
             }
             RelLang::NestLoopOp([_, _, l, r]) => {
                 let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
-                (cl * cr / 50.0) * self.calibration.tuple_cost() // O(n*m)
+                // O(n*m): scan inner per outer row. RFC 0091: prefer the
+                // rule-provided cost model; fall back to the built-in formula.
+                let ctx = self.op_cost_ctx(cl, cr);
+                rule_operator_cost("nest-loop", &ctx)
+                    .unwrap_or((cl * cr / 50.0) * self.calibration.tuple_cost())
             }
             RelLang::IndexNestLoopOp([_, _, l, _r]) => {
                 let cl = costs(*l).max(1.0);
@@ -1556,6 +1569,36 @@ mod tests {
             rand_page_cost: 4.0,
         };
         assert!(rule_operator_cost("seq-scan", &ctx).is_none());
+    }
+
+    /// RFC 0091 P2 golden test: the merge-join and nest-loop costs sourced from
+    /// their `.rra` `## Cost Model` blocks are exactly the built-in formulas
+    /// they replace, so wiring the rules changes no plan choices.
+    #[test]
+    fn merge_and_nest_loop_rule_costs_match_builtin() {
+        for (cl, cr, tc) in [(100.0, 200.0, 0.01), (1.0, 1.0, 1.0), (5_000.0, 3.0, 0.02)] {
+            let ctx = OperatorCostCtx {
+                left_cost: cl,
+                right_cost: cr,
+                tuple_cost: tc,
+                seq_page_cost: 1.0,
+                rand_page_cost: 4.0,
+            };
+            let merge = rule_operator_cost("merge-join", &ctx)
+                .expect("merge-join cost model must be registered from the rule file");
+            let merge_builtin = 0.6 * (cl + cr) * tc;
+            assert!(
+                (merge - merge_builtin).abs() < 1e-12,
+                "rule-sourced merge-join cost {merge} != built-in {merge_builtin}"
+            );
+            let nest = rule_operator_cost("nest-loop", &ctx)
+                .expect("nest-loop cost model must be registered from the rule file");
+            let nest_builtin = (cl * cr / 50.0) * tc;
+            assert!(
+                (nest - nest_builtin).abs() < 1e-12,
+                "rule-sourced nest-loop cost {nest} != built-in {nest_builtin}"
+            );
+        }
     }
 
     /// RFC 0090 Phase 3 chunk 3: per-method physical join costs order correctly.
