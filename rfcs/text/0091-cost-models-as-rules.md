@@ -148,6 +148,20 @@ staleness factor, `ra_hardware` `CalibratedCostModel` (the rates inside
 - **P2 — Migrate the ~14 operators:** move each `cost.rs` method body into its
   physical rule's `## Cost Model`; keep the built-in as fallback; per-operator
   golden-cost equivalence test.
+  - *Done:* the physical join family — `hash-join` (P1), `merge-join`,
+    `nest-loop` — is rule-sourced via `costs_operator:` on the
+    `join-lowering-core` rules, each with a golden-cost equivalence test, and
+    `IntegratedCostFn` dispatches through `op_cost_ctx` + `rule_operator_cost`.
+  - *Remaining:* `scan`/`filter`/`project`/`sort`/`incremental-sort`/
+    `aggregate`/`index-nest-loop` and the bitmap/parquet/vector scan methods.
+    These are blocked on two things: (1) `OperatorCostCtx` must grow the inputs
+    they read — per-node `row_count` (Scan), `selectivity` (index/bitmap), and
+    hardware fields (`simd_width_bits`, `cpu_cores` for the SIMD/parallel
+    factors in filter/sort); (2) several are *logical* e-graph operators
+    (filter, sort, aggregate) with no physical-lowering `.rra` owner like the
+    joins have, so they need either cost-only physical rules or a documented
+    home for their `## Cost Model`. Extend the ctx first, then migrate
+    operator-by-operator with golden tests.
 - **P3 — Retire the built-ins:** once all operators are rule-sourced and
   equivalence holds, delete the hand-coded bodies from `cost.rs` (it becomes the
   dispatcher + `OperatorCostCtx` builder only).
