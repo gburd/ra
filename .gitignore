@@ -119,3 +119,9 @@ docs/.vitepress/cache
 .kiro/
 .claude/
 .mcp.json
+
+# Ephemeral benchmark run artifacts (timestamped dirs, profiler dumps, generated plans/metrics)
+benchmarks/results/20*/
+benchmarks/test_results/
+benchmarks/results/cpu-profile-*.txt
+benchmarks/planner_comparison/results/*.json
