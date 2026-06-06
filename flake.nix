@@ -129,23 +129,19 @@
             echo "  ra-cli explain  'SELECT ...'   - Parse SQL into relational algebra"
             echo "  ra-cli optimize 'SELECT ...'   - Optimize with rewrite rules"
             echo "  ra-cli translate --from pg --to mysql 'SELECT ...'"
-            echo "  ra-cli list                    - List 1,387 optimization rules"
+            echo "  ra-cli list                    - List optimization rules"
+            echo "  nix run .#cli -- <args>        - Run ra-cli via the flake"
+            echo "  nix run .#bench -- <args>      - Run the ra-bench benchmark CLI"
+            echo "  nix run .#difftest -- <args>   - Run the differential test harness"
             echo ""
-            echo "Web & Documentation:"
-            echo "  nix run .#web                - Start ra-web backend (http://localhost:8000)"
-            echo "  nix run .#web-dev            - Start ra-web backend with auto-reload"
-            echo "  nix run .#web-frontend-dev   - Start React frontend dev server"
-            echo "  nix run .#web-frontend-build - Build React frontend for production"
+            echo "Documentation:"
             echo "  nix run .#docs               - Serve docs (http://localhost:5173/ra/)"
             echo "  nix run .#docs-build         - Build docs for deployment"
             echo ""
             echo "Container Services (Docker/Podman):"
-            echo "  nix run .#docker-build                   - Build all images (legacy)"
-            echo "  nix run .#docker-targets-core            - Build core services (docs, web, proxy)"
-            echo "  nix run .#docker-targets-postgres        - Build PostgreSQL with Ra extension"
-            echo "  nix run .#docker-targets-all             - Build all target services"
+            echo "  nix run .#docker-build                   - Build all images"
+            echo "  nix run .#docker-build-postgres-extension - PostgreSQL + Ra extension image"
             echo "  nix run .#docker-up                      - Start services"
-            echo "  nix run .#docker-up-targets              - Start target services"
             echo "  nix run .#docker-down                    - Stop all services"
             echo ""
           '';
@@ -216,101 +212,30 @@
             '');
           };
 
-          # Serve ra-web demo server
-          # Usage: nix run .#web
-          web = {
+          # Run the ra-cli query-optimizer CLI
+          # Usage: nix run .#cli -- explain 'SELECT ...'
+          cli = {
             type = "app";
-            program = toString (pkgs.writeShellScript "serve-web" ''
-              set -e
-
-              echo "🌐 Building ra-web server..."
-              ${rustToolchain}/bin/cargo build --release --bin ra-web
-
-              echo ""
-              echo "🚀 Starting ra-web server..."
-              echo ""
-              echo "Demo interface will be available at:"
-              echo "   http://localhost:8000/"
-              echo ""
-              echo "API endpoints:"
-              echo "   POST /api/optimize     - Optimize SQL query"
-              echo "   POST /api/translate    - Translate between SQL dialects"
-              echo "   GET  /api/health       - Health check"
-              echo ""
-              echo "Press Ctrl+C to stop the server"
-              echo ""
-
-              exec ${rustToolchain}/bin/cargo run --release --bin ra-web
+            program = toString (pkgs.writeShellScript "ra-cli" ''
+              exec ${rustToolchain}/bin/cargo run --release -p ra-cli -- "$@"
             '');
           };
 
-          # Build and run ra-web in development mode
-          # Usage: nix run .#web-dev
-          web-dev = {
+          # Run the ra-bench benchmark CLI
+          # Usage: nix run .#bench -- --workload tpch
+          bench = {
             type = "app";
-            program = toString (pkgs.writeShellScript "serve-web-dev" ''
-              set -e
-
-              echo "🌐 Starting ra-web in development mode..."
-              echo ""
-              echo "Demo interface: http://localhost:8000/"
-              echo ""
-              echo "Press Ctrl+C to stop"
-              echo ""
-
-              exec ${rustToolchain}/bin/cargo watch -x "run --bin ra-web"
+            program = toString (pkgs.writeShellScript "ra-bench" ''
+              exec ${rustToolchain}/bin/cargo run --release -p ra-bench -- "$@"
             '');
           };
 
-          # Serve ra-web React frontend dev server
-          # Usage: nix run .#web-frontend-dev
-          web-frontend-dev = {
+          # Run the differential test harness (Ra vs a reference DB)
+          # Usage: nix run .#difftest -- <args>
+          difftest = {
             type = "app";
-            program = toString (pkgs.writeShellScript "web-frontend-dev" ''
-              set -e
-              cd crates/ra-web/frontend
-
-              # Install dependencies if needed
-              if [ ! -d node_modules ]; then
-                echo "📦 Installing dependencies with npm..."
-                ${pkgs.nodejs_20}/bin/npm install
-              fi
-
-              echo "🌐 Starting ra-web React frontend dev server..."
-              echo ""
-              echo "Frontend will be available at:"
-              echo "   http://localhost:5173/"
-              echo ""
-              echo "Note: Make sure ra-web backend is running on port 8000:"
-              echo "   nix run .#web-dev"
-              echo ""
-              echo "Press Ctrl+C to stop the server"
-              echo ""
-
-              exec ${pkgs.nodejs_20}/bin/npm run dev
-            '');
-          };
-
-          # Build ra-web React frontend for production
-          # Usage: nix run .#web-frontend-build
-          web-frontend-build = {
-            type = "app";
-            program = toString (pkgs.writeShellScript "web-frontend-build" ''
-              set -e
-              cd crates/ra-web/frontend
-
-              # Install dependencies if needed
-              if [ ! -d node_modules ]; then
-                echo "📦 Installing dependencies with npm..."
-                ${pkgs.nodejs_20}/bin/npm install
-              fi
-
-              echo "🌐 Building ra-web React frontend..."
-              ${pkgs.nodejs_20}/bin/npm run build
-
-              echo ""
-              echo "✅ Frontend built successfully!"
-              echo "   Output: crates/ra-web/frontend/dist/"
+            program = toString (pkgs.writeShellScript "ra-difftest" ''
+              exec ${rustToolchain}/bin/cargo run --release -p ra-difftest -- "$@"
             '');
           };
 
@@ -356,20 +281,6 @@
               echo "🐳 Building docs container image with $CONTAINER_RUNTIME..."
               $COMPOSE_COMMAND build docs
               echo "✅ Docs image built!"
-            '');
-          };
-
-          # Build ra-web container image
-          # Usage: nix run .#docker-build-web
-          docker-build-web = {
-            type = "app";
-            program = toString (pkgs.writeShellScript "docker-build-web" ''
-              set -e
-              # Detect container runtime
-              source scripts/detect-container-runtime.sh
-              echo "🐳 Building ra-web container image with $CONTAINER_RUNTIME..."
-              $COMPOSE_COMMAND build ra-web
-              echo "✅ Ra-web image built!"
             '');
           };
 
@@ -434,63 +345,6 @@
               echo "🐳 Stopping all container services with $CONTAINER_RUNTIME..."
               $COMPOSE_COMMAND down
               echo "✅ Services stopped!"
-            '');
-          };
-
-          # Target-based builds (new approach)
-          # Usage: nix run .#docker-targets-core
-          docker-targets-core = {
-            type = "app";
-            program = toString (pkgs.writeShellScript "docker-targets-core" ''
-              set -e
-              echo "🎯 Building core Ra services..."
-              exec ./scripts/build-targets.sh core
-            '');
-          };
-
-          # Build PostgreSQL with Ra extension
-          # Usage: nix run .#docker-targets-postgres
-          docker-targets-postgres = {
-            type = "app";
-            program = toString (pkgs.writeShellScript "docker-targets-postgres" ''
-              set -e
-              echo "🐘 Building PostgreSQL with Ra extension..."
-              exec ./scripts/build-targets.sh pg-ra-planner
-            '');
-          };
-
-          # Build all target services
-          # Usage: nix run .#docker-targets-all
-          docker-targets-all = {
-            type = "app";
-            program = toString (pkgs.writeShellScript "docker-targets-all" ''
-              set -e
-              echo "🚀 Building all Ra services with target approach..."
-              exec ./scripts/build-targets.sh all
-            '');
-          };
-
-          # Start target-based services
-          # Usage: nix run .#docker-up-targets
-          docker-up-targets = {
-            type = "app";
-            program = toString (pkgs.writeShellScript "docker-up-targets" ''
-              set -e
-              # Detect container runtime
-              source scripts/detect-container-runtime.sh
-              echo "🐳 Starting Ra target services with $CONTAINER_RUNTIME..."
-              $COMPOSE_COMMAND -f docker-compose.targets.yml up -d
-              echo ""
-              echo "✅ Target services started!"
-              echo ""
-              echo "Access URLs:"
-              echo "  Documentation: http://localhost:3000"
-              echo "  Ra Web API:    http://localhost:8000"
-              echo "  Ra Proxy API:  http://localhost:8001"
-              echo "  PostgreSQL:    postgresql://ra_test:ra_test_pass@localhost:5432/ra_testdb"
-              echo ""
-              echo "Check status:"
-              echo "  $COMPOSE_COMMAND -f docker-compose.targets.yml ps"
             '');
           };
         };
