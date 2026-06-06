@@ -75,7 +75,7 @@ SQL string
 The workspace is organized into three layers plus a compatibility shim, controlled by Cargo features on the root `ra` package.
 
 **Core (default build — `cargo build`):**
-`lime-sys`, `lime-rs`, `ra-core`, `ra-parser`, `ra-compiler`, `ra-engine`, `ra-bitnet`, `ra-dialect`, `ra-hardware`, `ra-stats-advanced` (lib name `ra_stats`), `ra-cache-api`, `ra-sql-parser` (lib name `sqlparser`)
+`lime-sys`, `ra-core`, `ra-parser`, `ra-compiler`, `ra-engine`, `ra-bitnet`, `ra-dialect`, `ra-hardware`, `ra-stats-advanced` (lib name `ra_stats`), `ra-cache-api`, `ra-sql-parser` (lib name `sqlparser`)
 
 **CLI (`--features cli`):**
 `ra-cli` (binary), `ra-adapters`, `ra-metadata`
@@ -97,7 +97,7 @@ Use `--features all` to build everything in the root facade.
 
 **SQL Parsing:** `ra-sql-parser` — custom fork of sqlparser 0.52 at `crates/ra-sql-parser`. The library name is `sqlparser` for compatibility with downstream code.
 
-**Lime Tokenizer:** `lime-sys` (C library) + `lime-rs` (Rust bindings) — LALR(1) parser generator used by `ra-parser` for grammar-based SQL parsing.
+**Lime Tokenizer:** `lime-sys` (C library) — SIMD tokenizer used by `ra-parser`. The LALR(1) parser itself is generated as native Rust (`lime --target=rust`); see the SQL-parsing note below.
 
 **RA Parsing:** `ra-parser` → `ra-core`. Handles both SQL-to-`RelExpr` conversion (`sql_to_relexpr.rs`) and `.rra` literate rule file parsing (`rule_file_parser.rs`).
 
