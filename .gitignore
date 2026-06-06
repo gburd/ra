@@ -125,3 +125,20 @@ benchmarks/results/20*/
 benchmarks/test_results/
 benchmarks/results/cpu-profile-*.txt
 benchmarks/planner_comparison/results/*.json
+
+# --- Repository hygiene: never commit these (see AGENTS.md "Repository hygiene") ---
+# Dependency dirs anywhere in the tree (npm/pnpm). A committed node_modules
+# (112MB rollup binary) once blocked the Codeberg->GitHub mirror.
+node_modules/
+**/node_modules/
+docs/node_modules.bak/
+# Coverage + build/test output
+/coverage/
+**/tarpaulin-report.*
+# Agent / tool scratch (also covered above, restated defensively)
+.kiro/
+.claude/
+.agent/
+.memelord/
+.mcp.json
+agent/
