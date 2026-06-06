@@ -6,6 +6,7 @@ databases: [postgresql]
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [physical, lowering, join]
+costs_operator: hash-join
 ---
 
 # join-to-hash-join
@@ -20,3 +21,17 @@ physical join operator the cost extractor chooses among. Never rewrites back.
 lhs: (join inner ?cond ?l ?r)
 rhs: (hash-join inner ?cond ?l ?r)
 when: is_equi_join("?cond")
+
+## Cost Model
+
+Build a hash table on the inner (right) input, then probe once per outer row.
+The dominant term is the linear hash build over the inner side; the per-method
+base term is what orders the join methods during extraction (the equal `cl+cr`
+child-cost sum is added by the cost function for every method). `ctx` is an
+[`OperatorCostCtx`]: `right_cost`/`left_cost` are the egg child costs (size
+proxies) and `tuple_cost` is the calibrated per-tuple CPU cost.
+
+```rust
+0.5 * ctx.right_cost * ctx.tuple_cost
+```
+

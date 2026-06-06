@@ -127,12 +127,13 @@ fn build_lime_tool(lime_root: &Path, out_dir: &Path) -> PathBuf {
 fn run_lime_rust(lime_tool: &Path, lime_root: &Path, grammar_file: &Path, out_dir: &Path) {
     let template = lime_root.join("limpar.c");
     let work_grammar = out_dir.join("ra_sql.lime");
-    // run_lime already copied the grammar into OUT_DIR, but copy defensively
-    // in case generation order changes.
-    if !work_grammar.exists() {
-        std::fs::copy(grammar_file, &work_grammar)
-            .unwrap_or_else(|e| panic!("failed to copy grammar to OUT_DIR: {e}"));
-    }
+    // Always copy the current grammar into OUT_DIR. A conditional copy
+    // ("only if missing") reuses a stale grammar from a previous build when
+    // build.rs re-runs after a grammar edit, generating ra_sql.rs from the old
+    // grammar (observed: unused/`_`-prefixed aliases that then fail to compile
+    // against the new `%action_rust` bodies).
+    std::fs::copy(grammar_file, &work_grammar)
+        .unwrap_or_else(|e| panic!("failed to copy grammar to OUT_DIR: {e}"));
 
     let output = Command::new(lime_tool)
         .arg("--target=rust")
