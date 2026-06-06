@@ -183,7 +183,7 @@ Uses a custom fork at `crates/ra-sql-parser` (based on sqlparser 0.52) reference
 
 ## Lime Grammar SQL Support
 
-`ra-parser` uses a Lime (Lemon-derived) LALR(1) grammar (`crates/ra-parser/grammar/ra_sql.lime`) to parse SQL into `RelExpr`. As of RFC 0059 and follow-on work, the following SQL features are supported:
+`ra-parser` uses a Lime (Lemon-derived) LALR(1) grammar (`crates/ra-parser/grammar/ra_sql.lime`) to parse SQL into `RelExpr`. As of the Lime v1.0.0 upgrade, the parser is generated as **native Rust** (`lime --target=rust` → `ra_sql.rs`): each production carries a `%action_rust` body calling the native builder layer in `crates/ra-parser/src/rust_parser/`, and the parse path has no C FFI (the C tokenizer in `lime-sys` is still used for SIMD tokenization). The legacy C parser (`ra_sql.c` + extern-C builders) is gated behind `--no-default-features`. As of RFC 0059 and follow-on work, the following SQL features are supported:
 
 **Fully supported:**
 - SELECT with projections, DISTINCT, aliases

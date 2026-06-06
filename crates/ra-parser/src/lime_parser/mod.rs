@@ -14,10 +14,12 @@
 //! let rel = lime_parser::parse_sql("SELECT id FROM users WHERE age > 21")?;
 //! ```
 
+#[cfg(not(feature = "rust-parser"))]
 pub mod diagnostics;
 pub mod lexer;
 pub mod lime_tokenizer;
 
+#[cfg(not(feature = "rust-parser"))]
 use std::os::raw::{c_char, c_int, c_void};
 
 use ra_core::algebra::RelExpr;
@@ -51,8 +53,8 @@ extern "C" {
     fn ra(parser: *mut c_void, token_type: c_int, token_value: RaToken, state: *mut RaParseState);
 }
 
-// Diagnostics helpers (used by `diagnostics.rs` on both paths; the C parser
-// library is linked under both feature configurations).
+// Diagnostics helpers from the C parser (legacy path only).
+#[cfg(not(feature = "rust-parser"))]
 extern "C" {
     /// Return the string name of a terminal token code, or NULL.
     fn raTokenName(token_code: c_int) -> *const c_char;
@@ -99,7 +101,7 @@ pub fn parse_sql(sql: &str) -> Result<RelExpr, ParseErrors> {
     // the Rust parser to prove behavioral identity with the C path.
     #[cfg(feature = "rust-parser")]
     {
-        return crate::rust_parser::parse_sql(sql);
+        crate::rust_parser::parse_sql(sql)
     }
     #[cfg(not(feature = "rust-parser"))]
     {

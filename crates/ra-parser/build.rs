@@ -35,17 +35,15 @@ fn main() {
     // Step 1: Build the lime tool from source.
     let lime_tool = build_lime_tool(&lime_root, &out_dir);
 
-    // Step 2: Run lime on the grammar to produce C source.
-    let generated_c = run_lime(&lime_tool, &lime_root, &grammar_file, &out_dir);
-
-    // Step 3: Compile the generated C parser.
-    compile_generated_parser(&generated_c, &grammar_dir, &lime_root, &out_dir);
-
-    // Step 4 (staging): when the `rust-parser` feature is on, additionally
-    // emit the Rust parser (ra_sql.rs) from the same grammar. The C path
-    // above is left untouched so both targets coexist during migration.
     if env::var_os("CARGO_FEATURE_RUST_PARSER").is_some() {
+        // Native-Rust path (default): emit only ra_sql.rs. The C parser is not
+        // generated or compiled.
         run_lime_rust(&lime_tool, &lime_root, &grammar_file, &out_dir);
+    } else {
+        // Legacy C FFI path (--no-default-features): generate + compile the C
+        // parser and link it into the crate.
+        let generated_c = run_lime(&lime_tool, &lime_root, &grammar_file, &out_dir);
+        compile_generated_parser(&generated_c, &grammar_dir, &lime_root, &out_dir);
     }
 
     // Re-run triggers.

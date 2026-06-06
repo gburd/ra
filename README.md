@@ -83,7 +83,7 @@ Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner
 
 Ra uses [Lime](https://codeberg.org/gregburd/lime), an LALR(1) parser generator with conflict resolution strategies, GLR support, and a literate grammar format. The Lime grammar defines PostgreSQL-compatible SQL syntax and produces a `RelExpr` (relational algebra) tree directly during parsing — no intermediate AST.
 
-Lime is included as a git submodule at `crates/lime-sys/lime` and exposed to Rust through `lime-sys` (C FFI bindings) and `lime-rs` (safe Rust wrapper). The `ra-parser` crate combines Lime's generated parser with a `sql_to_relexpr` module that handles semantic analysis, type resolution, and expression lowering.
+Lime is included as a git submodule at `crates/lime-sys/lime`. As of the v1.0.0 upgrade, `ra-parser` uses Lime's **generated-Rust parser** (`lime --target=rust`): the grammar's reduction actions are emitted as native Rust (`%action_rust` bodies) that call a native builder layer, so SQL is parsed entirely in Rust with no C FFI on the parse path. The C tokenizer (`lime-sys`) is still used for SIMD tokenization. The legacy C parser path (`ra_sql.c` via the `ra()` FFI) remains available behind `--no-default-features` for one release. The `ra-parser` crate combines the generated parser with a `sql_to_relexpr` module that handles semantic analysis, type resolution, and expression lowering.
 
 ## Neural Cost Model: BitNet 1.58-bit
 
