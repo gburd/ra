@@ -46,6 +46,17 @@ typedef struct RaToken {
 /* Default non-terminal type: an opaque node pointer. */
 %default_type {RaNode *}
 
+/* ------------------------------------------------------------------ *
+ * Rust-target directives (ignored by the C target).                   *
+ * The Rust parser threads a single Value type through every symbol    *
+ * and carries the parse-state arenas as the user argument.            *
+ * ------------------------------------------------------------------ */
+%rust_value_type {crate::rust_parser::Value}
+%rust_extra_argument {crate::ffi::RaParseState}
+%rust_syntax_error {
+    self.user.record_rust_syntax_error(_token, _state);
+}
+
 /* ================================================================== */
 /* Token declarations                                                  */
 /* ================================================================== */
