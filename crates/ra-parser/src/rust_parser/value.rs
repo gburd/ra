@@ -27,18 +27,25 @@ use crate::ffi::node::{decode, encode, NodeTag, RaNode};
 pub struct Value {
     /// Tagged arena index, encoded exactly like the C path's `*mut RaNode`
     /// (`(index + 1) << 3 | tag`). Zero means "no node" (a terminal, or an
-    /// epsilon/passthrough that carries no AST node).
+    /// epsilon/passthrough that carries no AST node). Private: grammar actions
+    /// reach it via builder calls; the translator maps the C idioms `X = 0`
+    /// and `if (X)` to [`Value::default`] / [`Value::is_present`].
     node: usize,
     /// Token text for identifiers and literals; `None` for non-terminals.
+    /// Private: read via [`Value::text`]; the C write idiom `A.text = 0` is
+    /// dropped by the translator (a fresh `Value` already has no text).
     text: Option<Rc<str>>,
-    /// Integer literal value (valid when the token is `ICONST`).
-    int_val: i64,
-    /// Float literal value (valid when the token is `FCONST`).
-    float_val: f64,
-    /// Byte offset of the token in the source string.
-    location: i32,
-    /// Byte length of the token text.
-    length: i32,
+    /// Integer literal value (`ICONST`) or a small enum payload for
+    /// `%type {RaToken}` non-terminals (join kind, NULLS ordering, …). Public
+    /// so the C field idioms `A.int_val = N;` / `B.int_val` translate verbatim.
+    pub int_val: i64,
+    /// Float literal value (`FCONST`), also reused as a presence flag by the
+    /// LIMIT/OFFSET encoding. Public for verbatim field-idiom translation.
+    pub float_val: f64,
+    /// Byte offset of the token, reused as the OFFSET slot by LIMIT. Public.
+    pub location: i32,
+    /// Byte length of the token text. Public.
+    pub length: i32,
 }
 
 impl Value {
@@ -71,28 +78,11 @@ impl Value {
         self.text.as_deref().unwrap_or("")
     }
 
-    /// The integer literal value (0 when absent).
+    /// Whether this value carries an AST node (non-null handle). Mirrors the C
+    /// idiom `if (X) { ... }` used to test optional clauses for presence.
     #[must_use]
-    pub fn int_val(&self) -> i64 {
-        self.int_val
-    }
-
-    /// The float literal value (0.0 when absent).
-    #[must_use]
-    pub fn float_val(&self) -> f64 {
-        self.float_val
-    }
-
-    /// The source byte offset of the token.
-    #[must_use]
-    pub fn location(&self) -> i32 {
-        self.location
-    }
-
-    /// The byte length of the token text.
-    #[must_use]
-    pub fn length(&self) -> i32 {
-        self.length
+    pub fn is_present(&self) -> bool {
+        self.node != 0
     }
 
     /// The tagged node handle for passing to a builder, as a raw `*mut RaNode`
