@@ -23,7 +23,7 @@ use crate::ffi::node::{decode, encode, NodeTag, RaNode};
 /// Cheap to clone: the token text is reference-counted and the node handle is
 /// a plain integer. Reductions clone RHS values out of the stack, so `Clone`
 /// must stay inexpensive.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Value {
     /// Tagged arena index, encoded exactly like the C path's `*mut RaNode`
     /// (`(index + 1) << 3 | tag`). Zero means "no node" (a terminal, or an

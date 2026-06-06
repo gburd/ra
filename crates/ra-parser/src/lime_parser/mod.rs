@@ -22,7 +22,10 @@ use std::os::raw::{c_char, c_int, c_void};
 
 use ra_core::algebra::RelExpr;
 
-use crate::ffi::node::{ParseErrors, RaParseState};
+use crate::ffi::node::ParseErrors;
+#[cfg(not(feature = "rust-parser"))]
+use crate::ffi::node::RaParseState;
+#[cfg(not(feature = "rust-parser"))]
 use lexer::RaToken;
 
 // ---------------------------------------------------------------------------
@@ -38,6 +41,7 @@ use lexer::RaToken;
 // ---------------------------------------------------------------------------
 // RaParseState is passed as an opaque pointer (`void *`) in the C API
 // and is never dereferenced by the generated C code.
+#[cfg(not(feature = "rust-parser"))]
 #[expect(improper_ctypes)]
 extern "C" {
     fn raAlloc(alloc: Option<unsafe extern "C" fn(usize) -> *mut c_void>) -> *mut c_void;
@@ -45,7 +49,11 @@ extern "C" {
     fn raFree(parser: *mut c_void, free_fn: Option<unsafe extern "C" fn(*mut c_void)>);
 
     fn ra(parser: *mut c_void, token_type: c_int, token_value: RaToken, state: *mut RaParseState);
+}
 
+// Diagnostics helpers (used by `diagnostics.rs` on both paths; the C parser
+// library is linked under both feature configurations).
+extern "C" {
     /// Return the string name of a terminal token code, or NULL.
     fn raTokenName(token_code: c_int) -> *const c_char;
 
@@ -57,18 +65,21 @@ extern "C" {
     fn raExpectedTokens(stateno: c_int, out: *mut c_int, max: c_int) -> c_int;
 }
 
+#[cfg(not(feature = "rust-parser"))]
 extern "C" {
     fn malloc(size: usize) -> *mut c_void;
     fn free(ptr: *mut c_void);
 }
 
 /// Allocator callback for `raAlloc` (wraps C `malloc`).
+#[cfg(not(feature = "rust-parser"))]
 unsafe extern "C" fn parser_malloc(size: usize) -> *mut c_void {
     // SAFETY: delegates to the C runtime allocator.
     unsafe { malloc(size) }
 }
 
 /// Deallocator callback for `raFree` (wraps C `free`).
+#[cfg(not(feature = "rust-parser"))]
 unsafe extern "C" fn parser_free(ptr: *mut c_void) {
     // SAFETY: ptr was allocated by `malloc` via `parser_malloc`.
     unsafe { free(ptr) };
@@ -83,6 +94,22 @@ unsafe extern "C" fn parser_free(ptr: *mut c_void) {
 ///
 /// Returns a list of error messages if the SQL cannot be parsed.
 pub fn parse_sql(sql: &str) -> Result<RelExpr, ParseErrors> {
+    // Under the `rust-parser` feature, delegate to the native-Rust parse path
+    // (Lime `--target=rust` output). This routes the entire test suite through
+    // the Rust parser to prove behavioral identity with the C path.
+    #[cfg(feature = "rust-parser")]
+    {
+        return crate::rust_parser::parse_sql(sql);
+    }
+    #[cfg(not(feature = "rust-parser"))]
+    {
+        parse_sql_c(sql)
+    }
+}
+
+/// The C FFI parse path (Lime `--target=c` output via `lime-sys`).
+#[cfg(not(feature = "rust-parser"))]
+fn parse_sql_c(sql: &str) -> Result<RelExpr, ParseErrors> {
     // Tokenize using SIMD-accelerated lime tokenizer, falling
     // back to the pure-Rust lexer if the C tokenizer fails.
     let tokens = lime_tokenizer::tokenize_simd(sql)

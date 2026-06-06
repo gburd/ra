@@ -244,4 +244,20 @@ fn run_lime_rust(lime_tool: &Path, lime_root: &Path, grammar_file: &Path, out_di
         "lime --target=rust did not produce ra_sql.rs in {}",
         out_dir.display()
     );
+
+    // Strip the generated file's crate-level inner attributes (`#![...]`).
+    // The file is `include!`d into our `generated` module, which already
+    // supplies the needed `#![allow(...)]`; leaving the generated `#![...]`
+    // in place is a hard error ("inner attribute not permitted") because the
+    // include site is not the first token of the module.
+    let rs_path = out_dir.join("ra_sql.rs");
+    let contents = std::fs::read_to_string(&rs_path)
+        .unwrap_or_else(|e| panic!("failed to read generated ra_sql.rs: {e}"));
+    let stripped: String = contents
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("#!["))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&rs_path, stripped)
+        .unwrap_or_else(|e| panic!("failed to rewrite generated ra_sql.rs: {e}"));
 }

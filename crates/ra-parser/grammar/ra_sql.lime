@@ -235,7 +235,13 @@ typedef struct RaToken {
 /* -- Top-level statement ------------------------------------------- */
 
 input ::= stmt(A) SEMICOLON.               { (void)A; }
+%action_rust {
+    let _ = &A;
+}
 input ::= stmt(A).                          { (void)A; }
+%action_rust {
+    let _ = &A;
+}
 
 stmt(A) ::= select_stmt(B).                 { A = B; }
 stmt(A) ::= with_clause(B).                 { A = B; }
@@ -250,15 +256,24 @@ stmt(A) ::= merge_stmt(B).                  { A = B; }
 with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 
 /* CTE with optional column-name list: WITH name(col1, col2) AS (...) */
 with_clause(A) ::= WITH IDENT(B) LPAREN ident_list RPAREN AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D); /* column list is informational only */
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D); /* column list is informational only */
+}
 
 /* WITH RECURSIVE with column-name list */
 with_clause(A) ::= WITH RECURSIVE IDENT(B) LPAREN ident_list RPAREN AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_recursive_cte_auto(pstate, B.text, strlen(B.text), C, D);
+}
+%action_rust {
+    A = ra_recursive_cte_auto(ctx.user, B.clone().text(), B.clone().text().len(), C, D);
 }
 
 /* Multiple CTEs: WITH a AS (...), b AS (...) ... */
@@ -266,41 +281,74 @@ with_clause(A) ::= WITH RECURSIVE IDENT(B) LPAREN ident_list RPAREN AS LPAREN se
 with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 
 /* with_rest is the remaining CTEs (after the first comma) */
 with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
     A = ra_cte(pstate, B.text, C, D);
+}
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
 }
 with_rest(A) ::= IDENT(B) AS MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 with_rest(A) ::= IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
+}
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
 }
 with_rest(A) ::= IDENT(B) AS MATERIALIZED LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 with_rest(A) ::= IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPAREN COMMA with_rest(D). {
     A = ra_cte(pstate, B.text, C, D);
+}
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
 }
 
 /* with_rest terminal rules ending in DML */
 with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN update_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 with_rest(A) ::= IDENT(B) AS LPAREN select_stmt(C) RPAREN delete_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
+}
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
 }
 
 /* MATERIALIZED / NOT MATERIALIZED CTE hints (parsed, hint ignored) */
 with_clause(A) ::= WITH IDENT(B) AS MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 with_clause(A) ::= WITH IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
+}
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
 }
 
 /* WITH RECURSIVE: body is select_stmt (may or may not include UNION ALL).
@@ -309,21 +357,36 @@ with_clause(A) ::= WITH IDENT(B) AS NOT MATERIALIZED LPAREN select_stmt(C) RPARE
 with_clause(A) ::= WITH RECURSIVE IDENT(B) AS LPAREN select_stmt(C) RPAREN select_stmt(D). {
     A = ra_recursive_cte_auto(pstate, B.text, strlen(B.text), C, D);
 }
+%action_rust {
+    A = ra_recursive_cte_auto(ctx.user, B.clone().text(), B.clone().text().len(), C, D);
+}
 
 /* CTE with DML body: UPDATE */
 with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN update_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 with_clause(A) ::= WITH IDENT(B) LPAREN ident_list RPAREN AS LPAREN select_stmt(C) RPAREN update_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
+}
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
 }
 
 /* CTE with DML body: DELETE */
 with_clause(A) ::= WITH IDENT(B) AS LPAREN select_stmt(C) RPAREN delete_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
+}
 with_clause(A) ::= WITH IDENT(B) LPAREN ident_list RPAREN AS LPAREN select_stmt(C) RPAREN delete_stmt(D). {
     A = ra_cte(pstate, B.text, C, D);
+}
+%action_rust {
+    A = ra_cte(ctx.user, B.text(), C, D);
 }
 
 /* -- SELECT statement with set operations -------------------------- */
@@ -333,58 +396,112 @@ select_stmt(A) ::= LPAREN select_stmt(B) RPAREN. { A = B; }
 select_stmt(A) ::= select_no_parens(B) UNION ALL select_no_parens(C). {
     A = ra_union(pstate, B, C, 1);
 }
+%action_rust {
+    A = ra_union(ctx.user, B, C, 1);
+}
 select_stmt(A) ::= select_stmt(B) UNION ALL select_no_parens(C). {
     A = ra_union(pstate, B, C, 1);
+}
+%action_rust {
+    A = ra_union(ctx.user, B, C, 1);
 }
 select_stmt(A) ::= select_no_parens(B) UNION select_no_parens(C). {
     A = ra_union(pstate, B, C, 0);
 }
+%action_rust {
+    A = ra_union(ctx.user, B, C, 0);
+}
 select_stmt(A) ::= select_stmt(B) UNION select_no_parens(C). {
     A = ra_union(pstate, B, C, 0);
+}
+%action_rust {
+    A = ra_union(ctx.user, B, C, 0);
 }
 select_stmt(A) ::= select_no_parens(B) INTERSECT ALL select_no_parens(C). {
     A = ra_intersect(pstate, B, C, 1);
 }
+%action_rust {
+    A = ra_intersect(ctx.user, B, C, 1);
+}
 select_stmt(A) ::= select_stmt(B) INTERSECT ALL select_no_parens(C). {
     A = ra_intersect(pstate, B, C, 1);
+}
+%action_rust {
+    A = ra_intersect(ctx.user, B, C, 1);
 }
 select_stmt(A) ::= select_no_parens(B) INTERSECT select_no_parens(C). {
     A = ra_intersect(pstate, B, C, 0);
 }
+%action_rust {
+    A = ra_intersect(ctx.user, B, C, 0);
+}
 select_stmt(A) ::= select_stmt(B) INTERSECT select_no_parens(C). {
     A = ra_intersect(pstate, B, C, 0);
+}
+%action_rust {
+    A = ra_intersect(ctx.user, B, C, 0);
 }
 select_stmt(A) ::= select_no_parens(B) EXCEPT ALL select_no_parens(C). {
     A = ra_except(pstate, B, C, 1);
 }
+%action_rust {
+    A = ra_except(ctx.user, B, C, 1);
+}
 select_stmt(A) ::= select_stmt(B) EXCEPT ALL select_no_parens(C). {
     A = ra_except(pstate, B, C, 1);
+}
+%action_rust {
+    A = ra_except(ctx.user, B, C, 1);
 }
 select_stmt(A) ::= select_no_parens(B) EXCEPT select_no_parens(C). {
     A = ra_except(pstate, B, C, 0);
 }
+%action_rust {
+    A = ra_except(ctx.user, B, C, 0);
+}
 select_stmt(A) ::= select_stmt(B) EXCEPT select_no_parens(C). {
     A = ra_except(pstate, B, C, 0);
+}
+%action_rust {
+    A = ra_except(ctx.user, B, C, 0);
 }
 
 /* Parenthesized RHS of set operations */
 select_stmt(A) ::= select_no_parens(B) UNION ALL LPAREN select_stmt(C) RPAREN. {
     A = ra_union(pstate, B, C, 1);
 }
+%action_rust {
+    A = ra_union(ctx.user, B, C, 1);
+}
 select_stmt(A) ::= select_no_parens(B) UNION LPAREN select_stmt(C) RPAREN. {
     A = ra_union(pstate, B, C, 0);
+}
+%action_rust {
+    A = ra_union(ctx.user, B, C, 0);
 }
 select_stmt(A) ::= select_no_parens(B) INTERSECT ALL LPAREN select_stmt(C) RPAREN. {
     A = ra_intersect(pstate, B, C, 1);
 }
+%action_rust {
+    A = ra_intersect(ctx.user, B, C, 1);
+}
 select_stmt(A) ::= select_no_parens(B) INTERSECT LPAREN select_stmt(C) RPAREN. {
     A = ra_intersect(pstate, B, C, 0);
+}
+%action_rust {
+    A = ra_intersect(ctx.user, B, C, 0);
 }
 select_stmt(A) ::= select_no_parens(B) EXCEPT ALL LPAREN select_stmt(C) RPAREN. {
     A = ra_except(pstate, B, C, 1);
 }
+%action_rust {
+    A = ra_except(ctx.user, B, C, 1);
+}
 select_stmt(A) ::= select_no_parens(B) EXCEPT LPAREN select_stmt(C) RPAREN. {
     A = ra_except(pstate, B, C, 0);
+}
+%action_rust {
+    A = ra_except(ctx.user, B, C, 0);
 }
 /* -- SELECT body --------------------------------------------------- */
 
@@ -402,6 +519,18 @@ select_no_parens(A) ::= SELECT target_list(B) from_clause(C)
     }
     A = base;
 }
+%action_rust {
+    let mut base = C;
+    if D.clone().is_present() { base = ra_filter(ctx.user, base, D.clone()); }
+    if E.clone().is_present() { base = ra_aggregate(ctx.user, base, E.clone(), ra_list_new(ctx.user)); }
+    if H.clone().is_present() { base = ra_filter(ctx.user, base, H.clone()); }
+    base = ra_project(ctx.user, base, B);
+    if F.clone().is_present() { base = ra_sort(ctx.user, base, F.clone()); }
+    if (G.clone().float_val != 0.0) {
+        base = ra_limit(ctx.user, base, (G.clone().int_val as u64), (G.clone().location as u64));
+    }
+    A = base;
+}
 
 select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
                          where_clause(D) group_clause(E) having_clause(H)
@@ -415,6 +544,19 @@ select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
     if (F) { base = ra_sort(pstate, base, F); }
     if (G.float_val != 0.0) {
         base = ra_limit(pstate, base, (uint64_t)G.int_val, (uint64_t)G.location);
+    }
+    A = base;
+}
+%action_rust {
+    let mut base = C;
+    if D.clone().is_present() { base = ra_filter(ctx.user, base, D.clone()); }
+    if E.clone().is_present() { base = ra_aggregate(ctx.user, base, E.clone(), ra_list_new(ctx.user)); }
+    if H.clone().is_present() { base = ra_filter(ctx.user, base, H.clone()); }
+    base = ra_project(ctx.user, base, B);
+    base = ra_distinct(ctx.user, base);
+    if F.clone().is_present() { base = ra_sort(ctx.user, base, F.clone()); }
+    if (G.clone().float_val != 0.0) {
+        base = ra_limit(ctx.user, base, (G.clone().int_val as u64), (G.clone().location as u64));
     }
     A = base;
 }
@@ -438,6 +580,18 @@ select_no_parens(A) ::= SELECT target_list(B) from_clause(C)
     }
     A = base;
 }
+%action_rust {
+    let mut base = C;
+    if D.clone().is_present() { base = ra_filter(ctx.user, base, D.clone()); }
+    if E.clone().is_present() { base = ra_aggregate(ctx.user, base, E.clone(), ra_list_new(ctx.user)); }
+    if H.clone().is_present() { base = ra_filter(ctx.user, base, H.clone()); }
+    base = ra_project(ctx.user, base, B);
+    if F.clone().is_present() { base = ra_sort(ctx.user, base, F.clone()); }
+    if (G.clone().float_val != 0.0) {
+        base = ra_limit(ctx.user, base, (G.clone().int_val as u64), (G.clone().location as u64));
+    }
+    A = base;
+}
 
 select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
                          where_clause(D) group_clause(E) having_clause(H)
@@ -455,11 +609,27 @@ select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
     }
     A = base;
 }
+%action_rust {
+    let mut base = C;
+    if D.clone().is_present() { base = ra_filter(ctx.user, base, D.clone()); }
+    if E.clone().is_present() { base = ra_aggregate(ctx.user, base, E.clone(), ra_list_new(ctx.user)); }
+    if H.clone().is_present() { base = ra_filter(ctx.user, base, H.clone()); }
+    base = ra_project(ctx.user, base, B);
+    base = ra_distinct(ctx.user, base);
+    if F.clone().is_present() { base = ra_sort(ctx.user, base, F.clone()); }
+    if (G.clone().float_val != 0.0) {
+        base = ra_limit(ctx.user, base, (G.clone().int_val as u64), (G.clone().location as u64));
+    }
+    A = base;
+}
 
 /* -- VALUES clause ------------------------------------------------- */
 
 select_no_parens(A) ::= VALUES values_list(B). {
     A = ra_values(pstate, B);
+}
+%action_rust {
+    A = ra_values(ctx.user, B);
 }
 
 /* -- Target list (SELECT columns) ---------------------------------- */
@@ -468,19 +638,39 @@ target_list(A) ::= target_item(B). {
     RaNode *l = ra_list_new(pstate);
     A = ra_list_push(pstate, l, B);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    A = ra_list_push(ctx.user, l, B);
+}
 target_list(A) ::= target_list(B) COMMA target_item(C). {
     A = ra_list_push(pstate, B, C);
+}
+%action_rust {
+    A = ra_list_push(ctx.user, B, C);
 }
 
 target_item(A) ::= expr(B).                 { A = B; }
 target_item(A) ::= expr(B) AS IDENT(C).     { A = ra_alias_target(pstate, B, C.text); }
+%action_rust {
+    A = ra_alias_target(ctx.user, B, C.text());
+}
 target_item(A) ::= expr(B) IDENT(C).         { A = ra_alias_target(pstate, B, C.text); }
+%action_rust {
+    A = ra_alias_target(ctx.user, B, C.text());
+}
 target_item(A) ::= STAR. {
     A = ra_column(pstate, "*");
+}
+%action_rust {
+    A = ra_column(ctx.user, "*");
 }
 target_item(A) ::= IDENT(B) DOT STAR. {
     /* Qualified wildcard: table.* */
     A = ra_qualified_column(pstate, B.text, "*");
+}
+%action_rust {
+    /* Qualified wildcard: table.* */
+    A = ra_qualified_column(ctx.user, B.text(), "*");
 }
 
 /* -- FROM clause --------------------------------------------------- */
@@ -489,22 +679,38 @@ from_clause(A) ::= FROM from_list(B).       { A = B; }
 from_clause(A) ::= . {
     A = ra_scan(pstate, "__dual");
 }
+%action_rust {
+    A = ra_scan(ctx.user, "__dual");
+}
 
 from_list(A) ::= table_ref(B).              { A = B; }
 from_list(A) ::= from_list(B) COMMA table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 4, B, C, cond); /* 4 = Cross */
 }
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 4, B, C, cond); /* 4 = Cross */
+}
 
 table_ref(A) ::= IDENT(B). {
     A = ra_scan(pstate, B.text);
+}
+%action_rust {
+    A = ra_scan(ctx.user, B.text());
 }
 table_ref(A) ::= graph_table_ref(B). { A = B; }
 table_ref(A) ::= IDENT(B) AS IDENT(C). {
     A = ra_scan_alias(pstate, B.text, C.text);
 }
+%action_rust {
+    A = ra_scan_alias(ctx.user, B.text(), C.text());
+}
 table_ref(A) ::= IDENT(B) IDENT(C). {
     A = ra_scan_alias(pstate, B.text, C.text);
+}
+%action_rust {
+    A = ra_scan_alias(ctx.user, B.text(), C.text());
 }
 
 /* Derived table (subquery in FROM) */
@@ -531,12 +737,22 @@ table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN. {
 table_ref(A) ::= table_ref(B) join_type(C) JOIN table_ref(D) ON expr(E). {
     A = ra_join(pstate, C.int_val, B, D, E);
 }
+%action_rust {
+    A = ra_join(ctx.user, C.int_val, B, D, E);
+}
 table_ref(A) ::= table_ref(B) JOIN table_ref(C) ON expr(D). {
     A = ra_join(pstate, 0, B, C, D); /* 0 = Inner */
+}
+%action_rust {
+    A = ra_join(ctx.user, 0, B, C, D); /* 0 = Inner */
 }
 table_ref(A) ::= table_ref(B) CROSS JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 4, B, C, cond); /* 4 = Cross */
+}
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 4, B, C, cond); /* 4 = Cross */
 }
 
 /* NATURAL JOIN: inner join on all same-named columns (matching deferred to optimizer) */
@@ -544,43 +760,83 @@ table_ref(A) ::= table_ref(B) NATURAL JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 0, B, C, cond); /* 0 = Inner */
 }
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 0, B, C, cond); /* 0 = Inner */
+}
 table_ref(A) ::= table_ref(B) NATURAL LEFT JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 1, B, C, cond); /* 1 = Left */
+}
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 1, B, C, cond); /* 1 = Left */
 }
 table_ref(A) ::= table_ref(B) NATURAL LEFT OUTER JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 1, B, C, cond);
 }
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 1, B, C, cond);
+}
 table_ref(A) ::= table_ref(B) NATURAL RIGHT JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 2, B, C, cond); /* 2 = Right */
+}
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 2, B, C, cond); /* 2 = Right */
 }
 table_ref(A) ::= table_ref(B) NATURAL RIGHT OUTER JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 2, B, C, cond);
 }
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 2, B, C, cond);
+}
 table_ref(A) ::= table_ref(B) NATURAL FULL JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 3, B, C, cond); /* 3 = Full */
 }
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 3, B, C, cond); /* 3 = Full */
+}
 table_ref(A) ::= table_ref(B) NATURAL FULL OUTER JOIN table_ref(C). {
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 3, B, C, cond);
+}
+%action_rust {
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 3, B, C, cond);
 }
 
 /* Table function in FROM: func(args) AS alias or func(args) AS alias(cols) */
 table_ref(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN AS IDENT. {
     A = ra_table_function(pstate, B.text, strlen(B.text), C);
 }
+%action_rust {
+    A = ra_table_function(ctx.user, B.clone().text(), B.clone().text().len(), C);
+}
 table_ref(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN AS IDENT LPAREN ident_list RPAREN. {
     A = ra_table_function(pstate, B.text, strlen(B.text), C);
+}
+%action_rust {
+    A = ra_table_function(ctx.user, B.clone().text(), B.clone().text().len(), C);
 }
 table_ref(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN IDENT. {
     A = ra_table_function(pstate, B.text, strlen(B.text), C);
 }
+%action_rust {
+    A = ra_table_function(ctx.user, B.clone().text(), B.clone().text().len(), C);
+}
 table_ref(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN. {
     A = ra_table_function(pstate, B.text, strlen(B.text), C);
+}
+%action_rust {
+    A = ra_table_function(ctx.user, B.clone().text(), B.clone().text().len(), C);
 }
 
 /* Qualified table function: schema.func(args) */
@@ -588,27 +844,51 @@ table_ref(A) ::= IDENT(B) DOT IDENT(C) LPAREN expr_list RPAREN AS IDENT. {
     (void)C;
     A = ra_scan(pstate, B.text);  /* schema-qualified: use outer name */
 }
+%action_rust {
+    let _ = &C;
+    A = ra_scan(ctx.user, B.text());  /* schema-qualified: use outer name */
+}
 table_ref(A) ::= IDENT(B) DOT IDENT(C) LPAREN expr_list RPAREN. {
     (void)C;
     A = ra_scan(pstate, B.text);
 }
+%action_rust {
+    let _ = &C;
+    A = ra_scan(ctx.user, B.text());
+}
 table_ref(A) ::= IDENT(B) DOT IDENT(C) LPAREN RPAREN. {
     (void)C;
     A = ra_scan(pstate, B.text);
+}
+%action_rust {
+    let _ = &C;
+    A = ra_scan(ctx.user, B.text());
 }
 
 /* UNNEST in FROM clause */
 table_ref(A) ::= UNNEST LPAREN expr(B) RPAREN AS IDENT LPAREN ident_list RPAREN. {
     A = ra_unnest(pstate, B);
 }
+%action_rust {
+    A = ra_unnest(ctx.user, B);
+}
 table_ref(A) ::= UNNEST LPAREN expr(B) RPAREN AS IDENT. {
     A = ra_unnest(pstate, B);
+}
+%action_rust {
+    A = ra_unnest(ctx.user, B);
 }
 table_ref(A) ::= UNNEST LPAREN expr(B) RPAREN WITH ORDINALITY AS IDENT LPAREN ident_list RPAREN. {
     A = ra_unnest_ord(pstate, B);
 }
+%action_rust {
+    A = ra_unnest_ord(ctx.user, B);
+}
 table_ref(A) ::= UNNEST LPAREN expr(B) RPAREN WITH ORDINALITY AS IDENT. {
     A = ra_unnest_ord(pstate, B);
+}
+%action_rust {
+    A = ra_unnest_ord(ctx.user, B);
 }
 
 /* JOIN USING: treat as inner join with true condition (column equality
@@ -618,42 +898,88 @@ table_ref(A) ::= table_ref(B) JOIN table_ref(C) USING LPAREN ident_list(D) RPARE
     RaNode *cond = ra_const_int(pstate, 1);
     A = ra_join(pstate, 0, B, C, cond); /* 0 = Inner */
 }
+%action_rust {
+    let _ = &D; /* column list — kept for future optimizer use */
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, 0, B, C, cond); /* 0 = Inner */
+}
 
 /* Identifier list for USING clause */
 ident_list(A) ::= IDENT(B). {
     RaNode *l = ra_list_new(pstate);
     A = ra_list_push(pstate, l, ra_column(pstate, B.text));
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    A = ra_list_push(ctx.user, l, ra_column(ctx.user, B.text()));
+}
 ident_list(A) ::= ident_list(B) COMMA IDENT(C). {
     A = ra_list_push(pstate, B, ra_column(pstate, C.text));
+}
+%action_rust {
+    A = ra_list_push(ctx.user, B, ra_column(ctx.user, C.text()));
 }
 
 %type join_type {RaToken}
 join_type(A) ::= INNER.         { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 0;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 join_type(A) ::= LEFT OUTER.    { A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 1;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 join_type(A) ::= LEFT.          { A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 1;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 join_type(A) ::= RIGHT OUTER.   { A.int_val = 2; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 2;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 join_type(A) ::= RIGHT.         { A.int_val = 2; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 2;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 join_type(A) ::= FULL OUTER.    { A.int_val = 3; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 3;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 join_type(A) ::= FULL.          { A.int_val = 3; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 3;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 
 /* -- WHERE clause -------------------------------------------------- */
 
 where_clause(A) ::= WHERE expr(B).          { A = B; }
 where_clause(A) ::= .                       { A = 0; }
+%action_rust {
+    A = Value::default();
+}
 
 /* -- GROUP BY clause ----------------------------------------------- */
 
 group_clause(A) ::= GROUP BY group_by_list(B).   { A = B; }
 group_clause(A) ::= .                            { A = 0; }
+%action_rust {
+    A = Value::default();
+}
 
 /* GROUP BY can contain expressions or GROUPING SETS/ROLLUP/CUBE */
 group_by_list(A) ::= group_by_item(B). {
     RaNode *l = ra_list_new(pstate);
     A = ra_list_push(pstate, l, B);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    A = ra_list_push(ctx.user, l, B);
+}
 group_by_list(A) ::= group_by_list(B) COMMA group_by_item(C). {
     A = ra_list_push(pstate, B, C);
+}
+%action_rust {
+    A = ra_list_push(ctx.user, B, C);
 }
 
 group_by_item(A) ::= expr(B). { A = B; }
@@ -663,11 +989,19 @@ group_by_item(A) ::= IDENT IDENT LPAREN grouping_set_list(B) RPAREN. {
     /* GROUPING SETS (...) - mark with special function */
     A = ra_func(pstate, "__grouping_sets", B);
 }
+%action_rust {
+    /* GROUPING SETS (...) - mark with special function */
+    A = ra_func(ctx.user, "__grouping_sets", B);
+}
 
 /* ROLLUP (col1, col2, ...) */
 group_by_item(A) ::= IDENT LPAREN expr_list(B) RPAREN. {
     /* ROLLUP(...) or CUBE(...) - mark with function based on ident */
     A = ra_func(pstate, "__rollup", B);
+}
+%action_rust {
+    /* ROLLUP(...) or CUBE(...) - mark with function based on ident */
+    A = ra_func(ctx.user, "__rollup", B);
 }
 
 /* List of grouping sets: (col1, col2), (col1), () */
@@ -675,47 +1009,88 @@ grouping_set_list(A) ::= grouping_set(B). {
     RaNode *l = ra_list_new(pstate);
     A = ra_list_push(pstate, l, B);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    A = ra_list_push(ctx.user, l, B);
+}
 grouping_set_list(A) ::= grouping_set_list(B) COMMA grouping_set(C). {
     A = ra_list_push(pstate, B, C);
+}
+%action_rust {
+    A = ra_list_push(ctx.user, B, C);
 }
 
 /* Single grouping set: (col1, col2) or () */
 grouping_set(A) ::= LPAREN expr_list(B) RPAREN. { A = B; }
 grouping_set(A) ::= LPAREN RPAREN. { A = ra_list_new(pstate); }
+%action_rust {
+    A = ra_list_new(ctx.user);
+}
 
 /* -- HAVING clause ------------------------------------------------- */
 
 having_clause(A) ::= HAVING expr(B).         { A = B; }
 having_clause(A) ::= .                       { A = 0; }
+%action_rust {
+    A = Value::default();
+}
 
 /* -- ORDER BY clause ----------------------------------------------- */
 
 order_clause(A) ::= ORDER BY sort_list(B).   { A = B; }
 order_clause(A) ::= .                        { A = 0; }
+%action_rust {
+    A = Value::default();
+}
 
 sort_list(A) ::= sort_item(B). {
     RaNode *l = ra_list_new(pstate);
     A = ra_list_push(pstate, l, B);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    A = ra_list_push(ctx.user, l, B);
+}
 sort_list(A) ::= sort_list(B) COMMA sort_item(C). {
     A = ra_list_push(pstate, B, C);
+}
+%action_rust {
+    A = ra_list_push(ctx.user, B, C);
 }
 
 sort_item(A) ::= expr(B) ASC nulls_order(C). {
     A = ra_sort_key(pstate, B, 1, C.int_val);
 }
+%action_rust {
+    A = ra_sort_key(ctx.user, B, 1, C.int_val);
+}
 sort_item(A) ::= expr(B) DESC nulls_order(C). {
     A = ra_sort_key(pstate, B, 0, C.int_val);
 }
+%action_rust {
+    A = ra_sort_key(ctx.user, B, 0, C.int_val);
+}
 sort_item(A) ::= expr(B) nulls_order(C). {
     A = ra_sort_key(pstate, B, 1, C.int_val); /* default ASC */
+}
+%action_rust {
+    A = ra_sort_key(ctx.user, B, 1, C.int_val); /* default ASC */
 }
 
 %type nulls_order {RaToken}
 %type opt_window_frame {RaToken}
 nulls_order(A) ::= NULLS FIRST. { A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 1;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 nulls_order(A) ::= NULLS LAST.  { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 0;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 nulls_order(A) ::= .            { A.int_val = 2; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 2;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 
 /* -- LIMIT clause -------------------------------------------------- */
 /* Uses float_val as a "has limit" flag (1.0 = present, 0.0 = absent).
@@ -728,8 +1103,20 @@ limit_clause(A) ::= LIMIT ICONST(B) OFFSET ICONST(C). {
     A.location = (int)C.int_val;     /* offset (fits in i32 for any practical offset) */
     A.float_val = 1.0;               /* flag: limit present */
 }
+%action_rust {
+    A.length = 0;
+    A.int_val = B.int_val;           /* count */
+    A.location = (C.int_val as i32);     /* offset (fits in i32 for any practical offset) */
+    A.float_val = 1.0;               /* flag: limit present */
+}
 limit_clause(A) ::= LIMIT ICONST(B). {
     A.text = 0; A.length = 0;
+    A.int_val = B.int_val;           /* count */
+    A.location = 0;                  /* no offset */
+    A.float_val = 1.0;               /* flag: limit present */
+}
+%action_rust {
+    A.length = 0;
     A.int_val = B.int_val;           /* count */
     A.location = 0;                  /* no offset */
     A.float_val = 1.0;               /* flag: limit present */
@@ -740,8 +1127,18 @@ limit_clause(A) ::= OFFSET ICONST(C). {
     A.location = (int)C.int_val;     /* offset */
     A.float_val = 1.0;               /* flag: clause present */
 }
+%action_rust {
+    A.length = 0;
+    A.int_val = -1;                  /* count = u64::MAX sentinel: no limit */
+    A.location = (C.int_val as i32);     /* offset */
+    A.float_val = 1.0;               /* flag: clause present */
+}
 limit_clause(A) ::= . {
     A.text = 0; A.length = 0; A.int_val = 0; A.location = 0;
+    A.float_val = 0.0;               /* flag: no limit */
+}
+%action_rust {
+    A.length = 0; A.int_val = 0; A.location = 0;
     A.float_val = 0.0;               /* flag: no limit */
 }
 
@@ -751,8 +1148,15 @@ values_list(A) ::= LPAREN expr_list(B) RPAREN. {
     RaNode *l = ra_list_new(pstate);
     A = ra_list_push(pstate, l, B);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    A = ra_list_push(ctx.user, l, B);
+}
 values_list(A) ::= values_list(B) COMMA LPAREN expr_list(C) RPAREN. {
     A = ra_list_push(pstate, B, C);
+}
+%action_rust {
+    A = ra_list_push(ctx.user, B, C);
 }
 
 /* ================================================================== */
@@ -765,27 +1169,54 @@ insert_stmt(A) ::= INSERT INTO IDENT(T) opt_col_list(C)
                     insert_source(S) opt_on_conflict(O) opt_returning(R). {
     A = ra_insert(pstate, T.text, C, S, O, R);
 }
+%action_rust {
+    A = ra_insert(ctx.user, T.text(), C, S, O, R);
+}
 
 insert_source(A) ::= select_stmt(B).              { A = B; }
 insert_source(A) ::= DEFAULT VALUES.              { A = ra_default_values(pstate); }
+%action_rust {
+    A = ra_default_values(ctx.user);
+}
 
 opt_col_list(A) ::= .                             { A = NULL; }
+%action_rust {
+    A = Value::default();
+}
 opt_col_list(A) ::= LPAREN ident_list(B) RPAREN.  { A = B; }
 
 opt_on_conflict(A) ::= .                          { A = NULL; }
+%action_rust {
+    A = Value::default();
+}
 opt_on_conflict(A) ::= ON CONFLICT DO NOTHING.    { A = ra_on_conflict_nothing(pstate); }
+%action_rust {
+    A = ra_on_conflict_nothing(ctx.user);
+}
 opt_on_conflict(A) ::= ON CONFLICT LPAREN ident_list(T) RPAREN
                         DO UPDATE SET assignment_list(L). {
     A = ra_on_conflict_update(pstate, T, L);
 }
+%action_rust {
+    A = ra_on_conflict_update(ctx.user, T, L);
+}
 opt_on_conflict(A) ::= ON CONFLICT LPAREN ident_list(T) RPAREN DO SELECT. {
     A = ra_on_conflict_select(pstate, T);
+}
+%action_rust {
+    A = ra_on_conflict_select(ctx.user, T);
 }
 opt_on_conflict(A) ::= ON CONFLICT DO SELECT. {
     A = ra_on_conflict_select(pstate, NULL);
 }
+%action_rust {
+    A = ra_on_conflict_select(ctx.user, Value::default());
+}
 
 opt_returning(A) ::= .                            { A = NULL; }
+%action_rust {
+    A = Value::default();
+}
 opt_returning(A) ::= RETURNING target_list(B).    { A = B; }
 
 /* -- UPDATE -------------------------------------------------------- */
@@ -794,23 +1225,41 @@ update_stmt(A) ::= UPDATE IDENT(T) SET assignment_list(S)
                     opt_update_from(F) opt_where(W) opt_returning(R). {
     A = ra_update(pstate, T.text, S, W, F, R);
 }
+%action_rust {
+    A = ra_update(ctx.user, T.text(), S, W, F, R);
+}
 update_stmt(A) ::= UPDATE IDENT(T) AS IDENT SET assignment_list(S)
                     opt_update_from(F) opt_where(W) opt_returning(R). {
     A = ra_update(pstate, T.text, S, W, F, R);
+}
+%action_rust {
+    A = ra_update(ctx.user, T.text(), S, W, F, R);
 }
 
 assignment_list(A) ::= assignment(B). {
     A = ra_list_push(pstate, ra_list_new(pstate), B);
 }
+%action_rust {
+    A = ra_list_push(ctx.user, ra_list_new(ctx.user), B);
+}
 assignment_list(A) ::= assignment_list(L) COMMA assignment(B). {
     A = ra_list_push(pstate, L, B);
+}
+%action_rust {
+    A = ra_list_push(ctx.user, L, B);
 }
 
 assignment(A) ::= IDENT(C) EQ expr(V). {
     A = ra_assignment(pstate, C.text, V);
 }
+%action_rust {
+    A = ra_assignment(ctx.user, C.text(), V);
+}
 
 opt_update_from(A) ::= .                          { A = NULL; }
+%action_rust {
+    A = Value::default();
+}
 opt_update_from(A) ::= FROM from_list(B).         { A = B; }
 
 /* -- DELETE -------------------------------------------------------- */
@@ -819,17 +1268,29 @@ delete_stmt(A) ::= DELETE FROM IDENT(T)
                     opt_using(U) opt_where(W) opt_returning(R). {
     A = ra_delete(pstate, T.text, W, U, R);
 }
+%action_rust {
+    A = ra_delete(ctx.user, T.text(), W, U, R);
+}
 delete_stmt(A) ::= DELETE FROM IDENT(T) AS IDENT
                     opt_using(U) opt_where(W) opt_returning(R). {
     A = ra_delete(pstate, T.text, W, U, R);
 }
+%action_rust {
+    A = ra_delete(ctx.user, T.text(), W, U, R);
+}
 
 opt_using(A) ::= .                                { A = NULL; }
+%action_rust {
+    A = Value::default();
+}
 opt_using(A) ::= USING from_list(B).              { A = B; }
 
 /* -- Shared DML optional WHERE ------------------------------------- */
 
 opt_where(A) ::= .                                { A = NULL; }
+%action_rust {
+    A = Value::default();
+}
 opt_where(A) ::= WHERE expr(B).                   { A = B; }
 
 /* -- MERGE --------------------------------------------------------- */
@@ -838,34 +1299,61 @@ merge_stmt(A) ::= MERGE INTO IDENT(T) USING table_ref(S) ON expr(O)
                    merge_when_list(W) opt_returning(R). {
     A = ra_merge(pstate, T.text, S, O, W, R);
 }
+%action_rust {
+    A = ra_merge(ctx.user, T.text(), S, O, W, R);
+}
 merge_stmt(A) ::= MERGE INTO IDENT(T) AS IDENT USING table_ref(S) ON expr(O)
                    merge_when_list(W) opt_returning(R). {
     A = ra_merge(pstate, T.text, S, O, W, R);
+}
+%action_rust {
+    A = ra_merge(ctx.user, T.text(), S, O, W, R);
 }
 merge_stmt(A) ::= MERGE INTO IDENT(T) IDENT USING table_ref(S) ON expr(O)
                    merge_when_list(W) opt_returning(R). {
     A = ra_merge(pstate, T.text, S, O, W, R);
 }
+%action_rust {
+    A = ra_merge(ctx.user, T.text(), S, O, W, R);
+}
 
 merge_when_list(A) ::= merge_when(B). {
     A = ra_list_push(pstate, ra_list_new(pstate), B);
 }
+%action_rust {
+    A = ra_list_push(ctx.user, ra_list_new(ctx.user), B);
+}
 merge_when_list(A) ::= merge_when_list(L) merge_when(B). {
     A = ra_list_push(pstate, L, B);
 }
+%action_rust {
+    A = ra_list_push(ctx.user, L, B);
+}
 
 opt_merge_and(A) ::= .                { A = NULL; }
+%action_rust {
+    A = Value::default();
+}
 opt_merge_and(A) ::= AND expr(B).     { A = B; }
 
 /* WHEN MATCHED (kind 0) */
 merge_when(A) ::= WHEN MATCHED opt_merge_and(C) THEN UPDATE SET assignment_list(S). {
     A = ra_merge_when_update(pstate, 0, C, S);
 }
+%action_rust {
+    A = ra_merge_when_update(ctx.user, 0, C, S);
+}
 merge_when(A) ::= WHEN MATCHED opt_merge_and(C) THEN DELETE. {
     A = ra_merge_when_delete(pstate, 0, C);
 }
+%action_rust {
+    A = ra_merge_when_delete(ctx.user, 0, C);
+}
 merge_when(A) ::= WHEN MATCHED opt_merge_and(C) THEN DO NOTHING. {
     A = ra_merge_when_nothing(pstate, 0, C);
+}
+%action_rust {
+    A = ra_merge_when_nothing(ctx.user, 0, C);
 }
 
 /* WHEN NOT MATCHED [BY TARGET] (kind 1) */
@@ -873,12 +1361,21 @@ merge_when(A) ::= WHEN NOT MATCHED opt_merge_and(C)
                    THEN INSERT LPAREN ident_list(CO) RPAREN VALUES LPAREN expr_list(V) RPAREN. {
     A = ra_merge_when_insert(pstate, 1, C, CO, V);
 }
+%action_rust {
+    A = ra_merge_when_insert(ctx.user, 1, C, CO, V);
+}
 merge_when(A) ::= WHEN NOT MATCHED opt_merge_and(C)
                    THEN INSERT VALUES LPAREN expr_list(V) RPAREN. {
     A = ra_merge_when_insert(pstate, 1, C, NULL, V);
 }
+%action_rust {
+    A = ra_merge_when_insert(ctx.user, 1, C, Value::default(), V);
+}
 merge_when(A) ::= WHEN NOT MATCHED opt_merge_and(C) THEN DO NOTHING. {
     A = ra_merge_when_nothing(pstate, 1, C);
+}
+%action_rust {
+    A = ra_merge_when_nothing(ctx.user, 1, C);
 }
 
 /* WHEN NOT MATCHED BY SOURCE|TARGET. SOURCE/TARGET arrive as IDENT;
@@ -890,19 +1387,34 @@ merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C)
                    THEN UPDATE SET assignment_list(S). {
     A = ra_merge_when_update(pstate, ra_merge_kind_by(D.text), C, S);
 }
+%action_rust {
+    A = ra_merge_when_update(ctx.user, ra_merge_kind_by(D.text()), C, S);
+}
 merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C) THEN DELETE. {
     A = ra_merge_when_delete(pstate, ra_merge_kind_by(D.text), C);
 }
+%action_rust {
+    A = ra_merge_when_delete(ctx.user, ra_merge_kind_by(D.text()), C);
+}
 merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C) THEN DO NOTHING. {
     A = ra_merge_when_nothing(pstate, ra_merge_kind_by(D.text), C);
+}
+%action_rust {
+    A = ra_merge_when_nothing(ctx.user, ra_merge_kind_by(D.text()), C);
 }
 merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C)
                    THEN INSERT LPAREN ident_list(CO) RPAREN VALUES LPAREN expr_list(V) RPAREN. {
     A = ra_merge_when_insert(pstate, ra_merge_kind_by(D.text), C, CO, V);
 }
+%action_rust {
+    A = ra_merge_when_insert(ctx.user, ra_merge_kind_by(D.text()), C, CO, V);
+}
 merge_when(A) ::= WHEN NOT MATCHED BY IDENT(D) opt_merge_and(C)
                    THEN INSERT VALUES LPAREN expr_list(V) RPAREN. {
     A = ra_merge_when_insert(pstate, ra_merge_kind_by(D.text), C, NULL, V);
+}
+%action_rust {
+    A = ra_merge_when_insert(ctx.user, ra_merge_kind_by(D.text()), C, Value::default(), V);
 }
 
 /* -- GRAPH_TABLE (SQL/PGQ, SQL:2023 / PostgreSQL 19) --------------- */
@@ -911,48 +1423,99 @@ graph_table_ref(A) ::= GRAPH_TABLE LPAREN IDENT(G) MATCH graph_pattern(P)
                         COLUMNS LPAREN target_list(C) RPAREN RPAREN. {
     A = ra_graph_table(pstate, G.text, P, C, NULL);
 }
+%action_rust {
+    A = ra_graph_table(ctx.user, Some(G.text()), P, C, None);
+}
 graph_table_ref(A) ::= GRAPH_TABLE LPAREN IDENT(G) MATCH graph_pattern(P)
                         COLUMNS LPAREN target_list(C) RPAREN RPAREN AS IDENT(AL). {
     A = ra_graph_table(pstate, G.text, P, C, AL.text);
+}
+%action_rust {
+    A = ra_graph_table(ctx.user, Some(G.text()), P, C, Some(AL.text()));
 }
 
 graph_pattern(A) ::= graph_elem(B). {
     A = ra_list_push(pstate, ra_list_new(pstate), B);
 }
+%action_rust {
+    A = ra_list_push(ctx.user, ra_list_new(ctx.user), B);
+}
 graph_pattern(A) ::= graph_pattern(L) graph_elem(B). {
     A = ra_list_push(pstate, L, B);
+}
+%action_rust {
+    A = ra_list_push(ctx.user, L, B);
 }
 
 /* vertices: ( ), (v), (v IS label), (IS label) */
 graph_elem(A) ::= LPAREN RPAREN.                 { A = ra_graph_vertex(pstate, NULL, NULL); }
+%action_rust {
+    A = ra_graph_vertex(ctx.user, None, None);
+}
 graph_elem(A) ::= LPAREN IDENT(V) RPAREN.        { A = ra_graph_vertex(pstate, V.text, NULL); }
+%action_rust {
+    A = ra_graph_vertex(ctx.user, Some(V.text()), None);
+}
 graph_elem(A) ::= LPAREN IDENT(V) IS IDENT(L) RPAREN. {
     A = ra_graph_vertex(pstate, V.text, L.text);
 }
+%action_rust {
+    A = ra_graph_vertex(ctx.user, Some(V.text()), Some(L.text()));
+}
 graph_elem(A) ::= LPAREN IS IDENT(L) RPAREN.     { A = ra_graph_vertex(pstate, NULL, L.text); }
+%action_rust {
+    A = ra_graph_vertex(ctx.user, None, Some(L.text()));
+}
 
 /* edges: right -[..]-> (dir 0), undirected -[..]- (dir 2),
  *        left <-[..]- (dir 1) */
 graph_elem(A) ::= MINUS LBRACKET RBRACKET ARROW. { A = ra_graph_edge(pstate, NULL, NULL, 0); }
+%action_rust {
+    A = ra_graph_edge(ctx.user, None, None, 0);
+}
 graph_elem(A) ::= MINUS LBRACKET IDENT(V) RBRACKET ARROW. {
     A = ra_graph_edge(pstate, V.text, NULL, 0);
+}
+%action_rust {
+    A = ra_graph_edge(ctx.user, Some(V.text()), None, 0);
 }
 graph_elem(A) ::= MINUS LBRACKET IDENT(V) IS IDENT(L) RBRACKET ARROW. {
     A = ra_graph_edge(pstate, V.text, L.text, 0);
 }
+%action_rust {
+    A = ra_graph_edge(ctx.user, Some(V.text()), Some(L.text()), 0);
+}
 graph_elem(A) ::= MINUS LBRACKET RBRACKET MINUS. { A = ra_graph_edge(pstate, NULL, NULL, 2); }
+%action_rust {
+    A = ra_graph_edge(ctx.user, None, None, 2);
+}
 graph_elem(A) ::= MINUS LBRACKET IDENT(V) RBRACKET MINUS. {
     A = ra_graph_edge(pstate, V.text, NULL, 2);
+}
+%action_rust {
+    A = ra_graph_edge(ctx.user, Some(V.text()), None, 2);
 }
 graph_elem(A) ::= MINUS LBRACKET IDENT(V) IS IDENT(L) RBRACKET MINUS. {
     A = ra_graph_edge(pstate, V.text, L.text, 2);
 }
+%action_rust {
+    A = ra_graph_edge(ctx.user, Some(V.text()), Some(L.text()), 2);
+}
 graph_elem(A) ::= LT MINUS LBRACKET RBRACKET MINUS. { A = ra_graph_edge(pstate, NULL, NULL, 1); }
+%action_rust {
+    A = ra_graph_edge(ctx.user, None, None, 1);
+}
 graph_elem(A) ::= LT MINUS LBRACKET IDENT(V) RBRACKET MINUS. {
     A = ra_graph_edge(pstate, V.text, NULL, 1);
 }
+%action_rust {
+    A = ra_graph_edge(ctx.user, Some(V.text()), None, 1);
+}
 graph_elem(A) ::= LT MINUS LBRACKET IDENT(V) IS IDENT(L) RBRACKET MINUS. {
     A = ra_graph_edge(pstate, V.text, L.text, 1);
+}
+%action_rust {
+    A = ra_graph_edge(ctx.user, Some(V.text()), Some(L.text()), 1);
 }
 
 /* ================================================================== */
@@ -964,44 +1527,110 @@ graph_elem(A) ::= LT MINUS LBRACKET IDENT(V) IS IDENT(L) RBRACKET MINUS. {
 expr(A) ::= IDENT(B). {
     A = ra_column(pstate, B.text);
 }
+%action_rust {
+    A = ra_column(ctx.user, B.text());
+}
 expr(A) ::= IDENT(B) DOT IDENT(C). {
     A = ra_qualified_column(pstate, B.text, C.text);
+}
+%action_rust {
+    A = ra_qualified_column(ctx.user, B.text(), C.text());
 }
 expr(A) ::= ICONST(B). {
     A = ra_const_int(pstate, B.int_val);
 }
+%action_rust {
+    A = ra_const_int(ctx.user, B.int_val);
+}
 expr(A) ::= FCONST(B). {
     A = ra_const_float(pstate, B.float_val);
+}
+%action_rust {
+    A = ra_const_float(ctx.user, B.float_val);
 }
 expr(A) ::= SCONST(B). {
     A = ra_const_str(pstate, B.text);
 }
+%action_rust {
+    A = ra_const_str(ctx.user, B.text());
+}
 expr(A) ::= NULL_KW. {
     A = ra_const_null(pstate);
+}
+%action_rust {
+    A = ra_const_null(ctx.user);
 }
 expr(A) ::= TRUE_KW. {
     A = ra_const_int(pstate, 1);
 }
+%action_rust {
+    A = ra_const_int(ctx.user, 1);
+}
 expr(A) ::= FALSE_KW. {
     A = ra_const_int(pstate, 0);
+}
+%action_rust {
+    A = ra_const_int(ctx.user, 0);
 }
 
 /* -- Binary operations --------------------------------------------- */
 
 expr(A) ::= expr(B) PLUS expr(C).    { A = ra_binop(pstate, 0, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 0, B, C);
+}
 expr(A) ::= expr(B) MINUS expr(C).   { A = ra_binop(pstate, 1, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 1, B, C);
+}
 expr(A) ::= expr(B) STAR expr(C).    { A = ra_binop(pstate, 2, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 2, B, C);
+}
 expr(A) ::= expr(B) SLASH expr(C).   { A = ra_binop(pstate, 3, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 3, B, C);
+}
 expr(A) ::= expr(B) EQ expr(C).      { A = ra_binop(pstate, 4, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 4, B, C);
+}
 expr(A) ::= expr(B) NE expr(C).      { A = ra_binop(pstate, 5, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 5, B, C);
+}
 expr(A) ::= expr(B) LT expr(C).      { A = ra_binop(pstate, 6, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 6, B, C);
+}
 expr(A) ::= expr(B) LE expr(C).      { A = ra_binop(pstate, 7, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 7, B, C);
+}
 expr(A) ::= expr(B) GT expr(C).      { A = ra_binop(pstate, 8, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 8, B, C);
+}
 expr(A) ::= expr(B) GE expr(C).      { A = ra_binop(pstate, 9, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 9, B, C);
+}
 expr(A) ::= expr(B) AND expr(C).     { A = ra_binop(pstate, 10, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 10, B, C);
+}
 expr(A) ::= expr(B) OR expr(C).      { A = ra_binop(pstate, 11, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 11, B, C);
+}
 expr(A) ::= expr(B) PERCENT expr(C). { A = ra_binop(pstate, 12, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 12, B, C);
+}
 expr(A) ::= expr(B) CONCAT expr(C).  { A = ra_binop(pstate, 13, B, C); }
+%action_rust {
+    A = ra_binop(ctx.user, 13, B, C);
+}
 
 /* -- ALL/ANY/SOME predicates --------------------------------------- */
 /* Comparison with ALL/ANY subquery: value > ALL (subquery) */
@@ -1012,11 +1641,23 @@ expr(A) ::= expr(B) EQ ALL LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__eq_all", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__eq_all", args);
+}
 expr(A) ::= expr(B) NE ALL LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__ne_all", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__ne_all", args);
 }
 expr(A) ::= expr(B) LT ALL LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
@@ -1024,11 +1665,23 @@ expr(A) ::= expr(B) LT ALL LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__lt_all", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__lt_all", args);
+}
 expr(A) ::= expr(B) LE ALL LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__le_all", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__le_all", args);
 }
 expr(A) ::= expr(B) GT ALL LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
@@ -1036,11 +1689,23 @@ expr(A) ::= expr(B) GT ALL LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__gt_all", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__gt_all", args);
+}
 expr(A) ::= expr(B) GE ALL LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__ge_all", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__ge_all", args);
 }
 
 expr(A) ::= expr(B) EQ ANY LPAREN select_stmt(S) RPAREN. {
@@ -1049,11 +1714,23 @@ expr(A) ::= expr(B) EQ ANY LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__eq_any", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__eq_any", args);
+}
 expr(A) ::= expr(B) NE ANY LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__ne_any", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__ne_any", args);
 }
 expr(A) ::= expr(B) LT ANY LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
@@ -1061,11 +1738,23 @@ expr(A) ::= expr(B) LT ANY LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__lt_any", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__lt_any", args);
+}
 expr(A) ::= expr(B) LE ANY LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__le_any", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__le_any", args);
 }
 expr(A) ::= expr(B) GT ANY LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
@@ -1073,26 +1762,74 @@ expr(A) ::= expr(B) GT ANY LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__gt_any", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__gt_any", args);
+}
 expr(A) ::= expr(B) GE ANY LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__ge_any", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__ge_any", args);
+}
 
 /* OP ANY/ALL (array expression): a = ANY(ARRAY[...]) etc. -> ScalarArrayOpExpr */
 expr(A) ::= expr(B) EQ ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_eq_any",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_eq_any",a);
+}
 expr(A) ::= expr(B) NE ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_ne_any",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_ne_any",a);
+}
 expr(A) ::= expr(B) LT ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_lt_any",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_lt_any",a);
+}
 expr(A) ::= expr(B) LE ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_le_any",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_le_any",a);
+}
 expr(A) ::= expr(B) GT ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_gt_any",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_gt_any",a);
+}
 expr(A) ::= expr(B) GE ANY LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_ge_any",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_ge_any",a);
+}
 expr(A) ::= expr(B) EQ ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_eq_all",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_eq_all",a);
+}
 expr(A) ::= expr(B) NE ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_ne_all",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_ne_all",a);
+}
 expr(A) ::= expr(B) LT ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_lt_all",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_lt_all",a);
+}
 expr(A) ::= expr(B) LE ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_le_all",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_le_all",a);
+}
 expr(A) ::= expr(B) GT ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_gt_all",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_gt_all",a);
+}
 expr(A) ::= expr(B) GE ALL LPAREN expr(E) RPAREN. { RaNode *a=ra_list_new(pstate); a=ra_list_push(pstate,a,B); a=ra_list_push(pstate,a,E); A=ra_func(pstate,"__saoarr_ge_all",a); }
+%action_rust {
+    let mut a =ra_list_new(ctx.user); a=ra_list_push(ctx.user,a,B); a=ra_list_push(ctx.user,a,E); A=ra_func(ctx.user,"__saoarr_ge_all",a);
+}
 
 /* SOME is a synonym for ANY */
 expr(A) ::= expr(B) EQ SOME LPAREN select_stmt(S) RPAREN. {
@@ -1101,11 +1838,23 @@ expr(A) ::= expr(B) EQ SOME LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__eq_any", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__eq_any", args);
+}
 expr(A) ::= expr(B) NE SOME LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__ne_any", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__ne_any", args);
 }
 expr(A) ::= expr(B) LT SOME LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
@@ -1113,11 +1862,23 @@ expr(A) ::= expr(B) LT SOME LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__lt_any", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__lt_any", args);
+}
 expr(A) ::= expr(B) LE SOME LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__le_any", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__le_any", args);
 }
 expr(A) ::= expr(B) GT SOME LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
@@ -1125,21 +1886,39 @@ expr(A) ::= expr(B) GT SOME LPAREN select_stmt(S) RPAREN. {
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__gt_any", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__gt_any", args);
+}
 expr(A) ::= expr(B) GE SOME LPAREN select_stmt(S) RPAREN. {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, S);
     A = ra_func(pstate, "__ge_any", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, S);
+    A = ra_func(ctx.user, "__ge_any", args);
+}
 
 /* -- Unary minus --------------------------------------------------- */
 
 expr(A) ::= MINUS expr(B). [UMINUS]  { A = ra_binop(pstate, 1, ra_const_int(pstate, 0), B); }
+%action_rust {
+    A = ra_binop(ctx.user, 1, ra_const_int(ctx.user, 0), B);
+}
 
 /* -- NOT expression ------------------------------------------------ */
 
 expr(A) ::= NOT expr(B). {
     A = ra_unary_op(pstate, 0, B); /* 0 = Not */
+}
+%action_rust {
+    A = ra_unary_op(ctx.user, 0, B); /* 0 = Not */
 }
 
 /* -- JSON field access operators ----------------------------------- */
@@ -1152,11 +1931,23 @@ expr(A) ::= expr(B) ARROW expr(C). {
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__json_field", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__json_field", args);
+}
 expr(A) ::= expr(B) ARROW_TEXT expr(C). {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__json_field_text", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__json_field_text", args);
 }
 
 /* -- JSONB operators ----------------------------------------------- */
@@ -1168,11 +1959,23 @@ expr(A) ::= expr(B) AT_GT expr(C). {
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_contains", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_contains", args);
+}
 expr(A) ::= expr(B) LT_AT expr(C). {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_contained_by", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_contained_by", args);
 }
 expr(A) ::= expr(B) AT_QUESTION expr(C). {
     RaNode *args = ra_list_new(pstate);
@@ -1180,11 +1983,23 @@ expr(A) ::= expr(B) AT_QUESTION expr(C). {
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_path_exists", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_path_exists", args);
+}
 expr(A) ::= expr(B) AT_AT expr(C). {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_path_match", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_path_match", args);
 }
 
 /* JSONB key-exists operators (?, ?|, ?&) and #>> text path */
@@ -1194,11 +2009,23 @@ expr(A) ::= expr(B) JSONB_EXISTS expr(C). {
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_key_exists", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_key_exists", args);
+}
 expr(A) ::= expr(B) PLACEHOLDER expr(C). {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_key_exists", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_key_exists", args);
 }
 expr(A) ::= expr(B) JSONB_TEXT_PATH expr(C). {
     RaNode *args = ra_list_new(pstate);
@@ -1206,17 +2033,35 @@ expr(A) ::= expr(B) JSONB_TEXT_PATH expr(C). {
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_text_path", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_text_path", args);
+}
 expr(A) ::= expr(B) JSONB_ANY_KEY expr(C). {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_any_key", args);
 }
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_any_key", args);
+}
 expr(A) ::= expr(B) JSONB_ALL_KEYS expr(C). {
     RaNode *args = ra_list_new(pstate);
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__jsonb_all_keys", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__jsonb_all_keys", args);
 }
 
 /* -- IS NULL / IS NOT NULL ----------------------------------------- */
@@ -1226,10 +2071,20 @@ expr(A) ::= expr(B) IS NULL_KW. {
     l = ra_list_push(pstate, l, B);
     A = ra_func(pstate, "__is_null", l);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    A = ra_func(ctx.user, "__is_null", l);
+}
 expr(A) ::= expr(B) IS NOT NULL_KW. {
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, B);
     A = ra_func(pstate, "__is_not_null", l);
+}
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    A = ra_func(ctx.user, "__is_not_null", l);
 }
 
 /* -- BETWEEN ------------------------------------------------------- */
@@ -1241,11 +2096,22 @@ expr(A) ::= expr(B) BETWEEN expr(C) AND expr(D). [BETWEEN] {
     RaNode *le = ra_binop(pstate, 7, B, D);  /* LE */
     A = ra_binop(pstate, 10, ge, le);         /* AND */
 }
+%action_rust {
+    /* Expand: expr BETWEEN low AND high => (expr >= low) AND (expr <= high) */
+    let mut ge = ra_binop(ctx.user, 9, B.clone(), C);  /* GE */
+    let mut le = ra_binop(ctx.user, 7, B.clone(), D);  /* LE */
+    A = ra_binop(ctx.user, 10, ge, le);         /* AND */
+}
 
 expr(A) ::= expr(B) NOT BETWEEN expr(C) AND expr(D). [BETWEEN] {
     RaNode *lt = ra_binop(pstate, 6, B, C);  /* LT */
     RaNode *gt = ra_binop(pstate, 8, B, D);  /* GT */
     A = ra_binop(pstate, 11, lt, gt); /* OR: NOT BETWEEN = < low OR > high */
+}
+%action_rust {
+    let mut lt = ra_binop(ctx.user, 6, B.clone(), C);  /* LT */
+    let mut gt = ra_binop(ctx.user, 8, B.clone(), D);  /* GT */
+    A = ra_binop(ctx.user, 11, lt, gt); /* OR: NOT BETWEEN = < low OR > high */
 }
 
 /* -- LIKE / ILIKE -------------------------------------------------- */
@@ -1256,6 +2122,12 @@ expr(A) ::= expr(B) LIKE expr(C). [LIKE] {
     l = ra_list_push(pstate, l, C);
     A = ra_func(pstate, "__like", l);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    l = ra_list_push(ctx.user, l, C);
+    A = ra_func(ctx.user, "__like", l);
+}
 
 expr(A) ::= expr(B) NOT LIKE expr(C). [LIKE] {
     RaNode *l = ra_list_new(pstate);
@@ -1264,12 +2136,25 @@ expr(A) ::= expr(B) NOT LIKE expr(C). [LIKE] {
     RaNode *like = ra_func(pstate, "__like", l);
     A = ra_unary_op(pstate, 0, like); /* NOT */
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    l = ra_list_push(ctx.user, l, C);
+    let mut like = ra_func(ctx.user, "__like", l);
+    A = ra_unary_op(ctx.user, 0, like); /* NOT */
+}
 
 expr(A) ::= expr(B) ILIKE expr(C). [ILIKE] {
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, B);
     l = ra_list_push(pstate, l, C);
     A = ra_func(pstate, "__ilike", l);
+}
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    l = ra_list_push(ctx.user, l, C);
+    A = ra_func(ctx.user, "__ilike", l);
 }
 
 expr(A) ::= expr(B) NOT ILIKE expr(C). [ILIKE] {
@@ -1278,6 +2163,13 @@ expr(A) ::= expr(B) NOT ILIKE expr(C). [ILIKE] {
     l = ra_list_push(pstate, l, C);
     RaNode *ilike = ra_func(pstate, "__ilike", l);
     A = ra_unary_op(pstate, 0, ilike); /* NOT */
+}
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    l = ra_list_push(ctx.user, l, C);
+    let mut ilike = ra_func(ctx.user, "__ilike", l);
+    A = ra_unary_op(ctx.user, 0, ilike); /* NOT */
 }
 
 /* -- SIMILAR TO ---------------------------------------------------- */
@@ -1288,6 +2180,12 @@ expr(A) ::= expr(B) SIMILAR IDENT expr(C). [SIMILAR] {
     l = ra_list_push(pstate, l, C);
     A = ra_func(pstate, "__similar_to", l);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    l = ra_list_push(ctx.user, l, C);
+    A = ra_func(ctx.user, "__similar_to", l);
+}
 
 expr(A) ::= expr(B) NOT SIMILAR IDENT expr(C). [SIMILAR] {
     RaNode *l = ra_list_new(pstate);
@@ -1295,6 +2193,13 @@ expr(A) ::= expr(B) NOT SIMILAR IDENT expr(C). [SIMILAR] {
     l = ra_list_push(pstate, l, C);
     RaNode *sim = ra_func(pstate, "__similar_to", l);
     A = ra_unary_op(pstate, 0, sim); /* NOT */
+}
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    l = ra_list_push(ctx.user, l, C);
+    let mut sim = ra_func(ctx.user, "__similar_to", l);
+    A = ra_unary_op(ctx.user, 0, sim); /* NOT */
 }
 
 /* -- IN expression ------------------------------------------------- */
@@ -1304,20 +2209,36 @@ expr(A) ::= expr(B) IN LPAREN expr_list(C) RPAREN. [IN] {
     ra_list_prepend(pstate, C, B);
     A = ra_func(pstate, "__in_list", C);
 }
+%action_rust {
+    /* Encode as __in_list(test, values...) — test expr is the first arg. */
+    ra_list_prepend(ctx.user, C.clone(), B);
+    A = ra_func(ctx.user, "__in_list", C.clone());
+}
 
 expr(A) ::= expr(B) NOT IN LPAREN expr_list(C) RPAREN. [IN] {
     ra_list_prepend(pstate, C, B);
     A = ra_unary_op(pstate, 0, ra_func(pstate, "__in_list", C));
+}
+%action_rust {
+    ra_list_prepend(ctx.user, C.clone(), B);
+    A = ra_unary_op(ctx.user, 0, ra_func(ctx.user, "__in_list", C.clone()));
 }
 
 /* IN (subquery) */
 expr(A) ::= expr(B) IN LPAREN select_stmt(C) RPAREN. [IN] {
     A = ra_subquery(pstate, 2, C, B); /* 2 = In */
 }
+%action_rust {
+    A = ra_subquery(ctx.user, 2, C, B); /* 2 = In */
+}
 
 expr(A) ::= expr(B) NOT IN LPAREN select_stmt(C) RPAREN. [IN] {
     RaNode *inex = ra_subquery(pstate, 2, C, B);
     A = ra_unary_op(pstate, 0, inex); /* NOT */
+}
+%action_rust {
+    let mut inex = ra_subquery(ctx.user, 2, C, B);
+    A = ra_unary_op(ctx.user, 0, inex); /* NOT */
 }
 
 /* -- EXISTS -------------------------------------------------------- */
@@ -1325,20 +2246,35 @@ expr(A) ::= expr(B) NOT IN LPAREN select_stmt(C) RPAREN. [IN] {
 expr(A) ::= EXISTS LPAREN select_stmt(B) RPAREN. {
     A = ra_subquery(pstate, 1, B, 0); /* 1 = Exists, no test expr */
 }
+%action_rust {
+    A = ra_subquery(ctx.user, 1, B, Value::default()); /* 1 = Exists, no test expr */
+}
 
 /* -- CASE expression ----------------------------------------------- */
 
 expr(A) ::= CASE when_list(B) END. {
     A = ra_case(pstate, 0, B, 0); /* searched CASE, no else */
 }
+%action_rust {
+    A = ra_case(ctx.user, Value::default(), B, Value::default()); /* searched CASE, no else */
+}
 expr(A) ::= CASE when_list(B) ELSE expr(C) END. {
     A = ra_case(pstate, 0, B, C); /* searched CASE with else */
+}
+%action_rust {
+    A = ra_case(ctx.user, Value::default(), B, C); /* searched CASE with else */
 }
 expr(A) ::= CASE expr(B) when_list(C) END. {
     A = ra_case(pstate, B, C, 0); /* simple CASE, no else */
 }
+%action_rust {
+    A = ra_case(ctx.user, B, C, Value::default()); /* simple CASE, no else */
+}
 expr(A) ::= CASE expr(B) when_list(C) ELSE expr(D) END. {
     A = ra_case(pstate, B, C, D); /* simple CASE with else */
+}
+%action_rust {
+    A = ra_case(ctx.user, B, C, D); /* simple CASE with else */
 }
 
 when_list(A) ::= WHEN expr(B) THEN expr(C). {
@@ -1346,9 +2282,18 @@ when_list(A) ::= WHEN expr(B) THEN expr(C). {
     l = ra_list_push(pstate, l, B);
     A = ra_list_push(pstate, l, C);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, B);
+    A = ra_list_push(ctx.user, l, C);
+}
 when_list(A) ::= when_list(B) WHEN expr(C) THEN expr(D). {
     RaNode *l = ra_list_push(pstate, B, C);
     A = ra_list_push(pstate, l, D);
+}
+%action_rust {
+    let mut l = ra_list_push(ctx.user, B, C);
+    A = ra_list_push(ctx.user, l, D);
 }
 
 /* -- CAST expression ----------------------------------------------- */
@@ -1356,10 +2301,16 @@ when_list(A) ::= when_list(B) WHEN expr(C) THEN expr(D). {
 expr(A) ::= CAST LPAREN expr(B) AS type_name(C) RPAREN. {
     A = ra_cast(pstate, B, C.text, (size_t)C.int_val);
 }
+%action_rust {
+    A = ra_cast(ctx.user, B, C.clone().text(), (C.clone().int_val as usize));
+}
 
 /* PostgreSQL :: type cast operator: expr::type */
 expr(A) ::= expr(B) COLONCOLON type_name(C). {
     A = ra_cast(pstate, B, C.text, (size_t)C.int_val);
+}
+%action_rust {
+    A = ra_cast(ctx.user, B, C.clone().text(), (C.clone().int_val as usize));
 }
 
 %type type_name {RaToken}
@@ -1370,6 +2321,13 @@ type_name(A) ::= IDENT(B). {
     A.length = 0;
     A.float_val = 0;
 }
+%action_rust {
+    A = B.clone().clone();
+    A.int_val = (B.clone().text().len() as i64);
+    A.location = B.clone().location;
+    A.length = 0;
+    A.float_val = 0.0;
+}
 type_name(A) ::= IDENT(B) LPAREN ICONST RPAREN. {
     /* e.g. VARCHAR(255) -- use just the base type name */
     A.text = B.text;
@@ -1377,6 +2335,14 @@ type_name(A) ::= IDENT(B) LPAREN ICONST RPAREN. {
     A.location = B.location;
     A.length = 0;
     A.float_val = 0;
+}
+%action_rust {
+    /* e.g. VARCHAR(255) -- use just the base type name */
+    A = B.clone().clone();
+    A.int_val = (B.clone().text().len() as i64);
+    A.location = B.clone().location;
+    A.length = 0;
+    A.float_val = 0.0;
 }
 type_name(A) ::= IDENT(B) LPAREN ICONST COMMA ICONST RPAREN. {
     /* e.g. DECIMAL(15,4), NUMERIC(10,2) -- use just the base type name */
@@ -1386,11 +2352,22 @@ type_name(A) ::= IDENT(B) LPAREN ICONST COMMA ICONST RPAREN. {
     A.length = 0;
     A.float_val = 0;
 }
+%action_rust {
+    /* e.g. DECIMAL(15,4), NUMERIC(10,2) -- use just the base type name */
+    A = B.clone().clone();
+    A.int_val = (B.clone().text().len() as i64);
+    A.location = B.clone().location;
+    A.length = 0;
+    A.float_val = 0.0;
+}
 
 /* -- Scalar subquery ----------------------------------------------- */
 
 expr(A) ::= LPAREN select_stmt(B) RPAREN. {
     A = ra_subquery(pstate, 0, B, 0); /* 0 = Scalar */
+}
+%action_rust {
+    A = ra_subquery(ctx.user, 0, B, Value::default()); /* 0 = Scalar */
 }
 
 /* -- Function call ------------------------------------------------- */
@@ -1398,14 +2375,26 @@ expr(A) ::= LPAREN select_stmt(B) RPAREN. {
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN. {
     A = ra_func(pstate, B.text, C);
 }
+%action_rust {
+    A = ra_func(ctx.user, B.text(), C);
+}
 expr(A) ::= IDENT(B) LPAREN RPAREN. {
     A = ra_func(pstate, B.text, ra_list_new(pstate));
+}
+%action_rust {
+    A = ra_func(ctx.user, B.text(), ra_list_new(ctx.user));
 }
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN. {
     /* COUNT(*) style */
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
     A = ra_func(pstate, B.text, l);
+}
+%action_rust {
+    /* COUNT(*) style */
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, ra_column(ctx.user, "*"));
+    A = ra_func(ctx.user, B.text(), l);
 }
 
 /* -- FILTER clause on aggregates ----------------------------------- */
@@ -1420,6 +2409,9 @@ expr(A) ::= IDENT(B) LPAREN STAR RPAREN. {
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN FILTER LPAREN WHERE expr(D) RPAREN. {
     A = ra_filter_agg(pstate, B.text, C, D);
 }
+%action_rust {
+    A = ra_filter_agg(ctx.user, B.text(), C, D);
+}
 
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN FILTER LPAREN WHERE expr(C) RPAREN. {
     /* COUNT(*) FILTER (WHERE cond) → COUNT(CASE WHEN cond THEN 1 ELSE NULL END) */
@@ -1430,6 +2422,16 @@ expr(A) ::= IDENT(B) LPAREN STAR RPAREN FILTER LPAREN WHERE expr(C) RPAREN. {
     RaNode *new_args = ra_list_new(pstate);
     new_args = ra_list_push(pstate, new_args, case_expr);
     A = ra_func(pstate, B.text, new_args);
+}
+%action_rust {
+    /* COUNT(*) FILTER (WHERE cond) → COUNT(CASE WHEN cond THEN 1 ELSE Value::default() END) */
+    let mut when_list = ra_list_new(ctx.user);
+    when_list = ra_list_push(ctx.user, when_list, C); /* condition */
+    when_list = ra_list_push(ctx.user, when_list, ra_const_int(ctx.user, 1)); /* THEN 1 */
+    let mut case_expr = ra_case(ctx.user, Value::default(), when_list, ra_const_null(ctx.user));
+    let mut new_args = ra_list_new(ctx.user);
+    new_args = ra_list_push(ctx.user, new_args, case_expr);
+    A = ra_func(ctx.user, B.text(), new_args);
 }
 
 expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN FILTER LPAREN WHERE expr(D) RPAREN. {
@@ -1445,6 +2447,19 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN FILTER LPAREN WHERE expr(D) 
     new_args = ra_list_push(pstate, new_args, marker);
     A = ra_func(pstate, B.text, new_args);
 }
+%action_rust {
+    /* agg(DISTINCT x) FILTER (WHERE cond) → agg(DISTINCT CASE WHEN cond THEN x ELSE Value::default() END) */
+    let mut when_list = ra_list_new(ctx.user);
+    when_list = ra_list_push(ctx.user, when_list, D);
+    when_list = ra_list_push(ctx.user, when_list, C);
+    let mut case_expr = ra_case(ctx.user, Value::default(), when_list, ra_const_null(ctx.user));
+    let mut darg = ra_list_new(ctx.user);
+    darg = ra_list_push(ctx.user, darg, case_expr);
+    let mut marker = ra_func(ctx.user, "__distinct", darg);
+    let mut new_args = ra_list_new(ctx.user);
+    new_args = ra_list_push(ctx.user, new_args, marker);
+    A = ra_func(ctx.user, B.text(), new_args);
+}
 
 /* -- Aggregate DISTINCT: COUNT(DISTINCT col) etc. ------------------ */
 
@@ -1459,6 +2474,17 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN. {
     args = ra_list_push(pstate, args, marker);
     A = ra_func(pstate, B.text, args);
 }
+%action_rust {
+    /* Wrap the argument in a __distinct marker so the plan builder, which
+       does not yet emit Aggref.aggdistinct, defers to native PG instead of
+       silently building a non-DISTINCT aggregate (a wrong result). */
+    let mut darg = ra_list_new(ctx.user);
+    darg = ra_list_push(ctx.user, darg, C);
+    let mut marker = ra_func(ctx.user, "__distinct", darg);
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, marker);
+    A = ra_func(ctx.user, B.text(), args);
+}
 
 /* -- WITHIN GROUP (ordered-set aggregates) ------------------------- */
 /* e.g. PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) */
@@ -1466,6 +2492,10 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN. {
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN WITHIN GROUP LPAREN ORDER BY sort_list(D) RPAREN. {
     (void)D;
     A = ra_func(pstate, B.text, C);
+}
+%action_rust {
+    let _ = &D;
+    A = ra_func(ctx.user, B.text(), C);
 }
 
 /* -- Window function ----------------------------------------------- */
@@ -1477,6 +2507,9 @@ expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER LPAREN
              opt_partition(D) opt_window_order(E) opt_window_frame(F) RPAREN. {
     A = ra_window_marker_full(pstate, B.text, C, D, E, F.int_val);
 }
+%action_rust {
+    A = ra_window_marker_full(ctx.user, B.text(), C, D, E, F.int_val);
+}
 
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) opt_window_frame(E) RPAREN. {
@@ -1484,30 +2517,55 @@ expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
     A = ra_window_marker_full(pstate, B.text, l, C, D, E.int_val);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, ra_column(ctx.user, "*"));
+    A = ra_window_marker_full(ctx.user, B.text(), l, C, D, E.int_val);
+}
 
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) opt_window_frame(E) RPAREN. {
     A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), C, D, E.int_val);
+}
+%action_rust {
+    A = ra_window_marker_full(ctx.user, B.text(), ra_list_new(ctx.user), C, D, E.int_val);
 }
 
 /* Named window reference: func() OVER w — treated as empty window spec */
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER IDENT. {
     A = ra_window_marker_full(pstate, B.text, C, 0, 0, 0);
 }
+%action_rust {
+    A = ra_window_marker_full(ctx.user, B.text(), C, Value::default(), Value::default(), 0);
+}
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER IDENT. {
     RaNode *l = ra_list_new(pstate);
     l = ra_list_push(pstate, l, ra_column(pstate, "*"));
     A = ra_window_marker_full(pstate, B.text, l, 0, 0, 0);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, ra_column(ctx.user, "*"));
+    A = ra_window_marker_full(ctx.user, B.text(), l, Value::default(), Value::default(), 0);
+}
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER IDENT. {
     A = ra_window_marker_full(pstate, B.text, ra_list_new(pstate), 0, 0, 0);
+}
+%action_rust {
+    A = ra_window_marker_full(ctx.user, B.text(), ra_list_new(ctx.user), Value::default(), Value::default(), 0);
 }
 
 opt_partition(A) ::= PARTITION BY expr_list(B). { A = B; }
 opt_partition(A) ::= .                          { A = 0; }
+%action_rust {
+    A = Value::default();
+}
 
 opt_window_order(A) ::= ORDER BY sort_list(B).  { A = B; }
 opt_window_order(A) ::= .                       { A = 0; }
+%action_rust {
+    A = Value::default();
+}
 
 /* Window frame clause: ROWS/RANGE BETWEEN ... AND ... */
 opt_window_frame(A) ::= IDENT BETWEEN frame_bound(B) AND frame_bound(C). {
@@ -1516,15 +2574,32 @@ opt_window_frame(A) ::= IDENT BETWEEN frame_bound(B) AND frame_bound(C). {
     A.int_val = 1; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0;
     (void)B; (void)C;
 }
+%action_rust {
+    /* ROWS/RANGE BETWEEN start AND end — flag presence so the optimizer can
+     * defer (frame semantics are not built directly). */
+    A.int_val = 1;  A.location = 0; A.length = 0; A.float_val = 0.0;
+    let _ = &B; let _ = &C;
+}
 opt_window_frame(A) ::= . { A.int_val = 0; A.text = 0; A.location = 0; A.length = 0; A.float_val = 0; }
+%action_rust {
+    A.int_val = 0;  A.location = 0; A.length = 0; A.float_val = 0.0;
+}
 
 /* Frame bounds: UNBOUNDED PRECEDING, CURRENT ROW, expr PRECEDING/FOLLOWING */
 frame_bound(A) ::= IDENT IDENT. {
     /* UNBOUNDED PRECEDING, UNBOUNDED FOLLOWING, CURRENT ROW */
     A = 0;
 }
+%action_rust {
+    /* UNBOUNDED PRECEDING, UNBOUNDED FOLLOWING, CURRENT ROW */
+    A = Value::default();
+}
 frame_bound(A) ::= expr(B) IDENT. {
     /* N PRECEDING, N FOLLOWING */
+    A = B;
+}
+%action_rust {
+    /* N.clone() PRECEDING, N.clone() FOLLOWING */
     A = B;
 }
 
@@ -1541,6 +2616,12 @@ expr(A) ::= IDENT(B) LPAREN IDENT SCONST FROM expr(C) RPAREN. {
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, B.text, args);
 }
+%action_rust {
+    /* TRIM(BOTH/LEADING/TRAILING 'chars' FROM col) — keep the source expr */
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, B.text(), args);
+}
 
 /* -- Typed string literals: DATE '...', INTERVAL '...', etc. ------- */
 /* When an identifier is immediately followed by a string constant it is
@@ -1556,6 +2637,9 @@ expr(A) ::= IDENT(B) LPAREN IDENT SCONST FROM expr(C) RPAREN. {
 expr(A) ::= IDENT SCONST(B). {
     A = ra_const_str(pstate, B.text);
 }
+%action_rust {
+    A = ra_const_str(ctx.user, B.text());
+}
 
 /* -- EXTRACT function ---------------------------------------------- */
 /* EXTRACT(field FROM expr) — encoded as __extract_<field>(expr). */
@@ -1565,6 +2649,12 @@ expr(A) ::= EXTRACT LPAREN IDENT(F) FROM expr(E) RPAREN. {
     l = ra_list_push(pstate, l, E);
     A = ra_func(pstate, "__extract", l);
     (void)F;
+}
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, E);
+    A = ra_func(ctx.user, "__extract", l);
+    let _ = &F;
 }
 
 /* -- SUBSTRING function -------------------------------------------- */
@@ -1579,14 +2669,28 @@ expr(A) ::= IDENT LPAREN expr(S) FROM expr(F) IDENT expr(L) RPAREN. {
     args = ra_list_push(pstate, args, L);
     A = ra_func(pstate, "substring", args);
 }
+%action_rust {
+    /* Match any function with FROM...FOR pattern, but primarily for SUBSTRING */
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, S);
+    args = ra_list_push(ctx.user, args, F);
+    args = ra_list_push(ctx.user, args, L);
+    A = ra_func(ctx.user, "substring", args);
+}
 
 /* -- ARRAY literal ------------------------------------------------- */
 
 expr(A) ::= ARRAY LBRACKET expr_list(B) RBRACKET. {
     A = ra_array(pstate, B);
 }
+%action_rust {
+    A = ra_array(ctx.user, B);
+}
 expr(A) ::= ARRAY LBRACKET RBRACKET. {
     A = ra_array(pstate, ra_list_new(pstate));
+}
+%action_rust {
+    A = ra_array(ctx.user, ra_list_new(ctx.user));
 }
 
 /* -- Array subscript: expr[index] ---------------------------------- */
@@ -1594,11 +2698,17 @@ expr(A) ::= ARRAY LBRACKET RBRACKET. {
 expr(A) ::= expr(B) LBRACKET expr(C) RBRACKET. [LBRACKET] {
     A = ra_array_index(pstate, B, C);
 }
+%action_rust {
+    A = ra_array_index(ctx.user, B, C);
+}
 
 /* -- Parameter placeholder ----------------------------------------- */
 
 expr(A) ::= PLACEHOLDER. {
     A = ra_const_null(pstate); /* placeholder maps to NULL for now */
+}
+%action_rust {
+    A = ra_const_null(ctx.user); /* placeholder maps to Value::default() for now */
 }
 
 /* -- Regex match operator (~) -------------------------------------- */
@@ -1608,6 +2718,12 @@ expr(A) ::= expr(B) TILDE expr(C). [TILDE] {
     args = ra_list_push(pstate, args, B);
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__regex_match", args);
+}
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__regex_match", args);
 }
 
 /* -- Parenthesized expression -------------------------------------- */
@@ -1623,6 +2739,12 @@ expr(A) ::= LPAREN expr_list(B) COMMA expr(C) RPAREN. {
     args = ra_list_push(pstate, args, C);
     A = ra_func(pstate, "__row_constructor", args);
 }
+%action_rust {
+    /* Create a tuple/row constructor with 2+ elements */
+    let mut args = B.clone(); /* B.clone() is already a list */
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__row_constructor", args);
+}
 
 /* ================================================================== */
 /* Expression list                                                     */
@@ -1632,6 +2754,13 @@ expr_list(A) ::= expr(B). {
     RaNode *l = ra_list_new(pstate);
     A = ra_list_push(pstate, l, B);
 }
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    A = ra_list_push(ctx.user, l, B);
+}
 expr_list(A) ::= expr_list(B) COMMA expr(C). {
     A = ra_list_push(pstate, B, C);
+}
+%action_rust {
+    A = ra_list_push(ctx.user, B, C);
 }
