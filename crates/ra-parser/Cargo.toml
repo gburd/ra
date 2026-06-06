@@ -10,7 +10,6 @@ repository.workspace = true
 [dependencies]
 ra-core = { workspace = true }
 lime-sys = { workspace = true }
-lime-rs = { workspace = true }
 serde = { workspace = true }
 serde_yml = { workspace = true }
 serde_json = { workspace = true }

@@ -13,7 +13,6 @@ resolver = "2"
 members = [
     # Core layer (always available)
     "crates/lime-sys",
-    "crates/lime-rs",
     "crates/ra-core",
     "crates/ra-parser",
     "crates/ra-compiler",
@@ -45,7 +44,6 @@ members = [
 default-members = [
     # Core layer: cargo build builds only these by default
     "crates/lime-sys",
-    "crates/lime-rs",
     "crates/ra-core",
     "crates/ra-parser",
     "crates/ra-compiler",
@@ -182,7 +180,6 @@ ra-cli = { path = "crates/ra-cli" }
 ra-bitnet = { path = "crates/ra-bitnet" }
 ra-plan-advice = { path = "crates/ra-plan-advice" }
 lime-sys = { path = "crates/lime-sys" }
-lime-rs = { path = "crates/lime-rs" }
 postgres = { version = "0.19", features = ["with-serde_json-1"] }
 stoolap = "0.3"
 toml = "0.8"

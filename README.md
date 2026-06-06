@@ -313,7 +313,6 @@ ra/
 │   │   ├── ra-cache-api/         # Cache trait definitions
 │   │   ├── ra-sql-parser/        # SQL parser fork (lib name: sqlparser)
 │   │   ├── lime-sys/             # Lime parser generator (C, git submodule)
-│   │   └── lime-rs/              # Safe Rust bindings for Lime
 │   ├── CLI layer (--features cli):
 │   │   ├── ra-cli/               # Command-line interface
 │   │   ├── ra-adapters/          # DuckDB, MySQL, Stoolap connectors
