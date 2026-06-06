@@ -15,36 +15,6 @@ services:
     networks:
       - ra-network
 
-  ra-web:
-    build:
-      context: .
-      dockerfile: crates/ra-web/Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - RUST_LOG=info
-      - ROCKET_PORT=8000
-      - ROCKET_ADDRESS=0.0.0.0
-      - STATIC_DIR=/app/static
-      - DATABASE_URL=postgresql://ra_test:ra_test_pass@postgres-ra-extension:5432/ra_testdb
-      - REDIS_URL=redis://redis:6379
-    volumes:
-      - ./rules:/app/rules:ro
-    restart: unless-stopped
-    depends_on:
-      postgres-ra-extension:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    networks:
-      - ra-network
-
   postgres-ra-extension:
     build:
       context: .
