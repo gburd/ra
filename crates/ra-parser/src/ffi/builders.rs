@@ -9,9 +9,13 @@
 //! `RelExpr` / `Expr` AST in the arenas managed by `RaParseState`.
 
 use std::ffi::CStr;
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_char, c_int};
+#[cfg(not(feature = "rust-parser"))]
+use std::os::raw::c_void;
 
+#[cfg(not(feature = "rust-parser"))]
 use crate::lime_parser::diagnostics;
+#[cfg(not(feature = "rust-parser"))]
 use crate::lime_parser::lexer::RaToken;
 
 use ra_core::algebra::{
@@ -21,7 +25,9 @@ use ra_core::algebra::{
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
-use super::node::{decode, NodeTag, RaNode, RaParseState, StructuredParseError};
+use super::node::{decode, NodeTag, RaNode, RaParseState};
+#[cfg(not(feature = "rust-parser"))]
+use super::node::StructuredParseError;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2433,6 +2439,7 @@ fn collect_sort_keys(state: &RaParseState, list_ptr: *mut RaNode) -> Vec<SortKey
 /// - `pstate` must be null or a valid `*mut RaParseState`.
 /// - `parser` must be a valid Lime parser handle from `raAlloc`.
 /// - `token` must be a valid `RaToken` (passed by value from C).
+#[cfg(not(feature = "rust-parser"))]
 #[no_mangle]
 pub unsafe extern "C" fn ra_record_parse_error(
     pstate: *mut RaParseState,
@@ -2497,6 +2504,7 @@ pub unsafe extern "C" fn ra_record_parse_error(
 ///
 /// # Safety
 /// - `pstate` must be null or a valid `*mut RaParseState`.
+#[cfg(not(feature = "rust-parser"))]
 #[no_mangle]
 pub unsafe extern "C" fn ra_record_parse_failure(pstate: *mut RaParseState) {
     let Some(st) = (unsafe { state_ref(pstate) }) else {
