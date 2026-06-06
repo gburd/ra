@@ -122,15 +122,16 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | RFC | Title | Date | Reason |
 |-----|-------|------|--------|
 | [0059](_rejected/0059-bayesian-pruning.md) | Bayesian Adaptive Search Space Pruning (v1) | 2026-03-23 | Not integrated, learning failed (0% cross-query learning), fingerprint collisions |
+| [0092](_rejected/0092-algebra-notation-rewrite-validation.md) | Validate Rewrites Against `## Relational Algebra` Notation | 2026-06-06 | Notation is free-form prose, not a parseable language; equivalence checking is undecidable; correctness already guarded by tests + idempotence/property suite + `## Test Cases` harness |
 
 ## Statistics
 
-- **Total RFCs**: 91
+- **Total RFCs**: 92
 - **Implemented**: 33 (36%)
 - **Underway**: 2 (2%)
 - **Accepted**: 8 (9%)
 - **Under Review**: 6 (7%)
-- **Proposed**: 41 (45%)
-- **Rejected**: 1 (1%)
+- **Proposed**: 41 (44%)
+- **Rejected**: 2 (2%)
 
 ## Last Updated: 2026-05-29
