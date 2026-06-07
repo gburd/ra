@@ -429,10 +429,19 @@ fn optimize_relexpr(
     // Share the monitor's live fingerprint with the optimizer so its cost
     // model auto-tunes plan choice to the execution environment. The
     // fingerprint is an Arc<AtomicFingerprint> owned by the monitor — no
-    // global mutable state crosses into the engine.
-    let reader = ra_engine::state::FingerprintReader::from_shared(
-        crate::monitor::fingerprint_reader().shared().clone(),
-    );
+    // global mutable state crosses into the engine. When a debug override GUC
+    // is set, substitute a synthetic fingerprint so the live-conditions cost
+    // effect can be forced to known values for measurement.
+    let reader = match crate::extension_state::debug_fingerprint_override(
+        crate::monitor::fingerprint_reader().read(),
+    ) {
+        Some(fp) => ra_engine::state::FingerprintReader::from_shared(std::sync::Arc::new(
+            ra_engine::state::AtomicFingerprint::with_value(fp),
+        )),
+        None => ra_engine::state::FingerprintReader::from_shared(
+            crate::monitor::fingerprint_reader().shared().clone(),
+        ),
+    };
     let optimizer = ra_engine::Optimizer::with_config(config).with_fingerprint_reader(reader);
     optimizer
         .optimize_with_facts(rel_expr, facts)
