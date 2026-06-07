@@ -75,12 +75,63 @@ speculative router does not fast-path UNION/INTERSECT/EXCEPT.
 
 ## Open follow-ups (tracked; not yet fixed)
 
-1. **Re-enable coverage** by fixing the gated plan_builder bugs properly:
-   - non-inner-join predicate placement (`build_join_node` outer-WHERE remap);
-   - semi-join build returning 0 rows (the bare-IN regression — bisect from
-     2026-06-06).
+1. **Re-enable outer-join coverage** by fixing the predicate-pushdown bug
+   properly (see Update below) — LEFT/RIGHT/FULL/CROSS are still gated.
 2. **UNION planning blowup**: route set-ops through a fast path or cap the
    e-graph budget for set-op-dominated trees.
-3. Continue the shape sweep (recursive CTE, =ANY/=ALL, NULLS FIRST/LAST,
-   correlated scalar subqueries in SELECT, FILTER-clause aggregates, ordered-set
-   aggregates) — not yet exhausted.
+3. **Scalar subquery in WHERE**: still gated (SubPlan result param wiring);
+   re-enable with a proper fix.
+
+---
+
+## Update — same day, second pass (root-caused one family, narrowed the gate)
+
+Deeper diagnosis with `EXPLAIN (VERBOSE)` + `ra-cli optimize` turned the
+broad "all non-inner joins are wrong" finding into two distinct causes:
+
+### Real bug fixed: missing collation on coerced comparisons
+
+The "bare IN-subquery returns 0 rows" was **not** a semi-join bug — it was a
+**collation** bug. `WHERE textcol = 'literal'` on a `character`/`bpchar` column
+becomes `(col)::text = 'literal'::text` (implicit bpchar→text coercion). When no
+exact-type operator exists, `expr_translator` falls back to PG's `make_op`, which
+inserts the coercion but does **not** assign collations — PG's parser does that
+in a separate `assign_expr_collations` pass that Ra skipped. The OpExpr had
+`inputcollid = InvalidOid` → executor error *"could not determine which collation
+to use for string comparison"* (counted as 0 rows under `2>/dev/null`). The
+decorrelated IN-subquery's inner string filter hit the same path.
+
+Fix (`expr_translator.rs`): run `assign_expr_collations(NULL, op)` on the
+`make_op` result. This fixed **all string-comparison scan filters** (`=`,`<`,`>`,
+`<>` on text/bpchar) **and** the entire **IN / EXISTS / NOT IN / NOT EXISTS**
+family (semi/anti joins) — now row-identical to PG and **planned by Ra, not
+deferred**. Commit `fix(pg): assign collations on coerced comparisons` (main
+`24131eda`).
+
+### Genuine remaining bug: outer-join WHERE pushdown to the wrong child
+
+`SELECT o.o_orderkey FROM orders o LEFT JOIN customer c ON o.o_custkey=c.c_custkey
+WHERE o.o_orderkey<50` → 20000 rows vs PG's 49. `ra-cli optimize` shows a
+predicate-pushdown rewrite places the **outer**-relation predicate
+(`o.o_orderkey<50`) on the **inner** (customer) child:
+`LEFT JOIN(Scan orders, Filter(o.o_orderkey<50, Scan customer))`. The executed
+plan confirms `Filter: (o.o_orderkey<50)` on the customer seq scan, so it never
+filters and the join keeps all rows. The sound inner-join rules
+(`filter-through-join-left/right`) guard with `references_only`; the
+`*-filter-through-left-join-*` rewrites do not, but none pushes to the *right*
+child — the exact offending rewrite (likely a `left-outer-to-inner-*`
+interaction) needs e-graph firing traces to pin down. Gated for now.
+
+### Gate narrowed + validation expanded
+
+`wrong_result_risk` now gates only **outer joins (LEFT/RIGHT/FULL/CROSS)** and
+**scalar subqueries in filter predicates**; SEMI/ANTI are no longer gated.
+**63 distinct query shapes** verified row-identical Ra-on vs Ra-off, including:
+recursive/multi/nested CTEs, =ANY/=ALL, correlated scalar subquery in SELECT,
+FILTER-clause + ordered-set (`percentile_cont`) aggregates, CUBE/ROLLUP/GROUPING
+SETS, window partition/frame/lag-lead, INTERSECT/EXCEPT ALL, NULLS FIRST/LAST,
+TPC-H Q1/Q3-shaped multi-join+agg+order+limit, and the string-filter + IN/EXISTS
+families now planned by Ra.
+
+Remaining gated (correct via fallback, coverage follow-up): outer joins, scalar
+subquery in WHERE. Remaining perf: UNION planning blowup.
