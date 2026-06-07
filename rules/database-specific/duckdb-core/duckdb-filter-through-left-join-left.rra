@@ -19,3 +19,4 @@ Migrated from the hand-coded `duckdb_inspired_rules` to a declarative `.rra` rul
 
 lhs: (filter ?pred (join left-outer ?cond ?left ?right))
 rhs: (join left-outer ?cond (filter ?pred ?left) ?right)
+when: references_only("?pred", "?left")

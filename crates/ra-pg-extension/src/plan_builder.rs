@@ -356,39 +356,19 @@ impl PlanBuilder {
         }
     }
 
-    /// Conservative correctness gate: RelExpr shapes the builder currently
-    /// MISBUILDS (wrong results, no error). Returns a reason → the planner hook
-    /// defers to PG. Tracked bugs (docs/planner-fallback-backlog.md):
-    /// (1) any non-inner join (LEFT/RIGHT/FULL/CROSS outer + SEMI/ANTI from
-    ///     decorrelated IN/EXISTS) — plan_builder's predicate placement /
-    ///     semi-join construction is unsound (e.g. outer WHERE applied to the
-    ///     inner side; IN-subquery semi-join returning 0 rows); (2) a scalar
-    ///     subquery in a filter predicate — mis-evaluated. Inner joins, scans,
-    ///     aggregates, windows, CTEs, set-ops are unaffected.
-    /// Conservative correctness gate → defer to PG. Tracked bugs:
-    /// (1) outer joins (LEFT/RIGHT/FULL/CROSS): the optimizer-level wrong-result
-    ///     bugs (unsound filter pushdown / join commute on `(join ?type …)`) are
-    ///     now FIXED in ra-engine (references_only soundness + is_inner_join
-    ///     guards), but plan_builder still mis-remaps a Var's attno/type for some
-    ///     converted-join forms ("attribute N of <rel> has wrong type"), so outer
-    ///     joins stay gated until that plan_builder bug is fixed. SEMI/ANTI are
-    ///     enabled. (2) a scalar subquery in a filter predicate — mis-evaluated.
+    /// Conservative correctness gate: defer to PG for RelExpr shapes the
+    /// builder/optimizer still mishandles. Currently a scalar subquery in a
+    /// filter predicate (SubPlan result param not wired). Outer joins are no
+    /// longer gated: the optimizer wrong-result bugs (unsound filter pushdown /
+    /// join commute on `(join ?type …)` and the unguarded
+    /// `duckdb-filter-through-left-join-left`) are fixed in ra-engine
+    /// (references_only soundness via qualifier tracking + `is_inner_join`
+    /// guards + left-side `references_only`), verified row-identical to PG.
     fn wrong_result_risk(expr: &RelExpr) -> Option<&'static str> {
-        match expr {
-            RelExpr::Join { join_type, .. } | RelExpr::ParallelHashJoin { join_type, .. }
-                if !matches!(
-                    join_type,
-                    ra_core::algebra::JoinType::Inner
-                        | ra_core::algebra::JoinType::Semi
-                        | ra_core::algebra::JoinType::Anti
-                ) =>
-            {
-                return Some("outer/cross join (plan_builder Var attno/type remap unsound)");
-            }
-            RelExpr::Filter { predicate, .. } if expr_has_scalar_subquery(predicate) => {
+        if let RelExpr::Filter { predicate, .. } = expr {
+            if expr_has_scalar_subquery(predicate) {
                 return Some("scalar subquery in a filter predicate");
             }
-            _ => {}
         }
         for child in expr.children() {
             if let Some(r) = Self::wrong_result_risk(child) {
