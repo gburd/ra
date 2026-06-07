@@ -356,6 +356,37 @@ impl PlanBuilder {
         }
     }
 
+    /// Conservative correctness gate: RelExpr shapes the builder currently
+    /// MISBUILDS (wrong results, no error). Returns a reason → the planner hook
+    /// defers to PG. Tracked bugs (docs/planner-fallback-backlog.md):
+    /// (1) any non-inner join (LEFT/RIGHT/FULL/CROSS outer + SEMI/ANTI from
+    ///     decorrelated IN/EXISTS) — plan_builder's predicate placement /
+    ///     semi-join construction is unsound (e.g. outer WHERE applied to the
+    ///     inner side; IN-subquery semi-join returning 0 rows); (2) a scalar
+    ///     subquery in a filter predicate — mis-evaluated. Inner joins, scans,
+    ///     aggregates, windows, CTEs, set-ops are unaffected.
+    fn wrong_result_risk(expr: &RelExpr) -> Option<&'static str> {
+        match expr {
+            RelExpr::Join { join_type, .. } | RelExpr::ParallelHashJoin { join_type, .. }
+                if !matches!(join_type, ra_core::algebra::JoinType::Inner) =>
+            {
+                return Some(
+                    "non-inner/semi/anti/cross join (predicate/semi-join build unsound)",
+                );
+            }
+            RelExpr::Filter { predicate, .. } if expr_has_scalar_subquery(predicate) => {
+                return Some("scalar subquery in a filter predicate");
+            }
+            _ => {}
+        }
+        for child in expr.children() {
+            if let Some(r) = Self::wrong_result_risk(child) {
+                return Some(r);
+            }
+        }
+        None
+    }
+
     /// Build a complete `PlannedStmt` from an optimized `RelExpr` tree.
     ///
     /// Returns `Err` if the plan shape is not yet supported by the
@@ -385,6 +416,17 @@ impl PlanBuilder {
             return Err(PlanBuilderError::UnsupportedVariant(format!(
                 "{op} not yet supported by Ra plan_builder; deferring to native \
                  planner (see docs/planner-fallback-backlog.md)"
+            )));
+        }
+
+        // Correctness gate (RFC: correctness > coverage). RelExpr shapes the
+        // builder currently MISBUILDS — returning wrong results without erroring
+        // — must defer to PG rather than violate the prime invariant. Each is a
+        // tracked bug to fix properly (then un-gate).
+        if let Some(reason) = Self::wrong_result_risk(expr) {
+            return Err(PlanBuilderError::UnsupportedVariant(format!(
+                "{reason}; deferring to native planner for correctness \
+                 (see docs/planner-fallback-backlog.md)"
             )));
         }
 
@@ -5394,6 +5436,49 @@ fn subtree_has_filter(expr: &RelExpr) -> bool {
     }
 }
 /// expression yields a single element). Used to isolate an indexable
+/// equality conjunct from the rest of a `WHERE` clause.
+
+/// True if `e` contains a scalar subquery anywhere (RFC correctness gate).
+fn expr_has_scalar_subquery(e: &Expr) -> bool {
+    expr_any_subquery(e, true)
+}
+
+/// Recursively test for a subquery in `e`; `scalar_only` restricts to scalar.
+fn expr_any_subquery(e: &Expr, scalar_only: bool) -> bool {
+    use ra_core::expr::SubQueryType;
+    match e {
+        Expr::SubQuery { subquery_type, .. } => {
+            !scalar_only || matches!(subquery_type, SubQueryType::Scalar)
+        }
+        Expr::BinOp { left, right, .. } => {
+            expr_any_subquery(left, scalar_only) || expr_any_subquery(right, scalar_only)
+        }
+        Expr::UnaryOp { operand, .. } => expr_any_subquery(operand, scalar_only),
+        Expr::Function { args, .. } | Expr::Array(args) => {
+            args.iter().any(|a| expr_any_subquery(a, scalar_only))
+        }
+        Expr::Case { operand, when_clauses, else_result } => {
+            operand.as_deref().is_some_and(|o| expr_any_subquery(o, scalar_only))
+                || when_clauses
+                    .iter()
+                    .any(|(c, r)| expr_any_subquery(c, scalar_only) || expr_any_subquery(r, scalar_only))
+                || else_result.as_deref().is_some_and(|x| expr_any_subquery(x, scalar_only))
+        }
+        Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => {
+            expr_any_subquery(expr, scalar_only)
+        }
+        Expr::ArrayIndex(a, b) => {
+            expr_any_subquery(a, scalar_only) || expr_any_subquery(b, scalar_only)
+        }
+        Expr::ArraySlice { array, start, end } => {
+            expr_any_subquery(array, scalar_only)
+                || start.as_deref().is_some_and(|s| expr_any_subquery(s, scalar_only))
+                || end.as_deref().is_some_and(|s| expr_any_subquery(s, scalar_only))
+        }
+        _ => false,
+    }
+}
+
 /// equality conjunct from the rest of a `WHERE` clause.
 fn split_conjuncts<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
     if let Expr::BinOp {
