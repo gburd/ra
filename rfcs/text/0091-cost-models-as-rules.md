@@ -220,13 +220,33 @@ conditions actually steer plans:
      `index-scan` = `selectivity`·rows·`rand_page_cost` + per-row `tuple_cost`
      (random I/O, sensitive to `hit_rate`). Extend `OperatorCostCtx` with
      `selectivity` (already reserved in the RFC) and per-scan index availability.
-  3. A lowering rule `scan → index-scan` guarded by a `has_index_for` condition
-     (needs index metadata in `RelData`/`table_info`).
-  4. `plan_builder` consumes the chosen scan method from `PhysicalChoices`
-     (the seq/index peephole becomes a fallback, then retires).
+  3. A lowering rule `Filter(?cond, Scan(?t)) → IndexScan(?cond, ?t)` guarded by
+     a `has_index_for(?t, ?cond)` condition. **Prerequisite confirmed available:**
+     `RelAnalysis.table_info[t].indexes` (`ra_core::facts::TableInfo.indexes:
+     Vec<IndexInfo>`) is populated in production (`planner_hook.rs` fills it from
+     the PG catalogs), so the condition can read index availability during
+     saturation — no new analysis plumbing needed.
+  4. `plan_builder` consumes the chosen scan method from `PhysicalChoices`. The
+     correct, validated index-scan PG plan builder **already exists**
+     (`try_build_index_scan`: single-col btree equality, canonical indexqual,
+     bails to SeqScan on anything unproven); the e-graph choice selects between
+     it and the seq path. The peephole becomes the fallback, then retires.
   5. Validate with the debug-GUC sweep (force `hit_rate` high → expect
-     index-scan; low/`io_sat` high → expect seq-scan) + the PG19 A/B
+     index-scan; low / `io_sat` high → expect seq-scan) + the PG19 A/B
      (correctness + exec-time improvement on selective-predicate queries).
+
+  **Sequencing — verification-first (index scans crash the backend if the
+  indexqual is malformed; the prime invariant is correctness):**
+  - *B1 (engine-only, safe):* add the `index-scan` operator + `has_index_for`
+    condition + selectivity in `OperatorCostCtx` + the `index-scan` cost rule +
+    the lowering rule; `from_rec` lowers `index-scan` to the **same** RelExpr the
+    seq path produces and records the scan-method in `PhysicalChoices` (no
+    execution change yet). Demonstrate the live-conditions seq↔index flip at the
+    engine level with a unit test. No backend risk.
+  - *B2 (executor wiring):* `plan_builder` consumes the recorded scan method via
+    `try_build_index_scan`; validate row-equivalence + exec timing on PG19
+    (single-col btree equality first), bailing to SeqScan on anything unproven.
+  - *B3:* extend to bitmap scans, range/multi-col, retire the peephole.
 
 ## Risks / open questions
 
