@@ -237,7 +237,7 @@ conditions actually steer plans:
 
   **Sequencing — verification-first (index scans crash the backend if the
   indexqual is malformed; the prime invariant is correctness):**
-  - *B0 (rate-model prerequisite — MANDATORY, found by investigation):* a
+  - *B0 (rate-model prerequisite — DONE):* a
     seq↔index flip is **physically impossible** with the current
     `CalibratedCostModel::with_live_conditions`, which scales `sequential_io_cost`
     and `random_io_cost` by the *same* `io_factor` — so `hit_rate` moves them
@@ -251,7 +251,7 @@ conditions actually steer plans:
     `live_conditions_flip_join_method` demonstration and the
     `live_conditions_flow_into_rule_costs` "cached lowers seq scan" assertion
     must be updated to the corrected semantics. Gate on the PG19 A/B.
-  - *B1 (engine-only, safe):* add the `index-scan` operator + `has_index_for`
+  - *B1 (engine-only, safe — DONE):* add the `index-scan` operator + `has_index_for`
     condition + selectivity in `OperatorCostCtx` + the `index-scan` cost rule +
     the lowering rule; `from_rec` lowers `index-scan` to the **same** RelExpr the
     seq path produces and records the scan-method in `PhysicalChoices` (no
