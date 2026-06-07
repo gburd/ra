@@ -1473,7 +1473,10 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             }
             RelLang::IndexNestLoopOp([_, _, l, _r]) => {
                 let cl = costs(*l).max(1.0);
-                2.0 * cl * self.calibration.tuple_cost() // one index probe per outer row
+                // one index probe per outer row (linear in the outer side)
+                let ctx = self.op_cost_ctx(cl, 0.0, 0.0);
+                rule_operator_cost("index-nest-loop", &ctx)
+                    .unwrap_or(2.0 * cl * self.calibration.tuple_cost())
             }
             RelLang::Aggregate(_) => {
                 let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
@@ -1637,6 +1640,13 @@ mod tests {
             assert!(
                 (nest - nest_builtin).abs() < 1e-12,
                 "rule-sourced nest-loop cost {nest} != built-in {nest_builtin}"
+            );
+            let inl = rule_operator_cost("index-nest-loop", &ctx)
+                .expect("index-nest-loop cost model must be registered from the rule file");
+            let inl_builtin = 2.0 * cl * tc;
+            assert!(
+                (inl - inl_builtin).abs() < 1e-12,
+                "rule-sourced index-nest-loop cost {inl} != built-in {inl_builtin}"
             );
         }
     }
