@@ -1,0 +1,30 @@
+---
+id: scan-operator-cost
+name: "scan-operator-cost"
+category: cost-models/operators
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, operator, scan, seq-scan]
+costs_operator: scan
+---
+
+# scan-operator-cost
+
+## Description
+
+Per-instance cost of a sequential `scan` for the e-graph cost extractor (RFC
+0091). Cost-only rule (no `## Rewrite`). Shared by the `scan` and `scan-alias`
+e-graph operators (the alias binding does not change the scan cost).
+
+## Cost Model
+
+A sequential scan reads every page of the relation. The page count is derived
+from the estimated row count assuming ~100 bytes/row and an 8 KiB page, floored
+at one page. `ctx.row_count` is the node's estimated cardinality and
+`ctx.seq_page_cost` the calibrated sequential page cost. The child (table
+symbol) cost is added by the cost function.
+
+```rust
+(ctx.row_count * 100.0 / 8192.0).max(1.0) * ctx.seq_page_cost
+```

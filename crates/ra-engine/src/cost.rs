@@ -1394,6 +1394,13 @@ impl IntegratedCostFn {
             cpu_cores: self.hardware.cpu_cores,
         }
     }
+
+    /// Rule-or-builtin cost for an operator whose cost ignores child costs and
+    /// cardinality (filter/project/join/aggregate/sort/...). Returns the
+    /// rule-provided cost when registered, else `builtin`.
+    fn flat_op_cost(&self, operator: &str, builtin: f64) -> f64 {
+        rule_operator_cost(operator, &self.op_cost_ctx(0.0, 0.0, 0.0)).unwrap_or(builtin)
+    }
 }
 
 impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
@@ -1411,14 +1418,20 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 // Use per-table row count if available (resolved from e-graph
                 // before extraction), otherwise fall back to average.
                 let row_count = self.row_count_for_id(*table_id);
+                // RFC 0091: prefer the rule-provided cost model; fall back to
+                // the built-in pages * seq_page_cost formula.
+                let ctx = self.op_cost_ctx(0.0, 0.0, row_count);
                 let pages = (row_count * 100.0 / 8192.0).max(1.0);
-                let seq_cost = pages * self.calibration.seq_page_cost();
+                let seq_cost = rule_operator_cost("scan", &ctx)
+                    .unwrap_or(pages * self.calibration.seq_page_cost());
                 return child_cost + seq_cost;
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
                 let row_count = self.row_count_for_id(*table_id);
+                let ctx = self.op_cost_ctx(0.0, 0.0, row_count);
                 let pages = (row_count * 100.0 / 8192.0).max(1.0);
-                let seq_cost = pages * self.calibration.seq_page_cost();
+                let seq_cost = rule_operator_cost("scan", &ctx)
+                    .unwrap_or(pages * self.calibration.seq_page_cost());
                 return costs(*table_id) + costs(*alias_id) + seq_cost;
             }
             RelLang::Filter(_) | RelLang::Project(_) => {
@@ -1426,18 +1439,10 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 // the built-in SIMD-scaled per-tuple formula.
                 let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
                 let builtin = simd_factor * self.calibration.tuple_cost();
-                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
-                let op = if matches!(enode, RelLang::Filter(_)) {
-                    "filter"
-                } else {
-                    "project"
-                };
-                rule_operator_cost(op, &ctx).unwrap_or(builtin)
+                let op = if matches!(enode, RelLang::Filter(_)) { "filter" } else { "project" };
+                self.flat_op_cost(op, builtin)
             }
-            RelLang::Join(_) => {
-                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
-                rule_operator_cost("join", &ctx).unwrap_or(500.0 * self.calibration.tuple_cost())
-            }
+            RelLang::Join(_) => self.flat_op_cost("join", 500.0 * self.calibration.tuple_cost()),
             // Per-method physical join cost (RFC 0090 Phase 3 chunk 3). Child
             // *costs* (cl, cr) are monotonic proxies for input size (scan cost
             // scales with pages -> rows). The final `child_cost` sum below adds
@@ -1479,21 +1484,17 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                     .unwrap_or(2.0 * cl * self.calibration.tuple_cost())
             }
             RelLang::Aggregate(_) => {
-                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
-                rule_operator_cost("aggregate", &ctx)
-                    .unwrap_or(200.0 * self.calibration.tuple_cost())
+                self.flat_op_cost("aggregate", 200.0 * self.calibration.tuple_cost())
             }
             RelLang::Sort(_) => {
                 let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
                 let builtin = 150.0 * par_factor.max(0.5) * self.calibration.tuple_cost();
-                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
-                rule_operator_cost("sort", &ctx).unwrap_or(builtin)
+                self.flat_op_cost("sort", builtin)
             }
             RelLang::IncrementalSort(_) => {
                 let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
                 let builtin = 60.0 * par_factor.max(0.5) * self.calibration.tuple_cost();
-                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
-                rule_operator_cost("incremental-sort", &ctx).unwrap_or(builtin)
+                self.flat_op_cost("incremental-sort", builtin)
             }
             RelLang::Limit([n_id, _off_id, child_id]) => {
                 // Startup cost optimization: when LIMIT is present
@@ -1731,6 +1732,32 @@ mod tests {
                     "rule-sourced {op} cost {rule} != built-in {builtin}"
                 );
             }
+        }
+    }
+
+    /// RFC 0091 P2 golden test: the scan cost sourced from its `.rra` block
+    /// equals the built-in pages * seq_page_cost formula (shared by scan and
+    /// scan-alias).
+    #[test]
+    fn scan_rule_cost_matches_builtin() {
+        for (rows, spc) in [(1000.0, 1.0), (0.0, 1.0), (1_000_000.0, 0.5)] {
+            let ctx = OperatorCostCtx {
+                left_cost: 0.0,
+                right_cost: 0.0,
+                tuple_cost: 0.01,
+                seq_page_cost: spc,
+                rand_page_cost: 4.0,
+                row_count: rows,
+                simd_width_bits: 256,
+                cpu_cores: 8,
+            };
+            let rule =
+                rule_operator_cost("scan", &ctx).expect("scan cost model must be registered");
+            let builtin = (rows * 100.0 / 8192.0).max(1.0) * spc;
+            assert!(
+                (rule - builtin).abs() < 1e-9,
+                "rule-sourced scan cost {rule} != built-in {builtin}"
+            );
         }
     }
 
