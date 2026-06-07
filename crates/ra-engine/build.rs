@@ -537,6 +537,7 @@ const RELLANG_OPERATORS: &[(&str, Option<usize>)] = &[
     // Physical join variants (RFC 0090 Phase 3)
     ("hash-join", Some(4)), ("merge-join", Some(4)), ("nest-loop", Some(4)),
     ("index-nest-loop", Some(4)),
+    ("index-scan-choice", Some(2)),
     ("sort", Some(2)), ("incremental-sort", Some(3)), ("limit", Some(3)),
     ("union", Some(3)), ("intersect", Some(3)), ("except", Some(3)),
     ("recursive-cte", Some(4)), ("cte", Some(3)), ("window", Some(2)),

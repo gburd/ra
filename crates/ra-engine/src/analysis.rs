@@ -59,6 +59,14 @@ impl Analysis<RelLang> for RelAnalysis {
                 data.is_relational = true;
                 merge_child_tables(&mut data.tables, egraph, *input_id);
             }
+            // Index-scan choice (RFC 0091 Option B): children [cond, table];
+            // relational, table comes from the table-symbol child.
+            RelLang::IndexScanChoice([_, table_id]) => {
+                data.is_relational = true;
+                if let Some(sym) = get_symbol(egraph, *table_id) {
+                    data.tables.insert(sym);
+                }
+            }
             RelLang::Aggregate([_, _, input_id]) | RelLang::Limit([_, _, input_id]) => {
                 data.is_relational = true;
                 merge_child_tables(&mut data.tables, egraph, *input_id);

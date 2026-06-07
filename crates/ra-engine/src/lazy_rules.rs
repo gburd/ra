@@ -534,7 +534,13 @@ impl LazyRuleCompiler {
         match category {
             // RFC 0090: predicate-pushdown is sourced from the .rra corpus.
             RuleCategory::FilterOptimization => {
-                crate::rewrite::generated_logical_predicate_pushdown_core_rules()
+                let mut rules = crate::rewrite::generated_logical_predicate_pushdown_core_rules();
+                // RFC 0091 Option B: cost-driven scan-method lowering
+                // (Filter(Scan) -> index-scan-choice, guarded by has_index_for);
+                // the extractor chooses seq vs index by per-method cost under
+                // live conditions.
+                rules.extend(crate::rewrite::generated_physical_scan_lowering_core_rules());
+                rules
             }
             RuleCategory::ProjectionOptimization => {
                 crate::rewrite::generated_logical_projection_pushdown_core_rules()

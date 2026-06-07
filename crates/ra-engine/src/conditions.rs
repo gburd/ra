@@ -690,6 +690,44 @@ pub fn references_subset(pred: &str, cols: &str) -> SafeCondition<ReferencesSubs
     SafeCondition::new(ReferencesSubset::new(pred, cols), "references_subset")
 }
 
+/// Condition: the table bound to `?t` has at least one usable index, per the
+/// analysis's `table_info` (populated from the host catalogs). Guards the
+/// `Filter(Scan) → index-scan-choice` lowering rule (RFC 0091 Option B) so an
+/// index scan is only ever considered for indexed relations.
+pub struct HasIndexFor {
+    table_var: Var,
+}
+
+impl HasIndexFor {
+    #[must_use]
+    pub fn new(table: &str) -> Self {
+        Self { table_var: parse_var(table, "?t") }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for HasIndexFor {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        let canonical = egraph.find(subst[self.table_var]);
+        let table_name = egraph[canonical].nodes.iter().find_map(|node| match node {
+            RelLang::Symbol(s) => Some(s.to_string()),
+            _ => None,
+        });
+        table_name.is_some_and(|name| {
+            egraph
+                .analysis
+                .table_info
+                .get(&name)
+                .is_some_and(|info| !info.indexes.is_empty())
+        })
+    }
+}
+
+/// Returns a condition that the table `?t` has at least one usable index.
+#[must_use]
+pub fn has_index_for(table: &str) -> SafeCondition<HasIndexFor> {
+    SafeCondition::new(HasIndexFor::new(table), "has_index_for")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,29 @@
+---
+id: scan-to-index-scan
+name: "scan-to-index-scan"
+category: physical/scan-lowering-core
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [physical, lowering, scan, index]
+---
+
+# scan-to-index-scan
+
+## Description
+
+Cost-driven physical scan-method lowering (RFC 0091 Option B). Introduces an
+`index-scan-choice` as a cost alternative to a sequential `Filter(Scan)` when
+the scanned table has a usable index. One-way: never rewrites back, so
+saturation stays finite. The cost extractor chooses between the sequential scan
+and the index scan; with the live-conditions rate model (B0), a warm cache makes
+the selective index scan win while a cold/contended host favors the sequential
+scan. `from_rec` lowers `index-scan-choice` back to the same `Filter(Scan)`
+RelExpr (B1: the produced plan is unchanged; the chosen method is carried via
+PhysicalChoices in B2).
+
+## Rewrite
+
+lhs: (filter ?cond (scan ?t))
+rhs: (index-scan-choice ?cond ?t)
+when: has_index_for("?t")
