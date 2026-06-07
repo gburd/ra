@@ -237,6 +237,20 @@ conditions actually steer plans:
 
   **Sequencing — verification-first (index scans crash the backend if the
   indexqual is malformed; the prime invariant is correctness):**
+  - *B0 (rate-model prerequisite — MANDATORY, found by investigation):* a
+    seq↔index flip is **physically impossible** with the current
+    `CalibratedCostModel::with_live_conditions`, which scales `sequential_io_cost`
+    and `random_io_cost` by the *same* `io_factor` — so `hit_rate` moves them
+    together and the seq:index ratio never changes. The fix: caching must
+    compress *random* toward *sequential* (a cache hit serves a random page at
+    ~sequential cost, a miss pays the full penalty):
+    `random ← (seq·hit + rand·(1-hit))·(1+io_sat)`, `sequential ← seq·(1+io_sat)`
+    (neutral-preserving). This is broad-impact (every cost + plan_builder reads
+    these rates) and **cascades**: it weakens Option A's already-narrow join
+    flip (cached no longer drops random to ~0, only toward sequential), so A's
+    `live_conditions_flip_join_method` demonstration and the
+    `live_conditions_flow_into_rule_costs` "cached lowers seq scan" assertion
+    must be updated to the corrected semantics. Gate on the PG19 A/B.
   - *B1 (engine-only, safe):* add the `index-scan` operator + `has_index_for`
     condition + selectivity in `OperatorCostCtx` + the `index-scan` cost rule +
     the lowering rule; `from_rec` lowers `index-scan` to the **same** RelExpr the
