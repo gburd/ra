@@ -54,6 +54,13 @@ pub struct OperatorCostCtx {
     pub seq_page_cost: f64,
     /// Calibrated random page cost.
     pub rand_page_cost: f64,
+    /// Estimated output/scan row count for this node (0.0 when not applicable,
+    /// e.g. for operators whose cost does not depend on cardinality).
+    pub row_count: f64,
+    /// Hardware SIMD width in bits (drives vectorizable per-tuple operators).
+    pub simd_width_bits: u32,
+    /// Hardware CPU core count (drives parallelizable operators).
+    pub cpu_cores: u32,
 }
 
 /// A rule-provided operator cost model: returns the traditional (analytic) cost
@@ -1374,13 +1381,17 @@ impl IntegratedCostFn {
 
     /// Build the [`OperatorCostCtx`] passed to rule-provided operator cost
     /// models (RFC 0091) from two child costs and the calibrated rates.
-    fn op_cost_ctx(&self, left_cost: f64, right_cost: f64) -> OperatorCostCtx {
+    /// `row_count` is the node's estimated cardinality (0.0 when irrelevant).
+    fn op_cost_ctx(&self, left_cost: f64, right_cost: f64, row_count: f64) -> OperatorCostCtx {
         OperatorCostCtx {
             left_cost,
             right_cost,
             tuple_cost: self.calibration.tuple_cost(),
             seq_page_cost: self.calibration.seq_page_cost(),
             rand_page_cost: self.calibration.rand_page_cost(),
+            row_count,
+            simd_width_bits: self.hardware.simd_width_bits,
+            cpu_cores: self.hardware.cpu_cores,
         }
     }
 }
@@ -1411,8 +1422,17 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 return costs(*table_id) + costs(*alias_id) + seq_cost;
             }
             RelLang::Filter(_) | RelLang::Project(_) => {
+                // RFC 0091: prefer the rule-provided cost model; fall back to
+                // the built-in SIMD-scaled per-tuple formula.
                 let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
-                1.0 * simd_factor * self.calibration.tuple_cost()
+                let builtin = simd_factor * self.calibration.tuple_cost();
+                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
+                let op = if matches!(enode, RelLang::Filter(_)) {
+                    "filter"
+                } else {
+                    "project"
+                };
+                rule_operator_cost(op, &ctx).unwrap_or(builtin)
             }
             RelLang::Join(_) => 500.0 * self.calibration.tuple_cost(),
             // Per-method physical join cost (RFC 0090 Phase 3 chunk 3). Child
@@ -1427,7 +1447,7 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let cr = costs(*r).max(1.0);
                 // RFC 0091: prefer the rule-provided cost model; fall back to
                 // the built-in formula when no rule supplies one.
-                let ctx = self.op_cost_ctx(cl, cr);
+                let ctx = self.op_cost_ctx(cl, cr, 0.0);
                 rule_operator_cost("hash-join", &ctx)
                     .unwrap_or(0.5 * cr * self.calibration.tuple_cost()) // build hash on inner
             }
@@ -1436,7 +1456,7 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 // Sort both sides (no interesting-orders tracking yet, so always
                 // pay the sort) — slightly pricier than a hash build. RFC 0091:
                 // prefer the rule-provided cost model; fall back to the built-in.
-                let ctx = self.op_cost_ctx(cl, cr);
+                let ctx = self.op_cost_ctx(cl, cr, 0.0);
                 rule_operator_cost("merge-join", &ctx)
                     .unwrap_or(0.6 * (cl + cr) * self.calibration.tuple_cost())
             }
@@ -1444,7 +1464,7 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
                 // O(n*m): scan inner per outer row. RFC 0091: prefer the
                 // rule-provided cost model; fall back to the built-in formula.
-                let ctx = self.op_cost_ctx(cl, cr);
+                let ctx = self.op_cost_ctx(cl, cr, 0.0);
                 rule_operator_cost("nest-loop", &ctx)
                     .unwrap_or((cl * cr / 50.0) * self.calibration.tuple_cost())
             }
@@ -1551,6 +1571,9 @@ mod tests {
                 tuple_cost: tc,
                 seq_page_cost: 1.0,
                 rand_page_cost: 4.0,
+            row_count: 0.0,
+            simd_width_bits: 256,
+            cpu_cores: 8,
             };
             let rule = rule_operator_cost("hash-join", &ctx)
                 .expect("hash-join cost model must be registered from the rule file");
@@ -1567,6 +1590,9 @@ mod tests {
             tuple_cost: 1.0,
             seq_page_cost: 1.0,
             rand_page_cost: 4.0,
+            row_count: 0.0,
+            simd_width_bits: 256,
+            cpu_cores: 8,
         };
         assert!(rule_operator_cost("seq-scan", &ctx).is_none());
     }
@@ -1583,6 +1609,9 @@ mod tests {
                 tuple_cost: tc,
                 seq_page_cost: 1.0,
                 rand_page_cost: 4.0,
+            row_count: 0.0,
+            simd_width_bits: 256,
+            cpu_cores: 8,
             };
             let merge = rule_operator_cost("merge-join", &ctx)
                 .expect("merge-join cost model must be registered from the rule file");
@@ -1598,6 +1627,34 @@ mod tests {
                 (nest - nest_builtin).abs() < 1e-12,
                 "rule-sourced nest-loop cost {nest} != built-in {nest_builtin}"
             );
+        }
+    }
+
+    /// RFC 0091 P2 golden test: the filter and project costs sourced from their
+    /// `.rra` `## Cost Model` blocks equal the built-in SIMD-scaled per-tuple
+    /// formula they replace.
+    #[test]
+    fn filter_project_rule_costs_match_builtin() {
+        for (simd, tc) in [(256u32, 0.01), (128, 1.0), (512, 0.02)] {
+            let ctx = OperatorCostCtx {
+                left_cost: 0.0,
+                right_cost: 0.0,
+                tuple_cost: tc,
+                seq_page_cost: 1.0,
+                rand_page_cost: 4.0,
+                row_count: 0.0,
+                simd_width_bits: simd,
+                cpu_cores: 8,
+            };
+            let builtin = (256.0 / f64::from(simd)) * tc;
+            for op in ["filter", "project"] {
+                let rule = rule_operator_cost(op, &ctx)
+                    .expect("filter/project cost model must be registered");
+                assert!(
+                    (rule - builtin).abs() < 1e-12,
+                    "rule-sourced {op} cost {rule} != built-in {builtin}"
+                );
+            }
         }
     }
 
