@@ -21,11 +21,13 @@ added, this becomes its companion cost model alongside the join family.
 ## Cost Model
 
 One index probe per outer (left) row — linear in the outer side, so this wins
-when the driving side is small. The per-method base term orders the join methods
-during extraction; the equal `cl+cr` child-cost sum is added by the cost
-function for every method. `ctx.left_cost` is the egg outer-child cost (size
-proxy) and `ctx.tuple_cost` the calibrated per-tuple CPU cost.
+when the driving side is small. RFC 0091 Option A: a per-probe CPU term
+(`tuple_cost`) plus a **random-I/O** term (`rand_page_cost`) for the index
+descent + heap fetch on each probe. Index-nested-loop is random-I/O-bound, so a
+warm cache makes it much cheaper while cold/contended I/O penalizes it. `ctx` is
+an [`OperatorCostCtx`]; `left_cost` is the egg outer-child cost (size proxy) and
+the rates are live-tuned.
 
 ```rust
-2.0 * ctx.left_cost * ctx.tuple_cost
+ctx.left_cost * (0.5 * ctx.tuple_cost + 1.5 * ctx.rand_page_cost)
 ```

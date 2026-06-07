@@ -1572,7 +1572,7 @@ mod tests {
             };
             let rule = rule_operator_cost("hash-join", &ctx)
                 .expect("hash-join cost model must be registered from the rule file");
-            let builtin = 0.5 * cr * tc;
+            let builtin = cr * (0.45 * tc + 0.05 * ctx.seq_page_cost);
             assert!(
                 (rule - builtin).abs() < 1e-12,
                 "rule-sourced hash-join cost {rule} != built-in {builtin}"
@@ -1610,21 +1610,21 @@ mod tests {
             };
             let merge = rule_operator_cost("merge-join", &ctx)
                 .expect("merge-join cost model must be registered from the rule file");
-            let merge_builtin = 0.6 * (cl + cr) * tc;
+            let merge_builtin = (cl + cr) * (0.25 * tc + 0.35 * ctx.seq_page_cost);
             assert!(
                 (merge - merge_builtin).abs() < 1e-12,
                 "rule-sourced merge-join cost {merge} != built-in {merge_builtin}"
             );
             let nest = rule_operator_cost("nest-loop", &ctx)
                 .expect("nest-loop cost model must be registered from the rule file");
-            let nest_builtin = (cl * cr / 50.0) * tc;
+            let nest_builtin = (cl * cr / 50.0) * (0.1 * tc + 0.9 * ctx.rand_page_cost);
             assert!(
                 (nest - nest_builtin).abs() < 1e-12,
                 "rule-sourced nest-loop cost {nest} != built-in {nest_builtin}"
             );
             let inl = rule_operator_cost("index-nest-loop", &ctx)
                 .expect("index-nest-loop cost model must be registered from the rule file");
-            let inl_builtin = 2.0 * cl * tc;
+            let inl_builtin = cl * (0.5 * tc + 1.5 * ctx.rand_page_cost);
             assert!(
                 (inl - inl_builtin).abs() < 1e-12,
                 "rule-sourced index-nest-loop cost {inl} != built-in {inl_builtin}"
@@ -1805,6 +1805,39 @@ mod tests {
         assert!(
             busy.flat_op_cost("aggregate") > neutral.flat_op_cost("aggregate"),
             "high CPU load should raise the rule-sourced aggregate cost"
+        );
+    }
+
+    /// RFC 0091 Option A: with per-method I/O-vs-CPU cost splits, live
+    /// conditions actually *reorder* the join methods — a warm cache (cheap
+    /// I/O) lets the I/O-bearing nested-loop win over hash-join across a wider
+    /// input range than a cold/contended host does. Proves live conditions
+    /// steer plan choice (not just magnitude): there exists an input size where
+    /// the cheapest method differs between cached and contended hosts.
+    #[test]
+    fn live_conditions_flip_join_method() {
+        use crate::egraph::RelLang;
+        use egg::{CostFunction, Id};
+        let ids = [Id::from(0), Id::from(1), Id::from(2), Id::from(3)];
+        let cheapest = |cfn: &mut IntegratedCostFn, n: f64| -> &'static str {
+            let c = |id: Id| if usize::from(id) >= 2 { n } else { 1.0 };
+            let h = cfn.cost(&RelLang::HashJoinOp(ids), c);
+            let nl = cfn.cost(&RelLang::NestLoopOp(ids), c);
+            if nl < h { "nest" } else { "hash" }
+        };
+        let mut flipped = false;
+        for &n in &[4.0, 8.0, 12.0, 16.0, 20.0, 28.0, 40.0, 60.0] {
+            let mut neutral = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
+            let mut cached = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new())
+                .with_live_conditions(LiveConditions { hit_rate: 0.99, io_saturation: 0.0, cpu_load: 0.0 });
+            if cheapest(&mut neutral, n) != cheapest(&mut cached, n) {
+                flipped = true;
+                break;
+            }
+        }
+        assert!(
+            flipped,
+            "live conditions should flip the cheapest join method for some input size"
         );
     }
 
