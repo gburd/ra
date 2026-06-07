@@ -197,6 +197,39 @@ pushed form never enters the e-graph for outer joins.
 
 ---
 
+## Update — fourth pass: optimizer wrong-result bugs FIXED; blocker is now plan_builder
+
+Both pieces landed (main `2965141d`):
+- **`references_only` soundness** via `RelData.qualifiers` (main `27c6e47f`).
+- **`is_inner_join("?type")` guard** (new condition in `conditions.rs`, registered
+  in `build.rs` KNOWN_CONDITIONS, imported in the `rewrite.rs` generated module)
+  added to every generic `(join ?type …)` rewrite: filter-pushdown-to-child
+  (datafusion/materialize/calcite/volcano `filter-into-join-{left,right}`,
+  `filter-split-and-push`), predicate-merge-into-ON-condition
+  (`calcite-filter-into-join-right`, `filter-join-push`), and join commutativity
+  (volcano `join-commute` — which commuted outer joins, also unsound).
+
+With these, the optimizer produces **correct plans** for outer joins (verified
+LEFT/RIGHT/FULL with inner- and outer-side predicates extract sound forms). 2025
+ra-engine lib tests pass; clippy clean.
+
+### Remaining blocker (plan_builder, not the optimizer)
+
+Un-gating now exposes a **plan_builder Var-remap bug**:
+`… LEFT JOIN customer c … WHERE c.c_acctbal>9000` errors with
+*"attribute 6 of type orders has wrong type … expects numeric, has character"*.
+`c_acctbal` is **customer attno 6 (numeric)**; the error means the pushed inner
+filter's Var kept `varattno=6` but got the **wrong `varno`** (orders, whose attno
+6 is `o_orderpriority`/character) — a varno mix-up when a pushed filter sits on a
+join-child scan after the now-sound conversion/pushdown. So outer joins stay
+**gated** until plan_builder's join-child scan-filter Var resolution is fixed
+(likely in `build_join_node`/`remap_join_vars`/scan-filter qual construction:
+the filter on the inner child must carry the inner relation's varno, not the
+outer's). The optimizer (ra-engine) wrong-result bugs are resolved — this is a
+plan_builder (layer-3) bug.
+
+---
+
 ### Gate narrowed + validation expanded (second pass)
 
 `wrong_result_risk` now gates only **outer joins (LEFT/RIGHT/FULL/CROSS)** and
