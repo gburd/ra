@@ -64,6 +64,7 @@ rw!("calcite-filter-into-join";
     "(join ?type ?join_pred
         (filter ?left_pred ?left)
         (filter ?right_pred ?right))"
+    if is_inner_join("?type")
     if pred_references_only_left("?left_pred", "?left")
     if pred_references_only_right("?right_pred", "?left", "?right")
     if is_equi_condition("?join_pred")

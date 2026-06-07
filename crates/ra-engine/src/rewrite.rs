@@ -44,7 +44,7 @@ mod generated {
     )]
     use crate::conditions::{
         is_bson_operator_filter, is_canonical_scan, is_constant, is_deterministic, is_equi_join,
-        has_index_for,
+        has_index_for, is_inner_join,
         is_json_field_predicate, is_not_const_bool, is_ungrouped_count_star, is_uncorrelated,
         is_xml_function_filter, not_nullable,
         not_zero, pred_references_only, predicate_references_only, references_only,

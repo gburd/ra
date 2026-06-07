@@ -365,17 +365,14 @@ impl PlanBuilder {
     ///     inner side; IN-subquery semi-join returning 0 rows); (2) a scalar
     ///     subquery in a filter predicate — mis-evaluated. Inner joins, scans,
     ///     aggregates, windows, CTEs, set-ops are unaffected.
-    /// Conservative correctness gate: RelExpr shapes the builder/optimizer
-    /// currently MISBUILDS (wrong results, no error). Returns a reason → the
-    /// planner hook defers to PG. Tracked bugs (docs/planner-fallback-backlog.md):
-    /// (1) any outer join (LEFT/RIGHT/FULL/CROSS) — generic `(join ?type …)`
-    ///     filter-pushdown rules push a predicate to the NULLABLE side of the
-    ///     join (sound only for the preserved side / inner joins); the
-    ///     complementary outer-SIDE-predicate bug is already fixed by the
-    ///     ra-engine qualifier-tracking change. SEMI/ANTI (from decorrelated
-    ///     IN/EXISTS) are correct and stay enabled. (2) a scalar subquery in a
-    ///     filter predicate — mis-evaluated. Inner joins, scans, aggregates,
-    ///     windows, CTEs, set-ops, IN/EXISTS are unaffected.
+    /// Conservative correctness gate → defer to PG. Tracked bugs:
+    /// (1) outer joins (LEFT/RIGHT/FULL/CROSS): the optimizer-level wrong-result
+    ///     bugs (unsound filter pushdown / join commute on `(join ?type …)`) are
+    ///     now FIXED in ra-engine (references_only soundness + is_inner_join
+    ///     guards), but plan_builder still mis-remaps a Var's attno/type for some
+    ///     converted-join forms ("attribute N of <rel> has wrong type"), so outer
+    ///     joins stay gated until that plan_builder bug is fixed. SEMI/ANTI are
+    ///     enabled. (2) a scalar subquery in a filter predicate — mis-evaluated.
     fn wrong_result_risk(expr: &RelExpr) -> Option<&'static str> {
         match expr {
             RelExpr::Join { join_type, .. } | RelExpr::ParallelHashJoin { join_type, .. }
@@ -386,7 +383,7 @@ impl PlanBuilder {
                         | ra_core::algebra::JoinType::Anti
                 ) =>
             {
-                return Some("outer/cross join (filter pushdown to nullable side is unsound)");
+                return Some("outer/cross join (plan_builder Var attno/type remap unsound)");
             }
             RelExpr::Filter { predicate, .. } if expr_has_scalar_subquery(predicate) => {
                 return Some("scalar subquery in a filter predicate");

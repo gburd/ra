@@ -49,6 +49,7 @@ rw!("materialize-filter-pushdown-join-left";
     "(filter ?pred (join ?type ?cond ?left ?right))" =>
     "(join ?type ?cond (filter ?pred ?left) ?right)"
     if is_database("materialize")
+    if is_inner_join("?type")
     if predicate_references_only("?pred", "?left")
 ),
 
@@ -56,6 +57,7 @@ rw!("materialize-filter-pushdown-join-right";
     "(filter ?pred (join ?type ?cond ?left ?right))" =>
     "(join ?type ?cond ?left (filter ?pred ?right))"
     if is_database("materialize")
+    if is_inner_join("?type")
     if predicate_references_only("?pred", "?right")
 ),
 ```

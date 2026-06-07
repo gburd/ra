@@ -95,6 +95,7 @@ use egg::{rewrite as rw, *};
 rw!("join-commute";
     "(join ?type ?pred ?left ?right)" =>
     "(join ?type (swap-pred ?pred) ?right ?left)"
+    if is_inner_join("?type")
 ),
 
 // Join associativity
@@ -137,6 +138,7 @@ rw!("filter-into-join-left";
     "(join ?type ?jpred
        (filter ?pred ?left)
        ?right)"
+    if is_inner_join("?type")
     if pred_references_only("?pred", "?left")
 ),
 
@@ -146,6 +148,7 @@ rw!("filter-into-join-right";
     "(join ?type ?jpred
        ?left
        (filter ?pred ?right))"
+    if is_inner_join("?type")
     if pred_references_only("?pred", "?right")
 ),
 
@@ -157,6 +160,7 @@ rw!("filter-split-and-push";
        (join ?type ?jpred
          (filter ?p2 ?left)
          ?right))"
+    if is_inner_join("?type")
     if pred_references_only("?p2", "?left")
        && !pred_references_only("?p1", "?left")
 ),

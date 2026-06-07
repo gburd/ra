@@ -57,6 +57,7 @@ rw!("datafusion-filter-pushdown-through-join-left";
     "(filter ?pred (join ?type ?cond ?left ?right))" =>
     "(join ?type ?cond (filter ?pred ?left) ?right)"
     if is_database("datafusion")
+    if is_inner_join("?type")
     if predicate_references_only("?pred", "?left")
 ),
 
@@ -64,6 +65,7 @@ rw!("datafusion-filter-pushdown-through-join-right";
     "(filter ?pred (join ?type ?cond ?left ?right))" =>
     "(join ?type ?cond ?left (filter ?pred ?right))"
     if is_database("datafusion")
+    if is_inner_join("?type")
     if predicate_references_only("?pred", "?right")
 ),
 ```
