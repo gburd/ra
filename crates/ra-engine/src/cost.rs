@@ -80,14 +80,32 @@ mod generated_costs {
     include!(concat!(env!("OUT_DIR"), "/generated_costs.rs"));
 }
 
-/// Look up a rule-provided cost for `operator`, returning `None` when no rule
-/// supplies one (the caller then uses its built-in default).
+/// Look up the rule-provided cost for `operator` from the compiled `.rra`
+/// `## Cost Model` registry. Returns `None` only when no rule supplies one,
+/// which `all_migrated_operators_have_registered_cost_rules` proves cannot
+/// happen for the operators the cost function dispatches (RFC 0091 P3 made the
+/// rules the sole source of operator cost). Retained as the registry accessor
+/// and the hook the completeness test asserts against.
 #[must_use]
 pub(crate) fn rule_operator_cost(operator: &str, ctx: &OperatorCostCtx) -> Option<f64> {
     generated_costs::OPERATOR_COST_FNS
         .iter()
         .find(|(name, _)| *name == operator)
         .map(|(_, f)| f(ctx))
+}
+
+/// RFC 0091 P3 fail-safe: cost used if an operator has no registered `.rra`
+/// rule. Unreachable in a correct build (the completeness test guarantees
+/// registration); chosen high so an un-costed operator is deprioritized and the
+/// missing-rule regression is visible, rather than re-duplicating a formula.
+const UNREGISTERED_OPERATOR_COST: f64 = 1.0e6;
+
+/// RFC 0091 P3: the sole dispatch from the e-graph cost function to the
+/// rule-provided operator cost. The `.rra` `## Cost Model` rules are
+/// authoritative; on the (completeness-test-guaranteed unreachable) absence of
+/// a rule, fall back to a neutral sentinel rather than a duplicated formula.
+fn operator_cost(operator: &str, ctx: &OperatorCostCtx) -> f64 {
+    rule_operator_cost(operator, ctx).unwrap_or(UNREGISTERED_OPERATOR_COST)
 }
 
 /// Staleness inflation factors applied to row count estimates.
@@ -1395,11 +1413,10 @@ impl IntegratedCostFn {
         }
     }
 
-    /// Rule-or-builtin cost for an operator whose cost ignores child costs and
-    /// cardinality (filter/project/join/aggregate/sort/...). Returns the
-    /// rule-provided cost when registered, else `builtin`.
-    fn flat_op_cost(&self, operator: &str, builtin: f64) -> f64 {
-        rule_operator_cost(operator, &self.op_cost_ctx(0.0, 0.0, 0.0)).unwrap_or(builtin)
+    /// Rule-provided cost for an operator whose cost ignores child costs and
+    /// cardinality (filter/project/join/aggregate/sort/...).
+    fn flat_op_cost(&self, operator: &str) -> f64 {
+        operator_cost(operator, &self.op_cost_ctx(0.0, 0.0, 0.0))
     }
 }
 
@@ -1415,34 +1432,23 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
         let base_cost = match enode {
             RelLang::Scan([table_id]) => {
                 let child_cost = costs(*table_id);
-                // Use per-table row count if available (resolved from e-graph
-                // before extraction), otherwise fall back to average.
+                // Per-table row count resolved from the e-graph before
+                // extraction (else the average). RFC 0091 P3: cost comes solely
+                // from the `scan` rule.
                 let row_count = self.row_count_for_id(*table_id);
-                // RFC 0091: prefer the rule-provided cost model; fall back to
-                // the built-in pages * seq_page_cost formula.
                 let ctx = self.op_cost_ctx(0.0, 0.0, row_count);
-                let pages = (row_count * 100.0 / 8192.0).max(1.0);
-                let seq_cost = rule_operator_cost("scan", &ctx)
-                    .unwrap_or(pages * self.calibration.seq_page_cost());
-                return child_cost + seq_cost;
+                return child_cost + operator_cost("scan", &ctx);
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
                 let row_count = self.row_count_for_id(*table_id);
                 let ctx = self.op_cost_ctx(0.0, 0.0, row_count);
-                let pages = (row_count * 100.0 / 8192.0).max(1.0);
-                let seq_cost = rule_operator_cost("scan", &ctx)
-                    .unwrap_or(pages * self.calibration.seq_page_cost());
-                return costs(*table_id) + costs(*alias_id) + seq_cost;
+                return costs(*table_id) + costs(*alias_id) + operator_cost("scan", &ctx);
             }
             RelLang::Filter(_) | RelLang::Project(_) => {
-                // RFC 0091: prefer the rule-provided cost model; fall back to
-                // the built-in SIMD-scaled per-tuple formula.
-                let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
-                let builtin = simd_factor * self.calibration.tuple_cost();
                 let op = if matches!(enode, RelLang::Filter(_)) { "filter" } else { "project" };
-                self.flat_op_cost(op, builtin)
+                self.flat_op_cost(op)
             }
-            RelLang::Join(_) => self.flat_op_cost("join", 500.0 * self.calibration.tuple_cost()),
+            RelLang::Join(_) => self.flat_op_cost("join"),
             // Per-method physical join cost (RFC 0090 Phase 3 chunk 3). Child
             // *costs* (cl, cr) are monotonic proxies for input size (scan cost
             // scales with pages -> rows). The final `child_cost` sum below adds
@@ -1453,49 +1459,23 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             RelLang::HashJoinOp([_, _, l, r]) => {
                 let cl = costs(*l).max(1.0);
                 let cr = costs(*r).max(1.0);
-                // RFC 0091: prefer the rule-provided cost model; fall back to
-                // the built-in formula when no rule supplies one.
-                let ctx = self.op_cost_ctx(cl, cr, 0.0);
-                rule_operator_cost("hash-join", &ctx)
-                    .unwrap_or(0.5 * cr * self.calibration.tuple_cost()) // build hash on inner
+                operator_cost("hash-join", &self.op_cost_ctx(cl, cr, 0.0))
             }
             RelLang::MergeJoinOp([_, _, l, r]) => {
                 let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
-                // Sort both sides (no interesting-orders tracking yet, so always
-                // pay the sort) — slightly pricier than a hash build. RFC 0091:
-                // prefer the rule-provided cost model; fall back to the built-in.
-                let ctx = self.op_cost_ctx(cl, cr, 0.0);
-                rule_operator_cost("merge-join", &ctx)
-                    .unwrap_or(0.6 * (cl + cr) * self.calibration.tuple_cost())
+                operator_cost("merge-join", &self.op_cost_ctx(cl, cr, 0.0))
             }
             RelLang::NestLoopOp([_, _, l, r]) => {
                 let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
-                // O(n*m): scan inner per outer row. RFC 0091: prefer the
-                // rule-provided cost model; fall back to the built-in formula.
-                let ctx = self.op_cost_ctx(cl, cr, 0.0);
-                rule_operator_cost("nest-loop", &ctx)
-                    .unwrap_or((cl * cr / 50.0) * self.calibration.tuple_cost())
+                operator_cost("nest-loop", &self.op_cost_ctx(cl, cr, 0.0))
             }
             RelLang::IndexNestLoopOp([_, _, l, _r]) => {
                 let cl = costs(*l).max(1.0);
-                // one index probe per outer row (linear in the outer side)
-                let ctx = self.op_cost_ctx(cl, 0.0, 0.0);
-                rule_operator_cost("index-nest-loop", &ctx)
-                    .unwrap_or(2.0 * cl * self.calibration.tuple_cost())
+                operator_cost("index-nest-loop", &self.op_cost_ctx(cl, 0.0, 0.0))
             }
-            RelLang::Aggregate(_) => {
-                self.flat_op_cost("aggregate", 200.0 * self.calibration.tuple_cost())
-            }
-            RelLang::Sort(_) => {
-                let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
-                let builtin = 150.0 * par_factor.max(0.5) * self.calibration.tuple_cost();
-                self.flat_op_cost("sort", builtin)
-            }
-            RelLang::IncrementalSort(_) => {
-                let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
-                let builtin = 60.0 * par_factor.max(0.5) * self.calibration.tuple_cost();
-                self.flat_op_cost("incremental-sort", builtin)
-            }
+            RelLang::Aggregate(_) => self.flat_op_cost("aggregate"),
+            RelLang::Sort(_) => self.flat_op_cost("sort"),
+            RelLang::IncrementalSort(_) => self.flat_op_cost("incremental-sort"),
             RelLang::Limit([n_id, _off_id, child_id]) => {
                 // Startup cost optimization: when LIMIT is present
                 // we only need a prefix of the child output. Plans
