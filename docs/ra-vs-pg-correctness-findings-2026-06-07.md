@@ -1,3 +1,10 @@
+> **STATUS (main `0d56ba13`): outer-join coverage RE-ENABLED.** All
+> LEFT/RIGHT/FULL/CROSS shapes are now Ra-planned and row-identical to PG on
+> PG19. The only shape still gated to PG is a **scalar subquery in a filter
+> predicate** (SubPlan result-param wiring). Remaining perf item: the UNION
+> planning-time blowup. See the "fifth pass" update at the end for the final
+> root cause (unguarded generated `duckdb-filter-through-left-join-left`).
+
 # Ra vs PostgreSQL 19-beta1 — exhaustive A/B findings (2026-06-07)
 
 Follow-up to `ra-vs-pg-correctness-findings-2026-06-06.md`. Re-ran the Pg-vs-Ra
@@ -243,3 +250,45 @@ families now planned by Ra.
 
 Remaining gated (correct via fallback, coverage follow-up): outer joins, scalar
 subquery in WHERE. Remaining perf: UNION planning blowup.
+
+---
+
+## Update — fifth pass: outer-join coverage RE-ENABLED
+
+The "plan_builder Var attno/type" symptom from the fourth pass was **not** a
+plan_builder bug. With real stats, the optimizer pushed the customer-side
+predicate `c.c_acctbal>9000` onto the **orders (left/preserved) scan** of the
+LEFT join via `duckdb-filter-through-left-join-left`, which pushes `?pred` into
+`?left` with **no `references_only` guard**. So a customer column landed on the
+orders scan → "attribute 6 of orders has wrong type" (c_acctbal is customer
+attno 6 numeric; orders attno 6 is o_orderpriority character). The rule fired
+from BOTH the hand-coded copy (`rewrite.rs`) AND an **unguarded generated copy**
+from `rules/database-specific/duckdb-core/duckdb-filter-through-left-join-left.rra`
+(the source of the long-standing "Duplicated rule names" warning). Earlier I had
+only guarded the hand-coded one; tracing (`optimize_with_tracking_verbose`)
+showed the rule still firing, which pointed to the second copy.
+
+Fix (main `0d56ba13`): both copies now carry `references_only("?pred", "?left")`
+(`when:` in the `.rra`), meaningful now that `references_only` is sound. Pushing
+to the preserved side of a left-outer join is then allowed only for a
+left-referencing predicate.
+
+`wrong_result_risk` no longer gates outer joins. Validation (PGOPTIONS bare-query
+A/B on PG19): **12 outer-join shapes** — LEFT/RIGHT/FULL/CROSS with inner-side,
+outer-side, conjunction (both-sides), and no-WHERE predicates; 3-way LEFT; LEFT
++ aggregate; LEFT with an ON-clause condition — all row-identical to PG. A
+15-shape broad regression set (scans, inner joins, IN/EXISTS, NOT EXISTS, agg,
+window, union, distinct, CTE, TPC-H Q3-shape, lateral, scalar-subquery via
+fallback) is **0 diffs / 0 errors**.
+
+### Lesson
+
+A rule can exist as BOTH a hand-coded `rewrite.rs` entry and a generated `.rra`
+copy (duplicate name). Guarding only one leaves the other unsound. Use
+`optimize_with_tracking_verbose(...).rule_tracking.applied` to confirm a rule
+actually stopped firing after a guard change.
+
+### Still open
+
+- Scalar subquery in a filter predicate (gated): wire the SubPlan result param.
+- UNION planning-time blowup (~50×): router fast-path / e-graph budget for set-ops.
