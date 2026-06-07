@@ -186,6 +186,48 @@ staleness factor, `ra_hardware` `CalibratedCostModel` (the rates inside
   row-count proxy.) The honesty mandate is satisfied — parity is measured, not
   assumed.
 
+## Live-conditions plan steering (Options A & B)
+
+Once costs are rules, the live system fingerprint (`hit_rate` / `io_saturation`
+/ `cpu_load`) is threaded into the rule `ctx` (via `with_live_conditions`
+re-tuning the calibration rates). Measurement showed it changed plan **choice**
+on 0/6 queries, because operators were costed in a single category (all
+`tuple_cost`) so the rates scaled them uniformly. Two changes make live
+conditions actually steer plans:
+
+- **Option A — differentiate the I/O-vs-CPU split of existing operators (DONE).**
+  Each join method's `.rra` cost is now a sharp blend of `tuple_cost` (CPU) and
+  `seq`/`rand_page_cost` (I/O) reflecting its physical character (hash ~90% CPU,
+  nest-loop ~90% random I/O, merge sequential-I/O-leaning, index-nl random-I/O).
+  Weights sum to the prior coefficient so neutral behaviour matches the
+  validated baseline. Result (measured): live conditions now reorder methods —
+  a warm cache flips hash-join → nested-loop in the mid-size-join regime
+  (`live_conditions_flip_join_method`). But the flip window is **narrow**:
+  join-method choice is dominated by input *size* (the work amount), so large
+  joins stay hash regardless and the tested real TPC-H queries did not flip.
+  A is the right physical foundation but is **not sufficient** on its own.
+
+- **Option B — promote the scan-method decision into the e-graph (NEXT).** The
+  robust lever. Sequential-scan vs index-scan (vs bitmap) is a *sharp*
+  I/O-vs-CPU tradeoff on the **same input**, present in nearly every query — not
+  a narrow crossover. Today that choice is a `plan_builder` peephole, so the
+  optimizer never weighs a cache-cheap index scan against a seq scan, and live
+  conditions can't touch it. Plan:
+  1. Add `index-scan` (and later `bitmap-scan`) e-graph operators in
+     `egraph/lang.rs` (mirroring the physical-join variants), lowering back to a
+     `Scan` in `from_rec` with the method captured into `PhysicalChoices`.
+  2. Cost-only `.rra` rules: `seq-scan` = pages·`seq_page_cost` (sequential I/O);
+     `index-scan` = `selectivity`·rows·`rand_page_cost` + per-row `tuple_cost`
+     (random I/O, sensitive to `hit_rate`). Extend `OperatorCostCtx` with
+     `selectivity` (already reserved in the RFC) and per-scan index availability.
+  3. A lowering rule `scan → index-scan` guarded by a `has_index_for` condition
+     (needs index metadata in `RelData`/`table_info`).
+  4. `plan_builder` consumes the chosen scan method from `PhysicalChoices`
+     (the seq/index peephole becomes a fallback, then retires).
+  5. Validate with the debug-GUC sweep (force `hit_rate` high → expect
+     index-scan; low/`io_sat` high → expect seq-scan) + the PG19 A/B
+     (correctness + exec-time improvement on selective-predicate queries).
+
 ## Risks / open questions
 
 - **Compile surface:** generated cost bodies must compile against a *stable*
