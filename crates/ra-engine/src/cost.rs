@@ -1853,25 +1853,25 @@ mod tests {
         }
     }
 
-    /// RFC 0091 + live-conditions: the live system fingerprint must still reach
-    /// the rule-sourced operator costs after P2/P3 moved costing into `.rra`
-    /// rules. `with_live_conditions` re-tunes `self.calibration`, which
-    /// `op_cost_ctx` threads into the rule `ctx` — so a high cache hit-rate
-    /// (cheaper I/O) lowers the `scan` rule cost, and high CPU load raises a
-    /// tuple-cost operator (`aggregate`).
+    /// RFC 0091 + live-conditions (B0 rate model): the live fingerprint reaches
+    /// the rule-sourced costs after P2/P3. Under the corrected rate model a warm
+    /// cache compresses *random* I/O toward *sequential* (it does not lower
+    /// sequential, which is cache-insensitive), so it lowers a random-I/O-bearing
+    /// operator (`index-nest-loop`) while high CPU load raises a tuple-cost
+    /// operator (`aggregate`).
     #[test]
     fn live_conditions_flow_into_rule_costs() {
         let hw = HardwareProfile::cpu_only();
         let neutral = IntegratedCostFn::new(hw.clone(), HashMap::new(), HashMap::new());
         let cached = IntegratedCostFn::new(hw.clone(), HashMap::new(), HashMap::new())
             .with_live_conditions(LiveConditions { hit_rate: 0.95, io_saturation: 0.0, cpu_load: 0.0 });
-        let rc = 100_000.0;
-        let neutral_scan = operator_cost("scan", &neutral.op_cost_ctx(0.0, 0.0, rc));
-        let cached_scan = operator_cost("scan", &cached.op_cost_ctx(0.0, 0.0, rc));
+        let cl = 100_000.0;
+        let neutral_inl = operator_cost("index-nest-loop", &neutral.op_cost_ctx(cl, 0.0, 0.0));
+        let cached_inl = operator_cost("index-nest-loop", &cached.op_cost_ctx(cl, 0.0, 0.0));
         assert!(
-            cached_scan < neutral_scan,
-            "high cache hit-rate should lower the rule-sourced scan cost: \
-             cached {cached_scan} !< neutral {neutral_scan}"
+            cached_inl < neutral_inl,
+            "a warm cache should lower the random-I/O-bearing index-nest-loop cost: \
+             cached {cached_inl} !< neutral {neutral_inl}"
         );
 
         let busy = IntegratedCostFn::new(hw, HashMap::new(), HashMap::new())
@@ -1882,36 +1882,36 @@ mod tests {
         );
     }
 
-    /// RFC 0091 Option A: with per-method I/O-vs-CPU cost splits, live
-    /// conditions actually *reorder* the join methods — a warm cache (cheap
-    /// I/O) lets the I/O-bearing nested-loop win over hash-join across a wider
-    /// input range than a cold/contended host does. Proves live conditions
-    /// steer plan choice (not just magnitude): there exists an input size where
-    /// the cheapest method differs between cached and contended hosts.
+    /// RFC 0091 Option B / B0 rate model: a warm cache shifts the I/O-vs-CPU
+    /// balance between methods. The corrected `with_live_conditions` compresses
+    /// *random* I/O toward *sequential* on a cache hit while leaving sequential
+    /// and CPU unchanged — so caching lowers the random-I/O-bearing nested-loop
+    /// while the CPU-dominant hash-join is unmoved. This differential (not a
+    /// uniform scale) is the lever that lets live conditions reorder physical
+    /// methods (and, in B1, flip seq-scan ↔ index-scan).
     #[test]
-    fn live_conditions_flip_join_method() {
+    fn live_conditions_shift_join_io_cpu_balance() {
         use crate::egraph::RelLang;
         use egg::{CostFunction, Id};
         let ids = [Id::from(0), Id::from(1), Id::from(2), Id::from(3)];
-        let cheapest = |cfn: &mut IntegratedCostFn, n: f64| -> &'static str {
-            let c = |id: Id| if usize::from(id) >= 2 { n } else { 1.0 };
-            let h = cfn.cost(&RelLang::HashJoinOp(ids), c);
-            let nl = cfn.cost(&RelLang::NestLoopOp(ids), c);
-            if nl < h { "nest" } else { "hash" }
-        };
-        let mut flipped = false;
-        for &n in &[4.0, 8.0, 12.0, 16.0, 20.0, 28.0, 40.0, 60.0] {
-            let mut neutral = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
-            let mut cached = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new())
-                .with_live_conditions(LiveConditions { hit_rate: 0.99, io_saturation: 0.0, cpu_load: 0.0 });
-            if cheapest(&mut neutral, n) != cheapest(&mut cached, n) {
-                flipped = true;
-                break;
-            }
-        }
+        let c = |id: Id| if usize::from(id) >= 2 { 200.0 } else { 1.0 };
+        let mut neutral = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
+        let mut cached = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new())
+            .with_live_conditions(LiveConditions { hit_rate: 0.99, io_saturation: 0.0, cpu_load: 0.0 });
+        let hash_neutral = neutral.cost(&RelLang::HashJoinOp(ids), c);
+        let hash_cached = cached.cost(&RelLang::HashJoinOp(ids), c);
+        let nest_neutral = neutral.cost(&RelLang::NestLoopOp(ids), c);
+        let nest_cached = cached.cost(&RelLang::NestLoopOp(ids), c);
+        // CPU-dominant hash-join is cache-insensitive (tuple + sequential I/O,
+        // neither moved by hit_rate at cpu_load=0).
         assert!(
-            flipped,
-            "live conditions should flip the cheapest join method for some input size"
+            (hash_cached - hash_neutral).abs() < 1e-9,
+            "hash-join (CPU-dominant) should be cache-insensitive: {hash_cached} vs {hash_neutral}"
+        );
+        // Random-I/O-bearing nested-loop gets cheaper under a warm cache.
+        assert!(
+            nest_cached < nest_neutral,
+            "warm cache should lower the random-I/O-bearing nested-loop: {nest_cached} !< {nest_neutral}"
         );
     }
 

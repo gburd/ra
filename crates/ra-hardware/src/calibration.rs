@@ -127,17 +127,26 @@ impl CalibratedCostModel {
 
     /// Apply live host conditions measured by the monitoring dataflow.
     ///
-    /// Page I/O is paid only on the cache-miss fraction (`1 - hit_rate`) and
-    /// scaled by `io_saturation`; CPU is scaled by `cpu_load`. All inputs are
-    /// in `[0, 1]`. Neutral conditions `(0, 0, 0)` return an unchanged clone,
-    /// so callers without live data are unaffected.
+    /// Sequential I/O is streamed/prefetched, so it is largely cache-insensitive
+    /// — only contention (`io_saturation`) raises it. Random I/O is the
+    /// cache-sensitive one: a cache **hit** serves a random page at roughly
+    /// sequential cost, while a **miss** pays the full random penalty. So the
+    /// effective random cost interpolates from `random_io_cost` (cold) toward
+    /// `sequential_io_cost` (fully cached) by `hit_rate`. This random↔sequential
+    /// gap — not a uniform scale — is what lets a warm cache flip a plan from a
+    /// sequential scan to an index scan. CPU is scaled by `cpu_load`. Neutral
+    /// `(0, 0, 0)` returns an unchanged clone (random stays `random_io_cost`,
+    /// sequential stays `sequential_io_cost`).
     #[must_use]
     pub fn with_live_conditions(&self, hit_rate: f64, io_saturation: f64, cpu_load: f64) -> Self {
-        let io_factor = (1.0 - hit_rate.clamp(0.0, 1.0)) * (1.0 + io_saturation.max(0.0));
+        let hit = hit_rate.clamp(0.0, 1.0);
+        let io_sat_factor = 1.0 + io_saturation.max(0.0);
         let cpu_factor = 1.0 + cpu_load.max(0.0);
+        let seq = self.sequential_io_cost;
+        let rand = self.random_io_cost;
         let mut m = self.clone();
-        m.sequential_io_cost *= io_factor;
-        m.random_io_cost *= io_factor;
+        m.sequential_io_cost = seq * io_sat_factor;
+        m.random_io_cost = seq.mul_add(hit, rand * (1.0 - hit)) * io_sat_factor;
         m.cpu_tuple_cost *= cpu_factor;
         m
     }
@@ -224,9 +233,17 @@ mod tests {
         let neutral = base.with_live_conditions(0.0, 0.0, 0.0);
         assert!((neutral.seq_page_cost() - base.seq_page_cost()).abs() < 1e-9);
         assert!((neutral.tuple_cost() - base.tuple_cost()).abs() < 1e-9);
-        // A fully-cached relation pays no page I/O.
-        let cached = base.with_live_conditions(1.0, 0.0, 0.0);
-        assert!(cached.seq_page_cost() < 1e-9 && cached.rand_page_cost() < 1e-9);
+        // A fully-cached relation serves random pages at ~sequential cost: the
+        // random↔sequential gap closes (rather than both costs going to zero).
+        // Use a model with a real gap (random dearer than sequential).
+        let mut gapped = CalibratedCostModel::reference();
+        gapped.random_io_cost = 4.0 * gapped.sequential_io_cost;
+        let cached = gapped.with_live_conditions(1.0, 0.0, 0.0);
+        assert!((cached.rand_page_cost() - cached.seq_page_cost()).abs() < 1e-9);
+        assert!(cached.rand_page_cost() < gapped.rand_page_cost());
+        // Cold (no cache) preserves the full random penalty.
+        let cold = gapped.with_live_conditions(0.0, 0.0, 0.0);
+        assert!((cold.rand_page_cost() - gapped.rand_page_cost()).abs() < 1e-9);
         // I/O contention (cold + saturated) raises page costs above base.
         let busy = base.with_live_conditions(0.0, 2.0, 0.0);
         assert!(busy.rand_page_cost() > base.rand_page_cost());
