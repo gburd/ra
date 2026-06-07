@@ -1482,11 +1482,15 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             }
             RelLang::Sort(_) => {
                 let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
-                150.0 * par_factor.max(0.5) * self.calibration.tuple_cost()
+                let builtin = 150.0 * par_factor.max(0.5) * self.calibration.tuple_cost();
+                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
+                rule_operator_cost("sort", &ctx).unwrap_or(builtin)
             }
             RelLang::IncrementalSort(_) => {
                 let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
-                60.0 * par_factor.max(0.5) * self.calibration.tuple_cost()
+                let builtin = 60.0 * par_factor.max(0.5) * self.calibration.tuple_cost();
+                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
+                rule_operator_cost("incremental-sort", &ctx).unwrap_or(builtin)
             }
             RelLang::Limit([n_id, _off_id, child_id]) => {
                 // Startup cost optimization: when LIMIT is present
@@ -1684,6 +1688,34 @@ mod tests {
                 let rule = rule_operator_cost(op, &ctx)
                     .expect("aggregate/join cost model must be registered");
                 let builtin = mult * tc;
+                assert!(
+                    (rule - builtin).abs() < 1e-12,
+                    "rule-sourced {op} cost {rule} != built-in {builtin}"
+                );
+            }
+        }
+    }
+
+    /// RFC 0091 P2 golden test: sort and incremental-sort costs sourced from
+    /// their `.rra` blocks equal the built-in core-scaled formulas.
+    #[test]
+    fn sort_rule_costs_match_builtin() {
+        for (cores, tc) in [(8u32, 0.01), (1, 1.0), (32, 0.02)] {
+            let ctx = OperatorCostCtx {
+                left_cost: 0.0,
+                right_cost: 0.0,
+                tuple_cost: tc,
+                seq_page_cost: 1.0,
+                rand_page_cost: 4.0,
+                row_count: 0.0,
+                simd_width_bits: 256,
+                cpu_cores: cores,
+            };
+            let par = (8.0 / f64::from(cores)).max(0.5);
+            for (op, base) in [("sort", 150.0), ("incremental-sort", 60.0)] {
+                let rule =
+                    rule_operator_cost(op, &ctx).expect("sort cost model must be registered");
+                let builtin = base * par * tc;
                 assert!(
                     (rule - builtin).abs() < 1e-12,
                     "rule-sourced {op} cost {rule} != built-in {builtin}"

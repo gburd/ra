@@ -1,0 +1,27 @@
+---
+id: sort-operator-cost
+name: "sort-operator-cost"
+category: cost-models/operators
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, operator, sort]
+costs_operator: sort
+---
+
+# sort-operator-cost
+
+## Description
+
+Per-instance cost of a full `sort` operator for the e-graph cost extractor
+(RFC 0091). Cost-only rule (no `## Rewrite`).
+
+## Cost Model
+
+A full sort is parallelizable, so more cores lower the cost; the parallel factor
+is clamped at 0.5 so the speedup saturates. `ctx.cpu_cores` is the hardware core
+count and `ctx.tuple_cost` the calibrated per-tuple CPU cost.
+
+```rust
+150.0 * (8.0 / f64::from(ctx.cpu_cores)).max(0.5) * ctx.tuple_cost
+```
