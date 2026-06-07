@@ -145,26 +145,29 @@ staleness factor, `ra_hardware` `CalibratedCostModel` (the rates inside
   operator (`hash-join`) end-to-end and prove `IntegratedCostFn` dispatches to
   the rule body with identical plan choices (golden-cost test vs. the retained
   built-in).
-- **P2 — Migrate the ~14 operators:** move each `cost.rs` method body into its
-  physical rule's `## Cost Model`; keep the built-in as fallback; per-operator
-  golden-cost equivalence test.
-  - *Done:* the physical join family — `hash-join` (P1), `merge-join`,
-    `nest-loop` — is rule-sourced via `costs_operator:` on the
-    `join-lowering-core` rules, each with a golden-cost equivalence test, and
-    `IntegratedCostFn` dispatches through `op_cost_ctx` + `rule_operator_cost`.
-  - *Remaining:* `scan`/`filter`/`project`/`sort`/`incremental-sort`/
-    `aggregate`/`index-nest-loop` and the bitmap/parquet/vector scan methods.
-    These are blocked on two things: (1) `OperatorCostCtx` must grow the inputs
-    they read — per-node `row_count` (Scan), `selectivity` (index/bitmap), and
-    hardware fields (`simd_width_bits`, `cpu_cores` for the SIMD/parallel
-    factors in filter/sort); (2) several are *logical* e-graph operators
-    (filter, sort, aggregate) with no physical-lowering `.rra` owner like the
-    joins have, so they need either cost-only physical rules or a documented
-    home for their `## Cost Model`. Extend the ctx first, then migrate
-    operator-by-operator with golden tests.
+- **P2 — Migrate the operators:** move each `cost.rs` method body into a
+  `## Cost Model` rule; keep the built-in as fallback; per-operator golden-cost
+  equivalence test. **Done — every egg `CostFunction` operator arm is now
+  rule-sourced:**
+  - *Join family* (`costs_operator:` on the `join-lowering-core` rules):
+    `hash-join` (P1), `merge-join`, `nest-loop`, `index-nest-loop`.
+  - *Other operators* (cost-only rules under `rules/cost-models/operators/` —
+    frontmatter `costs_operator:` + `## Cost Model`, no `## Rewrite`):
+    `scan` (shared by `scan`/`scan-alias`), `filter`, `project`, `join`
+    (logical), `aggregate`, `sort`, `incremental-sort`.
+  - `OperatorCostCtx` was extended with `row_count`, `simd_width_bits`, and
+    `cpu_cores`; `IntegratedCostFn` dispatches via `op_cost_ctx` /
+    `flat_op_cost` / `rule_operator_cost`, with the prior built-in as fallback.
+    Each operator has a golden-cost test asserting rule == retired built-in, so
+    no plan choices change. (The `Limit` startup-cost arm is plan-shape logic,
+    not a per-operator base cost, and the analytic `IntegratedCostModel`
+    methods — `index_scan_cost`/`bitmap_*`/`parquet`/`vector` — are a separate
+    surface not used by the e-graph extractor; both stay built-in for now.)
 - **P3 — Retire the built-ins:** once all operators are rule-sourced and
   equivalence holds, delete the hand-coded bodies from `cost.rs` (it becomes the
-  dispatcher + `OperatorCostCtx` builder only).
+  dispatcher + `OperatorCostCtx` builder only). *Gated on P4:* the fallbacks are
+  cheap insurance and must not be removed until the plan-quality A/B confirms
+  the rule-sourced costs are authoritative in practice.
 - **P4 — Validate plan QUALITY (gating):** because changing the cost formula
   changes which plans Ra *picks*, gate every step on a plan-quality A/B
   (`ra-bench` / `EXPLAIN ANALYZE` on the PG19 cluster), **not** row-equivalence.
