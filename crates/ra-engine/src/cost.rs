@@ -1761,6 +1761,44 @@ mod tests {
         }
     }
 
+    /// RFC 0091 P3 precondition: every egg cost operator that P2 migrated must
+    /// have a *registered* rule cost, so the built-in fallbacks are provably
+    /// dead code for these operators. If a `.rra` cost rule fails to compile or
+    /// is dropped, build.rs silently omits it and the operator falls back to the
+    /// built-in — this test catches that regression before fallbacks are retired.
+    #[test]
+    fn all_migrated_operators_have_registered_cost_rules() {
+        let ctx = OperatorCostCtx {
+            left_cost: 1.0,
+            right_cost: 1.0,
+            tuple_cost: 1.0,
+            seq_page_cost: 1.0,
+            rand_page_cost: 4.0,
+            row_count: 1.0,
+            simd_width_bits: 256,
+            cpu_cores: 8,
+        };
+        for op in [
+            "scan",
+            "filter",
+            "project",
+            "join",
+            "hash-join",
+            "merge-join",
+            "nest-loop",
+            "index-nest-loop",
+            "aggregate",
+            "sort",
+            "incremental-sort",
+        ] {
+            assert!(
+                rule_operator_cost(op, &ctx).is_some(),
+                "operator `{op}` has no registered .rra cost rule — the built-in \
+                 fallback would silently fire; fix the rule before retiring fallbacks"
+            );
+        }
+    }
+
     /// RFC 0090 Phase 3 chunk 3: per-method physical join costs order correctly.
     /// `NestLoop` (quadratic) must exceed `HashJoin` on large inputs but be
     /// competitive on tiny inputs; `IndexNestLoop` (linear in the outer) must
