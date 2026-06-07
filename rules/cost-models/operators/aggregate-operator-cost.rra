@@ -1,0 +1,28 @@
+---
+id: aggregate-operator-cost
+name: "aggregate-operator-cost"
+category: cost-models/operators
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, operator, aggregate]
+costs_operator: aggregate
+---
+
+# aggregate-operator-cost
+
+## Description
+
+Per-instance cost of an `aggregate` operator for the e-graph cost extractor
+(RFC 0091). Cost-only rule (no `## Rewrite`).
+
+## Cost Model
+
+A flat per-instance base reflecting hash-table maintenance and per-group
+finalization; cardinality-aware refinement (group count) is future work once
+the extractor threads per-node row counts in. `ctx.tuple_cost` is the
+calibrated per-tuple CPU cost; the child cost is added by the cost function.
+
+```rust
+200.0 * ctx.tuple_cost
+```

@@ -1434,7 +1434,10 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 };
                 rule_operator_cost(op, &ctx).unwrap_or(builtin)
             }
-            RelLang::Join(_) => 500.0 * self.calibration.tuple_cost(),
+            RelLang::Join(_) => {
+                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
+                rule_operator_cost("join", &ctx).unwrap_or(500.0 * self.calibration.tuple_cost())
+            }
             // Per-method physical join cost (RFC 0090 Phase 3 chunk 3). Child
             // *costs* (cl, cr) are monotonic proxies for input size (scan cost
             // scales with pages -> rows). The final `child_cost` sum below adds
@@ -1472,7 +1475,11 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let cl = costs(*l).max(1.0);
                 2.0 * cl * self.calibration.tuple_cost() // one index probe per outer row
             }
-            RelLang::Aggregate(_) => 200.0 * self.calibration.tuple_cost(),
+            RelLang::Aggregate(_) => {
+                let ctx = self.op_cost_ctx(0.0, 0.0, 0.0);
+                rule_operator_cost("aggregate", &ctx)
+                    .unwrap_or(200.0 * self.calibration.tuple_cost())
+            }
             RelLang::Sort(_) => {
                 let par_factor = 8.0 / f64::from(self.hardware.cpu_cores);
                 150.0 * par_factor.max(0.5) * self.calibration.tuple_cost()
@@ -1650,6 +1657,33 @@ mod tests {
             for op in ["filter", "project"] {
                 let rule = rule_operator_cost(op, &ctx)
                     .expect("filter/project cost model must be registered");
+                assert!(
+                    (rule - builtin).abs() < 1e-12,
+                    "rule-sourced {op} cost {rule} != built-in {builtin}"
+                );
+            }
+        }
+    }
+
+    /// RFC 0091 P2 golden test: the flat-base operator costs (aggregate, logical
+    /// join) sourced from their `.rra` blocks equal the built-in constants.
+    #[test]
+    fn constant_operator_rule_costs_match_builtin() {
+        for tc in [0.01, 1.0, 0.5] {
+            let ctx = OperatorCostCtx {
+                left_cost: 0.0,
+                right_cost: 0.0,
+                tuple_cost: tc,
+                seq_page_cost: 1.0,
+                rand_page_cost: 4.0,
+                row_count: 0.0,
+                simd_width_bits: 256,
+                cpu_cores: 8,
+            };
+            for (op, mult) in [("aggregate", 200.0), ("join", 500.0)] {
+                let rule = rule_operator_cost(op, &ctx)
+                    .expect("aggregate/join cost model must be registered");
+                let builtin = mult * tc;
                 assert!(
                     (rule - builtin).abs() < 1e-12,
                     "rule-sourced {op} cost {rule} != built-in {builtin}"
