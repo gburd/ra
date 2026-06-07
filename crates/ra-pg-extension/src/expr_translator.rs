@@ -401,11 +401,11 @@ pub(crate) unsafe fn op_expr_from_nodes(
     let opno = pg_sys::OpernameGetOprid(opname_list, left_type, right_type);
     if opno == pg_sys::InvalidOid {
         // No operator for these exact types (e.g. `int4 < numeric`, as produced
-        // by comparing an int column to `avg(...)`). Defer to PostgreSQL's own
-        // operator resolution, which selects the best candidate and inserts the
-        // same implicit coercions the parser would. Returns a fully-formed
-        // OpExpr with coerced arguments.
-        return pg_sys::make_op(
+        // by comparing an int column to `avg(...)`, or `bpchar = text`). Defer
+        // to PostgreSQL's own operator resolution, which selects the best
+        // candidate and inserts the same implicit coercions the parser would.
+        // Returns a fully-formed OpExpr with coerced arguments.
+        let op = pg_sys::make_op(
             std::ptr::null_mut(),
             opname_list,
             left_pg.cast(),
@@ -413,6 +413,15 @@ pub(crate) unsafe fn op_expr_from_nodes(
             std::ptr::null_mut(),
             -1,
         );
+        // make_op does NOT assign collations — PG's parser does that in a
+        // separate pass (assign_expr_collations) that Ra otherwise skips. Run
+        // it here so collation-sensitive coercions (e.g. bpchar→text comparison)
+        // carry a valid inputcollid; without it the executor raises "could not
+        // determine which collation to use for string comparison".
+        if !op.is_null() {
+            pg_sys::assign_expr_collations(std::ptr::null_mut(), op.cast());
+        }
+        return op;
     }
 
     let opfuncid = pg_sys::get_opcode(opno);
