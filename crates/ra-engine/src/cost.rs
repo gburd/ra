@@ -1936,6 +1936,73 @@ mod tests {
         );
     }
 
+    /// RFC 0091 Option B — simulation across host storage + table situations.
+    /// The local box is NVMe (random ≈ sequential), so an empirical seq↔index
+    /// flip is not observable; this *simulates* hosts with a real random penalty
+    /// (NVMe/SATA/HDD `random_io_ratio`) via the B0 `with_live_conditions`
+    /// transform and asserts the scan-method economics across the regime matrix.
+    #[test]
+    fn simulated_scan_method_across_host_and_table() {
+        use ra_hardware::calibration::CalibratedCostModel;
+        let costs = |seq: f64, rand: f64, rows: f64, sel: f64| -> (f64, f64) {
+            let ctx = OperatorCostCtx {
+                left_cost: 0.0,
+                right_cost: 0.0,
+                tuple_cost: 0.01,
+                seq_page_cost: seq,
+                rand_page_cost: rand,
+                row_count: rows,
+                simd_width_bits: 256,
+                cpu_cores: 8,
+                page_size: 8192.0,
+                avg_row_size: 100.0,
+                selectivity: sel,
+            };
+            (operator_cost("scan", &ctx), operator_cost("index-scan", &ctx))
+        };
+        let rows = 1_000_000.0;
+        for &gap in &[1.2_f64, 8.0, 100.0] {
+            // Simulate a host whose random I/O is `gap`× sequential.
+            let mut base = CalibratedCostModel::reference();
+            base.sequential_io_cost = 1.0;
+            base.random_io_cost = gap;
+            let warm = base.with_live_conditions(0.99, 0.0, 0.0);
+            let cold = base.with_live_conditions(0.0, 0.0, 0.0);
+            // Invariant: a warm cache always favors the index at least as much
+            // as a cold host (random gets cheaper relative to sequential).
+            let sel = 0.01;
+            let (ws, wi) = costs(warm.seq_page_cost(), warm.rand_page_cost(), rows, sel);
+            let (cs, ci) = costs(cold.seq_page_cost(), cold.rand_page_cost(), rows, sel);
+            assert!(
+                (wi / ws) <= (ci / cs) + 1e-9,
+                "warm should favor index ≥ cold (gap={gap}): warm {wi}/{ws} cold {ci}/{cs}"
+            );
+            // High random-penalty storage: a clean flip exists at a selectivity
+            // inside the warm/cold crossover window — warm picks index, cold
+            // picks sequential.
+            if gap >= 50.0 {
+                let flip_sel = 0.001;
+                let (ws2, wi2) = costs(warm.seq_page_cost(), warm.rand_page_cost(), rows, flip_sel);
+                let (cs2, ci2) = costs(cold.seq_page_cost(), cold.rand_page_cost(), rows, flip_sel);
+                assert!(wi2 < ws2, "HDD warm should pick index (gap={gap})");
+                assert!(ci2 > cs2, "HDD cold should pick sequential (gap={gap})");
+            }
+        }
+        // Selectivity extremes (HDD host): a very selective predicate picks the
+        // index regardless of cache; a non-selective one picks sequential.
+        let mut hdd = CalibratedCostModel::reference();
+        hdd.sequential_io_cost = 1.0;
+        hdd.random_io_cost = 100.0;
+        let warm = hdd.with_live_conditions(0.99, 0.0, 0.0);
+        let cold = hdd.with_live_conditions(0.0, 0.0, 0.0);
+        for cal in [&warm, &cold] {
+            let (s_hi, i_hi) = costs(cal.seq_page_cost(), cal.rand_page_cost(), rows, 1e-5);
+            assert!(i_hi < s_hi, "very selective predicate should pick the index");
+            let (s_lo, i_lo) = costs(cal.seq_page_cost(), cal.rand_page_cost(), rows, 0.5);
+            assert!(i_lo > s_lo, "non-selective predicate should pick the sequential scan");
+        }
+    }
+
     /// RFC 0091 Option B (B1): the cost-driven seq↔index scan flip. For a
     /// selective predicate, a warm cache (random I/O ≈ sequential, per B0) makes
     /// the `index-scan` rule cheaper than reading every page sequentially, while
