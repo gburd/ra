@@ -22,6 +22,16 @@ pub struct RelData {
     /// reads; for a relational e-class it is the columns read by its operators.
     /// Used by column-aware conditions (e.g. `references_subset`).
     pub columns: HashSet<String>,
+    /// Relation qualifiers (table names AND aliases) reachable in this e-class.
+    /// A `QCol` leaf contributes its qualifier (the alias or table name used in
+    /// the query); a `ScanAlias` contributes BOTH its table name and alias; a
+    /// plain `Scan` contributes its table name. Propagated up like `columns`.
+    /// Unlike `tables` (relational nodes only), this is populated for scalar
+    /// predicate e-classes too, so `references_only(pred, side)` can soundly
+    /// test `pred.qualifiers ⊆ side.qualifiers` — the predicate references only
+    /// relations available on that side. (`tables` is empty for scalar
+    /// predicates, which made the subset test a no-op.)
+    pub qualifiers: HashSet<String>,
     /// Whether this e-class contains a relational operator.
     pub is_relational: bool,
     /// Estimated row count (if computable).
@@ -92,6 +102,36 @@ impl Analysis<RelLang> for RelAnalysis {
             _ => {}
         }
 
+        // Qualifier tracking: relation table-names + aliases (for scans) and
+        // the qualifier on a `QCol` leaf (for scalar predicates). Both use the
+        // query's alias namespace, so they match without alias↔table resolution.
+        match enode {
+            RelLang::ScanAlias([table_id, alias_id]) => {
+                if let Some(sym) = get_symbol(egraph, *table_id) {
+                    data.qualifiers.insert(sym);
+                }
+                if let Some(sym) = get_symbol(egraph, *alias_id) {
+                    data.qualifiers.insert(sym);
+                }
+            }
+            RelLang::Scan([table_id])
+            | RelLang::IndexScan([table_id, _])
+            | RelLang::IndexOnlyScan([table_id, _, _, _])
+            | RelLang::IndexScanChoice([_, table_id])
+            | RelLang::MetadataLookup([table_id, _])
+            | RelLang::MvScan([table_id, _, _, _]) => {
+                if let Some(sym) = get_symbol(egraph, *table_id) {
+                    data.qualifiers.insert(sym);
+                }
+            }
+            RelLang::QCol([table_id, _]) => {
+                if let Some(sym) = get_symbol(egraph, *table_id) {
+                    data.qualifiers.insert(sym);
+                }
+            }
+            _ => {}
+        }
+
         // Column tracking (RFC 0090): record the column a `col`/`qcol` leaf
         // references, then propagate the union of all children's columns so
         // every e-class carries the columns referenced in its subtree.
@@ -106,6 +146,7 @@ impl Analysis<RelLang> for RelAnalysis {
         for child in enode.children() {
             let canonical = egraph.find(*child);
             data.columns.extend(egraph[canonical].data.columns.iter().cloned());
+            data.qualifiers.extend(egraph[canonical].data.qualifiers.iter().cloned());
         }
 
         data
@@ -114,8 +155,10 @@ impl Analysis<RelLang> for RelAnalysis {
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
         let before_len = to.tables.len();
         let before_cols = to.columns.len();
+        let before_quals = to.qualifiers.len();
         to.tables.extend(from.tables);
         to.columns.extend(from.columns);
+        to.qualifiers.extend(from.qualifiers);
         to.is_relational |= from.is_relational;
 
         if from.estimated_rows.is_some() && to.estimated_rows.is_none() {
@@ -123,7 +166,9 @@ impl Analysis<RelLang> for RelAnalysis {
         }
 
         DidMerge(
-            to.tables.len() != before_len || to.columns.len() != before_cols,
+            to.tables.len() != before_len
+                || to.columns.len() != before_cols
+                || to.qualifiers.len() != before_quals,
             false, // from is consumed, nothing to report
         )
     }

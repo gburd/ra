@@ -110,8 +110,14 @@ impl Condition<RelLang, RelAnalysis> for ReferencesOnly {
         let pred_data = &egraph[pred_id].data;
         let side_data = &egraph[side_id].data;
 
-        // Check that all tables referenced by the predicate are in the side's table set
-        pred_data.tables.is_subset(&side_data.tables)
+        // The predicate references only this side iff every relation qualifier
+        // it uses is available on the side. `qualifiers` is populated for scalar
+        // predicate e-classes (via QCol) as well as relations (via Scan/
+        // ScanAlias), so this is a real test — unlike `tables`, which is empty
+        // for scalar predicates and made the subset trivially true. An empty
+        // predicate qualifier set (constant-only predicate) is pushable to
+        // either side, which is correct.
+        pred_data.qualifiers.is_subset(&side_data.qualifiers)
     }
 }
 

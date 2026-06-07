@@ -519,66 +519,88 @@ pub fn join_transformation_rules(
     use egg::rewrite;
 
     vec![
-        // LEFT OUTER -> INNER when filter has comparison on right side
-        // col > const rejects nulls
+        // LEFT OUTER -> INNER when a null-rejecting filter references the
+        // INNER (right) side. Comparison ops are strict, so `NULL cmp v` is not
+        // true and unmatched (null-extended) right rows are dropped — making the
+        // outer join equivalent to an inner join. The predicate MUST reference
+        // only the right side: a predicate on the preserved (left) side does NOT
+        // license the conversion (it would drop left rows that have no match).
         rewrite!("left-outer-to-inner-gt";
             "(filter (gt ?col ?val) (join left-outer ?cond ?left ?right))" =>
             "(filter (gt ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?right")
         ),
         rewrite!("left-outer-to-inner-lt";
             "(filter (lt ?col ?val) (join left-outer ?cond ?left ?right))" =>
             "(filter (lt ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?right")
         ),
         rewrite!("left-outer-to-inner-ge";
             "(filter (ge ?col ?val) (join left-outer ?cond ?left ?right))" =>
             "(filter (ge ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?right")
         ),
         rewrite!("left-outer-to-inner-le";
             "(filter (le ?col ?val) (join left-outer ?cond ?left ?right))" =>
             "(filter (le ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?right")
         ),
         rewrite!("left-outer-to-inner-eq";
             "(filter (eq ?col ?val) (join left-outer ?cond ?left ?right))" =>
             "(filter (eq ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?right")
         ),
         rewrite!("left-outer-to-inner-ne";
             "(filter (ne ?col ?val) (join left-outer ?cond ?left ?right))" =>
             "(filter (ne ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?right")
         ),
-        // RIGHT OUTER -> INNER with comparison filters
+        // RIGHT OUTER -> INNER with comparison filters. Mirror image: the
+        // nullable side of a right outer join is the LEFT child, so the
+        // null-rejecting predicate must reference only the left side.
         rewrite!("right-outer-to-inner-gt";
             "(filter (gt ?col ?val) (join right-outer ?cond ?left ?right))" =>
             "(filter (gt ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?left")
         ),
         rewrite!("right-outer-to-inner-lt";
             "(filter (lt ?col ?val) (join right-outer ?cond ?left ?right))" =>
             "(filter (lt ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?left")
         ),
         rewrite!("right-outer-to-inner-ge";
             "(filter (ge ?col ?val) (join right-outer ?cond ?left ?right))" =>
             "(filter (ge ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?left")
         ),
         rewrite!("right-outer-to-inner-le";
             "(filter (le ?col ?val) (join right-outer ?cond ?left ?right))" =>
             "(filter (le ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?left")
         ),
         rewrite!("right-outer-to-inner-eq";
             "(filter (eq ?col ?val) (join right-outer ?cond ?left ?right))" =>
             "(filter (eq ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?left")
         ),
         rewrite!("right-outer-to-inner-ne";
             "(filter (ne ?col ?val) (join right-outer ?cond ?left ?right))" =>
             "(filter (ne ?col ?val) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("?col", "?left")
         ),
-        // Outer-to-inner through AND conjunction:
-        // If either conjunct rejects nulls, the whole conjunction does
+        // Outer-to-inner through AND conjunction. Conservatively require the
+        // whole conjunction to reference only the nullable side; this is sound
+        // (the conjunction is then null-rejecting on that side) though it misses
+        // mixed-side conjunctions where only one conjunct is inner-side.
         rewrite!("left-outer-to-inner-and";
             "(filter (and ?p1 ?p2) (join left-outer ?cond ?left ?right))" =>
             "(filter (and ?p1 ?p2) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("(and ?p1 ?p2)", "?right")
         ),
         rewrite!("right-outer-to-inner-and";
             "(filter (and ?p1 ?p2) (join right-outer ?cond ?left ?right))" =>
             "(filter (and ?p1 ?p2) (join inner ?cond ?left ?right))"
+            if crate::conditions::references_only("(and ?p1 ?p2)", "?left")
         ),
         // Self-join elimination: join of same scan on same condition
         // is identity when result is same as left (simplified pattern)
