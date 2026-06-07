@@ -61,6 +61,12 @@ pub struct OperatorCostCtx {
     pub simd_width_bits: u32,
     /// Hardware CPU core count (drives parallelizable operators).
     pub cpu_cores: u32,
+    /// Heap page size in bytes (the DB's `block_size` / `PostgreSQL` `BLCKSZ`).
+    /// Derived from the host, never hard-coded in a cost formula.
+    pub page_size: f64,
+    /// Average bytes per row for the costed relation, from table statistics
+    /// (real `avg_row_size`), used with `page_size` to derive page counts.
+    pub avg_row_size: f64,
 }
 
 /// A rule-provided operator cost model: returns the traditional (analytic) cost
@@ -126,6 +132,32 @@ fn staleness_factor(staleness: Staleness) -> f64 {
 
 /// Default row count assumed when no statistics are available.
 const DEFAULT_ROW_COUNT: f64 = 1000.0;
+
+/// Heap page size in bytes — the DB's `block_size` (`PostgreSQL` `BLCKSZ`,
+/// default 8 KiB). This is a physical property of the host database, not a
+/// cost-tuning knob: the extension overrides it from the live `block_size`
+/// (`IntegratedCostFn::with_page_size_bytes`); this is the standalone default.
+pub const DEFAULT_DB_PAGE_SIZE_BYTES: f64 = 8192.0;
+
+/// Assumed average row width in bytes when a table carries no statistics.
+/// Only a fallback; real per-table `avg_row_size` is used when available.
+const DEFAULT_AVG_ROW_SIZE_BYTES: f64 = 100.0;
+
+/// Mean of the known tables' real `avg_row_size`, or the documented fallback
+/// when no statistics are available. Used to derive scan page counts together
+/// with the host page size (rather than a hard-coded bytes-per-row literal).
+fn mean_avg_row_size(table_stats: &HashMap<String, Statistics>) -> f64 {
+    let sizes: Vec<f64> = table_stats
+        .values()
+        .map(|s| s.avg_row_size as f64)
+        .filter(|&w| w > 0.0)
+        .collect();
+    if sizes.is_empty() {
+        DEFAULT_AVG_ROW_SIZE_BYTES
+    } else {
+        sizes.iter().sum::<f64>() / sizes.len() as f64
+    }
+}
 
 /// Confidence discount applied to cost estimates.
 ///
@@ -1275,6 +1307,13 @@ pub struct IntegratedCostFn {
     /// Populated before extraction by scanning the e-graph for Symbol nodes
     /// whose names match tables in `table_stats`.
     id_row_counts: std::sync::Arc<HashMap<egg::Id, f64>>,
+    /// Heap page size in bytes (host `block_size`); defaults to
+    /// `DEFAULT_DB_PAGE_SIZE_BYTES`, overridden from the host via
+    /// `with_page_size_bytes`.
+    page_size_bytes: f64,
+    /// Average row width in bytes across known tables (real `avg_row_size`),
+    /// used with `page_size_bytes` to derive scan page counts.
+    avg_row_size_bytes: f64,
 }
 
 impl IntegratedCostFn {
@@ -1296,6 +1335,7 @@ impl IntegratedCostFn {
             let total: f64 = table_stats.values().map(|s| s.row_count).sum();
             total / table_stats.len() as f64
         };
+        let avg_row_size_bytes = mean_avg_row_size(&table_stats);
         Self {
             hardware,
             calibration,
@@ -1303,7 +1343,20 @@ impl IntegratedCostFn {
             staleness_map: std::sync::Arc::new(staleness_map),
             avg_row_count,
             id_row_counts: std::sync::Arc::new(HashMap::new()),
+            page_size_bytes: DEFAULT_DB_PAGE_SIZE_BYTES,
+            avg_row_size_bytes,
         }
+    }
+
+    /// Override the heap page size from the host database's `block_size`
+    /// (`PostgreSQL` `BLCKSZ`). The standalone default is
+    /// `DEFAULT_DB_PAGE_SIZE_BYTES`.
+    #[must_use]
+    pub fn with_page_size_bytes(mut self, page_size_bytes: f64) -> Self {
+        if page_size_bytes > 0.0 {
+            self.page_size_bytes = page_size_bytes;
+        }
+        self
     }
 
     /// Create with pre-resolved Id → row count mapping.
@@ -1354,6 +1407,7 @@ impl IntegratedCostFn {
             let total: f64 = table_stats.values().map(|s| s.row_count).sum();
             total / table_stats.len() as f64
         };
+        let avg_row_size_bytes = mean_avg_row_size(&table_stats);
         Self {
             hardware: model.hardware().clone(),
             calibration: model.calibration().clone(),
@@ -1361,6 +1415,8 @@ impl IntegratedCostFn {
             staleness_map: std::sync::Arc::new(staleness_map),
             avg_row_count,
             id_row_counts: std::sync::Arc::new(HashMap::new()),
+            page_size_bytes: DEFAULT_DB_PAGE_SIZE_BYTES,
+            avg_row_size_bytes,
         }
     }
 
@@ -1410,6 +1466,8 @@ impl IntegratedCostFn {
             row_count,
             simd_width_bits: self.hardware.simd_width_bits,
             cpu_cores: self.hardware.cpu_cores,
+            page_size: self.page_size_bytes,
+            avg_row_size: self.avg_row_size_bytes,
         }
     }
 
@@ -1569,6 +1627,8 @@ mod tests {
             row_count: 0.0,
             simd_width_bits: 256,
             cpu_cores: 8,
+            page_size: 8192.0,
+            avg_row_size: 100.0,
             };
             let rule = rule_operator_cost("hash-join", &ctx)
                 .expect("hash-join cost model must be registered from the rule file");
@@ -1588,6 +1648,8 @@ mod tests {
             row_count: 0.0,
             simd_width_bits: 256,
             cpu_cores: 8,
+            page_size: 8192.0,
+            avg_row_size: 100.0,
         };
         assert!(rule_operator_cost("seq-scan", &ctx).is_none());
     }
@@ -1607,6 +1669,8 @@ mod tests {
             row_count: 0.0,
             simd_width_bits: 256,
             cpu_cores: 8,
+            page_size: 8192.0,
+            avg_row_size: 100.0,
             };
             let merge = rule_operator_cost("merge-join", &ctx)
                 .expect("merge-join cost model must be registered from the rule file");
@@ -1647,6 +1711,8 @@ mod tests {
                 row_count: 0.0,
                 simd_width_bits: simd,
                 cpu_cores: 8,
+                page_size: 8192.0,
+                avg_row_size: 100.0,
             };
             let builtin = (256.0 / f64::from(simd)) * tc;
             for op in ["filter", "project"] {
@@ -1674,6 +1740,8 @@ mod tests {
                 row_count: 0.0,
                 simd_width_bits: 256,
                 cpu_cores: 8,
+                page_size: 8192.0,
+                avg_row_size: 100.0,
             };
             for (op, mult) in [("aggregate", 200.0), ("join", 500.0)] {
                 let rule = rule_operator_cost(op, &ctx)
@@ -1701,6 +1769,8 @@ mod tests {
                 row_count: 0.0,
                 simd_width_bits: 256,
                 cpu_cores: cores,
+                page_size: 8192.0,
+                avg_row_size: 100.0,
             };
             let par = (8.0 / f64::from(cores)).max(0.5);
             for (op, base) in [("sort", 150.0), ("incremental-sort", 60.0)] {
@@ -1730,10 +1800,12 @@ mod tests {
                 row_count: rows,
                 simd_width_bits: 256,
                 cpu_cores: 8,
+                page_size: 8192.0,
+                avg_row_size: 100.0,
             };
             let rule =
                 rule_operator_cost("scan", &ctx).expect("scan cost model must be registered");
-            let builtin = (rows * 100.0 / 8192.0).max(1.0) * spc;
+            let builtin = (rows * ctx.avg_row_size / ctx.page_size).max(1.0) * spc;
             assert!(
                 (rule - builtin).abs() < 1e-9,
                 "rule-sourced scan cost {rule} != built-in {builtin}"
@@ -1757,6 +1829,8 @@ mod tests {
             row_count: 1.0,
             simd_width_bits: 256,
             cpu_cores: 8,
+            page_size: 8192.0,
+            avg_row_size: 100.0,
         };
         for op in [
             "scan",

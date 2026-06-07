@@ -20,11 +20,13 @@ e-graph operators (the alias binding does not change the scan cost).
 ## Cost Model
 
 A sequential scan reads every page of the relation. The page count is derived
-from the estimated row count assuming ~100 bytes/row and an 8 KiB page, floored
-at one page. `ctx.row_count` is the node's estimated cardinality and
-`ctx.seq_page_cost` the calibrated sequential page cost. The child (table
-symbol) cost is added by the cost function.
+from the estimated row count, the relation's real average row width
+(`ctx.avg_row_size`, from table statistics), and the host heap page size
+(`ctx.page_size`, the DB `block_size` / PostgreSQL `BLCKSZ`) — never a hard-coded
+page or row-size literal. Floored at one page. `ctx.seq_page_cost` is the
+calibrated sequential page cost; the child (table symbol) cost is added by the
+cost function.
 
 ```rust
-(ctx.row_count * 100.0 / 8192.0).max(1.0) * ctx.seq_page_cost
+(ctx.row_count * ctx.avg_row_size / ctx.page_size).max(1.0) * ctx.seq_page_cost
 ```

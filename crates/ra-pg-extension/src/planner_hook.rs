@@ -453,7 +453,9 @@ fn optimize_relexpr(
             crate::monitor::fingerprint_reader().shared().clone(),
         ),
     };
-    let optimizer = ra_engine::Optimizer::with_config(config).with_fingerprint_reader(reader);
+    let optimizer = ra_engine::Optimizer::with_config(config)
+        .with_fingerprint_reader(reader)
+        .with_page_size_bytes(f64::from(pg_sys::BLCKSZ));
     optimizer
         .optimize_with_facts(rel_expr, facts)
         .map_err(|e| format!("{e}"))
