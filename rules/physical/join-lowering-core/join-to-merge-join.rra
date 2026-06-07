@@ -24,15 +24,15 @@ when: is_equi_join("?cond")
 
 ## Cost Model
 
-Sort both inputs, then merge in one linear pass. With no interesting-orders
-tracking yet, the sort is always paid, making merge-join slightly pricier than a
-hash build but cheaper than a nested loop on large inputs. The per-method base
-term (linear in both child costs) is what orders the join methods during
-extraction; the equal `cl+cr` child-cost sum is added by the cost function for
-every method. `ctx` is an [`OperatorCostCtx`]: `left_cost`/`right_cost` are the
-egg child costs (size proxies) and `tuple_cost` is the calibrated per-tuple CPU
-cost.
+Sort both inputs, then merge in one linear pass (RFC 0091 Option A — split into
+physical components so live conditions can reorder it). A moderate CPU term for
+the sort comparisons + merge pass (`tuple_cost`), plus a **heavy
+sequential-I/O** term: the external sort writes and re-reads both inputs
+(~2 sequential passes over their pages). Merge-join is the most
+sequential-I/O-bound method, so a warm cache (low `io_factor`) makes it
+relatively cheaper while cold/contended I/O makes it pricier. `ctx` is an
+[`OperatorCostCtx`]; rates are live-tuned.
 
 ```rust
-0.6 * (ctx.left_cost + ctx.right_cost) * ctx.tuple_cost
+(ctx.left_cost + ctx.right_cost) * (0.25 * ctx.tuple_cost + 0.35 * ctx.seq_page_cost)
 ```

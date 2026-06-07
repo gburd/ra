@@ -25,13 +25,16 @@ when: is_equi_join("?cond")
 ## Cost Model
 
 Build a hash table on the inner (right) input, then probe once per outer row.
-The dominant term is the linear hash build over the inner side; the per-method
-base term is what orders the join methods during extraction (the equal `cl+cr`
-child-cost sum is added by the cost function for every method). `ctx` is an
-[`OperatorCostCtx`]: `right_cost`/`left_cost` are the egg child costs (size
-proxies) and `tuple_cost` is the calibrated per-tuple CPU cost.
+Two physical components, so live conditions can reorder it against other
+methods (RFC 0091 Option A): a **CPU-dominant** build/probe term
+(`tuple_cost`), plus a **light sequential-I/O** term for reading the inner once
+to build the table (`seq_page_cost` over the inner's page estimate, ~100 B/row
+at 8 KiB/page). Hash-join is the least I/O-bound method, so a warm cache barely
+helps it while heavy CPU load (`tuple_cost` scaled by `1+cpu_load`) makes it
+relatively pricier. `ctx` is an [`OperatorCostCtx`]: `left_cost`/`right_cost`
+are the egg child costs (size proxies), and the rates are live-tuned.
 
 ```rust
-0.5 * ctx.right_cost * ctx.tuple_cost
+ctx.right_cost * (0.45 * ctx.tuple_cost + 0.05 * ctx.seq_page_cost)
 ```
 
