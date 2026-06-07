@@ -981,11 +981,15 @@ fn duckdb_inspired_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(project ?c1 (project ?c2 ?input))" =>
             "(project ?c1 ?input)"
         ),
-        // Filter pushdown through left outer join (into left side)
-        // DuckDB: src/optimizer/filter_pushdown.cpp
+        // Filter pushdown through left outer join (into the LEFT/preserved
+        // side). Sound only when the predicate references just the left side:
+        // pushing a right (nullable) column's predicate to the left scan is a
+        // wrong-relation reference; pushing it below the join at all changes
+        // outer-join semantics. DuckDB: src/optimizer/filter_pushdown.cpp
         rewrite!("duckdb-filter-through-left-join-left";
             "(filter ?pred (join left-outer ?cond ?left ?right))" =>
             "(join left-outer ?cond (filter ?pred ?left) ?right)"
+            if crate::conditions::references_only("?pred", "?left")
         ),
         // Arithmetic simplification: a - a => 0
         // DuckDB: src/optimizer/expression_rewriter.cpp
