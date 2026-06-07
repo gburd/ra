@@ -67,6 +67,9 @@ pub struct OperatorCostCtx {
     /// Average bytes per row for the costed relation, from table statistics
     /// (real `avg_row_size`), used with `page_size` to derive page counts.
     pub avg_row_size: f64,
+    /// Estimated fraction of rows matching the operator's predicate (0..1),
+    /// for selectivity-sensitive operators like index scans.
+    pub selectivity: f64,
 }
 
 /// A rule-provided operator cost model: returns the traditional (analytic) cost
@@ -142,6 +145,12 @@ pub const DEFAULT_DB_PAGE_SIZE_BYTES: f64 = 8192.0;
 /// Assumed average row width in bytes when a table carries no statistics.
 /// Only a fallback; real per-table `avg_row_size` is used when available.
 const DEFAULT_AVG_ROW_SIZE_BYTES: f64 = 100.0;
+
+/// Default predicate selectivity assumed for index-scan costing until
+/// per-predicate selectivity (from column statistics) is threaded in. A
+/// moderately-selective fraction so the seq↔index choice is live: cheap when
+/// random I/O is cheap (warm cache), dear when random I/O is dear (cold).
+const DEFAULT_SELECTIVITY: f64 = 0.1;
 
 /// Mean of the known tables' real `avg_row_size`, or the documented fallback
 /// when no statistics are available. Used to derive scan page counts together
@@ -1468,6 +1477,7 @@ impl IntegratedCostFn {
             cpu_cores: self.hardware.cpu_cores,
             page_size: self.page_size_bytes,
             avg_row_size: self.avg_row_size_bytes,
+            selectivity: DEFAULT_SELECTIVITY,
         }
     }
 
@@ -1530,6 +1540,15 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             RelLang::IndexNestLoopOp([_, _, l, _r]) => {
                 let cl = costs(*l).max(1.0);
                 operator_cost("index-nest-loop", &self.op_cost_ctx(cl, 0.0, 0.0))
+            }
+            // RFC 0091 Option B: index-scan choice. Cost uses the table's row
+            // count (from the table-symbol child) + selectivity; it does NOT
+            // inherit the sequential scan child cost (the index scan replaces
+            // it). Selective + warm cache (cheap random I/O) → cheaper than the
+            // sequential `Filter(Scan)`; non-selective or cold → dearer.
+            RelLang::IndexScanChoice([_cond, table_id]) => {
+                let row_count = self.row_count_for_id(*table_id);
+                operator_cost("index-scan", &self.op_cost_ctx(0.0, 0.0, row_count))
             }
             RelLang::Aggregate(_) => self.flat_op_cost("aggregate"),
             RelLang::Sort(_) => self.flat_op_cost("sort"),
@@ -1629,6 +1648,7 @@ mod tests {
             cpu_cores: 8,
             page_size: 8192.0,
             avg_row_size: 100.0,
+            selectivity: 0.1,
             };
             let rule = rule_operator_cost("hash-join", &ctx)
                 .expect("hash-join cost model must be registered from the rule file");
@@ -1650,6 +1670,7 @@ mod tests {
             cpu_cores: 8,
             page_size: 8192.0,
             avg_row_size: 100.0,
+            selectivity: 0.1,
         };
         assert!(rule_operator_cost("seq-scan", &ctx).is_none());
     }
@@ -1671,6 +1692,7 @@ mod tests {
             cpu_cores: 8,
             page_size: 8192.0,
             avg_row_size: 100.0,
+            selectivity: 0.1,
             };
             let merge = rule_operator_cost("merge-join", &ctx)
                 .expect("merge-join cost model must be registered from the rule file");
@@ -1713,6 +1735,7 @@ mod tests {
                 cpu_cores: 8,
                 page_size: 8192.0,
                 avg_row_size: 100.0,
+                selectivity: 0.1,
             };
             let builtin = (256.0 / f64::from(simd)) * tc;
             for op in ["filter", "project"] {
@@ -1742,6 +1765,7 @@ mod tests {
                 cpu_cores: 8,
                 page_size: 8192.0,
                 avg_row_size: 100.0,
+                selectivity: 0.1,
             };
             for (op, mult) in [("aggregate", 200.0), ("join", 500.0)] {
                 let rule = rule_operator_cost(op, &ctx)
@@ -1771,6 +1795,7 @@ mod tests {
                 cpu_cores: cores,
                 page_size: 8192.0,
                 avg_row_size: 100.0,
+                selectivity: 0.1,
             };
             let par = (8.0 / f64::from(cores)).max(0.5);
             for (op, base) in [("sort", 150.0), ("incremental-sort", 60.0)] {
@@ -1802,6 +1827,7 @@ mod tests {
                 cpu_cores: 8,
                 page_size: 8192.0,
                 avg_row_size: 100.0,
+                selectivity: 0.1,
             };
             let rule =
                 rule_operator_cost("scan", &ctx).expect("scan cost model must be registered");
@@ -1831,6 +1857,7 @@ mod tests {
             cpu_cores: 8,
             page_size: 8192.0,
             avg_row_size: 100.0,
+            selectivity: 0.1,
         };
         for op in [
             "scan",
@@ -1880,6 +1907,47 @@ mod tests {
             busy.flat_op_cost("aggregate") > neutral.flat_op_cost("aggregate"),
             "high CPU load should raise the rule-sourced aggregate cost"
         );
+    }
+
+    /// RFC 0091 Option B (B1): the cost-driven seq↔index scan flip. For a
+    /// selective predicate, a warm cache (random I/O ≈ sequential, per B0) makes
+    /// the `index-scan` rule cheaper than reading every page sequentially, while
+    /// a cold/contended host (random I/O ≫ sequential) makes the sequential scan
+    /// win. This is the robust, same-input I/O-vs-CPU choice live conditions
+    /// steer (unlike the size-dominated join-method window).
+    #[test]
+    fn live_conditions_flip_scan_method() {
+        let mk = |seq: f64, rand: f64| OperatorCostCtx {
+            left_cost: 0.0,
+            right_cost: 0.0,
+            tuple_cost: 0.01,
+            seq_page_cost: seq,
+            rand_page_cost: rand,
+            row_count: 100_000.0,
+            simd_width_bits: 256,
+            cpu_cores: 8,
+            page_size: 8192.0,
+            avg_row_size: 100.0,
+            selectivity: 0.005, // selective predicate (0.5% of rows)
+        };
+        // Warm cache: random ≈ sequential (B0 compresses the gap).
+        let warm = mk(1.0, 1.0);
+        // Cold/contended: random dearer than sequential.
+        let cold = mk(1.0, 4.0);
+        for (label, ctx) in [("warm", &warm), ("cold", &cold)] {
+            let seq_cost = operator_cost("scan", ctx);
+            let index_cost = operator_cost("index-scan", ctx);
+            match label {
+                "warm" => assert!(
+                    index_cost < seq_cost,
+                    "warm cache should pick index scan: index {index_cost} !< seq {seq_cost}"
+                ),
+                _ => assert!(
+                    index_cost > seq_cost,
+                    "cold host should pick sequential scan: index {index_cost} !> seq {seq_cost}"
+                ),
+            }
+        }
     }
 
     /// RFC 0091 Option B / B0 rate model: a warm cache shifts the I/O-vs-CPU

@@ -21,6 +21,16 @@ define_language! {
         "merge-join" = MergeJoinOp([Id; 4]),
         "nest-loop" = NestLoopOp([Id; 4]),
         "index-nest-loop" = IndexNestLoopOp([Id; 4]),
+        // Physical scan-method variant (RFC 0091 Option B). Children
+        // [cond, table] mirror `(filter ?cond (scan ?t))`; produced by the
+        // cost-driven `Filter(Scan)→index-scan-choice` lowering rule (guarded by
+        // has_index_for) and chosen by the cost extractor when a warm cache
+        // makes the selective random I/O cheaper than a full sequential scan.
+        // `from_rec` maps it back to the same `Filter(Scan)` RelExpr (B1: no
+        // execution change); the chosen scan method is carried to plan-builder
+        // via the PhysicalChoices sidecar. Distinct from the `index-scan` leaf
+        // (IndexScan[table,column]) used by the MIN/MAX index optimization.
+        "index-scan-choice" = IndexScanChoice([Id; 2]),
         "aggregate" = Aggregate([Id; 3]),
         "sort" = Sort([Id; 2]),
         "incremental-sort" = IncrementalSort([Id; 3]),

@@ -1,0 +1,36 @@
+---
+id: index-scan-operator-cost
+name: "index-scan-operator-cost"
+category: cost-models/operators
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, operator, scan, index-scan]
+costs_operator: index-scan
+---
+
+# index-scan-operator-cost
+
+## Description
+
+Per-instance cost of an `index-scan-choice` (RFC 0091 Option B) for the e-graph
+cost extractor. Cost-only rule (no `## Rewrite`). The operator is introduced by
+the `Filter(Scan) → index-scan-choice` lowering rule and competes against the
+sequential `Filter(Scan)` during extraction.
+
+## Cost Model
+
+An index scan touches only the matching fraction of the relation, paying a
+**random** heap fetch per matched row (capped at the relation's page count — you
+never fetch more pages than exist) plus per-row CPU. This is the cache-sensitive
+counterpart to the sequential scan: because `rand_page_cost` collapses toward
+`seq_page_cost` as the cache warms (RFC 0091 B0), a warm cache makes a selective
+index scan cheaper than reading every page sequentially, while a cold/contended
+host makes the random fetches dearer and favors the sequential scan. `ctx`
+fields: `selectivity` (matched fraction), `row_count`, `avg_row_size`/`page_size`
+(page-count derivation), `rand_page_cost`, `tuple_cost` — all live-tuned.
+
+```rust
+(ctx.selectivity * ctx.row_count).min(ctx.row_count * ctx.avg_row_size / ctx.page_size) * ctx.rand_page_cost
+    + ctx.selectivity * ctx.row_count * ctx.tuple_cost
+```

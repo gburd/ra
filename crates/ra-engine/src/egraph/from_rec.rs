@@ -55,6 +55,20 @@ fn from_node(
                 input: Box::new(input),
             })
         }
+        // Index-scan choice (RFC 0091 Option B): children [cond, table-symbol].
+        // Lowers to the SAME Filter(Scan) RelExpr as the sequential path — B1
+        // changes only which cost the extractor picked, not the produced plan.
+        // The chosen scan method is surfaced separately via PhysicalChoices (B2).
+        // The table-symbol child (not the full scan node) keeps the index path
+        // from inheriting the sequential-scan child cost.
+        RelLang::IndexScanChoice([pred_id, table_id]) => {
+            let predicate = extract_scalar_expr(egraph, *pred_id)?;
+            let table = extract_symbol(egraph, *table_id)?;
+            Ok(RelExpr::Filter {
+                predicate,
+                input: Box::new(RelExpr::Scan { table, alias: None }),
+            })
+        }
         RelLang::Project([cols_id, input_id]) => {
             let columns = extract_projection_list(egraph, *cols_id)?;
             let input = from_egraph_node(egraph, *input_id)?;
