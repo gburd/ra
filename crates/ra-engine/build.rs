@@ -389,6 +389,7 @@ const KNOWN_CONDITIONS: &[&str] = &[
     "is_json_field_predicate",
     "is_equi_join",
     "references_subset",
+    "is_inner_join",
 ];
 
 // Strip `if is_database("X")` lines from a rewrite block. The

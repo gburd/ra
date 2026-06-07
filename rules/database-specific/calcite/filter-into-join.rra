@@ -56,12 +56,14 @@ use egg::{rewrite as rw, *};
 rw!("calcite-filter-into-join-left";
     "(filter ?pred (join ?type ?cond ?left ?right))" =>
     "(join ?type ?cond (filter ?pred ?left) ?right)"
+    if is_inner_join("?type")
     if references_only("?pred", "?left")
 ),
 
 rw!("calcite-filter-into-join-right";
     "(filter ?pred (join ?type ?cond ?left ?right))" =>
     "(join ?type (and ?cond ?pred) ?left ?right)"
+    if is_inner_join("?type")
     if is_equi_join_predicate("?pred", "?left", "?right")
 ),
 ```

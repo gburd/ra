@@ -734,6 +734,39 @@ pub fn has_index_for(table: &str) -> SafeCondition<HasIndexFor> {
     SafeCondition::new(HasIndexFor::new(table), "has_index_for")
 }
 
+/// Condition: the join-type symbol bound to `?type` is `inner`. Guards generic
+/// `(join ?type …)` rewrites — filter pushdown to a child, predicate merge into
+/// the ON-condition, join commutativity — that are sound only for inner joins.
+/// Pushing/merging a predicate on the nullable side of an outer join, or
+/// commuting an outer join, changes result semantics. `cross` is excluded too
+/// (its filter form is handled by the dedicated `cartesian-to-join` rule).
+pub struct IsInnerJoin {
+    type_var: Var,
+}
+
+impl IsInnerJoin {
+    #[must_use]
+    pub fn new(type_sym: &str) -> Self {
+        Self { type_var: parse_var(type_sym, "?type") }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for IsInnerJoin {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
+        let canonical = egraph.find(subst[self.type_var]);
+        egraph[canonical].nodes.iter().any(|node| match node {
+            RelLang::Symbol(s) => s.as_str() == "inner",
+            _ => false,
+        })
+    }
+}
+
+/// Returns a condition that the join-type symbol `?type` is `inner`.
+#[must_use]
+pub fn is_inner_join(type_sym: &str) -> SafeCondition<IsInnerJoin> {
+    SafeCondition::new(IsInnerJoin::new(type_sym), "is_inner_join")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
