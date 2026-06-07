@@ -1,0 +1,27 @@
+---
+id: join-operator-cost
+name: "join-operator-cost"
+category: cost-models/operators
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, operator, join]
+costs_operator: join
+---
+
+# join-operator-cost
+
+## Description
+
+Per-instance cost of the *logical* `join` operator for the e-graph cost
+extractor (RFC 0091). Cost-only rule (no `## Rewrite`). This is the cost of an
+un-lowered logical join; once a join is lowered to a physical method
+(hash/merge/nest-loop) the per-method cost models apply instead. The flat base
+keeps logical joins more expensive than their lowered forms so the extractor
+prefers a physical method.
+
+## Cost Model
+
+```rust
+500.0 * ctx.tuple_cost
+```
