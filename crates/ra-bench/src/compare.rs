@@ -259,28 +259,39 @@ fn run_with_planner(
 /// Verify that Ra and PG produce the same results.
 #[cfg(feature = "live-comparison")]
 fn verify_results(client: &mut postgres::Client, sql: &str) -> Option<bool> {
-    // Get PG results
-    let _ = client.execute("SET ra_planner.enabled = off", &[]);
-    let pg_rows = match client.query(sql, &[]) {
-        Ok(r) => r,
-        Err(_) => return None,
-    };
-
-    // Get Ra results
-    let _ = client.execute("SET ra_planner.enabled = on", &[]);
-    let ra_rows = match client.query(sql, &[]) {
-        Ok(r) => r,
-        Err(_) => return Some(false),
-    };
-
-    // Compare row counts
-    if pg_rows.len() != ra_rows.len() {
-        return Some(false);
+    // Only read-only queries are verifiable by re-execution: DML/DDL mutate
+    // state, so running the statement twice (PG path, then Ra path) and
+    // comparing is meaningless. Report those as "not verifiable" (None).
+    let head = sql.trim_start();
+    let verb = head
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    if matches!(
+        verb.as_str(),
+        "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "CREATE" | "DROP" | "ALTER" | "TRUNCATE"
+    ) {
+        return None;
     }
 
-    // For simplicity, compare row counts as correctness proxy.
-    // Full cell-by-cell comparison would require type-aware deserialization.
-    Some(true)
+    // Order-insensitive, type-agnostic content digest computed server-side:
+    // md5 over the result rows sorted by their text representation. This
+    // compares actual result *content* (the previous version only compared row
+    // counts, which missed value differences and flagged order-only diffs).
+    let body = head.trim_end().trim_end_matches(';');
+    let digest_sql =
+        format!("SELECT md5(coalesce(string_agg(t::text, ',' ORDER BY t::text), '')) FROM ({body}) t");
+
+    // A query error on either path (e.g. Ra falling back / an unsupported
+    // feature) is "not verifiable" (None), NOT a content mismatch — the prior
+    // version conflated the two, counting Ra errors as wrong results.
+    client.execute("SET ra_planner.enabled = off", &[]).ok()?;
+    let pg_digest: String = client.query_one(&digest_sql, &[]).ok()?.try_get(0).ok()?;
+    client.execute("SET ra_planner.enabled = on", &[]).ok()?;
+    let ra_digest: String = client.query_one(&digest_sql, &[]).ok()?.try_get(0).ok()?;
+
+    Some(pg_digest == ra_digest)
 }
 
 /// Compute aggregate summary from individual results.
