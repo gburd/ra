@@ -80,6 +80,8 @@ pub struct Optimizer {
     rule_advisor: Option<Mutex<crate::rule_advisor::RuleAdvisor>>,
     cost_model: Option<Arc<BitNetCostModel>>,
     fingerprint_reader: Option<FingerprintReader>,
+    /// Host heap page size (DB `block_size`); None uses the engine default.
+    page_size_bytes: Option<f64>,
     speculative_router: Option<SpeculativeRouter>,
     training_coordinator: Option<SharedTrainingCoordinator>,
     /// Adaptive cost calibrator (RFC 0026). When present, its
@@ -180,6 +182,7 @@ impl Optimizer {
             rule_advisor: None,
             cost_model: None,
             fingerprint_reader: None,
+            page_size_bytes: None,
             speculative_router: None,
             training_coordinator: None,
             calibrator: None,
@@ -210,6 +213,7 @@ impl Optimizer {
             rule_advisor,
             cost_model: None,
             fingerprint_reader: None,
+            page_size_bytes: None,
             speculative_router: None,
             training_coordinator: None,
             calibrator: None,
@@ -625,6 +629,15 @@ impl Optimizer {
         self
     }
 
+    /// Builder-style setter for the host heap page size (the DB `block_size` /
+    /// `PostgreSQL` `BLCKSZ`), threaded into the cost model's page-count
+    /// derivation. `None` (the default) uses the engine's standalone default.
+    #[must_use]
+    pub fn with_page_size_bytes(mut self, page_size_bytes: f64) -> Self {
+        self.page_size_bytes = Some(page_size_bytes);
+        self
+    }
+
     /// Enable speculative routing with the given cost model.
     ///
     /// When enabled, the optimizer uses a `BitNet` forward pass (~87ns)
@@ -741,7 +754,7 @@ impl Optimizer {
                     }
                 },
             );
-            extract_best(egraph, root, table_stats, hardware, live)
+            extract_best(egraph, root, table_stats, hardware, live, self.page_size_bytes)
         }
     }
 

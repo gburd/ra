@@ -65,6 +65,7 @@ pub fn extract_best<S: BuildHasher>(
     table_stats: &HashMap<String, Statistics, S>,
     hardware: &ra_hardware::HardwareProfile,
     live: crate::cost::LiveConditions,
+    page_size_bytes: Option<f64>,
 ) -> Result<RelExpr, EGraphError> {
     if table_stats.is_empty() {
         let cost_fn = RelCostFn::new(hardware.clone());
@@ -91,9 +92,12 @@ pub fn extract_best<S: BuildHasher>(
             .map(|k| (k.clone(), Staleness::Fresh))
             .collect();
 
-        let cost_fn =
+        let mut cost_fn =
             IntegratedCostFn::with_id_row_counts(hardware.clone(), stats, staleness_map, id_row_counts)
                 .with_live_conditions(live);
+        if let Some(ps) = page_size_bytes {
+            cost_fn = cost_fn.with_page_size_bytes(ps);
+        }
         let extractor = egg::Extractor::new(egraph, cost_fn);
         let (_, best_expr) = extractor.find_best(root);
         record_physical_choices(&best_expr);
