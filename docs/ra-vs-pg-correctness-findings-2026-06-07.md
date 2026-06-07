@@ -122,7 +122,82 @@ filters and the join keeps all rows. The sound inner-join rules
 child — the exact offending rewrite (likely a `left-outer-to-inner-*`
 interaction) needs e-graph firing traces to pin down. Gated for now.
 
-### Gate narrowed + validation expanded
+Remaining gated (correct via fallback, coverage follow-up): outer joins, scalar
+subquery in WHERE. Remaining perf: UNION planning blowup.
+
+---
+
+## Update — third pass: root-caused the outer-join bug to a systemic condition bug
+
+E-graph rule tracing (`optimize_with_tracking_verbose`, `applied` rules) on the
+LEFT-join case named the offenders: **`left-outer-to-inner-{lt,gt,…}`** (convert
+LEFT→INNER) and **`datafusion-filter-pushdown-through-join-{left,right}`** (push
+the filter into a child). Both are guarded by `references_only` /
+`predicate_references_only` preconditions that *should* forbid placing an
+outer-relation predicate on the inner side — but the guard is a **no-op for
+scalar predicates**:
+
+`ReferencesOnly::check` (`conditions.rs`) tests
+`pred_data.tables.is_subset(&side_data.tables)`. The analysis's `tables` set
+(`analysis.rs`) is populated only for **relational** nodes (Scan/Filter/Join);
+a **scalar** predicate e-class such as `(lt (qcol o o_orderkey) (const 50))`
+has an **empty** `tables` set. `∅.is_subset(anything) == true`, so the guard
+always passes → every `references_only`-gated filter-pushdown / outer-join
+conversion is effectively **unguarded**. Bad (semantically-invalid) equivalents
+are inserted into the e-graph; they stay hidden whenever cost extracts a correct
+equivalent, and surface as wrong results when the cost model (e.g. with the
+extension's live-fingerprint + page-size tuning) extracts the bad one. That is
+why `Optimizer::new().optimize()` returns the correct plan but the extension
+(and ra-cli with cost tuning) returns the buggy `LEFT JOIN(orders, Filter(o.col,
+customer))`.
+
+This is **systemic**: the same weakness underlies the inner-join pushdown rules
+too (their bad forms just aren't usually extracted).
+
+### What landed (ra-engine, main `27c6e47f`)
+
+`ReferencesOnly` is now sound. A new `RelData.qualifiers` field tracks relation
+table-names + aliases (from `Scan`/`ScanAlias`) and the qualifier on each `QCol`
+leaf (for scalar predicates), propagated up like `columns`. Because `QCol` stores
+the query alias and `ScanAlias` carries both table and alias, they share one
+namespace — no alias↔table resolution needed. `references_only` now tests
+`pred.qualifiers ⊆ side.qualifiers` (a real check), and `tables` (+ its consumers
+`is_uncorrelated`/`single_reference`/cardinality) is untouched. The
+`left/right-outer-to-inner-*` rules also got explicit
+`references_only("?col", <nullable-side>)` guards. 2025 ra-engine lib tests pass;
+clippy clean. Verified: LEFT JOIN + outer-side WHERE now keeps the filter above
+the join under the extension's cost config (the original wrong-result case).
+
+### Still gated: a *distinct* second bug (filter pushdown to the nullable side)
+
+Un-gating outer joins after the fix surfaced a different unsoundness: generic
+`(filter ?pred (join ?type ?cond ?left ?right))` pushdown rules
+(`datafusion-/materialize-filter-pushdown-through-join-{left,right}`,
+`calcite-filter-into-join`, `logical/predicate-pushdown/filter-join-push`) push a
+predicate to a child for **any** `?type`. With `references_only` now working they
+correctly push *side-matching* predicates — but pushing a predicate to the
+**nullable** side of an outer join is unsound regardless (e.g.
+`A LEFT JOIN B WHERE p(B)` ≠ `A LEFT JOIN (B WHERE p(B))`). Confirmed:
+`… LEFT JOIN customer c … WHERE c.c_acctbal>9000` returned 20000 vs PG's 0, with
+`Filter (… < c.c_acctbal)` pushed onto the customer scan under a `Hash Left Join`.
+Outer joins remain **gated** (correct via fallback) pending this fix.
+
+### Proper fix (next, self-contained)
+
+Restrict the generic `(join ?type …)` *side*-pushdown rules so they only push to
+a side the join type permits: inner/cross → either side; LEFT outer → left
+(preserved) only; RIGHT outer → right only; FULL → neither. Simplest sound
+encoding: change those rules' `?type` to `inner` (the dedicated
+`duckdb-/xml-filter-through-left-join` rules already cover the valid
+left-outer→left push), or add an `is_inner_join("?type")` precondition +
+register it in `build.rs` KNOWN_CONDITIONS. Then un-gate outer joins and re-run
+the A/B (the 3 inner-side-predicate cases: `left+inner-where`,
+`right+outer-where`, `left+str-where`). Needs unit tests asserting the bad
+pushed form never enters the e-graph for outer joins.
+
+---
+
+### Gate narrowed + validation expanded (second pass)
 
 `wrong_result_risk` now gates only **outer joins (LEFT/RIGHT/FULL/CROSS)** and
 **scalar subqueries in filter predicates**; SEMI/ANTI are no longer gated.

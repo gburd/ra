@@ -368,12 +368,14 @@ impl PlanBuilder {
     /// Conservative correctness gate: RelExpr shapes the builder/optimizer
     /// currently MISBUILDS (wrong results, no error). Returns a reason → the
     /// planner hook defers to PG. Tracked bugs (docs/planner-fallback-backlog.md):
-    /// (1) any outer join (LEFT/RIGHT/FULL/CROSS) — a predicate-pushdown rewrite
-    ///     places a WHERE predicate on the wrong (inner/nullable) child, so it is
-    ///     mis-evaluated; SEMI/ANTI joins (from decorrelated IN/EXISTS) are
-    ///     correct and stay enabled; (2) a scalar subquery in a filter predicate
-    ///     — mis-evaluated. Inner joins, scans, aggregates, windows, CTEs,
-    ///     set-ops, IN/EXISTS are unaffected.
+    /// (1) any outer join (LEFT/RIGHT/FULL/CROSS) — generic `(join ?type …)`
+    ///     filter-pushdown rules push a predicate to the NULLABLE side of the
+    ///     join (sound only for the preserved side / inner joins); the
+    ///     complementary outer-SIDE-predicate bug is already fixed by the
+    ///     ra-engine qualifier-tracking change. SEMI/ANTI (from decorrelated
+    ///     IN/EXISTS) are correct and stay enabled. (2) a scalar subquery in a
+    ///     filter predicate — mis-evaluated. Inner joins, scans, aggregates,
+    ///     windows, CTEs, set-ops, IN/EXISTS are unaffected.
     fn wrong_result_risk(expr: &RelExpr) -> Option<&'static str> {
         match expr {
             RelExpr::Join { join_type, .. } | RelExpr::ParallelHashJoin { join_type, .. }
@@ -384,7 +386,7 @@ impl PlanBuilder {
                         | ra_core::algebra::JoinType::Anti
                 ) =>
             {
-                return Some("outer/cross join (WHERE-predicate pushdown to wrong child is unsound)");
+                return Some("outer/cross join (filter pushdown to nullable side is unsound)");
             }
             RelExpr::Filter { predicate, .. } if expr_has_scalar_subquery(predicate) => {
                 return Some("scalar subquery in a filter predicate");
