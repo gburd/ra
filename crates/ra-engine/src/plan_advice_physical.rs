@@ -228,6 +228,12 @@ impl PhysicalChoices {
         self.scans.get(alias)
     }
 
+    /// Record the chosen scan strategy for `alias` (RFC 0091 B2: the cost
+    /// extractor's seq-vs-index decision, surfaced to plan-builder).
+    pub fn set_scan(&mut self, alias: String, strategy: ScanStrategy) {
+        self.scans.insert(alias, strategy);
+    }
+
     /// Look up the preferred inner-join strategy for `alias`.
     #[must_use]
     pub fn join_for(&self, alias: &str) -> Option<&JoinInnerStrategy> {
