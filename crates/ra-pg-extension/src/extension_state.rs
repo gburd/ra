@@ -84,6 +84,46 @@ pub static RA_ALWAYS_STORE_ADVICE_DETAILS: GucSetting<bool> =
 pub static RA_PLAN_ADVICE_FEEDBACK_WARNINGS: GucSetting<bool> =
     GucSetting::<bool>::new(false);
 
+/// GUC debug overrides for the live system fingerprint fed to the optimizer's
+/// cost model (`ra_planner.debug_hit_rate`, `_io_saturation`, `_cpu_load`).
+/// A negative value (the default, -1.0) means "use the real monitored value";
+/// a value in `[0.0, 1.0]` forces that fingerprint component, so the
+/// live-conditions cost effect can be isolated and measured (e.g. force
+/// `hit_rate=0.99` to model a fully-cached relation vs `0.0`/`io_saturation=0.9`
+/// to model cold, contended I/O).
+pub static RA_DEBUG_HIT_RATE: GucSetting<f64> = GucSetting::<f64>::new(-1.0);
+pub static RA_DEBUG_IO_SATURATION: GucSetting<f64> = GucSetting::<f64>::new(-1.0);
+pub static RA_DEBUG_CPU_LOAD: GucSetting<f64> = GucSetting::<f64>::new(-1.0);
+
+/// Apply any active debug fingerprint overrides to `base`, returning the
+/// overridden fingerprint, or `None` when no override GUC is set (use the live
+/// monitored value as-is). Diagnostic only — lets the live-conditions plan-cost
+/// effect be forced to known values for A/B measurement.
+#[must_use]
+pub fn debug_fingerprint_override(
+    base: ra_engine::state::SystemFingerprint,
+) -> Option<ra_engine::state::SystemFingerprint> {
+    let (hr, io, cpu) = (
+        RA_DEBUG_HIT_RATE.get(),
+        RA_DEBUG_IO_SATURATION.get(),
+        RA_DEBUG_CPU_LOAD.get(),
+    );
+    if hr < 0.0 && io < 0.0 && cpu < 0.0 {
+        return None;
+    }
+    let mut fp = base;
+    if hr >= 0.0 {
+        fp.shared_buffers_hit_rate = hr as f32;
+    }
+    if io >= 0.0 {
+        fp.io_saturation = io as f32;
+    }
+    if cpu >= 0.0 {
+        fp.cpu_load_fraction = cpu as f32;
+    }
+    Some(fp)
+}
+
 /// Hardware profile detected at extension initialization.
 ///
 /// Used to make hardware-aware planning decisions (SSD vs HDD,
@@ -214,6 +254,28 @@ pub fn register_gucs() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
+    for (name, setting) in [
+        (
+            c"ra_planner.debug_hit_rate" as &core::ffi::CStr,
+            &RA_DEBUG_HIT_RATE,
+        ),
+        (c"ra_planner.debug_io_saturation", &RA_DEBUG_IO_SATURATION),
+        (c"ra_planner.debug_cpu_load", &RA_DEBUG_CPU_LOAD),
+    ] {
+        GucRegistry::define_float_guc(
+            name,
+            c"Debug override for a live-fingerprint cost input.",
+            c"-1.0 (default) uses the real monitored value; 0.0..1.0 forces \
+              this fingerprint component so the live-conditions cost effect \
+              can be isolated for A/B measurement.",
+            setting,
+            -1.0,
+            1.0,
+            GucContext::Userset,
+            GucFlags::default(),
+        );
+    }
 
     GucRegistry::define_string_guc(
         c"ra_planner.model_path",
