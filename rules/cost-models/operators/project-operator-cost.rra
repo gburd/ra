@@ -1,0 +1,29 @@
+---
+id: project-operator-cost
+name: "project-operator-cost"
+category: cost-models/operators
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, operator, project]
+costs_operator: project
+---
+
+# project-operator-cost
+
+## Description
+
+Per-instance cost of a `project` operator for the e-graph cost extractor (RFC
+0091). Cost-only rule (no `## Rewrite`).
+
+## Cost Model
+
+A projection evaluates its output expressions once per tuple; like a filter the
+work vectorizes, so wider SIMD lowers the per-tuple cost. `ctx` is an
+[`OperatorCostCtx`]: `tuple_cost` is the calibrated per-tuple CPU cost and
+`simd_width_bits` is the hardware SIMD width. The child cost is added by the
+cost function.
+
+```rust
+(256.0 / f64::from(ctx.simd_width_bits)) * ctx.tuple_cost
+```

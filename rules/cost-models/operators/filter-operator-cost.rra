@@ -1,0 +1,30 @@
+---
+id: filter-operator-cost
+name: "filter-operator-cost"
+category: cost-models/operators
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost-model, operator, filter]
+costs_operator: filter
+---
+
+# filter-operator-cost
+
+## Description
+
+Per-instance cost of a `filter` operator for the e-graph cost extractor (RFC
+0091). This is a cost-only rule: it carries no `## Rewrite`, only the
+`## Cost Model` the `IntegratedCostFn` dispatches to.
+
+## Cost Model
+
+A filter evaluates its predicate once per tuple; the work vectorizes, so wider
+SIMD lowers the per-tuple cost. `ctx` is an [`OperatorCostCtx`]: `tuple_cost` is
+the calibrated per-tuple CPU cost and `simd_width_bits` is the hardware SIMD
+width. The base unit (1.0 tuple) matches the built-in this replaces; the child
+cost is added by the cost function.
+
+```rust
+(256.0 / f64::from(ctx.simd_width_bits)) * ctx.tuple_cost
+```
