@@ -14,7 +14,8 @@ precedence marker, `rule. [UMINUS] { ... }`). It never touches directives
 (`%include`, `%token_type`, ...), `%action_rust` blocks, token declarations,
 precedence, or the productions themselves.
 
-  ⚠️  BLOCKED ON A LIME FIX — DO NOT APPLY TO ra_sql.lime YET.
+  Applied to ra_sql.lime once the Lime fix below landed (Lime branch
+  fix/rust-action-counts-as-code). Re-runnable + idempotent.
 
   The inline C bodies are LOAD-BEARING for Lime's Rust target. Lime derives
   `rule->noCode` from the *C* body only (`rp->code`), ignoring `rust_code`.
