@@ -94,6 +94,7 @@ pub fn extract_best<S: BuildHasher>(
 
         let mut cost_fn =
             IntegratedCostFn::with_id_row_counts(hardware.clone(), stats, staleness_map, id_row_counts)
+                .with_id_selectivity(resolve_index_selectivity(egraph, table_stats))
                 .with_live_conditions(live);
         if let Some(ps) = page_size_bytes {
             cost_fn = cost_fn.with_page_size_bytes(ps);
@@ -128,6 +129,106 @@ fn resolve_table_row_counts<S: BuildHasher>(
         }
     }
     id_row_counts
+}
+
+/// Floor for estimated selectivity, so a huge NDV never yields a zero-cost
+/// index scan.
+const MIN_SELECTIVITY: f64 = 1.0e-6;
+
+/// Extract a column name compared by equality within `cond` (depth-limited),
+/// for index-scan selectivity estimation. Returns the first column found on
+/// either side of an `eq`, descending through `and`/`or`.
+fn eq_column_in(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> Option<String> {
+    if depth == 0 {
+        return None;
+    }
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        match node {
+            RelLang::Eq([l, r]) => {
+                if let Some(c) = col_name_of(egraph, *l).or_else(|| col_name_of(egraph, *r)) {
+                    return Some(c);
+                }
+            }
+            RelLang::And([l, r]) | RelLang::Or([l, r]) => {
+                if let Some(c) = eq_column_in(egraph, *l, depth - 1)
+                    .or_else(|| eq_column_in(egraph, *r, depth - 1))
+                {
+                    return Some(c);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The column name referenced by a `col`/`qcol` node in `id`'s e-class.
+fn col_name_of(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> Option<String> {
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        let name_id = match node {
+            RelLang::Col([n]) | RelLang::QCol([_, n]) => *n,
+            _ => continue,
+        };
+        if let Some(name) = symbol_text(egraph, name_id) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/// The string of a `Symbol` leaf in `id`'s e-class.
+fn symbol_text(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id) -> Option<String> {
+    let canonical = egraph.find(id);
+    egraph[canonical].nodes.iter().find_map(|node| match node {
+        RelLang::Symbol(s) => Some(s.to_string()),
+        _ => None,
+    })
+}
+
+/// Estimate the selectivity of an index-scan predicate from column statistics:
+/// for an equality on a column, `(1 - null_fraction) / distinct_count` (the
+/// `PostgreSQL` equality estimate). Falls back to the moderate default when the
+/// predicate is not a recognised single-column equality or the column has no
+/// statistics — so an un-estimated predicate never spuriously favours the index.
+fn estimate_index_selectivity(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    cond_id: Id,
+    stats: &Statistics,
+) -> f64 {
+    if let Some(col) = eq_column_in(egraph, cond_id, 4) {
+        if let Some(cs) = stats.columns.get(&col) {
+            let ndv = cs.distinct_count.max(1.0);
+            return ((1.0 - cs.null_fraction) / ndv).clamp(MIN_SELECTIVITY, 1.0);
+        }
+    }
+    crate::cost::DEFAULT_SELECTIVITY
+}
+
+/// Pre-extraction pass (RFC 0091 B2): resolve each `index-scan-choice` node's
+/// predicate selectivity from column statistics, keyed by the canonical `cond`
+/// child Id (which the cost function reads). Built after saturation, when the
+/// lowering rule's `index-scan-choice` nodes exist.
+fn resolve_index_selectivity<S: BuildHasher>(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    table_stats: &HashMap<String, Statistics, S>,
+) -> HashMap<Id, f64> {
+    let mut out = HashMap::new();
+    for class in egraph.classes() {
+        for node in &class.nodes {
+            if let RelLang::IndexScanChoice([cond_id, table_id]) = node {
+                let Some(table) = symbol_text(egraph, *table_id) else {
+                    continue;
+                };
+                if let Some(stats) = table_stats.get(&table) {
+                    let sel = estimate_index_selectivity(egraph, *cond_id, stats);
+                    out.insert(egraph.find(*cond_id), sel);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Extract the lowest-cost plan using staleness-aware statistics.
@@ -252,4 +353,42 @@ pub fn extract_best_bitnet<S: BuildHasher, S2: BuildHasher>(
     let (_, best_expr) = extractor.find_best(root);
     record_physical_choices(&best_expr);
     rec_expr_to_rel_expr(&best_expr)
+}
+
+#[cfg(test)]
+mod selectivity_tests {
+    use super::{resolve_index_selectivity, RelAnalysis};
+    use crate::egraph::RelLang;
+    use ra_core::statistics::{ColumnStats, Statistics};
+    use std::collections::HashMap;
+
+    /// RFC 0091 B2: index-scan selectivity is the per-column equality estimate
+    /// `(1 - null_fraction) / distinct_count`, resolved from column statistics,
+    /// keyed by the `index-scan-choice` cond Id.
+    #[test]
+    fn resolve_index_selectivity_uses_column_ndv() {
+        let mut eg: egg::EGraph<RelLang, RelAnalysis> = egg::EGraph::default();
+        let cname = eg.add(RelLang::Symbol("c".into()));
+        let col = eg.add(RelLang::Col([cname]));
+        let konst = eg.add(RelLang::Symbol("5".into()));
+        let eq = eg.add(RelLang::Eq([col, konst]));
+        let tsym = eg.add(RelLang::Symbol("t".into()));
+        let _isc = eg.add(RelLang::IndexScanChoice([eq, tsym]));
+        eg.rebuild();
+
+        let mut stats = Statistics::new(100_000.0);
+        stats.columns.insert("c".to_string(), ColumnStats::new(1000.0));
+        let mut ts = HashMap::new();
+        ts.insert("t".to_string(), stats);
+
+        let sel = resolve_index_selectivity(&eg, &ts);
+        let got = sel
+            .get(&eg.find(eq))
+            .copied()
+            .expect("selectivity resolved for the index-scan-choice cond");
+        assert!(
+            (got - 0.001).abs() < 1e-9,
+            "expected 1/NDV ≈ 0.001, got {got}"
+        );
+    }
 }

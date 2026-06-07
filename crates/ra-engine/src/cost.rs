@@ -150,7 +150,7 @@ const DEFAULT_AVG_ROW_SIZE_BYTES: f64 = 100.0;
 /// per-predicate selectivity (from column statistics) is threaded in. A
 /// moderately-selective fraction so the seq↔index choice is live: cheap when
 /// random I/O is cheap (warm cache), dear when random I/O is dear (cold).
-const DEFAULT_SELECTIVITY: f64 = 0.1;
+pub(crate) const DEFAULT_SELECTIVITY: f64 = 0.1;
 
 /// Mean of the known tables' real `avg_row_size`, or the documented fallback
 /// when no statistics are available. Used to derive scan page counts together
@@ -1323,6 +1323,11 @@ pub struct IntegratedCostFn {
     /// Average row width in bytes across known tables (real `avg_row_size`),
     /// used with `page_size_bytes` to derive scan page counts.
     avg_row_size_bytes: f64,
+    /// Pre-resolved index-scan predicate selectivity, keyed by the canonical
+    /// `cond` child Id of each `index-scan-choice` node (RFC 0091 B2). Empty
+    /// when no per-predicate estimation was threaded (then `DEFAULT_SELECTIVITY`
+    /// is used).
+    id_selectivity: std::sync::Arc<HashMap<egg::Id, f64>>,
 }
 
 impl IntegratedCostFn {
@@ -1354,6 +1359,7 @@ impl IntegratedCostFn {
             id_row_counts: std::sync::Arc::new(HashMap::new()),
             page_size_bytes: DEFAULT_DB_PAGE_SIZE_BYTES,
             avg_row_size_bytes,
+            id_selectivity: std::sync::Arc::new(HashMap::new()),
         }
     }
 
@@ -1366,6 +1372,24 @@ impl IntegratedCostFn {
             self.page_size_bytes = page_size_bytes;
         }
         self
+    }
+
+    /// Pre-resolved index-scan predicate selectivity, keyed by the canonical
+    /// `cond` child Id (RFC 0091 B2). Built by `resolve_index_selectivity`
+    /// after saturation.
+    #[must_use]
+    pub fn with_id_selectivity(mut self, id_selectivity: HashMap<egg::Id, f64>) -> Self {
+        self.id_selectivity = std::sync::Arc::new(id_selectivity);
+        self
+    }
+
+    /// Selectivity of an index-scan predicate by its canonical `cond` Id; the
+    /// moderate default when unresolved.
+    fn selectivity_for_cond(&self, cond_id: egg::Id) -> f64 {
+        self.id_selectivity
+            .get(&cond_id)
+            .copied()
+            .unwrap_or(DEFAULT_SELECTIVITY)
     }
 
     /// Create with pre-resolved Id → row count mapping.
@@ -1426,6 +1450,7 @@ impl IntegratedCostFn {
             id_row_counts: std::sync::Arc::new(HashMap::new()),
             page_size_bytes: DEFAULT_DB_PAGE_SIZE_BYTES,
             avg_row_size_bytes,
+            id_selectivity: std::sync::Arc::new(HashMap::new()),
         }
     }
 
@@ -1546,9 +1571,11 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             // inherit the sequential scan child cost (the index scan replaces
             // it). Selective + warm cache (cheap random I/O) → cheaper than the
             // sequential `Filter(Scan)`; non-selective or cold → dearer.
-            RelLang::IndexScanChoice([_cond, table_id]) => {
+            RelLang::IndexScanChoice([cond_id, table_id]) => {
                 let row_count = self.row_count_for_id(*table_id);
-                operator_cost("index-scan", &self.op_cost_ctx(0.0, 0.0, row_count))
+                let mut ctx = self.op_cost_ctx(0.0, 0.0, row_count);
+                ctx.selectivity = self.selectivity_for_cond(*cond_id);
+                operator_cost("index-scan", &ctx)
             }
             RelLang::Aggregate(_) => self.flat_op_cost("aggregate"),
             RelLang::Sort(_) => self.flat_op_cost("sort"),
