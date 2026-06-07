@@ -30,9 +30,47 @@ thread_local! {
         std::cell::RefCell::new(PhysicalChoices::new());
 }
 
-/// Record the physical choices derived from a just-extracted plan.
-fn record_physical_choices(best: &egg::RecExpr<RelLang>) {
-    let choices = physical_choices_from_recexpr(best);
+/// Record the physical choices derived from a just-extracted plan. `egraph`
+/// supplies the post-saturation node set so the scan-method *suppression* can be
+/// captured: a table for which the lowering rule introduced an
+/// `index-scan-choice` (index-eligible) but whose sequential `Filter(Scan)` the
+/// extractor kept means the cost model judged a sequential scan cheaper (e.g. a
+/// cold/contended host) — recorded as `ScanStrategy::Seq` so plan-builder
+/// suppresses its index-scan peephole. Tables with no recorded choice keep
+/// plan-builder's default behaviour (no regression).
+fn record_physical_choices(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    best: &egg::RecExpr<RelLang>,
+) {
+    use crate::plan_advice_physical::ScanStrategy;
+    let mut choices = physical_choices_from_recexpr(best);
+
+    // Tables the lowering rule made index-eligible (an index-scan-choice exists
+    // somewhere in the e-graph).
+    let mut eligible: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for class in egraph.classes() {
+        for node in &class.nodes {
+            if let RelLang::IndexScanChoice([_, table_id]) = node {
+                if let Some(t) = symbol_text(egraph, *table_id) {
+                    eligible.insert(t);
+                }
+            }
+        }
+    }
+    // Tables whose scan the extractor actually realised as an index-scan-choice.
+    let nodes = best.as_ref();
+    let mut chosen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for node in nodes {
+        if let RelLang::IndexScanChoice([_, table_id]) = node {
+            if let RelLang::Symbol(s) = &nodes[usize::from(*table_id)] {
+                chosen.insert(s.to_string());
+            }
+        }
+    }
+    // Eligible but not chosen => the extractor preferred the sequential scan.
+    for table in eligible.difference(&chosen) {
+        choices.set_scan(table.clone(), ScanStrategy::Seq);
+    }
     LAST_PHYSICAL_CHOICES.with(|c| *c.borrow_mut() = choices);
 }
 
@@ -71,7 +109,7 @@ pub fn extract_best<S: BuildHasher>(
         let cost_fn = RelCostFn::new(hardware.clone());
         let extractor = egg::Extractor::new(egraph, cost_fn);
         let (_, best_expr) = extractor.find_best(root);
-        record_physical_choices(&best_expr);
+        record_physical_choices(egraph, &best_expr);
         rec_expr_to_rel_expr(&best_expr)
     } else {
         // Pre-resolve: scan the e-graph to build a mapping from
@@ -101,7 +139,7 @@ pub fn extract_best<S: BuildHasher>(
         }
         let extractor = egg::Extractor::new(egraph, cost_fn);
         let (_, best_expr) = extractor.find_best(root);
-        record_physical_choices(&best_expr);
+        record_physical_choices(egraph, &best_expr);
         rec_expr_to_rel_expr(&best_expr)
     }
 }
@@ -258,7 +296,7 @@ pub fn extract_best_with_staleness<S: BuildHasher, S2: BuildHasher>(
     );
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (_, best_expr) = extractor.find_best(root);
-    record_physical_choices(&best_expr);
+    record_physical_choices(egraph, &best_expr);
     rec_expr_to_rel_expr(&best_expr)
 }
 
@@ -306,7 +344,7 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (cost, best_expr) = extractor.find_best(root);
     tracing::debug!("Extracted plan with cardinality-aware cost: {}", cost);
-    record_physical_choices(&best_expr);
+    record_physical_choices(egraph, &best_expr);
     rec_expr_to_rel_expr(&best_expr)
 }
 
@@ -351,7 +389,7 @@ pub fn extract_best_bitnet<S: BuildHasher, S2: BuildHasher>(
 
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (_, best_expr) = extractor.find_best(root);
-    record_physical_choices(&best_expr);
+    record_physical_choices(egraph, &best_expr);
     rec_expr_to_rel_expr(&best_expr)
 }
 

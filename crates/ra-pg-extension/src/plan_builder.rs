@@ -556,9 +556,23 @@ impl PlanBuilder {
                 // IndexScan (the equality moves into indexqual; any residual
                 // conjuncts stay as the heap recheck qual). Strictly
                 // conservative — falls through to the SeqScan path otherwise.
-                if let RelExpr::Scan { table, .. } = &**input {
-                    if let Some(plan) = self.try_build_index_scan(table, predicate)? {
-                        return Ok(plan);
+                if let RelExpr::Scan { table, alias } = &**input {
+                    // RFC 0091 B2b: honor the cost extractor's seq-vs-index
+                    // decision. It records ScanStrategy::Seq for an
+                    // index-eligible scan only when it judged a sequential scan
+                    // cheaper under the current live conditions (e.g. a cold /
+                    // contended host) — suppress the index-scan peephole then.
+                    // No recorded choice (fast-pathed / not eligible) keeps the
+                    // default peephole behaviour.
+                    let scan_key = alias.as_deref().unwrap_or(table);
+                    let force_seq = matches!(
+                        self.physical_choices.scan_for(scan_key),
+                        Some(ra_engine::plan_advice_physical::ScanStrategy::Seq)
+                    );
+                    if !force_seq {
+                        if let Some(plan) = self.try_build_index_scan(table, predicate)? {
+                            return Ok(plan);
+                        }
                     }
                 }
                 // 1.0 safety: fold the predicate into the child scan's
