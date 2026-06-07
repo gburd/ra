@@ -1779,6 +1779,35 @@ mod tests {
         }
     }
 
+    /// RFC 0091 + live-conditions: the live system fingerprint must still reach
+    /// the rule-sourced operator costs after P2/P3 moved costing into `.rra`
+    /// rules. `with_live_conditions` re-tunes `self.calibration`, which
+    /// `op_cost_ctx` threads into the rule `ctx` — so a high cache hit-rate
+    /// (cheaper I/O) lowers the `scan` rule cost, and high CPU load raises a
+    /// tuple-cost operator (`aggregate`).
+    #[test]
+    fn live_conditions_flow_into_rule_costs() {
+        let hw = HardwareProfile::cpu_only();
+        let neutral = IntegratedCostFn::new(hw.clone(), HashMap::new(), HashMap::new());
+        let cached = IntegratedCostFn::new(hw.clone(), HashMap::new(), HashMap::new())
+            .with_live_conditions(LiveConditions { hit_rate: 0.95, io_saturation: 0.0, cpu_load: 0.0 });
+        let rc = 100_000.0;
+        let neutral_scan = operator_cost("scan", &neutral.op_cost_ctx(0.0, 0.0, rc));
+        let cached_scan = operator_cost("scan", &cached.op_cost_ctx(0.0, 0.0, rc));
+        assert!(
+            cached_scan < neutral_scan,
+            "high cache hit-rate should lower the rule-sourced scan cost: \
+             cached {cached_scan} !< neutral {neutral_scan}"
+        );
+
+        let busy = IntegratedCostFn::new(hw, HashMap::new(), HashMap::new())
+            .with_live_conditions(LiveConditions { hit_rate: 0.0, io_saturation: 0.0, cpu_load: 1.0 });
+        assert!(
+            busy.flat_op_cost("aggregate") > neutral.flat_op_cost("aggregate"),
+            "high CPU load should raise the rule-sourced aggregate cost"
+        );
+    }
+
     /// RFC 0090 Phase 3 chunk 3: per-method physical join costs order correctly.
     /// `NestLoop` (quadratic) must exceed `HashJoin` on large inputs but be
     /// competitive on tiny inputs; `IndexNestLoop` (linear in the outer) must
