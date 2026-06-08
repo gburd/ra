@@ -84,3 +84,38 @@ In value order:
 
 Each must pass the replan-equivalence property test before its fallback gate is
 removed (correctness > coverage remains the invariant).
+
+---
+
+## Addendum (2026-06-08) — genuine-fix attempt #2 measured and reverted
+
+Attempted the "real IndexScan/BitmapHeapScan support" by lowering the physical
+scan nodes the optimizer extracts (`IndexScan`/`IndexOnlyScan`/`BitmapHeapScan`/
+`BitmapIndexScan`) back to logical `Filter(Scan)`/`Project(Filter(Scan))` in the
+extraction conversion (`extract/convert.rs::rec_expr_to_rel_expr` — the actual
+RecExpr→RelExpr path; note `egraph/from_rec.rs::from_egraph_node` is a *separate*
+function that is NOT used for extraction), so plan_builder's verified
+`try_build_index_scan` peephole re-derives the access path.
+
+**Measured result on the 54-shape suite: a regression** — RA-BUILT 34→25,
+FALLBACK 20→11, **ERR 0→18, plus a backend segfault**. Reverted to HEAD.
+
+**Root cause / blocker.** Routing more queries to plan_builder's index-scan path
+surfaces its latent bugs: the `0x7f7f7f7f…` index-stats double-free (`pfree
+called with invalid pointer`, previously only contained by `catch_unwind`) and
+malformed index/set-op plans. So the genuine fixes are gated on **first making
+those plan_builder paths crash-free and correct**, not on routing — exactly the
+RFC-scale, executor-coupled work flagged in `planner-fallback-backlog.md`.
+
+This mirrors the set-op fast-path result (#1): both genuine-fix routes crash
+because the underlying plan_builder index-scan and set-op *build* paths are
+fragile. The safe posture (34 built / 20 fallback / **0 wrong / 0 error / 0
+crash**) is preserved. Required order of work, verified each step with
+`scripts/replan-equivalence-test.sh` + `scripts/ra_requalify.sh`:
+1. Root-cause and fix the `0x7f7f` index-stats double-free (debug with
+   `backtrace_functions='BogusFree'` per mcxt.c).
+2. Make `build_index_scan`/`build_bitmap_heap_scan` emit correct index quals
+   (single-col btree first), gated + property-tested.
+3. *Then* lower extracted physical scans to logical so the verified path is used.
+4. Set-op build normalization; then a safe branch-wise fast-path.
+5. SubPlan/`PARAM_EXEC` for scalar subqueries.
