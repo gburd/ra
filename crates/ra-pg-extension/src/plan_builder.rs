@@ -306,9 +306,27 @@ impl PlanBuilder {
             RelExpr::Aggregate { .. } => Some("Aggregate"),
             // Distinct (SELECT DISTINCT): build_unique sorts its input on all
             // output columns before the Unique, so adjacent-dedup is correct.
-            RelExpr::Distinct { input } => Self::first_unsupported_op(input),
-            RelExpr::Union { left, right, .. } => {
-                Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
+            // But DISTINCT directly over a UNION/Append hits the same unsound
+            // dedup-over-Append build as UNION distinct — defer it.
+            RelExpr::Distinct { input } => {
+                if matches!(&**input, RelExpr::Union { .. }) {
+                    Some("UnionDistinct")
+                } else {
+                    Self::first_unsupported_op(input)
+                }
+            }
+            RelExpr::Union { all, left, right } => {
+                // UNION ALL is a plain Append (safe). UNION (distinct) wraps the
+                // Append in Sort+Unique (dedup_plan); that Sort+Unique-over-Append
+                // path mis-builds (backend crash) when the branches carry base
+                // scanrelid Vars from differing relations — a tracked plan_builder
+                // set-op bug (docs/planner-fallback-backlog.md). Defer UNION
+                // distinct to PG until the dedup-over-Append build is hardened.
+                if *all {
+                    Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
+                } else {
+                    Some("UnionDistinct")
+                }
             }
             RelExpr::Intersect { left, right, .. } | RelExpr::Except { left, right, .. } => {
                 Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))

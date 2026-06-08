@@ -807,7 +807,22 @@ fn extract_index_only_scan() {
     };
     let rec = to_rec_expr(&expr).expect("to_rec_expr");
     let result = rec_expr_to_rel_expr(&rec).expect("extraction");
-    assert_eq!(result, expr);
+    // Physical scans lower to logical Project(Filter(Scan)).
+    let expected = RelExpr::Project {
+        columns: vec![ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new("email")),
+            alias: None,
+        }],
+        input: Box::new(RelExpr::Filter {
+            predicate: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("email"))),
+                right: Box::new(Expr::Const(Const::String("test@example.com".into()))),
+            },
+            input: Box::new(RelExpr::Scan { table: "users".into(), alias: None }),
+        }),
+    };
+    assert_eq!(result, expected);
 }
 
 // -- MvScan --
@@ -849,7 +864,15 @@ fn extract_bitmap_index_scan() {
     };
     let rec = to_rec_expr(&expr).expect("to_rec_expr");
     let result = rec_expr_to_rel_expr(&rec).expect("extraction");
-    assert_eq!(result, expr);
+    let expected = RelExpr::Filter {
+        predicate: Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("status"))),
+            right: Box::new(Expr::Const(Const::String("active".into()))),
+        },
+        input: Box::new(RelExpr::Scan { table: "orders".into(), alias: None }),
+    };
+    assert_eq!(result, expected);
 }
 
 #[test]
@@ -877,7 +900,16 @@ fn extract_bitmap_and() {
     };
     let rec = to_rec_expr(&expr).expect("to_rec_expr");
     let result = rec_expr_to_rel_expr(&rec).expect("extraction");
-    assert_eq!(result, expr);
+    let mk = |c: &str, v: i64| RelExpr::Filter {
+        predicate: Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new(c))),
+            right: Box::new(Expr::Const(Const::Int(v))),
+        },
+        input: Box::new(RelExpr::Scan { table: "t".into(), alias: None }),
+    };
+    let expected = RelExpr::BitmapAnd { inputs: vec![Box::new(mk("a",1)), Box::new(mk("b",2))] };
+    assert_eq!(result, expected);
 }
 
 #[test]
@@ -905,7 +937,16 @@ fn extract_bitmap_or() {
     };
     let rec = to_rec_expr(&expr).expect("to_rec_expr");
     let result = rec_expr_to_rel_expr(&rec).expect("extraction");
-    assert_eq!(result, expr);
+    let mk = |c: &str, v: i64| RelExpr::Filter {
+        predicate: Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new(c))),
+            right: Box::new(Expr::Const(Const::Int(v))),
+        },
+        input: Box::new(RelExpr::Scan { table: "t".into(), alias: None }),
+    };
+    let expected = RelExpr::BitmapOr { inputs: vec![Box::new(mk("x",1)), Box::new(mk("y",2))] };
+    assert_eq!(result, expected);
 }
 
 #[test]
@@ -930,7 +971,16 @@ fn extract_bitmap_heap_scan() {
     };
     let rec = to_rec_expr(&expr).expect("to_rec_expr");
     let result = rec_expr_to_rel_expr(&rec).expect("extraction");
-    assert_eq!(result, expr);
+    // BitmapHeapScan lowers to Filter(Scan) using the recheck condition.
+    let expected = RelExpr::Filter {
+        predicate: Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("date"))),
+            right: Box::new(Expr::Const(Const::String("2024-01-01".into()))),
+        },
+        input: Box::new(RelExpr::Scan { table: "orders".into(), alias: None }),
+    };
+    assert_eq!(result, expected);
 }
 
 // -- Sort with multiple keys and directions --
