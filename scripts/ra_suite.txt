@@ -1,0 +1,54 @@
+scan-point|SELECT o_orderkey FROM orders WHERE o_orderkey=42
+scan-range|SELECT o_orderkey FROM orders WHERE o_totalprice>200000
+scan-str-eq|SELECT c_custkey FROM customer WHERE c_mktsegment='BUILDING'
+scan-between|SELECT o_orderkey FROM orders WHERE o_totalprice BETWEEN 100000 AND 120000
+scan-in|SELECT o_orderkey FROM orders WHERE o_orderstatus IN ('O','P')
+scan-or|SELECT o_orderkey FROM orders WHERE o_totalprice>290000 OR o_orderstatus='F'
+scan-isnull|SELECT o_orderkey FROM orders WHERE o_comment IS NOT NULL AND o_orderkey<50
+scan-like|SELECT c_custkey FROM customer WHERE c_mktsegment LIKE 'BUILD%'
+proj-expr|SELECT o_orderkey, o_totalprice/100 FROM orders WHERE o_orderkey<30
+proj-case|SELECT o_orderkey, CASE WHEN o_totalprice>200000 THEN 'big' ELSE 'small' END FROM orders WHERE o_orderkey<30
+proj-cast|SELECT o_orderkey, o_totalprice::int FROM orders WHERE o_orderkey<30
+proj-coalesce|SELECT coalesce(o_comment,'none') FROM orders WHERE o_orderkey<30
+inner-join|SELECT o.o_orderkey FROM orders o JOIN customer c ON o.o_custkey=c.c_custkey WHERE o.o_totalprice>200000
+inner-join-str|SELECT o.o_orderkey FROM orders o JOIN customer c ON o.o_custkey=c.c_custkey WHERE c.c_mktsegment='BUILDING'
+left-join|SELECT o.o_orderkey FROM orders o LEFT JOIN customer c ON o.o_custkey=c.c_custkey WHERE o.o_orderkey<50
+left-join-inner-pred|SELECT o.o_orderkey FROM orders o LEFT JOIN customer c ON o.o_custkey=c.c_custkey WHERE c.c_acctbal>9000
+right-join|SELECT o.o_orderkey,c.c_custkey FROM orders o RIGHT JOIN customer c ON o.o_custkey=c.c_custkey WHERE c.c_custkey<50
+full-join|SELECT o.o_orderkey,c.c_custkey FROM orders o FULL JOIN customer c ON o.o_custkey=c.c_custkey WHERE c.c_custkey<50
+cross-join|SELECT n.n_name,r.r_name FROM nation n CROSS JOIN region r WHERE n.n_nationkey<3
+3-join|SELECT l.l_orderkey FROM lineitem l JOIN orders o ON l.l_orderkey=o.o_orderkey JOIN customer c ON o.o_custkey=c.c_custkey WHERE o.o_totalprice>250000
+self-join|SELECT a.o_orderkey FROM orders a JOIN orders b ON a.o_custkey=b.o_custkey AND a.o_orderkey<b.o_orderkey WHERE a.o_totalprice>290000
+agg-scalar|SELECT count(*),sum(o_totalprice),avg(o_totalprice) FROM orders
+agg-group|SELECT o_orderstatus,count(*) FROM orders GROUP BY o_orderstatus
+agg-having|SELECT o_custkey,sum(o_totalprice) s FROM orders GROUP BY o_custkey HAVING sum(o_totalprice)>500000
+agg-distinct|SELECT count(DISTINCT o_custkey) FROM orders
+agg-filter|SELECT o_orderstatus,count(*) FILTER(WHERE o_totalprice>200000) FROM orders GROUP BY o_orderstatus
+agg-rollup|SELECT o_orderstatus,count(*) FROM orders GROUP BY ROLLUP(o_orderstatus)
+agg-cube|SELECT o_orderstatus,o_orderpriority,count(*) FROM orders GROUP BY CUBE(o_orderstatus,o_orderpriority)
+ordered-set|SELECT percentile_cont(0.5) WITHIN GROUP(ORDER BY o_totalprice) FROM orders
+distinct|SELECT DISTINCT o_orderstatus FROM orders
+distinct-on|SELECT DISTINCT ON (o_custkey) o_custkey,o_totalprice FROM orders ORDER BY o_custkey,o_totalprice DESC
+order-limit|SELECT o_orderkey FROM orders ORDER BY o_totalprice DESC LIMIT 20
+offset|SELECT o_orderkey FROM orders ORDER BY o_orderkey LIMIT 10 OFFSET 100
+window-rank|SELECT o_orderkey,rank() OVER (ORDER BY o_totalprice) FROM orders WHERE o_orderkey<100
+window-partition|SELECT o_custkey,sum(o_totalprice) OVER (PARTITION BY o_custkey) FROM orders WHERE o_orderkey<100
+window-lag|SELECT o_orderkey,lag(o_totalprice) OVER (ORDER BY o_orderkey) FROM orders WHERE o_orderkey<50
+union|SELECT o_custkey FROM orders WHERE o_totalprice>250000 UNION SELECT c_custkey FROM customer WHERE c_acctbal>9000
+union-all|SELECT o_orderstatus FROM orders UNION ALL SELECT o_orderpriority FROM orders
+intersect|SELECT o_custkey FROM orders INTERSECT SELECT c_custkey FROM customer
+except|SELECT c_custkey FROM customer EXCEPT SELECT o_custkey FROM orders
+in-subq|SELECT o_orderkey FROM orders WHERE o_custkey IN (SELECT c_custkey FROM customer WHERE c_mktsegment='BUILDING')
+exists|SELECT o_orderkey FROM orders o WHERE EXISTS(SELECT 1 FROM customer c WHERE c.c_custkey=o.o_custkey AND c.c_acctbal>9000)
+not-exists|SELECT c_custkey FROM customer c WHERE NOT EXISTS(SELECT 1 FROM orders o WHERE o.o_custkey=c.c_custkey)
+not-in|SELECT c_custkey FROM customer WHERE c_custkey NOT IN (SELECT o_custkey FROM orders WHERE o_custkey IS NOT NULL)
+scalar-subq-where|SELECT o_orderkey FROM orders WHERE o_totalprice<(SELECT avg(o_totalprice) FROM orders)
+scalar-subq-select|SELECT o_orderkey,(SELECT c_name FROM customer c WHERE c.c_custkey=o.o_custkey) FROM orders o WHERE o_orderkey<30
+corr-subq|SELECT o_orderkey FROM orders o WHERE o_totalprice>(SELECT avg(o2.o_totalprice) FROM orders o2 WHERE o2.o_custkey=o.o_custkey) AND o_orderkey<200
+cte|WITH a AS (SELECT * FROM orders WHERE o_totalprice>250000) SELECT o_orderkey FROM a WHERE o_orderstatus='O'
+cte-multi|WITH a AS (SELECT o_custkey,count(*) c FROM orders GROUP BY o_custkey), b AS (SELECT c_custkey FROM customer WHERE c_acctbal>9000) SELECT a.c FROM a JOIN b ON a.o_custkey=b.c_custkey
+rec-cte|WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM t WHERE n<10) SELECT n FROM t
+lateral|SELECT o.o_orderkey,t.m FROM orders o JOIN LATERAL (SELECT max(l_quantity) m FROM lineitem l WHERE l.l_orderkey=o.o_orderkey) t ON true WHERE o.o_orderkey<30
+subq-from|SELECT t.s FROM (SELECT o_custkey,sum(o_totalprice) s FROM orders GROUP BY o_custkey) t WHERE t.s>400000
+tpch-q1|SELECT l_returnflag,l_linestatus,sum(l_quantity),avg(l_discount),count(*) FROM lineitem WHERE l_shipdate<=DATE '1998-09-01' GROUP BY l_returnflag,l_linestatus ORDER BY l_returnflag,l_linestatus
+tpch-q3|SELECT l.l_orderkey,sum(l.l_extendedprice*(1-l.l_discount)) rev,o.o_orderdate FROM customer c JOIN orders o ON c.c_custkey=o.o_custkey JOIN lineitem l ON l.l_orderkey=o.o_orderkey WHERE c.c_mktsegment='BUILDING' AND o.o_orderdate<DATE '1995-03-15' GROUP BY l.l_orderkey,o.o_orderdate ORDER BY rev DESC LIMIT 10
