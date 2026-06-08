@@ -41,6 +41,36 @@ collation fixes (`varcollid` / `inputcollid` / `constcollid`).
 - `Sort` (`ORDER BY`, single or multi-key, ASC/DESC, NULLS FIRST/LAST, aliases)
   and `Limit`/`OFFSET`, when every sort key is a plain column that appears in
   the output. Verified row-equivalent on a live PG18 cluster.
+- **All join types** — INNER / LEFT / RIGHT / FULL / CROSS outer joins and
+  SEMI / ANTI joins (from decorrelated `IN`/`EXISTS`/`NOT IN`/`NOT EXISTS`),
+  including multi-way joins, joins with `WHERE` on either side, and
+  `IN`/`EXISTS` families. Verified row-identical to PG19 (see
+  `docs/ra-vs-pg-correctness-findings-2026-06-07.md`). The outer-join
+  correctness arc fixed three optimizer bugs: `references_only` was a no-op for
+  scalar predicates (now uses an analysis `qualifiers` set); generic
+  `(join ?type …)` rewrites pushed predicates to the nullable side / commuted
+  outer joins (now guarded by `is_inner_join`); and an unguarded generated copy
+  of `duckdb-filter-through-left-join-left` pushed a right-relation predicate
+  onto the left scan (now guarded by `references_only`).
+
+## Correctness gate — the one remaining wrong-result fallback
+
+`PlanBuilder::wrong_result_risk` defers a query to PG when it contains a
+**scalar subquery in a filter predicate** (e.g. `WHERE x < (SELECT avg(y) FROM
+t)`). Decorrelation lowers this to a cross/semi join whose inner side is an
+`Aggregate` and whose filter references the aggregate **result** as a function
+expression, not a `Var` — so it needs PostgreSQL `SubPlan`/`InitPlan` +
+`PARAM_EXEC` wiring (an executor-coupled, RFC-scale mechanism), not a rewrite
+rule. Falling back is correct; closing it is tracked as a dedicated task.
+
+## Known performance gap (correct, but slower planning)
+
+- **`UNION` with filters on both branches**: ~10–15× slower *planning* than PG
+  (the produced plan and results are identical). The cost is the per-iteration
+  e-graph saturation machinery (each interleaved iteration clones the e-graph
+  and spins up a fresh egg `Runner` over the full rule set + scheduler), not a
+  single rule. A fix that avoids re-creating the `Runner`/cloning per iteration
+  would benefit all queries and is tracked separately.
 
 ## Plan-builder gaps (each = one task)
 
@@ -48,7 +78,7 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 
 | Op token | SQL it blocks | Status / why it falls back | Pri |
 |---|---|---|---|
-| ~~`Join`~~ | ~~multi-table join~~ | **DONE** for Inner/Left/Cross over two base relations (build_projected_join, NestLoop). Right/Full/Semi/Anti and 3+ table joins still defer. Fixing this also fixed two latent **optimizer** correctness bugs (left-deep dropped a WHERE predicate / rebuilt the join as a cartesian product; left-deep converted LEFT/RIGHT/FULL joins to INNER) | P2 |
+| ~~`Join`~~ | ~~multi-table join~~ | **DONE** — all join types (INNER/LEFT/RIGHT/FULL/CROSS + SEMI/ANTI), multi-way, WHERE on either side, IN/EXISTS. Verified row-identical to PG19 | — |
 | ~~`Aggregate`~~ | ~~`count/sum/avg/min/max`, `GROUP BY`~~ | **DONE** for count/sum/avg/min/max (± GROUP BY, ± ORDER BY). HAVING, expressions over aggregates, DISTINCT aggregates, and stddev/variance/string_agg/array_agg still defer | P2 |
 | ~~`Sort`~~ | ~~`ORDER BY`~~ | **DONE** (plain-column keys); expression keys and `ORDER BY` of a non-output column still defer (need resjunk targetlist / ordering-operator resolution) | — |
 | ~~`Limit`~~ | ~~`LIMIT` / `OFFSET`~~ | **DONE** | — |
