@@ -155,7 +155,7 @@ Training happens online: every e-graph optimization run produces an `Optimizatio
 
 The optimizer uses [egg](https://arxiv.org/abs/2004.03082) (e-graphs good) for equality saturation. Instead of applying transformations sequentially (potentially missing better orderings), the e-graph represents ALL equivalent plans simultaneously and extracts the cheapest.
 
-### Rule Categories (~298 rules active)
+### Rule Categories (293 rules active)
 
 | Category | Rules | Examples |
 |----------|-------|----------|
@@ -340,8 +340,8 @@ ra/
 ```
 
 > Note: Of the 1,387 `.rra` rule sources, ~94 currently compile to
-> active rewrite rules. Combined with the ~213 hand-coded rules in
-> `ra-engine`, `Optimizer::all_rules()` returns **307 active rewrite
+> active rewrite rules. Combined with the hand-coded rules in
+> `ra-engine`, `Optimizer::all_rules()` returns **293 active rewrite
 > rules** (verified via `cargo run --release -p ra-engine --example
 > count_rules`). The remaining .rra files are spec-only and require
 > additional condition functions or operator-mapping work to activate.
