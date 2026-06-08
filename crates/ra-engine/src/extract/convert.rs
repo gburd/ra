@@ -1,5 +1,6 @@
 use egg::Id;
 use ra_core::algebra::RelExpr;
+use ra_core::expr::{BinOp, Expr};
 
 use crate::egraph::{EGraphError, RelLang};
 
@@ -8,6 +9,28 @@ use super::helpers::{
     convert_window_expr_list, get_symbol, id,
 };
 use super::scalar::convert_scalar;
+
+/// Extract a combined filter predicate from a lowered bitmap source.
+fn bitmap_source_predicate(b: &RelExpr) -> Option<Expr> {
+    match b {
+        RelExpr::Filter { predicate, .. } => Some(predicate.clone()),
+        RelExpr::BitmapAnd { inputs } => combine_bitmap_preds(inputs, BinOp::And),
+        RelExpr::BitmapOr { inputs } => combine_bitmap_preds(inputs, BinOp::Or),
+        _ => None,
+    }
+}
+
+fn combine_bitmap_preds(inputs: &[Box<RelExpr>], op: BinOp) -> Option<Expr> {
+    let mut acc: Option<Expr> = None;
+    for inp in inputs {
+        let p = bitmap_source_predicate(inp)?;
+        acc = Some(match acc {
+            None => p,
+            Some(prev) => Expr::BinOp { op, left: Box::new(prev), right: Box::new(p) },
+        });
+    }
+    acc
+}
 
 /// Convert a [`RecExpr`] back to a [`RelExpr`].
 ///
@@ -133,21 +156,20 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
                 input: Box::new(RelExpr::Scan { table, alias: None }),
             })
         }
-        RelLang::IndexScan([table_id, column_id]) => {
+        RelLang::IndexScan([table_id, _column_id]) => {
             let table = get_symbol(nodes, id(*table_id))?;
-            let column = get_symbol(nodes, id(*column_id))?;
-            Ok(RelExpr::IndexScan { table, column })
+            Ok(RelExpr::Scan { table, alias: None })
         }
-        RelLang::IndexOnlyScan([table_id, index_id, cols_id, pred_id]) => {
+        RelLang::IndexOnlyScan([table_id, _index_id, cols_id, pred_id]) => {
             let table = get_symbol(nodes, id(*table_id))?;
-            let index = get_symbol(nodes, id(*index_id))?;
             let columns = convert_projection_list(nodes, id(*cols_id))?;
             let predicate = convert_scalar(nodes, id(*pred_id))?;
-            Ok(RelExpr::IndexOnlyScan {
-                table,
-                index,
+            Ok(RelExpr::Project {
                 columns,
-                predicate,
+                input: Box::new(RelExpr::Filter {
+                    predicate,
+                    input: Box::new(RelExpr::Scan { table, alias: None }),
+                }),
             })
         }
         RelLang::MvScan([view_id, alias_id, _, _]) => {
@@ -160,14 +182,12 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             };
             Ok(RelExpr::MvScan { view_name, alias })
         }
-        RelLang::BitmapIndexScan([table_id, index_id, pred_id]) => {
+        RelLang::BitmapIndexScan([table_id, _index_id, pred_id]) => {
             let table = get_symbol(nodes, id(*table_id))?;
-            let index = get_symbol(nodes, id(*index_id))?;
             let predicate = convert_scalar(nodes, id(*pred_id))?;
-            Ok(RelExpr::BitmapIndexScan {
-                table,
-                index,
+            Ok(RelExpr::Filter {
                 predicate,
+                input: Box::new(RelExpr::Scan { table, alias: None }),
             })
         }
         RelLang::BitmapAnd(input_ids) => {
@@ -192,11 +212,16 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             } else {
                 Some(convert_scalar(nodes, id(*recheck_id))?)
             };
-            Ok(RelExpr::BitmapHeapScan {
-                table,
-                bitmap: Box::new(bitmap),
-                recheck_cond,
-            })
+            let predicate = recheck_cond.or_else(|| bitmap_source_predicate(&bitmap));
+            match predicate {
+                Some(predicate) => Ok(RelExpr::Filter {
+                    predicate,
+                    input: Box::new(RelExpr::Scan { table, alias: None }),
+                }),
+                None => Err(EGraphError::ConversionError(
+                    "bitmap-heap-scan without a recoverable predicate".to_string(),
+                )),
+            }
         }
         RelLang::Func(ids) if !ids.is_empty() => convert_func_as_relational(nodes, ids),
         RelLang::VectorKNN([table_id, _col_id, _target_id, _k_id]) => {
