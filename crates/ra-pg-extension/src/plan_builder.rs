@@ -304,31 +304,14 @@ impl PlanBuilder {
                 Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
             }
             RelExpr::Aggregate { .. } => Some("Aggregate"),
-            // Distinct (SELECT DISTINCT): build_unique sorts its input on all
-            // output columns before the Unique, so adjacent-dedup is correct.
-            // But DISTINCT directly over a UNION/Append hits the same unsound
-            // dedup-over-Append build as UNION distinct — defer it.
-            RelExpr::Distinct { input } => {
-                if matches!(&**input, RelExpr::Union { .. }) {
-                    Some("UnionDistinct")
-                } else {
-                    Self::first_unsupported_op(input)
-                }
-            }
-            RelExpr::Union { all, left, right } => {
-                // UNION ALL is a plain Append (safe). UNION (distinct) wraps the
-                // Append in Sort+Unique (dedup_plan); that Sort+Unique-over-Append
-                // path mis-builds (backend crash) when the branches carry base
-                // scanrelid Vars from differing relations — a tracked plan_builder
-                // set-op bug (docs/planner-fallback-backlog.md). Defer UNION
-                // distinct to PG until the dedup-over-Append build is hardened.
-                if *all {
-                    Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
-                } else {
-                    Some("UnionDistinct")
-                }
-            }
-            RelExpr::Intersect { left, right, .. } | RelExpr::Except { left, right, .. } => {
+            // DISTINCT and UNION/INTERSECT/EXCEPT (incl. UNION distinct's
+            // Sort+Unique over an Append) build correctly now that the Append's
+            // part_prune_index is set to -1 (palloc0 left it 0, which crashed
+            // ExecInitAppend on empty partition-prune info).
+            RelExpr::Distinct { input } => Self::first_unsupported_op(input),
+            RelExpr::Union { left, right, .. }
+            | RelExpr::Intersect { left, right, .. }
+            | RelExpr::Except { left, right, .. } => {
                 Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
             }
             // VALUES: built as an Append of one-row Result nodes;
@@ -442,7 +425,6 @@ impl PlanBuilder {
         // Pre-build SubPlan nodes for scalar sub-queries so expression
         // translation can resolve them; Errs here defer to native PG.
         self.prepare_subplans(expr)?;
-
         let plan_tree = self.build_plan(expr)?;
 
         let stmt = self.alloc_node::<pg_sys::PlannedStmt>();
@@ -4142,6 +4124,10 @@ impl PlanBuilder {
             ));
         }
         (*node).plan.type_ = pg_sys::NodeTag::T_Append;
+        // No run-time partition pruning: PG uses -1 here, but palloc0 zeroes it
+        // to 0, which makes ExecInitAppend index an empty es_part_prune_infos[0]
+        // and crash (even under EXPLAIN's EXEC_FLAG_EXPLAIN_ONLY init). Set -1.
+        (*node).part_prune_index = -1;
         // Build the appendplans list from the two child plans.
         let mut plans_list = std::ptr::null_mut::<pg_sys::List>();
         if !left_plan.is_null() {
@@ -4151,6 +4137,10 @@ impl PlanBuilder {
             plans_list = pg_sys::lappend(plans_list, right_plan.cast());
         }
         (*node).appendplans = plans_list;
+        // All subplans are non-partial (Ra emits no parallel-aware Append), so
+        // the first partial plan is past the end. palloc0 leaves this 0, which
+        // would make the executor treat every subplan as partial.
+        (*node).first_partial_plan = pg_sys::list_length(plans_list);
 
         // Propagate cost estimates from children.
         let left_cost = if left_plan.is_null() {
