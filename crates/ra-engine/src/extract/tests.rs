@@ -807,22 +807,8 @@ fn extract_index_only_scan() {
     };
     let rec = to_rec_expr(&expr).expect("to_rec_expr");
     let result = rec_expr_to_rel_expr(&rec).expect("extraction");
-    // Physical scans lower to logical Project(Filter(Scan)).
-    let expected = RelExpr::Project {
-        columns: vec![ProjectionColumn {
-            expr: Expr::Column(ColumnRef::new("email")),
-            alias: None,
-        }],
-        input: Box::new(RelExpr::Filter {
-            predicate: Expr::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Column(ColumnRef::new("email"))),
-                right: Box::new(Expr::Const(Const::String("test@example.com".into()))),
-            },
-            input: Box::new(RelExpr::Scan { table: "users".into(), alias: None }),
-        }),
-    };
-    assert_eq!(result, expected);
+    // IndexOnlyScan is preserved (plan_builder builds it faithfully).
+    assert_eq!(result, expr);
 }
 
 // -- MvScan --

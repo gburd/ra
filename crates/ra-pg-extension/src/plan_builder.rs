@@ -337,7 +337,10 @@ impl PlanBuilder {
                 .or_else(|| Self::first_unsupported_op(body)),
             RelExpr::Unnest { .. } | RelExpr::MultiUnnest { .. } => Some("Unnest"),
             RelExpr::TableFunction { .. } => Some("TableFunction"),
-            RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => Some("IndexScan"),
+            // IndexOnlyScan is built faithfully (build_index_only_scan) and
+            // falls back internally when the index does not cover the query.
+            RelExpr::IndexOnlyScan { .. } => None,
+            RelExpr::IndexScan { .. } => Some("IndexScan"),
             RelExpr::BitmapHeapScan { .. }
             | RelExpr::BitmapIndexScan { .. }
             | RelExpr::BitmapAnd { .. }
@@ -721,7 +724,9 @@ impl PlanBuilder {
             }
             RelExpr::BitmapAnd { inputs } => self.build_bitmap_and(inputs),
             RelExpr::BitmapOr { inputs } => self.build_bitmap_or(inputs),
-            RelExpr::IndexOnlyScan { table, index, .. } => self.build_index_only_scan(table, index),
+            RelExpr::IndexOnlyScan { table, index, columns, predicate } => {
+                self.build_index_only_scan(table, index, columns, predicate)
+            }
             RelExpr::ParallelScan { table, workers } => {
                 self.build_parallel_seq_scan(table, *workers)
             }
@@ -1573,42 +1578,181 @@ impl PlanBuilder {
     }
 
     /// Build an `IndexOnlyScan` node (covering index — no heap fetch).
+    unsafe fn try_build_index_only_scan(
+        &mut self,
+        table: &str,
+        index: &str,
+        columns: &[ProjectionColumn],
+        predicate: &Expr,
+    ) -> Result<Option<*mut pg_sys::Plan>, PlanBuilderError> {
+        let rtindex = self.rtindex_for(table)?;
+        let rel_oid = self.rel_oid_for(table)?;
+
+        // Resolve the chosen index → key columns. An index-only scan is sound
+        // only when the index COVERS the query: every projected column and
+        // every predicate column must be an index key column (so no heap fetch
+        // is needed). Otherwise defer to the native planner.
+        let Some(info) = crate::index_resolver::resolve_index_by_name(rel_oid, index) else {
+            return Ok(None);
+        };
+        if info.am_type != "btree" || info.columns.is_empty() {
+            return Ok(None);
+        }
+        // Position (1-based) of a column within the index key list.
+        let key_pos = |name: &str| -> Option<i16> {
+            info.columns
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case(name))
+                .map(|p| (p + 1) as i16)
+        };
+
+        // Every projected column must be a plain Column covered by the index.
+        let mut out_cols: Vec<(String, i16)> = Vec::with_capacity(columns.len());
+        for pc in columns {
+            let Expr::Column(cr) = &pc.expr else {
+                return Ok(None);
+            };
+            let Some(pos) = key_pos(&cr.column) else {
+                return Ok(None);
+            };
+            out_cols.push((cr.column.clone(), pos));
+        }
+        // Every predicate column must be covered too.
+        let mut pred_cols: Vec<String> = Vec::new();
+        collect_column_names(predicate, &mut pred_cols);
+        for c in &pred_cols {
+            if key_pos(c).is_none() {
+                return Ok(None);
+            }
+        }
+
+        // Per-key opfamilies (copied out before closing the relcache entry),
+        // for the canonical-form index conditions.
+        let idx_rel = pg_sys::index_open(info.oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        if idx_rel.is_null() || (*idx_rel).rd_opfamily.is_null() {
+            if !idx_rel.is_null() {
+                pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            }
+            return Ok(None);
+        }
+        let nkeys = if (*idx_rel).rd_index.is_null() {
+            0
+        } else {
+            (*(*idx_rel).rd_index).indnkeyatts as usize
+        };
+        let mut opfamilies: Vec<pg_sys::Oid> = Vec::with_capacity(nkeys);
+        for i in 0..nkeys {
+            opfamilies.push(*(*idx_rel).rd_opfamily.add(i));
+        }
+        pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+
+        // Build index conditions. EVERY conjunct must be a pushable btree
+        // index clause — index-only has no heap tuple to recheck an arbitrary
+        // residual qual against, so a non-pushable conjunct means fall back.
+        let mut conjuncts: Vec<&Expr> = Vec::new();
+        split_conjuncts(predicate, &mut conjuncts);
+        let mut indexqual = std::ptr::null_mut::<pg_sys::List>();
+        for c in &conjuncts {
+            let Some((_heap_op, idx_op, _is_eq)) =
+                self.build_index_clause(c, &info.columns, rtindex, &opfamilies)
+            else {
+                return Ok(None);
+            };
+            indexqual = pg_sys::lappend(indexqual, idx_op.cast());
+        }
+        if indexqual.is_null() {
+            return Ok(None);
+        }
+
+        let node = self.alloc_node::<pg_sys::IndexOnlyScan>();
+        if node.is_null() {
+            return Err(PlanBuilderError::NullPointer("IndexOnlyScan allocation".to_string()));
+        }
+        (*node).scan.plan.type_ = pg_sys::NodeTag::T_IndexOnlyScan;
+        (*node).scan.scanrelid = rtindex;
+        (*node).indexid = info.oid;
+        (*node).indexqual = indexqual;
+        // Exact (non-lossy) btree conditions need no recheck. recheckqual would
+        // be evaluated against the index-reconstructed tuple (INDEX_VAR frame),
+        // not the heap, so a heap-form qual here returns wrong rows — leave it
+        // empty (palloc0 default).
+        (*node).indexorderdir = pg_sys::ScanDirection::ForwardScanDirection;
+
+        // indextlist: one entry per index key column, as an INDEX_VAR Var of
+        // the column's type. The executor uses it to reconstruct tuples from
+        // the index without touching the heap.
+        let mut indextlist = std::ptr::null_mut::<pg_sys::List>();
+        for (i, colname) in info.columns.iter().enumerate() {
+            let Ok(cname) = std::ffi::CString::new(colname.as_str()) else {
+                return Ok(None);
+            };
+            let attno = pg_sys::get_attnum(rel_oid, cname.as_ptr());
+            let typ = pg_sys::get_atttype(rel_oid, attno);
+            let var = self.alloc_node::<pg_sys::Var>();
+            (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*var).varno = pg_sys::INDEX_VAR as i32;
+            (*var).varattno = (i + 1) as i16;
+            (*var).vartype = typ;
+            (*var).vartypmod = -1;
+            (*var).varcollid = pg_sys::get_typcollation(typ);
+            (*var).varlevelsup = 0;
+            let te = pg_sys::makeTargetEntry(var.cast(), (i + 1) as i16, std::ptr::null_mut(), false);
+            indextlist = pg_sys::lappend(indextlist, te.cast());
+        }
+        (*node).indextlist = indextlist;
+
+        // Output targetlist: each projected column as an INDEX_VAR Var at its
+        // index key position (index-only reads from the index, not the heap).
+        let mut out_tl = std::ptr::null_mut::<pg_sys::List>();
+        for (i, (colname, pos)) in out_cols.iter().enumerate() {
+            let Ok(cname) = std::ffi::CString::new(colname.as_str()) else {
+                return Ok(None);
+            };
+            let attno = pg_sys::get_attnum(rel_oid, cname.as_ptr());
+            let typ = pg_sys::get_atttype(rel_oid, attno);
+            let var = self.alloc_node::<pg_sys::Var>();
+            (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*var).varno = pg_sys::INDEX_VAR as i32;
+            (*var).varattno = *pos;
+            (*var).vartype = typ;
+            (*var).vartypmod = -1;
+            (*var).varcollid = pg_sys::get_typcollation(typ);
+            (*var).varlevelsup = 0;
+            let resname = std::ffi::CString::new(colname.as_str())
+                .ok()
+                .map_or(std::ptr::null_mut(), |c| pg_sys::pstrdup(c.as_ptr()));
+            let te = pg_sys::makeTargetEntry(var.cast(), (i + 1) as i16, resname, false);
+            out_tl = pg_sys::lappend(out_tl, te.cast());
+        }
+        (*node).scan.plan.targetlist = out_tl;
+
+        // Index-only scans avoid the heap fetch — cheaper than a regular index
+        // scan.
+        self.set_index_costs(&mut (*node).scan.plan, table, 0.05);
+        Ok(Some(&mut (*node).scan.plan as *mut pg_sys::Plan))
+    }
+
+    /// Build a faithful `IndexOnlyScan` when the chosen index covers the query;
+    /// otherwise fall back to the standard index/seq-scan build of the
+    /// equivalent `Project(Filter(Scan))` (never worse than the prior lowering).
     unsafe fn build_index_only_scan(
         &mut self,
         table: &str,
         index: &str,
+        columns: &[ProjectionColumn],
+        predicate: &Expr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        let rtindex = self.rtindex_for(table)?;
-        let rel_oid = self.rel_oid_for(table)?;
-        let node = self.alloc_node::<pg_sys::IndexOnlyScan>();
-        if node.is_null() {
-            return Err(PlanBuilderError::NullPointer(
-                "IndexOnlyScan allocation".to_string(),
-            ));
+        if let Some(plan) = self.try_build_index_only_scan(table, index, columns, predicate)? {
+            return Ok(plan);
         }
-        (*node).scan.plan.type_ = pg_sys::NodeTag::T_IndexOnlyScan;
-        (*node).scan.scanrelid = rtindex;
-
-        // Resolve the named index to its OID
-        if let Some(info) = crate::index_resolver::resolve_index_by_name(rel_oid, index) {
-            (*node).indexid = info.oid;
-            debug!(
-                table = table,
-                index = index,
-                index_oid = info.oid.to_u32(),
-                "IndexOnlyScan: resolved index"
-            );
-        } else {
-            debug!(
-                table = table,
-                index = index,
-                "IndexOnlyScan: named index not found"
-            );
-        }
-
-        // Index-only scans are cheaper than regular index scans (no heap fetch)
-        self.set_index_costs(&mut (*node).scan.plan, table, 0.05);
-        Ok(&mut (*node).scan.plan as *mut pg_sys::Plan)
+        let lowered = RelExpr::Project {
+            columns: columns.to_vec(),
+            input: Box::new(RelExpr::Filter {
+                predicate: predicate.clone(),
+                input: Box::new(RelExpr::Scan { table: table.to_owned(), alias: None }),
+            }),
+        };
+        self.build_plan(&lowered)
     }
 
     // -----------------------------------------------------------------------
@@ -5467,6 +5611,44 @@ fn expr_any_subquery(e: &Expr, scalar_only: bool) -> bool {
 }
 
 /// equality conjunct from the rest of a `WHERE` clause.
+/// Collect the names of all columns referenced anywhere in `expr` (for the
+/// index-only-scan coverage check).
+fn collect_column_names(expr: &Expr, out: &mut Vec<String>) {
+    match expr {
+        Expr::Column(cr) => out.push(cr.column.clone()),
+        Expr::BinOp { left, right, .. } => {
+            collect_column_names(left, out);
+            collect_column_names(right, out);
+        }
+        Expr::UnaryOp { operand, .. } => collect_column_names(operand, out),
+        Expr::Function { args, .. } | Expr::Array(args) => {
+            for a in args {
+                collect_column_names(a, out);
+            }
+        }
+        Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => {
+            collect_column_names(expr, out);
+        }
+        Expr::Case { operand, when_clauses, else_result } => {
+            if let Some(o) = operand {
+                collect_column_names(o, out);
+            }
+            for (c, r) in when_clauses {
+                collect_column_names(c, out);
+                collect_column_names(r, out);
+            }
+            if let Some(e) = else_result {
+                collect_column_names(e, out);
+            }
+        }
+        Expr::ArrayIndex(a, b) => {
+            collect_column_names(a, out);
+            collect_column_names(b, out);
+        }
+        _ => {}
+    }
+}
+
 fn split_conjuncts<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
     if let Expr::BinOp {
         op: BinOp::And,
