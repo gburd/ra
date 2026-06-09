@@ -160,17 +160,15 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             let table = get_symbol(nodes, id(*table_id))?;
             Ok(RelExpr::Scan { table, alias: None })
         }
-        RelLang::IndexOnlyScan([table_id, _index_id, cols_id, pred_id]) => {
+        RelLang::IndexOnlyScan([table_id, index_id, cols_id, pred_id]) => {
+            // Preserve the physical IndexOnlyScan so plan_builder can build a
+            // faithful index-only scan (it falls back internally to a regular
+            // index/seq scan when the index does not cover the query).
             let table = get_symbol(nodes, id(*table_id))?;
+            let index = get_symbol(nodes, id(*index_id))?;
             let columns = convert_projection_list(nodes, id(*cols_id))?;
             let predicate = convert_scalar(nodes, id(*pred_id))?;
-            Ok(RelExpr::Project {
-                columns,
-                input: Box::new(RelExpr::Filter {
-                    predicate,
-                    input: Box::new(RelExpr::Scan { table, alias: None }),
-                }),
-            })
+            Ok(RelExpr::IndexOnlyScan { table, index, columns, predicate })
         }
         RelLang::MvScan([view_id, alias_id, _, _]) => {
             let view_name = get_symbol(nodes, id(*view_id))?;
