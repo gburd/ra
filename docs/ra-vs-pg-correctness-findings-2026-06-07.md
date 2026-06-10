@@ -292,3 +292,29 @@ actually stopped firing after a guard change.
 
 - Scalar subquery in a filter predicate (gated): wire the SubPlan result param.
 - UNION planning-time blowup (~50×): router fast-path / e-graph budget for set-ops.
+
+## 2026-06-10 — Physical access-path peepholes (IndexOnlyScan + BitmapHeapScan)
+
+The faithful IndexOnlyScan/BitmapHeapScan plan-node builders were
+previously dormant: single-table queries take the speculative router's
+`Skip` route (no e-graph), so the rules that would emit those nodes
+never fired, and the covering builder resolved the optimizer's sentinel
+index name `"auto"` (never a real index).
+
+Fix: physical access-path selection now lives in `plan_builder`
+peepholes, which run for every query (including `Skip`-routed
+single-table ones), so no router/optimizer change is needed.
+
+- `Project(Filter(Scan))`: `try_build_index_only_scan` uses
+  `index_resolver::find_covering_index` over the projected + predicate
+  columns and builds a real `T_IndexOnlyScan` (INDEX_VAR indexqual,
+  `indextlist`, INDEX_VAR output targetlist, empty `recheckqual`).
+- `Filter(Scan)` with a top-level OR of indexed-column conditions:
+  builds a real `BitmapHeapScan → BitmapOr → BitmapIndexScan`. Also
+  fixed an INDEX_VAR bug in the bitmap leaf builder (heap-form indexqual
+  → wrong rows).
+
+Both are strictly conservative (decline → existing index/seq-scan
+build). Verified RA-BUILT (`ra_planner: OK`, not "fell back") and
+row-identical to native PG; requalify 35/19/0 DIFF/0 ERR across 3
+stress runs, 0 crashes. Commits: main `1886a312`, `e0ff52c8`.
