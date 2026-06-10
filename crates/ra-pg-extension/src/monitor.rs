@@ -48,6 +48,18 @@ impl Drop for RefreshGuard {
     }
 }
 
+/// True while the monitor is executing its internal SPI refresh queries.
+///
+/// The planner hook routes queries straight to the native planner while this
+/// is set: the monitor only introspects `pg_catalog`/statistics views (which
+/// Ra cannot plan and always falls back on), so attempting Ra planning for
+/// them is wasted work — and doing so re-enters the planner during a refresh,
+/// a known trigger for the contained index-stats double-free.
+#[must_use]
+pub fn is_refreshing() -> bool {
+    unsafe { IN_REFRESH }
+}
+
 /// Initialize the fingerprint monitor subsystem.
 ///
 /// Called once during `_PG_init`. Creates the shared `FingerprintReader`

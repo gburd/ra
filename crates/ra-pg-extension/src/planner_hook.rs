@@ -123,6 +123,14 @@ unsafe fn ra_planner_hook_inner(
 ) -> *mut pg_sys::PlannedStmt {
     use ra_core::algebra::Statement;
 
+    // While the monitor is running its internal pg_catalog/statistics SPI
+    // queries, route straight to the native planner. Ra cannot plan those
+    // introspection queries (they always fall back), and re-entering Ra during
+    // a refresh is a known trigger for the contained index-stats double-free.
+    if crate::monitor::is_refreshing() {
+        return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
+    }
+
     // Refresh system fingerprint if intervals have elapsed.
     crate::monitor::maybe_refresh();
 
