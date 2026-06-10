@@ -601,7 +601,21 @@ unsafe fn build_sao_array(
     );
     let opno = pg_sys::OpernameGetOprid(opname, pg_sys::exprType(test.cast()), elem_type);
     if opno == pg_sys::InvalidOid {
-        return std::ptr::null_mut();
+        // No exact operator for these types: defer to PostgreSQL's parser
+        // helper, which coerces the array elements and applies useOr like the
+        // parser, then assign collations for collation-sensitive comparisons.
+        let sao = pg_sys::make_scalar_array_op(
+            std::ptr::null_mut(),
+            opname,
+            use_or,
+            test.cast(),
+            arr.cast(),
+            -1,
+        );
+        if !sao.is_null() {
+            pg_sys::assign_expr_collations(std::ptr::null_mut(), sao.cast());
+        }
+        return sao;
     }
     let node = alloc::<pg_sys::ScalarArrayOpExpr>();
     (*node).xpr.type_ = pg_sys::NodeTag::T_ScalarArrayOpExpr;
@@ -641,7 +655,23 @@ unsafe fn build_in_list(args: &[RaExpr], ctx: &ExprContext) -> *mut pg_sys::Expr
     );
     let opno = pg_sys::OpernameGetOprid(opname, test_type, elem_type);
     if opno == pg_sys::InvalidOid {
-        return std::ptr::null_mut();
+        // No exact `test_type = elem_type` operator (e.g. `bpchar = text` /
+        // `varchar = text` from a text-typed IN list). Defer to PostgreSQL's
+        // parser helper, which coerces the array elements to the operator's
+        // input type and sets useOr exactly like transformAExprIn, then assign
+        // collations so text comparisons carry a valid collation.
+        let sao = pg_sys::make_scalar_array_op(
+            std::ptr::null_mut(),
+            opname,
+            true,
+            test.cast(),
+            arr.cast(),
+            -1,
+        );
+        if !sao.is_null() {
+            pg_sys::assign_expr_collations(std::ptr::null_mut(), sao.cast());
+        }
+        return sao;
     }
     let node = alloc::<pg_sys::ScalarArrayOpExpr>();
     (*node).xpr.type_ = pg_sys::NodeTag::T_ScalarArrayOpExpr;
