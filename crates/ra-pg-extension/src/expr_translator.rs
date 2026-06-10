@@ -740,28 +740,61 @@ unsafe fn build_minmax(
 
 unsafe fn build_coalesce(args: &[RaExpr], ctx: &ExprContext) -> *mut pg_sys::Expr {
     let mut pg_args: *mut pg_sys::List = std::ptr::null_mut();
-    let mut common_type = pg_sys::InvalidOid;
-    let mut collid = pg_sys::InvalidOid;
     for a in args {
         let pg = translate(a, ctx);
         if pg.is_null() {
             return std::ptr::null_mut();
         }
-        let ty = pg_sys::exprType(pg.cast());
-        if common_type == pg_sys::InvalidOid {
-            common_type = ty;
-            collid = pg_sys::exprCollation(pg.cast());
-        } else if ty != common_type {
-            return std::ptr::null_mut();
-        }
         pg_args = pg_sys::lappend(pg_args, pg.cast());
     }
+    if pg_args.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    // Determine the common type PostgreSQL would use across the arguments and
+    // coerce each to it (mirrors transformCoalesceExpr). This handles mixed
+    // but compatible types like `varchar` column + `unknown`/`text` literal —
+    // requiring an exact type match previously rejected those.
+    let ctx_cstr = match CString::new("COALESCE") {
+        Ok(c) => c,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let mut which: *mut pg_sys::Node = std::ptr::null_mut();
+    let common_type = pg_sys::select_common_type(
+        std::ptr::null_mut(),
+        pg_args,
+        ctx_cstr.as_ptr(),
+        &mut which,
+    );
+    if common_type == pg_sys::InvalidOid {
+        return std::ptr::null_mut();
+    }
+
+    let mut coerced: *mut pg_sys::List = std::ptr::null_mut();
+    let n = pg_sys::list_length(pg_args);
+    for i in 0..n {
+        let node = pg_sys::list_nth(pg_args, i).cast::<pg_sys::Node>();
+        let c = pg_sys::coerce_to_common_type(
+            std::ptr::null_mut(),
+            node,
+            common_type,
+            ctx_cstr.as_ptr(),
+        );
+        if c.is_null() {
+            return std::ptr::null_mut();
+        }
+        coerced = pg_sys::lappend(coerced, c.cast());
+    }
+
     let node = alloc::<pg_sys::CoalesceExpr>();
     (*node).xpr.type_ = pg_sys::NodeTag::T_CoalesceExpr;
     (*node).coalescetype = common_type;
-    (*node).coalescecollid = collid;
-    (*node).args = pg_args;
+    (*node).args = coerced;
     (*node).location = -1;
+    // Assign collation from the (coerced) arguments — PG's parser does this in
+    // a separate pass that Ra otherwise skips; without it a text/varchar
+    // COALESCE can raise "could not determine which collation to use".
+    pg_sys::assign_expr_collations(std::ptr::null_mut(), node.cast());
     node.cast()
 }
 
