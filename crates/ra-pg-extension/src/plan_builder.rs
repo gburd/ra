@@ -4579,9 +4579,27 @@ impl PlanBuilder {
             _ => return Err(unsupported("window function")),
         };
         let nargs = i32::from(arg.is_some());
+        let actual_arg_ty = arg.map(|(_, ty, _)| ty);
         let mut argtypes = [pg_sys::InvalidOid; 1];
         if let Some((_, ty, _)) = arg {
             argtypes[0] = ty;
+        }
+        // The value window functions (lag/lead/first_value/last_value/nth_value)
+        // have a polymorphic `anyelement` first parameter in the catalog, so a
+        // lookup by the actual argument type (e.g. numeric) finds no exact
+        // match. Look them up by the polymorphic signature and resolve the
+        // result type from the actual argument below.
+        // first_value/last_value are strictly single-argument and have a
+        // polymorphic `anyelement` parameter, so look them up by that
+        // signature and resolve the result type from the actual argument.
+        // lag/lead/nth_value are intentionally excluded: they have optional
+        // offset/default arguments, but `WindowExpr` only carries a single
+        // `arg`, so the parser silently drops the offset — building them here
+        // would return wrong rows for the `lag(x, n)` form. They correctly
+        // fall back until WindowExpr carries all arguments.
+        let polymorphic_value_fn = matches!(func, Wf::FirstValue | Wf::LastValue);
+        if polymorphic_value_fn && arg.is_some() {
+            argtypes[0] = pg_sys::ANYELEMENTOID;
         }
         let fname = CString::new(name).map_err(|_| unsupported("window fn name"))?;
         let name_node = pg_sys::makeString(fname.as_ptr().cast_mut());
@@ -4595,7 +4613,16 @@ impl PlanBuilder {
         if !winagg && prokind != pg_sys::PROKIND_WINDOW as i8 {
             return Err(unsupported("not a window/agg function"));
         }
-        let wintype = pg_sys::get_func_rettype(winfnoid);
+        // A polymorphic return type resolves to the actual argument type.
+        let mut wintype = pg_sys::get_func_rettype(winfnoid);
+        if matches!(
+            wintype,
+            pg_sys::ANYELEMENTOID | pg_sys::ANYCOMPATIBLEOID | pg_sys::ANYARRAYOID
+        ) {
+            if let Some(ty) = actual_arg_ty {
+                wintype = ty;
+            }
+        }
         let node = self.alloc_node::<pg_sys::WindowFunc>();
         (*node).xpr.type_ = pg_sys::NodeTag::T_WindowFunc;
         (*node).winfnoid = winfnoid;
