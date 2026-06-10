@@ -609,6 +609,20 @@ impl PlanBuilder {
                         if let Some(plan) = self.try_build_index_scan(table, predicate)? {
                             return Ok(plan);
                         }
+                        // Bitmap access path: a top-level OR (or multi-index
+                        // AND) of indexed-column conditions can't be served by
+                        // a single index scan. Build a real BitmapIndexScan(s)
+                        // → BitmapHeapScan. build_bitmap_heap_for_filter Errs if
+                        // any disjunct lacks a usable index, so we fall through
+                        // to the SeqScan path then (never wrong, never worse).
+                        if matches!(
+                            predicate,
+                            Expr::BinOp { op: ra_core::expr::BinOp::Or, .. }
+                        ) {
+                            if let Ok(plan) = self.build_bitmap_heap_for_filter(table, predicate) {
+                                return Ok(plan);
+                            }
+                        }
                     }
                 }
                 // 1.0 safety: fold the predicate into the child scan's
@@ -1225,10 +1239,35 @@ impl PlanBuilder {
         }
         let idx_info = crate::index_resolver::resolve_index(rel_oid, column)
             .ok_or_else(|| format!("no index covers column `{column}`"))?;
-        let pg_expr = expr_translator::translate(clause, &self.expr_ctx);
-        if pg_expr.is_null() {
-            return Err("clause translation produced null".to_string());
+
+        // Per-key opfamilies of the chosen index (copied out before the
+        // relcache entry is closed), for the canonical-form index condition.
+        let idx_rel = pg_sys::index_open(idx_info.oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        if idx_rel.is_null() || (*idx_rel).rd_opfamily.is_null() {
+            if !idx_rel.is_null() {
+                pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            }
+            return Err(format!("no opfamily for index on `{column}`"));
         }
+        let nkeys = if (*idx_rel).rd_index.is_null() {
+            0
+        } else {
+            (*(*idx_rel).rd_index).indnkeyatts as usize
+        };
+        let mut opfamilies: Vec<pg_sys::Oid> = Vec::with_capacity(nkeys);
+        for i in 0..nkeys {
+            opfamilies.push(*(*idx_rel).rd_opfamily.add(i));
+        }
+        pg_sys::index_close(idx_rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+
+        // Canonical index condition: indexqual references the index key via
+        // INDEX_VAR (varattno = index column position); indexqualorig keeps the
+        // heap-Var form for recheck. A heap-form indexqual would map scan keys
+        // to the wrong index attribute and return wrong rows.
+        let (heap_op, idx_op, _is_eq) = self
+            .build_index_clause(clause, &idx_info.columns, rtindex, &opfamilies)
+            .ok_or_else(|| format!("clause not a pushable btree condition on `{column}`"))?;
+
         let bis = self.alloc_node::<pg_sys::BitmapIndexScan>();
         if bis.is_null() {
             return Err("BitmapIndexScan allocation returned null".to_string());
@@ -1236,8 +1275,8 @@ impl PlanBuilder {
         (*bis).scan.plan.type_ = pg_sys::NodeTag::T_BitmapIndexScan;
         (*bis).scan.scanrelid = rtindex;
         (*bis).indexid = idx_info.oid;
-        (*bis).indexqual = pg_sys::lappend((*bis).indexqual, pg_expr.cast());
-        (*bis).indexqualorig = pg_sys::lappend((*bis).indexqualorig, pg_expr.cast());
+        (*bis).indexqual = pg_sys::lappend((*bis).indexqual, idx_op.cast());
+        (*bis).indexqualorig = pg_sys::lappend((*bis).indexqualorig, heap_op.cast());
         (*bis).scan.plan.startup_cost = 0.0;
         (*bis).scan.plan.total_cost = 0.5;
         (*bis).scan.plan.plan_rows = 1.0;
