@@ -911,13 +911,14 @@ impl PlanBuilder {
         let strategy = self.physical_choices.scan_for(lookup_alias).cloned();
 
         use ra_engine::plan_advice_physical::ScanStrategy;
-        // 1.0 safety: only SeqScan is verified correct end-to-end (see
-        // scripts/replan-equivalence-test.sh). IndexScan / IndexOnlyScan
-        // / BitmapHeap / Tid builders are not yet verified and have
-        // produced wrong results or backend crashes, so scan-strategy
-        // advice is parsed and validated but not physically honored —
-        // every Scan becomes a SeqScan. Re-enable a strategy here only
-        // once it passes the replan-equivalence property test.
+        // A bare `Scan` reaching here carries no predicate, so there is no
+        // index condition to build — every strategy maps to a SeqScan. The
+        // physical access path (real IndexScan / covering IndexOnlyScan /
+        // OR-bitmap BitmapHeapScan) is instead chosen by the Filter(Scan) and
+        // Project(Filter(Scan)) peepholes in `build_plan`, which DO have the
+        // predicate + projection and are verified row-identical to PG. The old
+        // advice-driven scan-strategy peephole here produced backend-crashing
+        // plans and is intentionally not revived.
         match strategy {
             None
             | Some(ScanStrategy::Seq)

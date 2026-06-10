@@ -35,9 +35,14 @@ collation fixes (`varcollid` / `inputcollid` / `constcollid`).
 
 ## Currently supported (no fallback)
 
-- Single-relation `Scan` (SeqScan) with any nesting of `Filter` (→ qual) and
+- Single-relation `Scan` with any nesting of `Filter` (→ qual) and
   `Project` (→ targetlist), including qualified and unqualified columns, NULL
-  tests (`IS [NOT] NULL`), and text/collation-sensitive comparisons.
+  tests (`IS [NOT] NULL`), and text/collation-sensitive comparisons. Physical
+  access path is chosen by plan_builder peepholes: a real `IndexScan`
+  (`col <op> const`, ranges, multi-column prefixes), a covering `IndexOnlyScan`
+  (a btree index covers all projected + predicate columns), or a
+  `BitmapHeapScan` (top-level OR of indexed-column conditions) — otherwise a
+  `SeqScan`. All verified row-identical to PG.
 - `Sort` (`ORDER BY`, single or multi-key, ASC/DESC, NULLS FIRST/LAST, aliases)
   and `Limit`/`OFFSET`, when every sort key is a plain column that appears in
   the output. Verified row-equivalent on a live PG18 cluster.
@@ -87,8 +92,9 @@ Priority P0 (common, highest value), P1 (common), P2 (specialized).
 | ~~`Window`~~ | ~~window functions~~ | **DONE** for row_number/rank/dense_rank and sum/count/avg/min/max OVER (PARTITION BY/ORDER BY, default frame, single spec). Explicit frames, multiple window specs, and lag/lead/ntile/nth_value/first_value/last_value defer | P2 |
 | ~~`Values`~~ | `VALUES (...)` | **DONE** — ValuesScan over PG's RTE_VALUES (single and multi-row) | — |
 | ~~`CTE`~~ / `RecursiveCTE` | `WITH` | **CTE DONE** — non-recursive CTEs inlined with range-table flattening (cte_flatten_rtes + fresh rtable copy in build_planned_stmt). RecursiveCTE and multi-relation/non-simple CTE bodies defer | P2 |
-| `IndexScan` | index / index-only scans (optimizer- or advice-chosen) | `build_index_scan*` unverified; scan-strategy advice not physically honored | P2 |
-| `BitmapScan` | bitmap heap/index/and/or scans | `build_bitmap_*` crashed the backend (the removed Filter peephole) | P2 |
+| ~~`IndexScan`~~ | index scans (`col = const`, ranges, multi-col prefixes) | **DONE** — `try_build_index_scan` Filter(Scan) peephole builds a real `T_IndexScan` with canonical INDEX_VAR `indexqual`; verified row-identical to PG | — |
+| ~~`IndexOnlyScan`~~ | covering index-only scans | **DONE** — `Project(Filter(Scan))` peephole builds a real `T_IndexOnlyScan` when a btree index covers all projected + predicate columns (`find_covering_index`); INDEX_VAR indexqual + indextlist + empty recheckqual. Verified RA-BUILT + row-identical to PG (main 1886a312) | — |
+| ~~`BitmapScan`~~ | bitmap heap/index/or scans | **DONE** for a top-level OR of indexed-column conditions — `Filter(Scan)` peephole builds `BitmapHeapScan → BitmapOr → BitmapIndexScan` (INDEX_VAR indexqual). Verified RA-BUILT + row-identical to PG (main e0ff52c8). BitmapAnd (multi-index AND) still to do | P2 |
 | `Parallel` | parallel scan/hash-join/agg, `Gather` | not verified | P2 |
 | `Unnest` | `UNNEST(...)`, `MultiUnnest` | not verified | P2 |
 | `TableFunction` | table functions in `FROM` | not verified | P2 |
@@ -274,9 +280,12 @@ shows two-bound `Index Cond`s; 12000 mixed stress queries with 0 crashes.
 no `$N` token (and ra-core no `Param` variant), so prepared statements fail
 Lime parse and already fall back to PG (which index-scans them correctly);
 adding native support is a grammar + ra-core + translator change, not a
-plan_builder one. Also pending: `IndexOnlyScan` / `BitmapScan` emission, the
-optimizer choosing index access by cost, and a non-unique-equality
-`plan_rows` estimate better than the generic `0.1` selectivity.
+plan_builder one. `IndexOnlyScan` (covering) and `BitmapScan` (OR-of-indexed)
+emission are now DONE (2026-06-10, plan_builder access-path peepholes — see the
+plan-builder gaps table above). Still pending: the optimizer choosing index
+access by cost (the peepholes choose structurally, not by cost), `BitmapAnd`
+for multi-index AND predicates, and a non-unique-equality `plan_rows` estimate
+better than the generic `0.1` selectivity.
 
 **Multi-column prefixes (added 2026-06-01).** `build_index_clause` matches a
 conjunct against *any* key column of the chosen index and emits the
