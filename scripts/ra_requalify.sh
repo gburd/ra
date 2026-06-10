@@ -6,6 +6,11 @@
 set -uo pipefail
 PSQL="psql -h /tmp -p 5433 -U postgres -d tpch -tAq"
 LOG=/tmp/pg19_p4.log
+# Authoritative suite lives in the repo next to this script; fall back to the
+# legacy /tmp copy only if the repo file is missing.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUITE="${RA_SUITE:-$SCRIPT_DIR/ra_suite.txt}"
+[ -f "$SUITE" ] || SUITE=/tmp/ra_suite.txt
 
 q_off() { PGOPTIONS='-c ra_planner.enabled=off' $PSQL -c "$1" </dev/null 2>/dev/null | grep -vE '^Time:' | sort | shasum | cut -d' ' -f1; }
 q_on()  { PGOPTIONS='-c ra_planner.enabled=on'  $PSQL -c "$1" </dev/null 2>/dev/null | grep -vE '^Time:' | sort | shasum | cut -d' ' -f1; }
@@ -31,6 +36,6 @@ while IFS='|' read -r name sql; do
   if [ "$o" != "$n" ]; then echo "DIFF     $name"; diff=$((diff+1));
   elif [ "$f" = "1" ]; then echo "FALLBACK $name"; fb=$((fb+1));
   else echo "RA-BUILT $name"; ok=$((ok+1)); fi
-done < /tmp/ra_suite.txt
+done < "$SUITE"
 echo "==================================================="
 echo "TOTAL=$total  RA-BUILT(correct)=$ok  FALLBACK(correct)=$fb  DIFF=$diff  ERR=$err"

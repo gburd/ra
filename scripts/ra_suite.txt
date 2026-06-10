@@ -52,3 +52,8 @@ lateral|SELECT o.o_orderkey,t.m FROM orders o JOIN LATERAL (SELECT max(l_quantit
 subq-from|SELECT t.s FROM (SELECT o_custkey,sum(o_totalprice) s FROM orders GROUP BY o_custkey) t WHERE t.s>400000
 tpch-q1|SELECT l_returnflag,l_linestatus,sum(l_quantity),avg(l_discount),count(*) FROM lineitem WHERE l_shipdate<=DATE '1998-09-01' GROUP BY l_returnflag,l_linestatus ORDER BY l_returnflag,l_linestatus
 tpch-q3|SELECT l.l_orderkey,sum(l.l_extendedprice*(1-l.l_discount)) rev,o.o_orderdate FROM customer c JOIN orders o ON c.c_custkey=o.o_custkey JOIN lineitem l ON l.l_orderkey=o.o_orderkey WHERE c.c_mktsegment='BUILDING' AND o.o_orderdate<DATE '1995-03-15' GROUP BY l.l_orderkey,o.o_orderdate ORDER BY rev DESC LIMIT 10
+idxonly-eq|SELECT o_custkey FROM orders WHERE o_custkey=42
+idxonly-range|SELECT o_custkey FROM orders WHERE o_custkey<100
+idxonly-between|SELECT o_custkey FROM orders WHERE o_custkey BETWEEN 50 AND 500
+bitmap-or-eq|SELECT o_orderkey FROM orders WHERE o_custkey=5 OR o_custkey=10
+bitmap-or-mixed|SELECT o_orderkey FROM orders WHERE o_custkey=5 OR o_custkey>19000
