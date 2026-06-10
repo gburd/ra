@@ -606,6 +606,21 @@ impl PlanBuilder {
                         Some(ra_engine::plan_advice_physical::ScanStrategy::Seq)
                     );
                     if !force_seq {
+                        // Multi-index AND: when >=2 top-level conjuncts are
+                        // each served by a DISTINCT index, a BitmapAnd of those
+                        // indexes beats a single index scan that pushes one
+                        // index and rechecks the rest. Gated strictly (>=2
+                        // distinct indexes) so single-index ANDs still take the
+                        // cheaper plain index scan below. build_bitmap_heap_for_filter
+                        // Errs safely (→ fall through) if it can't build.
+                        if let Ok(rel_oid) = self.rel_oid_for(table) {
+                            if self.and_distinct_index_count(predicate, rel_oid) >= 2 {
+                                if let Ok(plan) = self.build_bitmap_heap_for_filter(table, predicate)
+                                {
+                                    return Ok(plan);
+                                }
+                            }
+                        }
                         if let Some(plan) = self.try_build_index_scan(table, predicate)? {
                             return Ok(plan);
                         }
@@ -1283,6 +1298,33 @@ impl PlanBuilder {
         (*bis).scan.plan.plan_rows = 1.0;
         (*bis).scan.plan.plan_width = 0;
         Ok(&mut (*bis).scan.plan as *mut pg_sys::Plan)
+    }
+
+    /// Count the distinct indexes referenced by the top-level `AND` conjuncts
+    /// of `predicate` (each conjunct that is a `col = const` on an indexed
+    /// column contributes its index). Used to decide whether a BitmapAnd of
+    /// multiple indexes is worthwhile: a single-index AND is better served by
+    /// a plain index scan (one indexqual + recheck), so the bitmap path is
+    /// gated to `>= 2` DISTINCT indexes.
+    unsafe fn and_distinct_index_count(&self, predicate: &Expr, rel_oid: pg_sys::Oid) -> usize {
+        if !matches!(predicate, Expr::BinOp { op: ra_core::expr::BinOp::And, .. }) {
+            return 0;
+        }
+        let mut conjuncts: Vec<&Expr> = Vec::new();
+        split_conjuncts(predicate, &mut conjuncts);
+        let mut oids: Vec<pg_sys::Oid> = Vec::new();
+        for c in &conjuncts {
+            let Some(col) = leaf_eq_column(c) else { continue };
+            if col.eq_ignore_ascii_case("ctid") {
+                continue;
+            }
+            if let Some(info) = crate::index_resolver::resolve_index(rel_oid, col) {
+                if !oids.contains(&info.oid) {
+                    oids.push(info.oid);
+                }
+            }
+        }
+        oids.len()
     }
 
     /// Try to emit a real `IndexScan` for `Filter(predicate) over Scan(table)`
