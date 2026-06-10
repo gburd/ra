@@ -125,6 +125,59 @@ pub unsafe fn resolve_index_by_name(rel_oid: pg_sys::Oid, index_name: &str) -> O
     None
 }
 
+/// Find a btree index whose key columns COVER all `needed` columns (every
+/// needed column is one of the index's key columns), so an index-only scan can
+/// satisfy the query without a heap fetch.
+///
+/// Among covering candidates the one with the fewest key columns is preferred
+/// (less I/O), with unique indexes winning ties. Returns `None` when no btree
+/// index covers every needed column.
+///
+/// # Safety
+///
+/// Must be called from within a PostgreSQL backend process.
+pub unsafe fn find_covering_index(rel_oid: pg_sys::Oid, needed: &[String]) -> Option<IndexInfo> {
+    if needed.is_empty() {
+        return None;
+    }
+    let rel = pg_sys::table_open(rel_oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    if rel.is_null() {
+        return None;
+    }
+    let index_list = pg_sys::RelationGetIndexList(rel);
+    let n_indexes = if index_list.is_null() { 0 } else { (*index_list).length };
+
+    let covers = |info: &IndexInfo| -> bool {
+        needed
+            .iter()
+            .all(|n| info.columns.iter().any(|c| c.eq_ignore_ascii_case(n)))
+    };
+
+    let mut best: Option<IndexInfo> = None;
+    for i in 0..n_indexes {
+        let idx_oid = pg_sys::list_nth_oid(index_list, i);
+        let Some(info) = read_index_info(idx_oid, rel_oid) else {
+            continue;
+        };
+        if info.am_type != "btree" || !covers(&info) {
+            continue;
+        }
+        let better = match &best {
+            None => true,
+            Some(b) => {
+                info.columns.len() < b.columns.len()
+                    || (info.columns.len() == b.columns.len() && info.is_unique && !b.is_unique)
+            }
+        };
+        if better {
+            best = Some(info);
+        }
+    }
+
+    pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    best
+}
+
 /// Read full index metadata from system caches.
 ///
 /// Returns `None` if the index OID is invalid or the catalog entries
