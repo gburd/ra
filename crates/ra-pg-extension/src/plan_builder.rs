@@ -697,6 +697,29 @@ impl PlanBuilder {
                         );
                     }
                 }
+                // Physical access-path peephole: a single-table
+                // Project(Filter(Scan)) whose covering btree index includes
+                // every projected and predicate column becomes a real
+                // index-only scan (no heap fetch). Strictly conservative —
+                // try_build_index_only_scan returns None unless it can prove
+                // coverage and build a canonical INDEX_VAR indexqual, so any
+                // other shape falls through to the generic build below.
+                if let RelExpr::Filter { predicate, input: fi } = &**input {
+                    if let RelExpr::Scan { table, alias } = &**fi {
+                        let scan_key = alias.as_deref().unwrap_or(table);
+                        let force_seq = matches!(
+                            self.physical_choices.scan_for(scan_key),
+                            Some(ra_engine::plan_advice_physical::ScanStrategy::Seq)
+                        );
+                        if !force_seq {
+                            if let Some(plan) =
+                                self.try_build_index_only_scan(table, "auto", columns, predicate)?
+                            {
+                                return Ok(plan);
+                            }
+                        }
+                    }
+                }
                 let child = self.build_plan(input)?;
                 self.set_targetlist(child, columns)?;
                 Ok(child)
@@ -1587,15 +1610,29 @@ impl PlanBuilder {
     ) -> Result<Option<*mut pg_sys::Plan>, PlanBuilderError> {
         let rtindex = self.rtindex_for(table)?;
         let rel_oid = self.rel_oid_for(table)?;
+        // The index name is advisory (the optimizer emits the sentinel
+        // "auto"); the access-path choice is made here by finding a btree
+        // index that COVERS the query. An index-only scan is sound only when
+        // every projected and predicate column is an index key column (no heap
+        // fetch). Otherwise return None so the caller falls back.
+        let _ = index;
 
-        // Resolve the chosen index → key columns. An index-only scan is sound
-        // only when the index COVERS the query: every projected column and
-        // every predicate column must be an index key column (so no heap fetch
-        // is needed). Otherwise defer to the native planner.
-        let Some(info) = crate::index_resolver::resolve_index_by_name(rel_oid, index) else {
+        // Projected columns must all be plain Columns (an expression cannot map
+        // to an index attribute). Collect them plus the predicate columns as
+        // the set the index must cover.
+        let mut needed: Vec<String> = Vec::with_capacity(columns.len());
+        for pc in columns {
+            let Expr::Column(cr) = &pc.expr else {
+                return Ok(None);
+            };
+            needed.push(cr.column.clone());
+        }
+        collect_column_names(predicate, &mut needed);
+
+        let Some(info) = crate::index_resolver::find_covering_index(rel_oid, &needed) else {
             return Ok(None);
         };
-        if info.am_type != "btree" || info.columns.is_empty() {
+        if info.columns.is_empty() {
             return Ok(None);
         }
         // Position (1-based) of a column within the index key list.
@@ -1606,7 +1643,7 @@ impl PlanBuilder {
                 .map(|p| (p + 1) as i16)
         };
 
-        // Every projected column must be a plain Column covered by the index.
+        // Output column → index key position (coverage guaranteed above).
         let mut out_cols: Vec<(String, i16)> = Vec::with_capacity(columns.len());
         for pc in columns {
             let Expr::Column(cr) = &pc.expr else {
@@ -1616,14 +1653,6 @@ impl PlanBuilder {
                 return Ok(None);
             };
             out_cols.push((cr.column.clone(), pos));
-        }
-        // Every predicate column must be covered too.
-        let mut pred_cols: Vec<String> = Vec::new();
-        collect_column_names(predicate, &mut pred_cols);
-        for c in &pred_cols {
-            if key_pos(c).is_none() {
-                return Ok(None);
-            }
         }
 
         // Per-key opfamilies (copied out before closing the relcache entry),
