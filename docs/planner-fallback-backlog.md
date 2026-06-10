@@ -409,3 +409,41 @@ numbers) and a suggested upstream fix are written up for the Lime team in
 Holding at v0.8.7 until the upstream warning is fixed; special-casing the
 warning string in `build.rs` was rejected as brittle (it would mask future
 legitimate warnings).
+
+## Fallback-closing pass (2026-06-10)
+
+Closed the tractable translation-level fallbacks (each verified row-identical
+to PG, requalify 0 DIFF / 0 ERR / 0 crash):
+
+- **proj-coalesce** — `COALESCE` now coerces arguments to a common type
+  (`select_common_type` + `coerce_to_common_type` + `assign_expr_collations`),
+  so `coalesce(varchar_col, 'literal')` builds instead of failing on an exact
+  type-match check.
+- **scan-in** — `IN (...)` / `= ANY(ARRAY[...])` on `text`/`bpchar`/`varchar`
+  columns now translate via `make_scalar_array_op` when no exact element
+  operator exists (the prior `OpernameGetOprid` exact lookup found no
+  `bpchar = text`).
+- **window first_value/last_value** — looked up by their polymorphic
+  `anyelement` signature with the result type resolved from the actual
+  argument.
+
+Suite: 60 shapes, **43 RA-BUILT / 17 FALLBACK / 0 DIFF / 0 ERR**.
+
+### Remaining fallbacks — deferred with rationale (each a dedicated effort)
+
+These fall back *correctly* (0 wrong results); closing them is real
+feature/structural work, not a translation tweak:
+
+| Shape(s) | Why it falls back | Scope to close |
+|---|---|---|
+| `agg-distinct` (`count(DISTINCT x)`) | needs `Aggref.aggdistinct` + a `SortGroupClause` (eqop/sortop) and `ressortgroupref` wiring | plan_builder, executor-coupled |
+| `agg-filter` (`count(*) FILTER (WHERE …)`) | `AggregateExpr` has no `filter` field — dropped at parse | ra-core + parser + builder |
+| `agg-rollup` / `agg-cube` | GROUPING SETS (`GroupingSetsClause`, `Agg` grouping sets) | RFC-scale |
+| `ordered-set` (`percentile_cont … WITHIN GROUP`) | ordered-set aggregate | RFC-scale |
+| `distinct-on` (`DISTINCT ON`) | Lime grammar has no `DISTINCT ON` production | grammar + builder |
+| `order-limit` (`ORDER BY` non-output column) | needs a resjunk targetlist entry + top-level junk filtering | plan_builder, correctness-sensitive |
+| `window-lag` (`lag`/`lead` with offset) | the grammar's `ra_window_expr` takes a single arg, dropping the offset; `WindowExpr` carries one `arg` | grammar + ra-core + builder |
+| `self-join`, `union-all` (same table twice), `subq-from` (derived table) | the range-table map is keyed by bare table name + does not recurse into set-op/subquery RTEs, so the same table twice / nested base tables resolve to "table not found" | plan_builder range-table identity (key by RTE/alias; recurse into subquery RTEs) |
+| `rec-cte` | recursive worktable name resolution for this shape | plan_builder |
+| `scalar-subq-where`, `corr-subq` | scalar subquery in a WHERE predicate needs SubPlan/InitPlan result-param wiring; currently gated for correctness | RFC-scale |
+| `cte`, `cte-multi`, `lateral` | e-graph extraction emits a node (`NestLoopOp`/`HashJoinOp`) or a projection the extractor/builder can't lower | ra-engine extraction |
