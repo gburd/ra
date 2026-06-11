@@ -126,8 +126,25 @@ pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 /// Return all optimization rewrite rules without priority sorting.
 ///
 /// Used for benchmarking the impact of priority sorting.
+///
+/// The compiled rule set is cached per process: building it parses ~293
+/// rewrite patterns from their string forms (egg `Pattern` construction),
+/// which profiling showed costs ~200ms and was repeated on *every* e-graph
+/// optimization (it dominated set-op planning time, since set-ops take the
+/// e-graph route). `Rewrite` is `Arc`-backed and `Clone`, so callers get a
+/// cheap clone of the cached set; the rules are static, so this is
+/// output-identical.
 #[must_use]
 pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+    static RULES_CACHE: std::sync::OnceLock<Vec<Rewrite<RelLang, RelAnalysis>>> =
+        std::sync::OnceLock::new();
+    RULES_CACHE.get_or_init(build_all_rules_unsorted).clone()
+}
+
+/// Build the full rewrite-rule set from scratch (parses every pattern). Call
+/// [`all_rules_unsorted`] instead — it caches this.
+#[must_use]
+fn build_all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     // Pre-allocate capacity to avoid reallocations
     // Typical total: ~200 rules across all categories
     let mut rules = Vec::with_capacity(200);
@@ -272,7 +289,7 @@ pub struct RuleAnnotation {
 }
 
 /// A group of rewrite rules with associated annotation metadata.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AnnotatedRuleGroup {
     /// Human-readable label for the rule group.
     pub label: &'static str,
@@ -289,8 +306,19 @@ pub struct AnnotatedRuleGroup {
 /// require. The rule advisor uses these annotations to eliminate
 /// inapplicable groups before equality saturation.
 #[must_use]
-#[expect(clippy::too_many_lines, reason = "annotated rule collection for all optimization phases")]
 pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
+    // Cached per process: building this re-parses every rewrite pattern, and
+    // it is consulted on every e-graph optimize (shape-aware + plan-advice
+    // filtering in `load_rules`), where profiling showed it dominated set-op
+    // planning time. `AnnotatedRuleGroup` is `Arc`-backed `Clone`, so callers
+    // get a cheap clone of the cached, output-identical set.
+    static ANNOTATED_CACHE: std::sync::OnceLock<Vec<AnnotatedRuleGroup>> =
+        std::sync::OnceLock::new();
+    ANNOTATED_CACHE.get_or_init(build_all_rules_annotated).clone()
+}
+
+#[expect(clippy::too_many_lines, reason = "annotated rule collection for all optimization phases")]
+fn build_all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
     vec![
         // -- Universal baseline rules --
         AnnotatedRuleGroup {
