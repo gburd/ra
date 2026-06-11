@@ -73,17 +73,41 @@ rule. Falling back is correct; closing it is tracked as a dedicated task.
 - **`UNION` / set-op planning ~100× slower than PG (root-caused 2026-06-10):**
   a 2-table `UNION ALL` optimizes in ~204ms vs PG ~2ms. Measured: `optimize=204ms`,
   constant regardless of 2- vs 3-way, i.e. it runs to the `default_timeout_ms_for_tables`
-  budget (200ms for 2–4 tables). iter_limit for 2 tables is only 5, so ~40ms/egg-iteration
-  → the e-graph EXPLODES (rewrite rules generate many equivalent forms on set-op trees)
-  rather than saturating. The produced plan + results are IDENTICAL to PG (verified 0 DIFF).
-  Node-growth budgets are applied only on `EGraph*` routes; set-ops hit the default branch
-  with no node cap. Attempted+REVERTED: per-iteration `egraph.clone()` removal (not the
-  bottleneck — egg's clone is cheap). A bypass fast-path is UNSAFE (segfaults — the e-graph
-  performs a set-op normalization plan_builder depends on). A guaranteed output-preserving
-  fix needs to make set-ops SATURATE quickly: identify + gate the rule(s) that keep firing
-  on set-op trees (deep, blast radius = all e-graph queries) — OR a node/time budget cap
-  empirically verified (EXPLAIN plan + requalify 0 DIFF) not to change set-op plans. NOTE
-  (legacy): `UNION` with filters on both branches — ~10–15× slower *planning* than PG
+  budget (200ms for 2–4 tables) and terminates with `term=timeout, iters=1, nodes=36`.
+
+  **On-backend profiling (macOS `sample` of a live backend, 2026-06-10) — corrects the
+  earlier "e-graph node explosion" guess, which was wrong (the e-graph stays at 36 nodes):**
+  - A standalone egg `Runner` over the same rules + the same 36-node set-op e-graph
+    saturates in ~0.08ms. So egg matching is *not* inherently slow on this shape; the
+    slowdown is specific to the in-backend run.
+  - Sampling the **`EXPLAIN`** (plan-only) path is unambiguous: the hot leaves are all
+    PostgreSQL functions — `resolve_special_varno` (≈1650 hits), `get_tle_by_resno` (≈940),
+    `check_stack_depth` (≈465) — i.e. PG's deparse / plan-ref Var resolution recursing
+    deeply. This points at the **plan_builder emitting a degenerate special-varno
+    target-list structure for Append/SetOp** (a deep/chained `OUTER_VAR`/`INNER_VAR`
+    resolution), which makes PG recurse pathologically when resolving Vars.
+  - Sampling the executing path is contaminated by the query's own seq-scans + numeric
+    comparisons (and the PG19 ASSERT build's `AllocSetCheck`), so it is not a clean planning
+    profile; prefer `EXPLAIN`-loop sampling.
+
+  **Landed (output-preserving, did NOT move the 204ms):** `all_rules_unsorted()` and
+  `all_rules_annotated()` now cache their built rule set in a process-local `OnceLock`
+  (egg `Rewrite` is `Clone`+`Send`+`Sync`). `load_rules()` called both per optimize,
+  re-parsing ~293 patterns each time; sampling showed those construction frames on the hot
+  path. Caching removes the per-query rebuild (~a few ms) but the dominant 204ms is plan
+  shape / Var-resolution bound, not rule construction — verified by re-measuring (still
+  204ms) and by 0 DIFF on the 60-shape requalification suite.
+
+  **Attempted+REVERTED:** per-iteration `egraph.clone()` removal (not the bottleneck —
+  egg's clone is cheap). A bypass fast-path is UNSAFE (segfaults — the e-graph performs a
+  set-op normalization plan_builder depends on).
+
+  **Next:** inspect `plan_builder`'s Append/SetOp target-list construction — build the
+  output Vars so PG's `resolve_special_varno` resolves them in O(1) (reference the child
+  tlist resno directly) rather than chaining through nested special varnos. Verify with an
+  `EXPLAIN`-loop `sample` (the recursion frames should vanish) + requalify 0 DIFF + the
+  set-op `optimize=` time drops to single-digit ms. NOTE (legacy): `UNION` with filters on
+  both branches — ~10–15× slower *planning* than PG
   (the produced plan and results are identical). The cost is the per-iteration
   e-graph saturation machinery (each interleaved iteration clones the e-graph
   and spins up a fresh egg `Runner` over the full rule set + scheduler), not a
