@@ -4376,6 +4376,46 @@ impl PlanBuilder {
         &mut (*node).plan as *mut pg_sys::Plan
     }
 
+    /// Build a fresh "dummy" targetlist projecting a child plan's output
+    /// unchanged: one `OUTER_VAR` `Var` per child column (`varattno` =
+    /// position), copying type/typmod/collation/resname/resjunk from the
+    /// child's targetlist entry.
+    ///
+    /// This mirrors PostgreSQL's `set_dummy_tlist_references`, which the core
+    /// planner applies to nodes that return their child's tuples verbatim
+    /// (`Append`, `MergeAppend`, `SetOp`, `Sort`, `Unique`, ...). Ra bypasses
+    /// the planner's setrefs pass, so assigning the child's targetlist
+    /// directly leaves the parent's output `Var`s carrying the child's own
+    /// (scan/special) varnos. For a parent whose first child *owns* that same
+    /// list (an `Append` aliasing its first subplan's tlist), an `OUTER_VAR`
+    /// entry then resolves — in the parent's deparse context, where
+    /// `outer_plan` is that first child — straight back into the same list,
+    /// producing a self-referential `resolve_special_varno` cycle that
+    /// recurses until `check_stack_depth` (observed as ~200ms of set-op
+    /// planning). Emitting fresh `OUTER_VAR` refs resolves each column one
+    /// level down to the first child and terminates.
+    unsafe fn dummy_outer_tlist(&self, child_tlist: *mut pg_sys::List) -> *mut pg_sys::List {
+        let len = pg_sys::list_length(child_tlist);
+        let mut out: *mut pg_sys::List = std::ptr::null_mut();
+        for p in 1..=len {
+            let te = pg_sys::list_nth(child_tlist, p - 1).cast::<pg_sys::TargetEntry>();
+            if te.is_null() || (*te).expr.is_null() {
+                continue;
+            }
+            let var = self.alloc_node::<pg_sys::Var>();
+            (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*var).varno = pg_sys::OUTER_VAR;
+            (*var).varattno = p as i16;
+            (*var).vartype = pg_sys::exprType((*te).expr.cast());
+            (*var).vartypmod = pg_sys::exprTypmod((*te).expr.cast());
+            (*var).varcollid = pg_sys::exprCollation((*te).expr.cast());
+            (*var).varlevelsup = 0;
+            let nt = pg_sys::makeTargetEntry(var.cast(), p as i16, (*te).resname, (*te).resjunk);
+            out = pg_sys::lappend(out, nt.cast());
+        }
+        out
+    }
+
     unsafe fn build_set_op_union(
         &mut self,
         all: bool,
@@ -4433,11 +4473,14 @@ impl PlanBuilder {
         (*node).plan.total_cost = left_cost + right_cost;
         (*node).plan.plan_rows = left_rows + right_rows;
         // Append returns child slots directly; its targetlist supplies the
-        // result tuple descriptor (column types). Share the first child's.
+        // result tuple descriptor (column types) and the deparse/plan-ref
+        // column references. Emit fresh OUTER_VAR refs (not the first child's
+        // aliased tlist) so PG resolves each output column one level down to
+        // the first subplan — see `dummy_outer_tlist`.
         if left_plan.is_null() || right_plan.is_null() {
             return Err(PlanBuilderError::UnsupportedVariant("union child".to_owned()));
         }
-        (*node).plan.targetlist = (*left_plan).targetlist;
+        (*node).plan.targetlist = self.dummy_outer_tlist((*left_plan).targetlist);
         (*node).plan.plan_width = (*left_plan).plan_width;
         let append_plan = &mut (*node).plan as *mut pg_sys::Plan;
 
@@ -4500,7 +4543,9 @@ impl PlanBuilder {
         (*node).strategy = pg_sys::SetOpStrategy::SETOP_HASHED;
         (*node).plan.lefttree = left_plan;
         (*node).plan.righttree = right_plan;
-        (*node).plan.targetlist = (*left_plan).targetlist;
+        // Fresh OUTER_VAR refs (see `dummy_outer_tlist`); the cmp arrays below
+        // still index the left child's own targetlist by resno.
+        (*node).plan.targetlist = self.dummy_outer_tlist((*left_plan).targetlist);
         (*node).plan.plan_width = (*left_plan).plan_width;
 
         // Compare on all output columns with equality operators.
