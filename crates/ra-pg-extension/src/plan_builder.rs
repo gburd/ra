@@ -3692,6 +3692,7 @@ impl PlanBuilder {
         name: &str,
         args: &[(*mut pg_sys::Expr, pg_sys::Oid, pg_sys::Oid)],
         aggno: i32,
+        distinct: bool,
     ) -> Result<*mut pg_sys::Expr, PlanBuilderError> {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
         let lower = name.to_lowercase();
@@ -3761,7 +3762,38 @@ impl PlanBuilder {
         for (i, &(arg_expr, ty, _)) in args.iter().enumerate() {
             (*node).aggargtypes = pg_sys::lappend_oid((*node).aggargtypes, ty);
             let te = pg_sys::makeTargetEntry(arg_expr, (i + 1) as i16, std::ptr::null_mut(), false);
+            if distinct {
+                // DISTINCT aggregate: tag each argument with a sort/group ref
+                // and build the matching SortGroupClause list in aggdistinct,
+                // so the executor de-duplicates the aggregate input. Mirrors
+                // PostgreSQL's representation of count(DISTINCT x).
+                (*te).ressortgroupref = (i + 1) as pg_sys::Index;
+            }
             (*node).args = pg_sys::lappend((*node).args, te.cast());
+        }
+        if distinct {
+            let mut dlist: *mut pg_sys::List = std::ptr::null_mut();
+            for (i, &(_, ty, _)) in args.iter().enumerate() {
+                let mut lt = pg_sys::InvalidOid;
+                let mut eq = pg_sys::InvalidOid;
+                let mut gt = pg_sys::InvalidOid;
+                let mut hashable = false;
+                pg_sys::get_sort_group_operators(
+                    ty, true, true, false, &mut lt, &mut eq, &mut gt, &mut hashable,
+                );
+                if eq == pg_sys::InvalidOid {
+                    return Err(unsupported("DISTINCT aggregate: no equality operator"));
+                }
+                let sgc = self.alloc_node::<pg_sys::SortGroupClause>();
+                (*sgc).type_ = pg_sys::NodeTag::T_SortGroupClause;
+                (*sgc).tleSortGroupRef = (i + 1) as pg_sys::Index;
+                (*sgc).eqop = eq;
+                (*sgc).sortop = lt;
+                (*sgc).nulls_first = false;
+                (*sgc).hashable = hashable;
+                dlist = pg_sys::lappend(dlist, sgc.cast());
+            }
+            (*node).aggdistinct = dlist;
         }
         Ok(node.cast())
     }
@@ -3779,8 +3811,18 @@ impl PlanBuilder {
         if let Expr::Function { name, args } = expr {
             if Self::is_supported_agg(name) {
                 for a in args {
-                    if matches!(a, Expr::Column(c) if c.column != "*") {
-                        if self.add_input_col(a, in_tlist, colmap).is_none() {
+                    // Unwrap a DISTINCT marker so the underlying column is
+                    // registered in the aggregate input tlist.
+                    let real = match a {
+                        Expr::Function { name: n, args: ia }
+                            if n == "__distinct" && ia.len() == 1 =>
+                        {
+                            &ia[0]
+                        }
+                        _ => a,
+                    };
+                    if matches!(real, Expr::Column(c) if c.column != "*") {
+                        if self.add_input_col(real, in_tlist, colmap).is_none() {
                             return Err(unsupported("aggregate arg not a column"));
                         }
                     }
@@ -3837,15 +3879,28 @@ impl PlanBuilder {
                 // delimiter) is translated in place. `count(*)` has no args.
                 let mut arglist: Vec<(*mut pg_sys::Expr, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
                 let is_star = matches!(args.as_slice(), [Expr::Column(c)] if c.column == "*");
+                let mut distinct = false;
                 if !is_star {
                     for a in args {
-                        match a {
+                        // count(DISTINCT x) parses as count(__distinct(x)); the
+                        // parser wraps a DISTINCT argument in a "__distinct"
+                        // marker function. Unwrap it and flag the aggregate.
+                        let real = match a {
+                            Expr::Function { name: n, args: ia }
+                                if n == "__distinct" && ia.len() == 1 =>
+                            {
+                                distinct = true;
+                                &ia[0]
+                            }
+                            _ => a,
+                        };
+                        match real {
                             Expr::Column(_) => {
-                                let (pos, ty, coll) = self.add_input_col(a, in_tlist, colmap)?;
+                                let (pos, ty, coll) = self.add_input_col(real, in_tlist, colmap)?;
                                 arglist.push((self.outer_var(pos, ty, coll), ty, coll));
                             }
                             Expr::Const(_) => {
-                                let e = expr_translator::translate(a, &self.expr_ctx);
+                                let e = expr_translator::translate(real, &self.expr_ctx);
                                 if e.is_null() {
                                     return None;
                                 }
@@ -3855,7 +3910,7 @@ impl PlanBuilder {
                         }
                     }
                 }
-                let aggref = self.build_aggref(name, &arglist, *aggno).ok()?;
+                let aggref = self.build_aggref(name, &arglist, *aggno, distinct).ok()?;
                 *aggno += 1;
                 Some(aggref)
             }
