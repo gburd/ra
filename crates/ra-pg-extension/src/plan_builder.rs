@@ -846,7 +846,7 @@ impl PlanBuilder {
                 body,
                 ..
             } => self.build_recursive_cte(name, base_case, recursive_case, body),
-            RelExpr::MvScan { view_name, .. } => self.build_seq_scan(view_name),
+            RelExpr::MvScan { view_name, .. } => self.build_seq_scan(view_name, None),
             RelExpr::Unnest { .. } | RelExpr::TableFunction { .. } => {
                 self.build_function_scan(expr)
             }
@@ -941,7 +941,7 @@ impl PlanBuilder {
             | Some(ScanStrategy::IndexOnly { .. })
             | Some(ScanStrategy::BitmapHeap)
             | Some(ScanStrategy::Tid)
-            | Some(ScanStrategy::DoNotScan) => self.build_seq_scan(table),
+            | Some(ScanStrategy::DoNotScan) => self.build_seq_scan(table, alias),
         }
     }
 
@@ -985,7 +985,7 @@ impl PlanBuilder {
                     "INDEX_SCAN advice references unknown index; \
                      falling back to SeqScan",
                 );
-                self.build_seq_scan(table)
+                self.build_seq_scan(table, None)
             }
         }
     }
@@ -994,8 +994,18 @@ impl PlanBuilder {
     unsafe fn build_seq_scan(
         &mut self,
         table: &str,
+        alias: Option<&str>,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        let rtindex = self.rtindex_for(table)?;
+        // Resolve the range-table index by the scan's alias when it has one:
+        // build_table_map keys distinct aliases to distinct rtindexes, but the
+        // base-table name maps to only one (last-wins), so a self-join
+        // (orders a JOIN orders b) must use the alias to get per-instance
+        // rtindexes that match the alias-resolved Vars in conditions. Fall back
+        // to the table name when the alias isn't a known range-table entry.
+        let rtindex = match alias {
+            Some(a) => self.rtindex_for(a).or_else(|_| self.rtindex_for(table))?,
+            None => self.rtindex_for(table)?,
+        };
         let node = self.alloc_node::<pg_sys::SeqScan>();
         if node.is_null() {
             return Err(PlanBuilderError::NullPointer(
@@ -2019,6 +2029,20 @@ impl PlanBuilder {
         }
     }
 
+    /// Like [`Self::base_scan_table`] but returns the scan's alias when it has
+    /// one, falling back to the table name. Used to look up the range-table
+    /// index per scan *instance* (a self-join's two aliases map to distinct
+    /// rtindexes; the bare table name does not).
+    fn base_scan_ident(expr: &RelExpr) -> Option<&str> {
+        match expr {
+            RelExpr::Scan { table, alias } => Some(alias.as_deref().unwrap_or(table)),
+            RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
+                Self::base_scan_ident(input)
+            }
+            _ => None,
+        }
+    }
+
     /// Pre-build a `SubPlan` for every scalar sub-query reachable in `expr`'s
     /// projection/filter expressions, registering each in `expr_ctx.subplans`
     /// so expression translation can resolve it.
@@ -2613,7 +2637,10 @@ impl PlanBuilder {
                 return Ok((rti, tlist, map));
             }
         }
-        let rti = self.rtindex_for(tab)?;
+        let ident = Self::base_scan_ident(side).unwrap_or(tab);
+        let rti = self
+            .rtindex_for(ident)
+            .or_else(|_| self.rtindex_for(tab))?;
         let reloid = self.rel_oid_for(tab)?;
         let (tlist, map) = self
             .expose_relation_columns(rti, reloid)
@@ -4162,7 +4189,7 @@ impl PlanBuilder {
         table: &str,
         _workers: usize,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        let plan = self.build_seq_scan(table)?;
+        let plan = self.build_seq_scan(table, None)?;
         if !plan.is_null() {
             (*plan).parallel_aware = true;
             (*plan).parallel_safe = true;
