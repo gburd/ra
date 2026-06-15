@@ -69,6 +69,15 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             input: Box::new(convert_node(nodes, id(*input_id))?),
         }),
         RelLang::Join(ids) => convert_join(nodes, ids),
+        // Physical join operators introduced during saturation extract back to
+        // a logical Join; plan_builder re-selects the physical method. Mirrors
+        // `from_rec`. Without these, extracting a plan whose best node is a
+        // physical join fails ("unexpected relational node") and the query
+        // falls back (observed on cte-multi and lateral).
+        RelLang::HashJoinOp(ids)
+        | RelLang::MergeJoinOp(ids)
+        | RelLang::NestLoopOp(ids)
+        | RelLang::IndexNestLoopOp(ids) => convert_join(nodes, ids),
         RelLang::Aggregate(ids) => convert_aggregate(nodes, ids),
         RelLang::Sort([keys_id, input_id]) => Ok(RelExpr::Sort {
             keys: convert_sort_key_list(nodes, id(*keys_id))?,
