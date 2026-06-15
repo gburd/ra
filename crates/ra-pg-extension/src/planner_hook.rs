@@ -177,7 +177,14 @@ unsafe fn ra_planner_hook_inner(
             Ok(expr) => expr,
             Err(e) => {
                 if log {
-                    pgrx::log!(
+                    // Bypass pgrx's ereport path (do_ereport -> cee_scape
+                    // sigsetjmp) for decision logging: under repeated calls on
+                    // arm64 macOS it can pfree an already-freed ErrorContext
+                    // chunk (the 0x7f7f double-free), which surfaces as a
+                    // caught "inner panic" and, intermittently, an uncaught
+                    // SIGSEGV that crashes the backend. stderr is captured by
+                    // the server log; this matches the panic-handler above.
+                    eprintln!(
                         "ra_planner: parse fell back to PG: {} [query: {}]",
                         e,
                         truncate_sql(&sql, 80)
@@ -206,7 +213,7 @@ unsafe fn ra_planner_hook_inner(
             // Optimization failed — fall back to PG's planner
             // rather than aborting the query.
             if log {
-                pgrx::log!(
+                eprintln!(
                     "ra_planner: optimize fell back to PG: {} [query: {}]",
                     e,
                     truncate_sql(&sql, 80)
@@ -272,7 +279,7 @@ unsafe fn ra_planner_hook_inner(
             // as MATCH_RECOGNIZE or a vector TopK). Fall back to
             // PG's native planner instead of failing the query.
             if log {
-                pgrx::log!(
+                eprintln!(
                     "ra_planner: plan-build fell back to PG: {} [query: {}]",
                     e,
                     truncate_sql(&sql, 80)
@@ -298,7 +305,7 @@ unsafe fn ra_planner_hook_inner(
 
     // ─── Timing log ───────────────────────────────────────────────────
     if log {
-        pgrx::log!(
+        eprintln!(
             "ra_planner: OK parse={:.2}ms optimize={:.2}ms \
              translate={:.2}ms total={:.2}ms: {}",
             parse_ms,
