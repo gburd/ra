@@ -3687,6 +3687,91 @@ impl PlanBuilder {
     /// Build an `Aggref` for a supported aggregate (`count`/`sum`/`avg`/
     /// `min`/`max`). `arg_var`/`arg_type` describe the (already-resolved
     /// OUTER) argument, or `None` for `count(*)`.
+    /// Remap a translated aggregate-argument expression so its column `Var`s
+    /// reference the aggregate input tlist via `OUTER_VAR` (matched by attno
+    /// to its position in `colmap`). Used for expression arguments (a CASE
+    /// from `FILTER (WHERE ...)`, arithmetic like `a*b`). Returns false on an
+    /// unhandled node type so the caller defers to PG.
+    unsafe fn remap_agg_input_vars(
+        &self,
+        node: *mut pg_sys::Node,
+        colmap: &[(i16, i32, pg_sys::Oid, pg_sys::Oid)],
+    ) -> bool {
+        if node.is_null() {
+            return true;
+        }
+        let list = |this: &Self, l: *mut pg_sys::List| -> bool {
+            if l.is_null() {
+                return true;
+            }
+            let el = (*l).elements;
+            for i in 0..(*l).length {
+                let item = (*el.add(i as usize)).ptr_value as *mut pg_sys::Node;
+                if !this.remap_agg_input_vars(item, colmap) {
+                    return false;
+                }
+            }
+            true
+        };
+        match (*node).type_ {
+            pg_sys::NodeTag::T_Var => {
+                let var = node.cast::<pg_sys::Var>();
+                if let Some(&(_, pos, _, _)) =
+                    colmap.iter().find(|(a, ..)| *a == (*var).varattno)
+                {
+                    (*var).varno = pg_sys::OUTER_VAR;
+                    (*var).varattno = pos as i16;
+                    true
+                } else {
+                    false
+                }
+            }
+            pg_sys::NodeTag::T_Const | pg_sys::NodeTag::T_Param => true,
+            pg_sys::NodeTag::T_OpExpr | pg_sys::NodeTag::T_DistinctExpr => {
+                list(self, (*node.cast::<pg_sys::OpExpr>()).args)
+            }
+            pg_sys::NodeTag::T_ScalarArrayOpExpr => {
+                list(self, (*node.cast::<pg_sys::ScalarArrayOpExpr>()).args)
+            }
+            pg_sys::NodeTag::T_BoolExpr => list(self, (*node.cast::<pg_sys::BoolExpr>()).args),
+            pg_sys::NodeTag::T_FuncExpr => list(self, (*node.cast::<pg_sys::FuncExpr>()).args),
+            pg_sys::NodeTag::T_CoalesceExpr => {
+                list(self, (*node.cast::<pg_sys::CoalesceExpr>()).args)
+            }
+            pg_sys::NodeTag::T_NullTest => {
+                self.remap_agg_input_vars((*node.cast::<pg_sys::NullTest>()).arg.cast(), colmap)
+            }
+            pg_sys::NodeTag::T_RelabelType => {
+                self.remap_agg_input_vars((*node.cast::<pg_sys::RelabelType>()).arg.cast(), colmap)
+            }
+            pg_sys::NodeTag::T_CaseExpr => {
+                let ce = node.cast::<pg_sys::CaseExpr>();
+                if !(*ce).arg.is_null()
+                    && !self.remap_agg_input_vars((*ce).arg.cast(), colmap)
+                {
+                    return false;
+                }
+                if !(*ce).args.is_null() {
+                    let el = (*(*ce).args).elements;
+                    for i in 0..(*(*ce).args).length {
+                        let cw = (*el.add(i as usize)).ptr_value as *mut pg_sys::CaseWhen;
+                        if !self.remap_agg_input_vars((*cw).expr.cast(), colmap)
+                            || !self.remap_agg_input_vars((*cw).result.cast(), colmap)
+                        {
+                            return false;
+                        }
+                    }
+                }
+                if (*ce).defresult.is_null() {
+                    true
+                } else {
+                    self.remap_agg_input_vars((*ce).defresult.cast(), colmap)
+                }
+            }
+            _ => false,
+        }
+    }
+
     unsafe fn build_aggref(
         &self,
         name: &str,
@@ -3821,10 +3906,16 @@ impl PlanBuilder {
                         }
                         _ => a,
                     };
-                    if matches!(real, Expr::Column(c) if c.column != "*") {
-                        if self.add_input_col(real, in_tlist, colmap).is_none() {
-                            return Err(unsupported("aggregate arg not a column"));
+                    match real {
+                        Expr::Column(c) if c.column != "*" => {
+                            if self.add_input_col(real, in_tlist, colmap).is_none() {
+                                return Err(unsupported("aggregate arg not a column"));
+                            }
                         }
+                        Expr::Column(_) => {} // count(*): no input column
+                        // Expression argument (CASE from FILTER, arithmetic
+                        // like a*b): register the columns it references.
+                        other => self.register_agg_args(other, in_tlist, colmap)?,
                     }
                 }
                 return Ok(());
@@ -3855,6 +3946,12 @@ impl PlanBuilder {
                 if let Some(el) = else_result {
                     self.register_agg_args(el, in_tlist, colmap)?;
                 }
+            }
+            // A column reached while recursing through an expression argument
+            // (e.g. inside a CASE or arithmetic) must be added to the input
+            // tlist so the remapped aggregate arg can reference it.
+            Expr::Column(c) if c.column != "*" => {
+                let _ = self.add_input_col(expr, in_tlist, colmap);
             }
             _ => {}
         }
@@ -3906,7 +4003,22 @@ impl PlanBuilder {
                                 }
                                 arglist.push((e, pg_sys::exprType(e.cast()), pg_sys::exprCollation(e.cast())));
                             }
-                            _ => return None,
+                            _ => {
+                                // Expression argument (CASE from FILTER,
+                                // arithmetic like a*b): its columns were
+                                // registered by register_agg_args, so translate
+                                // it and remap the column Vars to OUTER_VAR
+                                // references into the aggregate input tlist.
+                                let e = expr_translator::translate(real, &self.expr_ctx);
+                                if e.is_null() || !self.remap_agg_input_vars(e.cast(), colmap) {
+                                    return None;
+                                }
+                                arglist.push((
+                                    e,
+                                    pg_sys::exprType(e.cast()),
+                                    pg_sys::exprCollation(e.cast()),
+                                ));
+                            }
                         }
                     }
                 }
