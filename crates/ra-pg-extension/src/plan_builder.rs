@@ -663,6 +663,13 @@ impl PlanBuilder {
                 Ok(child)
             }
             RelExpr::Project { columns, input } => {
+                // Expand `SELECT *` / `t.*` into one projection column per
+                // relation attribute (from the single base relation's schema)
+                // before any projection path runs, so the star sentinel never
+                // reaches expression translation.
+                let expanded_star = self.expand_star_columns(columns, input);
+                let columns: &[ProjectionColumn] =
+                    expanded_star.as_deref().unwrap_or(columns);
                 // Project over Aggregate is built as one Agg node whose
                 // targetlist carries the group Vars and Aggref nodes.
                 if let RelExpr::Aggregate {
@@ -2041,6 +2048,75 @@ impl PlanBuilder {
             }
             _ => None,
         }
+    }
+
+    /// Column names of `table` in attribute order, excluding dropped columns.
+    /// Returns `None` if the relation can't be resolved.
+    unsafe fn relation_column_names(&self, table: &str) -> Option<Vec<String>> {
+        let reloid = self.rel_oid_for(table).ok()?;
+        let rel = pg_sys::table_open(reloid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        if rel.is_null() {
+            return None;
+        }
+        let natts = (*(*rel).rd_att).natts;
+        let mut out = Vec::new();
+        for attno in 1..=natts {
+            let tup = pg_sys::SearchSysCache2(
+                pg_sys::SysCacheIdentifier::ATTNUM as i32,
+                pg_sys::Datum::from(reloid),
+                pg_sys::Datum::from(attno as i16),
+            );
+            if tup.is_null() {
+                continue;
+            }
+            let form = pg_sys::GETSTRUCT(tup) as *mut pg_sys::FormData_pg_attribute;
+            let dropped = (*form).attisdropped;
+            let name = std::ffi::CStr::from_ptr((*form).attname.data.as_ptr())
+                .to_string_lossy()
+                .into_owned();
+            pg_sys::ReleaseSysCache(tup);
+            if !dropped {
+                out.push(name);
+            }
+        }
+        pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        Some(out)
+    }
+
+    /// Expand `SELECT *` / `t.*` projection columns into one column per
+    /// attribute of the single base relation the input scans. Returns `None`
+    /// when there is no star (caller uses the original columns) or the star
+    /// can't be safely expanded (the input is not a single base relation —
+    /// e.g. a join — so the caller proceeds and may defer to PG).
+    fn expand_star_columns(
+        &self,
+        columns: &[ProjectionColumn],
+        input: &RelExpr,
+    ) -> Option<Vec<ProjectionColumn>> {
+        use ra_core::expr::{ColumnRef, Expr};
+        let is_star = |c: &ProjectionColumn| matches!(&c.expr, Expr::Column(cr) if cr.column == "*");
+        if !columns.iter().any(is_star) {
+            return None;
+        }
+        let table = Self::base_scan_table(input)?;
+        let names = unsafe { self.relation_column_names(table) }?;
+        if names.is_empty() {
+            return None;
+        }
+        let mut out = Vec::with_capacity(columns.len() + names.len());
+        for pc in columns {
+            if is_star(pc) {
+                for n in &names {
+                    out.push(ProjectionColumn {
+                        expr: Expr::Column(ColumnRef::new(n.as_str())),
+                        alias: None,
+                    });
+                }
+            } else {
+                out.push(pc.clone());
+            }
+        }
+        Some(out)
     }
 
     /// Pre-build a `SubPlan` for every scalar sub-query reachable in `expr`'s
