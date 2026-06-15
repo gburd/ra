@@ -77,17 +77,18 @@ pg_plan_ms() { # $1=sql
 }
 
 # Min Ra planning time (ms) from Ra's own per-query "total=" log line, over N
-# warm runs of the actual query. This avoids EXPLAIN under Ra, whose deparse
-# can hang on some Ra-built plans (e.g. covering index scans). Needs RA_LOG.
+# warm runs of the actual query in ONE session (so the per-backend e-graph and
+# stats caches are warm, matching pg_plan_ms's warm measurement). Avoids
+# EXPLAIN under Ra, whose deparse can hang on some Ra-built plans. Needs RA_LOG.
 ra_plan_ms() { # $1=sql
   if [ ! -r "$RA_LOG" ]; then echo ''; return; fi
   local before _i
   before=$(wc -l <"$RA_LOG")
-  PGOPTIONS="-c ${RA_GUC}=on" timeout 30 "${PSQL[@]}" -c "$WARM" </dev/null >/dev/null 2>&1
-  for _i in $(seq 1 "$N"); do
-    PGOPTIONS="-c ${RA_GUC}=on -c ra_planner.log_decisions=on" timeout 30 "${PSQL[@]}" \
-      -c "$1" </dev/null >/dev/null 2>&1
-  done
+  {
+    echo "$WARM;"
+    for _i in $(seq 1 "$N"); do echo "$1;"; done
+  } | PGOPTIONS="-c ${RA_GUC}=on -c ra_planner.log_decisions=on" timeout 60 "${PSQL[@]}" \
+    >/dev/null 2>&1
   tail -n +$((before + 1)) "$RA_LOG" \
     | sed -nE 's/.*ra_planner: OK .*total=([0-9.]+)ms.*/\1/p' \
     | LC_ALL=C sort -g | head -1
