@@ -761,7 +761,16 @@ unsafe fn resolve_am_type(am_oid: pg_sys::Oid) -> ra_core::IndexType {
 pub fn gather_all_stats(table_names: &[(String, String)]) -> Vec<(String, Statistics)> {
     let mut result = Vec::with_capacity(table_names.len());
     for (schema, table) in table_names {
-        if let Some(stats) = gather_table_stats(schema, table) {
+        // Route through the metadata cache (keyed by relation OID, invalidated
+        // by the registered relcache callback) so repeated queries on the same
+        // table reuse stats instead of re-reading pg_class/pg_statistic and the
+        // index list on every plan. Stats are identical to a fresh gather — the
+        // cache refreshes via the same `gather_table_stats_by_oid` — so plan
+        // quality is unchanged; this only removes redundant catalog work, which
+        // profiling showed dominates warm planning time.
+        let stats = unsafe { resolve_relation_oid(schema, table) }
+            .and_then(crate::metadata_cache::get_table_metadata);
+        if let Some(stats) = stats {
             result.push((table.clone(), stats));
         }
     }
