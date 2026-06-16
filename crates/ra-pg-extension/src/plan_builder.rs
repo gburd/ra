@@ -140,6 +140,12 @@ pub struct PlanBuilder {
     /// no-FROM `Scan(__dual)` becomes a one-row Result (standalone no-FROM
     /// selects keep falling back to native PG).
     in_recursive_cte: bool,
+    /// While building a grouped aggregate whose input is a join, this holds the
+    /// join's `(rtindex, attno) -> output position` map. When set, the
+    /// aggregate's column resolution (`add_input_col`, `remap_agg_input_vars`)
+    /// references the join's full passthrough output via `OUTER_VAR(position)`
+    /// instead of appending to a fresh scan targetlist.
+    active_join_map: Option<JoinColMap>,
 }
 
 /// How a `Scan` of the in-scope recursive CTE should be built.
@@ -212,6 +218,7 @@ impl PlanBuilder {
             param_types: Vec::new(),
             cte_runtime: None,
             in_recursive_cte: false,
+            active_join_map: None,
         }
     }
 
@@ -235,12 +242,15 @@ impl PlanBuilder {
     /// gap so logs map directly to a coverage backlog task (see
     /// docs/planner-fallback-backlog.md).
     ///
-    /// Stricter check for an Aggregate's input: a join under an aggregate
-    /// defers to PG, since `build_grouped_aggregate` references its input by
-    /// scan attno, not by a join's remapped output position.
+    /// Stricter check for an Aggregate's input. A join under an aggregate is
+    /// built over the join's passthrough output (`build_grouped_aggregate`'s
+    /// join path), so it is admitted by recursing into the join's children;
+    /// build itself defers for join shapes it cannot render.
     fn agg_input_unsupported(expr: &RelExpr) -> Option<&'static str> {
         match expr {
-            RelExpr::Join { .. } => Some("Aggregate over Join"),
+            RelExpr::Join { left, right, .. } => {
+                Self::first_unsupported_op(left).or_else(|| Self::first_unsupported_op(right))
+            }
             RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
                 Self::agg_input_unsupported(input)
             }
@@ -3673,6 +3683,13 @@ impl PlanBuilder {
             return None;
         }
         let var = v.cast::<pg_sys::Var>();
+        // Aggregate over a join: the column already exists in the join's full
+        // passthrough output; resolve it to that position (OUTER_VAR) rather
+        // than appending to a scan targetlist.
+        if let Some(jm) = &self.active_join_map {
+            let pos = *jm.get(&((*var).varno, (*var).varattno))?;
+            return Some((pos, (*var).vartype, (*var).varcollid));
+        }
         let attno = (*var).varattno;
         if let Some(&(_, pos, ty, coll)) = colmap.iter().find(|(a, ..)| *a == attno) {
             return Some((pos, ty, coll));
@@ -3717,6 +3734,15 @@ impl PlanBuilder {
         match (*node).type_ {
             pg_sys::NodeTag::T_Var => {
                 let var = node.cast::<pg_sys::Var>();
+                // Aggregate over a join: remap to the join output position.
+                if let Some(jm) = &self.active_join_map {
+                    if let Some(&pos) = jm.get(&((*var).varno, (*var).varattno)) {
+                        (*var).varno = pg_sys::OUTER_VAR;
+                        (*var).varattno = pos as i16;
+                        return true;
+                    }
+                    return false;
+                }
                 if let Some(&(_, pos, _, _)) =
                     colmap.iter().find(|(a, ..)| *a == (*var).varattno)
                 {
@@ -4081,29 +4107,48 @@ impl PlanBuilder {
         having: Option<&Expr>,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
-        let child = self.build_plan(agg_input)?;
+        // An aggregate over a join builds the join with full passthrough output
+        // and resolves group/aggregate columns to the join's output positions
+        // (active_join_map). Otherwise the input is a scan/filter whose
+        // targetlist we set to exactly the referenced columns.
+        let (child, is_join) =
+            if let Some((jt, cond, l, r, wp)) = Self::agg_join_components(agg_input) {
+                let (jplan, jmap, _) = self.build_join_node(jt, cond, l, r, wp, None)?;
+                self.active_join_map = Some(jmap);
+                (jplan, true)
+            } else {
+                (self.build_plan(agg_input)?, false)
+            };
         if child.is_null() {
+            self.active_join_map = None;
             return Err(unsupported("aggregate input"));
         }
         let mut in_tlist: *mut pg_sys::List = std::ptr::null_mut();
         let mut colmap: Vec<(i16, i32, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
 
         // Pass 1: register every input column referenced by group_by and by
-        // aggregate arguments so the scan exposes them.
+        // aggregate arguments so the scan exposes them. For a join the columns
+        // already exist in the passthrough output, so only the group keys are
+        // resolved (to positions) and the join targetlist is left intact.
         let mut grp_pos: Vec<(i32, pg_sys::Oid, pg_sys::Oid)> = Vec::new();
         for g in group_by {
             match self.add_input_col(g, &mut in_tlist, &mut colmap) {
                 Some(t) => grp_pos.push(t),
-                None => return Err(unsupported("group key not a column")),
+                None => {
+                    self.active_join_map = None;
+                    return Err(unsupported("group key not a column"));
+                }
             }
         }
-        for pc in out_columns {
-            self.register_agg_args(&pc.expr, &mut in_tlist, &mut colmap)?;
+        if !is_join {
+            for pc in out_columns {
+                self.register_agg_args(&pc.expr, &mut in_tlist, &mut colmap)?;
+            }
+            if let Some(h) = having {
+                self.register_agg_args(h, &mut in_tlist, &mut colmap)?;
+            }
+            (*child).targetlist = in_tlist;
         }
-        if let Some(h) = having {
-            self.register_agg_args(h, &mut in_tlist, &mut colmap)?;
-        }
-        (*child).targetlist = in_tlist;
 
         let node = self.alloc_node::<pg_sys::Agg>();
         if node.is_null() {
@@ -4175,7 +4220,41 @@ impl PlanBuilder {
         (*node).plan.plan_rows = ngroups;
         (*node).plan.total_cost = (*child).total_cost + (*child).plan_rows * 0.01;
         (*node).plan.startup_cost = (*node).plan.total_cost;
+        // Clear the join column map so nodes built above this aggregate resolve
+        // columns normally.
+        self.active_join_map = None;
         Ok(&mut (*node).plan as *mut pg_sys::Plan)
+    }
+
+    /// If an aggregate's input is a join (optionally under a WHERE `Filter`),
+    /// return its `(join_type, condition, left, right, where_predicate)` so the
+    /// aggregate can be built over the join's passthrough output. `None` for a
+    /// non-join input (the scan/filter path).
+    fn agg_join_components(
+        expr: &RelExpr,
+    ) -> Option<(JoinType, &Expr, &RelExpr, &RelExpr, Option<&Expr>)> {
+        match expr {
+            RelExpr::Join {
+                join_type,
+                condition,
+                left,
+                right,
+            } => Some((*join_type, condition, left, right, None)),
+            RelExpr::Filter { predicate, input } => {
+                if let RelExpr::Join {
+                    join_type,
+                    condition,
+                    left,
+                    right,
+                } = &**input
+                {
+                    Some((*join_type, condition, left, right, Some(predicate)))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     fn is_supported_agg(name: &str) -> bool {
