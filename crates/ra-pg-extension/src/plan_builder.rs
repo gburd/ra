@@ -4335,12 +4335,68 @@ impl PlanBuilder {
         true
     }
 
+    /// If `input` is a `Project` missing some ORDER BY *column* keys from its
+    /// output, return an augmented `Project` that also selects those columns
+    /// (so the Sort can reference them), plus the count of appended columns.
+    /// The columns are built through the normal `set_targetlist` path — which
+    /// sorts correctly — and the caller marks the appended trailing tlist
+    /// entries resjunk so PostgreSQL's junk filter drops them from the result.
+    /// Returns `(input.clone(), 0)` when nothing needs augmenting (or the input
+    /// is not a Project), leaving the existing behaviour unchanged.
+    fn augment_sort_input(&self, keys: &[SortKey], input: &RelExpr) -> (RelExpr, usize) {
+        use ra_core::expr::Expr;
+        let RelExpr::Project { columns, input: inner } = input else {
+            return (input.clone(), 0);
+        };
+        let col_present = |kc: &ra_core::expr::ColumnRef| {
+            columns.iter().any(|c| {
+                matches!(&c.expr, Expr::Column(cc)
+                    if cc.column.eq_ignore_ascii_case(&kc.column)
+                        && cc.table == kc.table)
+            })
+        };
+        let mut missing: Vec<ProjectionColumn> = Vec::new();
+        for k in keys {
+            if let Expr::Column(kc) = &k.expr {
+                let dup = missing.iter().any(|c| {
+                    matches!(&c.expr, Expr::Column(cc)
+                        if cc.column.eq_ignore_ascii_case(&kc.column) && cc.table == kc.table)
+                });
+                if !col_present(kc) && !dup {
+                    missing.push(ProjectionColumn { expr: k.expr.clone(), alias: None });
+                }
+            }
+        }
+        if missing.is_empty() {
+            return (input.clone(), 0);
+        }
+        let n = missing.len();
+        let mut cols = columns.clone();
+        cols.extend(missing);
+        (RelExpr::Project { columns: cols, input: inner.clone() }, n)
+    }
+
     unsafe fn build_sort(
         &mut self,
         keys: &[SortKey],
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        let child = self.build_plan(input)?;
+        // ORDER BY may reference a column not in the SELECT list. If the input
+        // is a Project, select those columns too (via the normal targetlist
+        // path) and mark the appended trailing entries resjunk so PostgreSQL's
+        // junk filter removes them from the query result.
+        let (build_input, n_resjunk) = self.augment_sort_input(keys, input);
+        let child = self.build_plan(&build_input)?;
+        if n_resjunk > 0 && !child.is_null() {
+            let tl = (*child).targetlist;
+            let len = pg_sys::list_length(tl);
+            for p in (len - n_resjunk as i32)..len {
+                let te = pg_sys::list_nth(tl, p).cast::<pg_sys::TargetEntry>();
+                if !te.is_null() {
+                    (*te).resjunk = true;
+                }
+            }
+        }
         let node = self.alloc_node::<pg_sys::Sort>();
         if node.is_null() {
             return Err(PlanBuilderError::NullPointer("Sort allocation".to_string()));
