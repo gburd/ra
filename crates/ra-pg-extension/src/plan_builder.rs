@@ -285,9 +285,10 @@ impl PlanBuilder {
             // expression keys still need ordering-operator resolution, so they
             // defer to PG.
             RelExpr::Sort { keys, input }
-                if keys
-                    .iter()
-                    .all(|k| matches!(k.expr, ra_core::expr::Expr::Column(_))) =>
+                if keys.iter().all(|k| {
+                    matches!(k.expr, ra_core::expr::Expr::Column(_))
+                        || Self::sort_output_position(&k.expr, input).is_some()
+                }) =>
             {
                 Self::first_unsupported_op(input)
             }
@@ -4278,9 +4279,27 @@ impl PlanBuilder {
     /// resjunk targetlist entry that Ra does not yet build). The caller must
     /// then defer to the native planner — a dangling sort index reads past the
     /// tuple slot (wrong results or a backend crash).
+    /// 1-based output position of a sort key that appears verbatim among the
+    /// input `Project`'s output columns — e.g. `ORDER BY rev` where `rev` is a
+    /// selected aggregate, so the parser resolves the key to the same
+    /// `sum(...)` expression that the Project outputs. `None` when the input is
+    /// not a `Project` or the key is not one of its output columns (the caller
+    /// then uses Var/name resolution or defers).
+    fn sort_output_position(key_expr: &ra_core::expr::Expr, input: &RelExpr) -> Option<i16> {
+        if let RelExpr::Project { columns, .. } = input {
+            for (j, c) in columns.iter().enumerate() {
+                if c.expr == *key_expr {
+                    return i16::try_from(j + 1).ok();
+                }
+            }
+        }
+        None
+    }
+
     unsafe fn resolve_sort_indices(
         &self,
         keys: &[SortKey],
+        positions: &[Option<i16>],
         child_tlist: *mut pg_sys::List,
         col_idx: *mut pg_sys::AttrNumber,
         num_cols: i32,
@@ -4291,6 +4310,13 @@ impl PlanBuilder {
         for (i, key) in keys.iter().enumerate() {
             if i as i32 >= num_cols {
                 break;
+            }
+            // A key that matches an output column verbatim (e.g. ORDER BY an
+            // aggregate that is also selected) resolves directly to its
+            // position; the operator/collation are fixed up by the caller.
+            if let Some(p) = positions.get(i).copied().flatten() {
+                *col_idx.add(i) = p;
+                continue;
             }
             let key_expr = expr_translator::translate(&key.expr, &self.expr_ctx);
             if key_expr.is_null() || (*key_expr).type_ != pg_sys::NodeTag::T_Var {
@@ -4420,10 +4446,30 @@ impl PlanBuilder {
         let rel_oid = self.first_rel_oid(input);
 
         if let Some(arrays) = crate::sort_utils::build_sort_arrays(keys, child_tlist, rel_oid) {
+            // Resolve keys that name an output column verbatim (e.g. ORDER BY a
+            // selected aggregate). For those, fix the column index, operator and
+            // collation from the child targetlist entry — build_sort_arrays
+            // leaves a non-column key with an InvalidOid operator.
+            let positions: Vec<Option<i16>> = keys
+                .iter()
+                .map(|k| Self::sort_output_position(&k.expr, input))
+                .collect();
+            for (i, key) in keys.iter().enumerate() {
+                let Some(p) = positions[i] else { continue };
+                let te = pg_sys::list_nth(child_tlist, i32::from(p) - 1).cast::<pg_sys::TargetEntry>();
+                if te.is_null() || (*te).expr.is_null() {
+                    continue;
+                }
+                let ty = pg_sys::exprType((*te).expr.cast());
+                let asc = matches!(key.direction, ra_core::algebra::SortDirection::Asc);
+                *arrays.col_idx.add(i) = p;
+                *arrays.operators.add(i) = crate::sort_utils::resolve_sort_operator(ty, asc);
+                *arrays.collations.add(i) = pg_sys::exprCollation((*te).expr.cast());
+            }
             // Every sort key must map to an output column; otherwise the sort
             // index dangles (ORDER BY a non-selected column needs a resjunk
             // targetlist entry Ra does not build). Defer to native PG.
-            if !self.resolve_sort_indices(keys, child_tlist, arrays.col_idx, arrays.num_cols) {
+            if !self.resolve_sort_indices(keys, &positions, child_tlist, arrays.col_idx, arrays.num_cols) {
                 return Err(PlanBuilderError::UnsupportedVariant(
                     "ORDER BY references a column not in the output; deferring to \
                      native planner (see docs/planner-fallback-backlog.md)"

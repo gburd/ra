@@ -58,3 +58,4 @@ idxonly-between|SELECT o_custkey FROM orders WHERE o_custkey BETWEEN 50 AND 500
 bitmap-or-eq|SELECT o_orderkey FROM orders WHERE o_custkey=5 OR o_custkey=10
 bitmap-or-mixed|SELECT o_orderkey FROM orders WHERE o_custkey=5 OR o_custkey>19000
 bitmap-and|SELECT o_orderkey FROM orders WHERE o_custkey=5 AND bucket=3
+agg-orderby|SELECT o_custkey,sum(o_totalprice) rev FROM orders GROUP BY o_custkey ORDER BY rev DESC LIMIT 10
