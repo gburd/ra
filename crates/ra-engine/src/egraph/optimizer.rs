@@ -191,6 +191,56 @@ fn normalize_input(expr: &RelExpr) -> Option<RelExpr> {
 }
 
 impl Optimizer {
+    /// True if the tree contains a `DistinctOn` node anywhere.
+    fn tree_contains_distinct_on(expr: &RelExpr) -> bool {
+        matches!(expr, RelExpr::DistinctOn { .. })
+            || expr.children().iter().any(|c| Self::tree_contains_distinct_on(c))
+    }
+
+    /// Optimize a tree containing `DistinctOn` without converting the
+    /// `DistinctOn` (which has no e-graph form). The `DistinctOn` input is
+    /// optimized normally; the `DistinctOn` and any `Limit`/`Sort`/`Project`
+    /// wrappers above it are preserved. Any other parent of a `DistinctOn`
+    /// falls through to the normal path, which defers to PG.
+    fn optimize_preserving_distinct_on(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
+        match expr {
+            RelExpr::DistinctOn { on, input } => Ok(RelExpr::DistinctOn {
+                on: on.clone(),
+                input: Box::new(self.optimize(input)?),
+            }),
+            RelExpr::Limit {
+                count,
+                offset,
+                input,
+            } => Ok(RelExpr::Limit {
+                count: *count,
+                offset: *offset,
+                input: Box::new(self.optimize_preserving_distinct_on(input)?),
+            }),
+            RelExpr::Sort { keys, input } => Ok(RelExpr::Sort {
+                keys: keys.clone(),
+                input: Box::new(self.optimize_preserving_distinct_on(input)?),
+            }),
+            RelExpr::Project { columns, input } => Ok(RelExpr::Project {
+                columns: columns.clone(),
+                input: Box::new(self.optimize_preserving_distinct_on(input)?),
+            }),
+            // DistinctOn in any other position (under Filter/Aggregate/Join,
+            // etc.): cannot be built, and recursing through self.optimize would
+            // loop back here. Defer to PG. Subtrees with no DistinctOn optimize
+            // normally.
+            other => {
+                if Self::tree_contains_distinct_on(other) {
+                    Err(EGraphError::ConversionError(
+                        "DISTINCT ON in an unsupported position".into(),
+                    ))
+                } else {
+                    self.optimize(other)
+                }
+            }
+        }
+    }
+
     /// Create a new optimizer with default configuration.
     #[must_use]
     pub fn new() -> Self {
@@ -926,6 +976,14 @@ impl Optimizer {
     pub fn optimize(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
         use std::time::Instant;
         use tracing::{debug, info};
+
+        // DISTINCT ON is built directly by the plan builder (Unique over its
+        // sorted input) and has no e-graph representation. Optimize the input
+        // subtree and preserve the DistinctOn (and any Limit/Sort/Project
+        // wrappers) so it never reaches e-graph conversion.
+        if Self::tree_contains_distinct_on(expr) {
+            return self.optimize_preserving_distinct_on(expr);
+        }
 
         let total_start = Instant::now();
 

@@ -295,6 +295,7 @@ impl LargeJoinOptimizer {
             | RelExpr::Limit { input, .. }
             | RelExpr::Window { input, .. }
             | RelExpr::Distinct { input }
+            | RelExpr::DistinctOn { input, .. }
             | RelExpr::RowPattern { input, .. }
             | RelExpr::IncrementalSort { input, .. }
             | RelExpr::ParallelAggregate { input, .. }
@@ -381,6 +382,7 @@ impl LargeJoinOptimizer {
             | RelExpr::Limit { input, .. }
             | RelExpr::Window { input, .. }
             | RelExpr::Distinct { input }
+            | RelExpr::DistinctOn { input, .. }
             | RelExpr::RowPattern { input, .. }
             | RelExpr::IncrementalSort { input, .. }
             | RelExpr::ParallelAggregate { input, .. }

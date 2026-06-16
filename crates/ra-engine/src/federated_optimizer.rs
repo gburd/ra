@@ -194,7 +194,7 @@ impl FederatedOptimizer {
             RelExpr::Window { input, .. } => {
                 capabilities.supports_window_pushdown && self.can_ship_query(input, capabilities)
             }
-            RelExpr::Distinct { input, .. } => self.can_ship_query(input, capabilities),
+            RelExpr::Distinct { input, .. } | RelExpr::DistinctOn { input, .. } => self.can_ship_query(input, capabilities),
             RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }
             | RelExpr::Except { left, right, .. } => {
@@ -244,7 +244,7 @@ impl FederatedOptimizer {
             RelExpr::Project { input, .. }
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
-            | RelExpr::Distinct { input, .. } => self.extract_pushable_filter(input, table_name),
+            | RelExpr::Distinct { input, .. } | RelExpr::DistinctOn { input, .. } => self.extract_pushable_filter(input, table_name),
             _ => None,
         }
     }
@@ -427,7 +427,7 @@ impl FederatedOptimizer {
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
             | RelExpr::Window { input, .. }
-            | RelExpr::Distinct { input, .. } => self.extract_scan(input, table_name),
+            | RelExpr::Distinct { input, .. } | RelExpr::DistinctOn { input, .. } => self.extract_scan(input, table_name),
             RelExpr::Join { left, right, .. }
             | RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }

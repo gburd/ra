@@ -133,6 +133,7 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input }
+        | RelExpr::DistinctOn { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Gather { input, .. }
         | RelExpr::ParallelAggregate { input, .. }
@@ -370,7 +371,7 @@ impl FeatureExtractor {
                 self.visit(input);
             }
 
-            RelExpr::Distinct { input } => {
+            RelExpr::Distinct { input } | RelExpr::DistinctOn { input, .. } => {
                 self.distinct_flag = true;
                 self.visit(input);
             }

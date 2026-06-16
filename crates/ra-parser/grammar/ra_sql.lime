@@ -467,6 +467,26 @@ select_no_parens(A) ::= SELECT DISTINCT target_list(B) from_clause(C)
     A = base;
 }
 
+/* SELECT DISTINCT ON (keys) ... — keep the first row per group of equal keys.
+ * Built as DistinctOn over the ORDER BY sort so the Unique reads sorted input
+ * (PostgreSQL requires the leading ORDER BY to match the DISTINCT ON keys). */
+select_no_parens(A) ::= SELECT DISTINCT ON LPAREN expr_list(K) RPAREN target_list(B) from_clause(C)
+                         where_clause(D) group_clause(E) having_clause(H)
+                         order_clause(F) limit_clause(G). 
+%action_rust {
+    let mut base = C;
+    if D.clone().is_present() { base = ra_filter(ctx.user, base, D.clone()); }
+    if E.clone().is_present() { base = ra_aggregate(ctx.user, base, E.clone(), ra_list_new(ctx.user)); }
+    if H.clone().is_present() { base = ra_filter(ctx.user, base, H.clone()); }
+    base = ra_project(ctx.user, base, B);
+    if F.clone().is_present() { base = ra_sort(ctx.user, base, F.clone()); }
+    base = ra_distinct_on(ctx.user, base, K);
+    if (G.clone().float_val != 0.0) {
+        base = ra_limit(ctx.user, base, (G.clone().int_val as u64), (G.clone().location as u64));
+    }
+    A = base;
+}
+
 /* Named WINDOW clause: SELECT ... WINDOW w AS (...) ORDER BY ... */
 /* The named window is parsed but the definition is ignored; window
  * functions already inline their OVER spec. */

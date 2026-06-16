@@ -208,7 +208,7 @@ impl FingerprintCollector {
                 self.has_limit = true;
                 self.visit(input);
             }
-            RelExpr::Distinct { input } => {
+            RelExpr::Distinct { input } | RelExpr::DistinctOn { input, .. } => {
                 self.has_distinct = true;
                 self.visit(input);
             }

@@ -320,6 +320,7 @@ impl PlanBuilder {
             // part_prune_index is set to -1 (palloc0 left it 0, which crashed
             // ExecInitAppend on empty partition-prune info).
             RelExpr::Distinct { input } => Self::first_unsupported_op(input),
+            RelExpr::DistinctOn { input, .. } => Self::first_unsupported_op(input),
             RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }
             | RelExpr::Except { left, right, .. } => {
@@ -834,6 +835,7 @@ impl PlanBuilder {
                 self.build_gather(input, *workers)
             }
             RelExpr::Distinct { input } => self.build_unique(input),
+            RelExpr::DistinctOn { on, input } => self.build_distinct_on(on, input),
             RelExpr::Union { all, left, right } => self.build_set_op_union(*all, left, right),
             RelExpr::Intersect { all, left, right } => {
                 self.build_set_op_intersect(*all, left, right)
@@ -4755,6 +4757,65 @@ impl PlanBuilder {
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         let raw_child = self.build_plan(input)?;
         Ok(self.dedup_plan(raw_child))
+    }
+
+    /// Build `DISTINCT ON (keys)` as a `Unique` on the key columns over the
+    /// already-sorted input (the `DistinctOn` input is the ORDER BY `Sort`, so
+    /// rows sharing the keys are adjacent). Keys must be plain columns present
+    /// in the output; otherwise defer to PG.
+    unsafe fn build_distinct_on(
+        &mut self,
+        on: &[Expr],
+        input: &RelExpr,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        if on.is_empty() {
+            return Err(unsupported("DISTINCT ON without keys"));
+        }
+        let child = self.build_plan(input)?;
+        if child.is_null() {
+            return Err(unsupported("DISTINCT ON input"));
+        }
+        let child_tlist = (*child).targetlist;
+        let n = on.len();
+        let col_idx =
+            pg_sys::palloc(n * std::mem::size_of::<pg_sys::AttrNumber>()) as *mut pg_sys::AttrNumber;
+        let operators = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+        let collations = pg_sys::palloc(n * std::mem::size_of::<pg_sys::Oid>()) as *mut pg_sys::Oid;
+        for (i, key) in on.iter().enumerate() {
+            let name = crate::sort_utils::extract_column_name(key)
+                .ok_or_else(|| unsupported("DISTINCT ON key not a column"))?;
+            let resno = crate::sort_utils::find_attr_in_targetlist(child_tlist, name)
+                .ok_or_else(|| unsupported("DISTINCT ON key not in output"))?;
+            let te = pg_sys::list_nth(child_tlist, i32::from(resno) - 1).cast::<pg_sys::TargetEntry>();
+            let (ty, coll) = if te.is_null() || (*te).expr.is_null() {
+                (pg_sys::INT4OID, pg_sys::InvalidOid)
+            } else {
+                (
+                    pg_sys::exprType((*te).expr.cast()),
+                    pg_sys::exprCollation((*te).expr.cast()),
+                )
+            };
+            *col_idx.add(i) = resno;
+            *operators.add(i) = crate::sort_utils::resolve_equality_op(ty);
+            *collations.add(i) = coll;
+        }
+        let node = self.alloc_node::<pg_sys::Unique>();
+        if node.is_null() {
+            return Err(PlanBuilderError::NullPointer("Unique".to_owned()));
+        }
+        (*node).plan.type_ = pg_sys::NodeTag::T_Unique;
+        (*node).plan.lefttree = child;
+        // Unique passes tuples through unchanged: share the child targetlist.
+        (*node).plan.targetlist = child_tlist;
+        (*node).numCols = n as i32;
+        (*node).uniqColIdx = col_idx;
+        (*node).uniqOperators = operators;
+        (*node).uniqCollations = collations;
+        (*node).plan.total_cost = (*child).total_cost;
+        (*node).plan.plan_rows = ((*child).plan_rows * 0.5).max(1.0);
+        (*node).plan.plan_width = (*child).plan_width;
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     /// Deduplicate a plan's rows on all output columns: sort by every output

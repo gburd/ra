@@ -188,6 +188,7 @@ impl FeatureSchema {
             }
             RelExpr::Window { input, .. }
             | RelExpr::Distinct { input, .. }
+            | RelExpr::DistinctOn { input, .. }
             | RelExpr::RowPattern { input, .. }
             | RelExpr::TopK { input, .. } => {
                 features[OP_TYPE_OFFSET + 2] = 1.0;
