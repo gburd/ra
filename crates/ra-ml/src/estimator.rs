@@ -123,7 +123,7 @@ fn estimate_heuristic(expr: &RelExpr, stats: &dyn StatisticsProvider) -> f64 {
             (left_rows - right_rows * 0.5).max(0.0)
         }
         RelExpr::CTE { body, .. } => estimate_heuristic(body, stats),
-        RelExpr::Distinct { input, .. } => {
+        RelExpr::Distinct { input, .. } | RelExpr::DistinctOn { input, .. } => {
             let input_rows = estimate_heuristic(input, stats);
             (input_rows * 0.75).max(1.0)
         }
@@ -321,6 +321,7 @@ fn collect_tables_recursive(
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Distinct { input, .. }
+            | RelExpr::DistinctOn { input, .. }
         | RelExpr::RowPattern { input, .. }
         | RelExpr::ParallelAggregate { input, .. }
         | RelExpr::Gather { input, .. }

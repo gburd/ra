@@ -171,6 +171,12 @@ pub fn ra_distinct(st: *mut RaParseState, input: Value) -> Value {
 }
 
 #[must_use]
+pub fn ra_distinct_on(st: *mut RaParseState, input: Value, on: Value) -> Value {
+    let handle = unsafe { ffi::ra_distinct_on(st, input.handle(), on.handle()) };
+    Value::from_node(handle)
+}
+
+#[must_use]
 pub fn ra_insert(st: *mut RaParseState, table: &str, columns: Value, source: Value, on_conflict: Value, returning: Value) -> Value {
     let table_c = CString::new(table).unwrap_or_default();
     let handle = unsafe { ffi::ra_insert(st, table_c.as_ptr(), columns.handle(), source.handle(), on_conflict.handle(), returning.handle()) };

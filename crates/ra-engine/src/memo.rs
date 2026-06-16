@@ -153,7 +153,7 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             functions.len().hash(hasher);
             hash_rel_expr(input, hasher);
         }
-        RelExpr::Distinct { input } => {
+        RelExpr::Distinct { input } | RelExpr::DistinctOn { input, .. } => {
             hash_rel_expr(input, hasher);
         }
         RelExpr::Values { rows } => {

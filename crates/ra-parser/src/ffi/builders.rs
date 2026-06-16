@@ -768,6 +768,31 @@ pub unsafe fn ra_distinct(state: *mut RaParseState, input: *mut RaNode) -> *mut 
     })
 }
 
+/// Build a `DistinctOn` node from an input relation and a list of ON-key
+/// expressions.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `input` and `on_list` must be valid tagged pointers or null.
+pub unsafe fn ra_distinct_on(
+    state: *mut RaParseState,
+    input: *mut RaNode,
+    on_list: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(input_rel) = decode_rel(st, input) else {
+        st.push_error("ra_distinct_on: invalid input node".to_owned());
+        return std::ptr::null_mut();
+    };
+    let on = collect_exprs(st, on_list);
+    st.push_rel(RelExpr::DistinctOn {
+        on,
+        input: Box::new(input_rel),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // DML builders
 // ---------------------------------------------------------------------------

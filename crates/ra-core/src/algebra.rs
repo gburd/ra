@@ -233,6 +233,18 @@ pub enum RelExpr {
         input: Box<RelExpr>,
     },
 
+    /// `DISTINCT ON (keys)` — keep the first row of each group of equal `on`
+    /// keys, in the input's row order. The input must already be sorted so that
+    /// rows sharing the `on` keys are adjacent (PostgreSQL requires the leading
+    /// `ORDER BY` to match the `on` keys), which is how it is built.
+    DistinctOn {
+        /// The DISTINCT ON key expressions.
+        on: Vec<Expr>,
+        /// The input relation (sorted on the `on` keys, then any further
+        /// ORDER BY).
+        input: Box<RelExpr>,
+    },
+
     /// Inline values (VALUES clause).
     Values {
         /// Rows of constant expressions.
@@ -842,6 +854,7 @@ impl RelExpr {
             | Self::Limit { input, .. }
             | Self::Window { input, .. }
             | Self::Distinct { input, .. }
+            | Self::DistinctOn { input, .. }
             | Self::RowPattern { input, .. }
             | Self::ParallelAggregate { input, .. }
             | Self::Gather { input, .. }
@@ -977,6 +990,7 @@ impl RelExpr {
             }
             Self::Limit { input, .. }
             | Self::Distinct { input, .. }
+            | Self::DistinctOn { input, .. }
             | Self::Gather { input, .. } => {
                 input.collect_columns(out);
             }
@@ -1202,6 +1216,7 @@ impl RelExpr {
             | Self::Limit { input, .. }
             | Self::Window { input, .. }
             | Self::Distinct { input, .. }
+            | Self::DistinctOn { input, .. }
             | Self::IncrementalSort { input, .. }
             | Self::RowPattern { input, .. }
             | Self::ParallelAggregate { input, .. }

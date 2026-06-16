@@ -106,6 +106,16 @@ fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, Re
             let my_props = derive_properties(&node, &[]);
             (my_props, node)
         }
+        // DISTINCT ON preserves the input ordering (Unique over sorted input).
+        RelExpr::DistinctOn { on, input } => {
+            let (_child_props, rewritten_child) = propagate_inner(*input, facts);
+            let node = RelExpr::DistinctOn {
+                on,
+                input: Box::new(rewritten_child),
+            };
+            let my_props = derive_properties(&node, &[]);
+            (my_props, node)
+        }
 
         // Aggregate: ordering depends on strategy
         RelExpr::Aggregate {

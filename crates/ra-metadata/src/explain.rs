@@ -2047,7 +2047,7 @@ pub fn relexpr_to_explain_node(expr: &ra_core::algebra::RelExpr) -> ExplainNode 
             ],
         },
 
-        RelExpr::Distinct { input } => ExplainNode {
+        RelExpr::Distinct { input } | RelExpr::DistinctOn { input, .. } => ExplainNode {
             node_type: NodeType::Unique,
             join_type: None,
             relation: None,

@@ -65,6 +65,14 @@ pub fn derive_properties(expr: &RelExpr, input_props: &[&PropertySet]) -> Proper
             ps
         }
 
+        RelExpr::DistinctOn { .. } => {
+            // DISTINCT ON is a Unique over sorted input, so it preserves the
+            // input's ordering (and partitioning).
+            input_props
+                .first()
+                .map_or_else(PropertySet::new, |p| (*p).clone())
+        }
+
         RelExpr::Aggregate { group_by, .. } => derive_aggregate_properties(group_by),
 
         RelExpr::Join {
