@@ -270,7 +270,19 @@ fn extract_window_exprs(
                 if let Some(func) = window_function_for(name) {
                     let (real_args, partition_by, order_by, has_frame) =
                         decode_window_sentinels(args.clone());
-                    let arg = real_args.into_iter().next();
+                    // Most window functions take a single argument. lag/lead/
+                    // nth_value also take an offset (and optional default); the
+                    // WindowExpr carries one `arg`, so preserve the extra
+                    // arguments in a `__win_args(value, offset, ...)` marker
+                    // that the plan builder decodes (mirrors __distinct etc.).
+                    let arg = match real_args.len() {
+                        0 => None,
+                        1 => real_args.into_iter().next(),
+                        _ => Some(Expr::Function {
+                            name: "__win_args".to_string(),
+                            args: real_args,
+                        }),
+                    };
                     window_exprs.push(WindowExpr {
                         function: func,
                         arg,
