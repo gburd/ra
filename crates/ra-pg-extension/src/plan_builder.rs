@@ -2133,53 +2133,92 @@ impl PlanBuilder {
         Some(name)
     }
 
-    /// Expand a `ROLLUP`/`CUBE` grouping-set aggregate into a `UNION ALL` of
-    /// ordinary grouped aggregates with NULL-padded columns — semantically
-    /// equivalent to GROUP BY GROUPING SETS, reusing Ra's grouped-aggregate
-    /// and set-op builders instead of PostgreSQL's MixedAggregate machinery.
+    /// Expand a grouping-set aggregate (`ROLLUP`/`CUBE`/explicit `GROUPING
+    /// SETS`) into a `UNION ALL` of ordinary grouped aggregates with
+    /// NULL-padded columns — semantically equivalent to GROUP BY GROUPING SETS,
+    /// reusing Ra's grouped-aggregate and set-op builders instead of
+    /// PostgreSQL's MixedAggregate machinery.
     ///
-    /// `group_by` must be a single `__rollup(cols...)` or `__cube(cols...)`
-    /// marker (emitted by the parser). For each grouping set, a branch groups
-    /// by that set and replaces every grouping column not in the set with a
-    /// typed NULL in the output. Returns None for anything else (normal GROUP
-    /// BY, non-column grouping args, unresolved types) so the caller proceeds
-    /// with the regular grouped-aggregate build.
+    /// `group_by` must be a single `__rollup(cols...)`, `__cube(cols...)`, or
+    /// `__grouping_sets(__gs_item(cols...)...)` marker (emitted by the parser).
+    /// For each grouping set, a branch groups by that set and replaces every
+    /// grouping column not in the set with a typed NULL in the output. Returns
+    /// None for anything else (normal GROUP BY, non-column grouping args,
+    /// unresolved types) so the caller proceeds with the regular build.
     unsafe fn expand_grouping_sets(
         &self,
         columns: &[ProjectionColumn],
         group_by: &[ra_core::expr::Expr],
         agg_input: &RelExpr,
     ) -> Option<RelExpr> {
-        use ra_core::expr::{Const, Expr};
+        use ra_core::expr::{ColumnRef, Const, Expr};
         let [Expr::Function { name, args }] = group_by else {
             return None;
         };
-        let cube = match name.as_str() {
-            "__rollup" => false,
-            "__cube" => true,
+        // Compute the universe of grouping columns (`gcols`) and the grouping
+        // sets as index lists into it (`sets`), uniformly across marker kinds.
+        let push_col = |gcols: &mut Vec<ColumnRef>, c: &ColumnRef| -> usize {
+            match gcols
+                .iter()
+                .position(|g| g.column.eq_ignore_ascii_case(&c.column) && g.table == c.table)
+            {
+                Some(i) => i,
+                None => {
+                    gcols.push(c.clone());
+                    gcols.len() - 1
+                }
+            }
+        };
+        let (gcols, sets): (Vec<ColumnRef>, Vec<Vec<usize>>) = match name.as_str() {
+            "__rollup" | "__cube" => {
+                let mut gcols: Vec<ColumnRef> = Vec::new();
+                for a in args {
+                    match a {
+                        Expr::Column(c) => gcols.push(c.clone()),
+                        _ => return None,
+                    }
+                }
+                let n = gcols.len();
+                if n == 0 || n > 12 {
+                    return None;
+                }
+                let sets: Vec<Vec<usize>> = if name == "__cube" {
+                    (0..(1usize << n))
+                        .map(|mask| (0..n).filter(|i| mask & (1 << i) != 0).collect())
+                        .collect()
+                } else {
+                    (0..=n).rev().map(|k| (0..k).collect()).collect()
+                };
+                (gcols, sets)
+            }
+            "__grouping_sets" => {
+                let mut gcols: Vec<ColumnRef> = Vec::new();
+                let mut sets: Vec<Vec<usize>> = Vec::with_capacity(args.len());
+                for item in args {
+                    let Expr::Function { name: inm, args: iargs } = item else {
+                        return None;
+                    };
+                    if inm != "__gs_item" {
+                        return None;
+                    }
+                    let mut set = Vec::with_capacity(iargs.len());
+                    for a in iargs {
+                        let Expr::Column(c) = a else {
+                            return None;
+                        };
+                        set.push(push_col(&mut gcols, c));
+                    }
+                    sets.push(set);
+                }
+                if gcols.is_empty() || gcols.len() > 12 {
+                    return None;
+                }
+                (gcols, sets)
+            }
             _ => return None,
         };
-        let mut gcols: Vec<&ra_core::expr::ColumnRef> = Vec::new();
-        for a in args {
-            match a {
-                Expr::Column(c) => gcols.push(c),
-                _ => return None,
-            }
-        }
-        let n = gcols.len();
-        if n == 0 || n > 12 {
-            return None;
-        }
-        // Grouping sets as index lists into `gcols`.
-        let sets: Vec<Vec<usize>> = if cube {
-            (0..(1usize << n))
-                .map(|mask| (0..n).filter(|i| mask & (1 << i) != 0).collect())
-                .collect()
-        } else {
-            (0..=n).rev().map(|k| (0..k).collect()).collect()
-        };
         // Typed NULL for each grouping column.
-        let mut null_exprs: Vec<Expr> = Vec::with_capacity(n);
+        let mut null_exprs: Vec<Expr> = Vec::with_capacity(gcols.len());
         for c in &gcols {
             let tn = self.column_type_name(c, agg_input)?;
             null_exprs.push(Expr::Cast {

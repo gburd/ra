@@ -804,11 +804,14 @@ grouping_set_list(A) ::= grouping_set_list(B) COMMA grouping_set(C).
     A = ra_list_push(ctx.user, B, C);
 }
 
-/* Single grouping set: (col1, col2) or () */
-grouping_set(A) ::= LPAREN expr_list(B) RPAREN. %action_rust { A = B; }
+/* Single grouping set: (col1, col2) or () — wrapped in a marker so the set
+   boundaries survive into the __grouping_sets arg list (a bare list would be
+   flattened by ra_func). */
+grouping_set(A) ::= LPAREN expr_list(B) RPAREN. 
+%action_rust { A = ra_func(ctx.user, "__gs_item", B); }
 grouping_set(A) ::= LPAREN RPAREN. 
 %action_rust {
-    A = ra_list_new(ctx.user);
+    A = ra_func(ctx.user, "__gs_item", ra_list_new(ctx.user));
 }
 
 /* -- HAVING clause ------------------------------------------------- */
