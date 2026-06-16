@@ -5006,6 +5006,7 @@ impl PlanBuilder {
         &self,
         func: &ra_core::algebra::WindowFunction,
         arg: Option<(*mut pg_sys::Expr, pg_sys::Oid, pg_sys::Oid)>,
+        extra_args: &[(*mut pg_sys::Expr, pg_sys::Oid)],
         winref: pg_sys::Index,
     ) -> Result<*mut pg_sys::Expr, PlanBuilderError> {
         use ra_core::algebra::WindowFunction as Wf;
@@ -5027,29 +5028,29 @@ impl PlanBuilder {
             Wf::Max => "max",
             _ => return Err(unsupported("window function")),
         };
-        let nargs = i32::from(arg.is_some());
         let actual_arg_ty = arg.map(|(_, ty, _)| ty);
-        let mut argtypes = [pg_sys::InvalidOid; 1];
+        // The value window functions (lag/lead/first_value/last_value) have a
+        // polymorphic `anyelement` first parameter in the catalog, so a lookup
+        // by the actual argument type (e.g. numeric) finds no exact match. Look
+        // them up by the polymorphic signature and resolve the result type from
+        // the actual argument below. lag/lead additionally take an integer
+        // offset (and optional default); the offset is carried in `extra_args`
+        // (decoded from the parser's __win_args marker), so the correct arity
+        // is built rather than silently dropping it.
+        let polymorphic_value_fn =
+            matches!(func, Wf::FirstValue | Wf::LastValue | Wf::Lag | Wf::Lead);
+        let mut argtypes: Vec<pg_sys::Oid> = Vec::with_capacity(1 + extra_args.len());
         if let Some((_, ty, _)) = arg {
-            argtypes[0] = ty;
+            argtypes.push(if polymorphic_value_fn {
+                pg_sys::ANYELEMENTOID
+            } else {
+                ty
+            });
         }
-        // The value window functions (lag/lead/first_value/last_value/nth_value)
-        // have a polymorphic `anyelement` first parameter in the catalog, so a
-        // lookup by the actual argument type (e.g. numeric) finds no exact
-        // match. Look them up by the polymorphic signature and resolve the
-        // result type from the actual argument below.
-        // first_value/last_value are strictly single-argument and have a
-        // polymorphic `anyelement` parameter, so look them up by that
-        // signature and resolve the result type from the actual argument.
-        // lag/lead/nth_value are intentionally excluded: they have optional
-        // offset/default arguments, but `WindowExpr` only carries a single
-        // `arg`, so the parser silently drops the offset — building them here
-        // would return wrong rows for the `lag(x, n)` form. They correctly
-        // fall back until WindowExpr carries all arguments.
-        let polymorphic_value_fn = matches!(func, Wf::FirstValue | Wf::LastValue);
-        if polymorphic_value_fn && arg.is_some() {
-            argtypes[0] = pg_sys::ANYELEMENTOID;
+        for &(_, ty) in extra_args {
+            argtypes.push(ty);
         }
+        let nargs = argtypes.len() as i32;
         let fname = CString::new(name).map_err(|_| unsupported("window fn name"))?;
         let name_node = pg_sys::makeString(fname.as_ptr().cast_mut());
         let fname_list = pg_sys::lappend(std::ptr::null_mut(), name_node.cast());
@@ -5082,7 +5083,11 @@ impl PlanBuilder {
         (*node).winagg = winagg;
         if let Some((arg_expr, _, coll)) = arg {
             (*node).inputcollid = coll;
-            (*node).args = pg_sys::lappend(std::ptr::null_mut(), arg_expr.cast());
+            let mut args = pg_sys::lappend(std::ptr::null_mut(), arg_expr.cast());
+            for &(e, _) in extra_args {
+                args = pg_sys::lappend(args, e.cast());
+            }
+            (*node).args = args;
         }
         Ok(node.cast())
     }
@@ -5147,14 +5152,40 @@ impl PlanBuilder {
             let nf = matches!(k.nulls, ra_core::algebra::NullOrdering::First);
             sort_keys.push((t.0, t.1, t.2, asc, nf));
         }
-        let arg_outer = match &wf.arg {
+        let (arg_outer, extra_args) = match &wf.arg {
+            // lag/lead carry their offset (and optional default) in a
+            // __win_args(value, offset, ...) marker. The value becomes the
+            // window input column; the offset/default must be constants
+            // (translated without a column frame), else defer to PG.
+            Some(Expr::Function { name, args }) if name == "__win_args" => {
+                let value = args.first().ok_or_else(|| unsupported("window arg"))?;
+                let (pos, ty, coll) = self
+                    .add_input_col(value, &mut in_tlist, &mut colmap)
+                    .ok_or_else(|| unsupported("window arg"))?;
+                let mut extra: Vec<(*mut pg_sys::Expr, pg_sys::Oid)> = Vec::new();
+                if args.len() - 1 > 1 {
+                    // offset + default (3-arg lag/lead) not yet supported.
+                    return Err(unsupported("window default arg"));
+                }
+                for a in &args[1..] {
+                    let e = expr_translator::translate(a, &self.expr_ctx);
+                    if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Const {
+                        return Err(unsupported("window offset not constant"));
+                    }
+                    extra.push((e, pg_sys::exprType(e.cast())));
+                }
+                (Some((self.outer_var(pos, ty, coll), ty, coll)), extra)
+            }
             Some(a) => {
                 let (pos, ty, coll) = self
                     .add_input_col(a, &mut in_tlist, &mut colmap)
                     .ok_or_else(|| unsupported("window arg"))?;
-                Some((self.outer_var(pos, ty, coll), ty, coll))
+                (
+                    Some((self.outer_var(pos, ty, coll), ty, coll)),
+                    Vec::new(),
+                )
             }
-            None => None,
+            None => (None, Vec::new()),
         };
         (*child).targetlist = in_tlist;
 
@@ -5208,7 +5239,7 @@ impl PlanBuilder {
         let mut out_tlist: *mut pg_sys::List = std::ptr::null_mut();
         for (i, pc) in out_columns.iter().enumerate() {
             let entry: *mut pg_sys::Expr = if Self::is_window_marker(&pc.expr) {
-                self.build_window_func(&wf.function, arg_outer, 1)?
+                self.build_window_func(&wf.function, arg_outer, &extra_args, 1)?
             } else {
                 let (pos, ty, coll) = self
                     .add_input_col(&pc.expr, &mut in_tlist, &mut colmap)
