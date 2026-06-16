@@ -678,14 +678,6 @@ impl PlanBuilder {
                     ..
                 } = &**input
                 {
-                    // ROLLUP/CUBE → rewrite to a UNION ALL of ordinary grouped
-                    // aggregates with NULL-padded columns (a normal GROUP BY
-                    // returns None here and builds directly below).
-                    if let Some(rewritten) =
-                        self.expand_grouping_sets(columns, group_by, agg_input)
-                    {
-                        return self.build_plan(&rewritten);
-                    }
                     return self.build_grouped_aggregate(columns, group_by, agg_input, None);
                 }
                 // Project over Filter over Aggregate is HAVING: the Filter
@@ -2089,180 +2081,6 @@ impl PlanBuilder {
         }
         pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
         Some(out)
-    }
-
-    /// SQL type name (with typmod, e.g. "character(1)") of a column from the
-    /// single base relation the input scans. Used to type the NULL padding in
-    /// grouping-set expansion. Returns None if it can't be resolved.
-    unsafe fn column_type_name(
-        &self,
-        col: &ra_core::expr::ColumnRef,
-        input: &RelExpr,
-    ) -> Option<String> {
-        let table = col.table.as_deref().or_else(|| Self::base_scan_table(input))?;
-        let reloid = self.rel_oid_for(table).ok()?;
-        let cname = std::ffi::CString::new(col.column.as_str()).ok()?;
-        let attno = pg_sys::get_attnum(reloid, cname.as_ptr());
-        if attno <= 0 {
-            return None;
-        }
-        let mut typid = pg_sys::InvalidOid;
-        let mut typmod: i32 = -1;
-        let mut collid = pg_sys::InvalidOid;
-        pg_sys::get_atttypetypmodcoll(reloid, attno, &mut typid, &mut typmod, &mut collid);
-        if typid == pg_sys::InvalidOid {
-            return None;
-        }
-        // Use the internal type name (e.g. "bpchar", "int4") rather than the
-        // SQL name with typmod ("character(1)"): the cast translator resolves a
-        // bare type name and does not parse a typmod suffix. The dropped typmod
-        // is harmless here — the column is NULL in this branch, and the set-op
-        // output descriptor comes from the non-NULL branch.
-        let tup = pg_sys::SearchSysCache1(
-            pg_sys::SysCacheIdentifier::TYPEOID as i32,
-            pg_sys::Datum::from(typid),
-        );
-        if tup.is_null() {
-            return None;
-        }
-        let form = pg_sys::GETSTRUCT(tup).cast::<pg_sys::FormData_pg_type>();
-        let name = std::ffi::CStr::from_ptr((*form).typname.data.as_ptr())
-            .to_string_lossy()
-            .into_owned();
-        pg_sys::ReleaseSysCache(tup);
-        Some(name)
-    }
-
-    /// Expand a grouping-set aggregate (`ROLLUP`/`CUBE`/explicit `GROUPING
-    /// SETS`) into a `UNION ALL` of ordinary grouped aggregates with
-    /// NULL-padded columns — semantically equivalent to GROUP BY GROUPING SETS,
-    /// reusing Ra's grouped-aggregate and set-op builders instead of
-    /// PostgreSQL's MixedAggregate machinery.
-    ///
-    /// `group_by` must be a single `__rollup(cols...)`, `__cube(cols...)`, or
-    /// `__grouping_sets(__gs_item(cols...)...)` marker (emitted by the parser).
-    /// For each grouping set, a branch groups by that set and replaces every
-    /// grouping column not in the set with a typed NULL in the output. Returns
-    /// None for anything else (normal GROUP BY, non-column grouping args,
-    /// unresolved types) so the caller proceeds with the regular build.
-    unsafe fn expand_grouping_sets(
-        &self,
-        columns: &[ProjectionColumn],
-        group_by: &[ra_core::expr::Expr],
-        agg_input: &RelExpr,
-    ) -> Option<RelExpr> {
-        use ra_core::expr::{ColumnRef, Const, Expr};
-        let [Expr::Function { name, args }] = group_by else {
-            return None;
-        };
-        // Compute the universe of grouping columns (`gcols`) and the grouping
-        // sets as index lists into it (`sets`), uniformly across marker kinds.
-        let push_col = |gcols: &mut Vec<ColumnRef>, c: &ColumnRef| -> usize {
-            match gcols
-                .iter()
-                .position(|g| g.column.eq_ignore_ascii_case(&c.column) && g.table == c.table)
-            {
-                Some(i) => i,
-                None => {
-                    gcols.push(c.clone());
-                    gcols.len() - 1
-                }
-            }
-        };
-        let (gcols, sets): (Vec<ColumnRef>, Vec<Vec<usize>>) = match name.as_str() {
-            "__rollup" | "__cube" => {
-                let mut gcols: Vec<ColumnRef> = Vec::new();
-                for a in args {
-                    match a {
-                        Expr::Column(c) => gcols.push(c.clone()),
-                        _ => return None,
-                    }
-                }
-                let n = gcols.len();
-                if n == 0 || n > 12 {
-                    return None;
-                }
-                let sets: Vec<Vec<usize>> = if name == "__cube" {
-                    (0..(1usize << n))
-                        .map(|mask| (0..n).filter(|i| mask & (1 << i) != 0).collect())
-                        .collect()
-                } else {
-                    (0..=n).rev().map(|k| (0..k).collect()).collect()
-                };
-                (gcols, sets)
-            }
-            "__grouping_sets" => {
-                let mut gcols: Vec<ColumnRef> = Vec::new();
-                let mut sets: Vec<Vec<usize>> = Vec::with_capacity(args.len());
-                for item in args {
-                    let Expr::Function { name: inm, args: iargs } = item else {
-                        return None;
-                    };
-                    if inm != "__gs_item" {
-                        return None;
-                    }
-                    let mut set = Vec::with_capacity(iargs.len());
-                    for a in iargs {
-                        let Expr::Column(c) = a else {
-                            return None;
-                        };
-                        set.push(push_col(&mut gcols, c));
-                    }
-                    sets.push(set);
-                }
-                if gcols.is_empty() || gcols.len() > 12 {
-                    return None;
-                }
-                (gcols, sets)
-            }
-            _ => return None,
-        };
-        // Typed NULL for each grouping column.
-        let mut null_exprs: Vec<Expr> = Vec::with_capacity(gcols.len());
-        for c in &gcols {
-            let tn = self.column_type_name(c, agg_input)?;
-            null_exprs.push(Expr::Cast {
-                expr: Box::new(Expr::Const(Const::Null)),
-                target_type: tn,
-            });
-        }
-        let mut branches: Vec<RelExpr> = Vec::with_capacity(sets.len());
-        for set in &sets {
-            let group_keys: Vec<Expr> =
-                set.iter().map(|&i| Expr::Column(gcols[i].clone())).collect();
-            let out: Vec<ProjectionColumn> = columns
-                .iter()
-                .map(|pc| {
-                    if let Expr::Column(pcol) = &pc.expr {
-                        if let Some(j) = gcols.iter().position(|g| {
-                            g.column.eq_ignore_ascii_case(&pcol.column) && g.table == pcol.table
-                        }) {
-                            if !set.contains(&j) {
-                                return ProjectionColumn {
-                                    expr: null_exprs[j].clone(),
-                                    alias: pc.alias.clone(),
-                                };
-                            }
-                        }
-                    }
-                    pc.clone()
-                })
-                .collect();
-            branches.push(RelExpr::Project {
-                columns: out,
-                input: Box::new(RelExpr::Aggregate {
-                    group_by: group_keys,
-                    aggregates: Vec::new(),
-                    input: Box::new(agg_input.clone()),
-                }),
-            });
-        }
-        let mut it = branches.into_iter();
-        let mut acc = it.next()?;
-        for b in it {
-            acc = RelExpr::Union { all: true, left: Box::new(acc), right: Box::new(b) };
-        }
-        Some(acc)
     }
 
     /// Expand `SELECT *` / `t.*` projection columns into one column per
@@ -3926,9 +3744,6 @@ impl PlanBuilder {
             pg_sys::NodeTag::T_RelabelType => {
                 self.remap_agg_input_vars((*node.cast::<pg_sys::RelabelType>()).arg.cast(), colmap)
             }
-            pg_sys::NodeTag::T_CoerceViaIO => {
-                self.remap_agg_input_vars((*node.cast::<pg_sys::CoerceViaIO>()).arg.cast(), colmap)
-            }
             pg_sys::NodeTag::T_CaseExpr => {
                 let ce = node.cast::<pg_sys::CaseExpr>();
                 if !(*ce).arg.is_null()
@@ -4218,16 +4033,6 @@ impl PlanBuilder {
             Expr::Const(_) => {
                 let e = expr_translator::translate(expr, &self.expr_ctx);
                 (!e.is_null()).then_some(e)
-            }
-            // A cast (e.g. NULL::type used to pad a grouping-set branch, or a
-            // cast over a column) — translate it and remap any column Vars to
-            // the aggregate input frame; constant casts have no Vars to remap.
-            Expr::Cast { .. } => {
-                let e = expr_translator::translate(expr, &self.expr_ctx);
-                if e.is_null() || !self.remap_agg_input_vars(e.cast(), colmap) {
-                    return None;
-                }
-                Some(e)
             }
             Expr::BinOp { op: ra_core::expr::BinOp::And, left, right } => {
                 let l = self.build_agg_out_expr(left, in_tlist, colmap, aggno)?;
@@ -4937,14 +4742,128 @@ impl PlanBuilder {
         out
     }
 
+    /// Collect the leaf branches of a `UNION ALL` spine. Nested `UNION ALL`
+    /// nodes are flattened; any other node (including `UNION DISTINCT`) is a
+    /// leaf. Flattening lets [`Self::unify_setop_null_types_global`] resolve
+    /// column types across every branch at once — NULL pads are retypable
+    /// `Const`s at the leaves, but become opaque `Var`s once wrapped in a
+    /// nested `Append`, so pairwise resolution is fragile to branch ordering
+    /// (which the e-graph may permute).
+    fn collect_union_all_leaves<'a>(expr: &'a RelExpr, out: &mut Vec<&'a RelExpr>) {
+        if let RelExpr::Union {
+            all: true,
+            left,
+            right,
+        } = expr
+        {
+            Self::collect_union_all_leaves(left, out);
+            Self::collect_union_all_leaves(right, out);
+        } else {
+            out.push(expr);
+        }
+    }
+
+    /// Unify column types across all arms of a set operation, order-independent.
+    /// For each column, the concrete (non-NULL) type found in any arm is the
+    /// resolved type; every NULL `Const` in that column (a grouping-set NULL
+    /// pad, or a literal NULL) is retyped to it, so the Append's output
+    /// descriptor (taken from the first arm) is correct and all arms agree.
+    /// Returns `false` if two arms carry different concrete types for a column
+    /// (irreconcilable here — defer to PG).
+    unsafe fn unify_setop_null_types_global(&self, plans: &[*mut pg_sys::Plan]) -> bool {
+        let Some(&first) = plans.first() else {
+            return true;
+        };
+        let ncols = pg_sys::list_length((*first).targetlist);
+        for i in 0..ncols {
+            let mut concrete: Option<(pg_sys::Oid, i32, pg_sys::Oid)> = None;
+            for &p in plans {
+                let te = pg_sys::list_nth((*p).targetlist, i).cast::<pg_sys::TargetEntry>();
+                if te.is_null() {
+                    continue;
+                }
+                let e = (*te).expr;
+                if !Self::is_null_const(e) {
+                    let t = pg_sys::exprType(e.cast());
+                    match concrete {
+                        None => {
+                            concrete = Some((
+                                t,
+                                pg_sys::exprTypmod(e.cast()),
+                                pg_sys::exprCollation(e.cast()),
+                            ));
+                        }
+                        Some((ct, _, _)) if ct != t => return false,
+                        _ => {}
+                    }
+                }
+            }
+            if let Some((t, tm, coll)) = concrete {
+                for &p in plans {
+                    let te = pg_sys::list_nth((*p).targetlist, i).cast::<pg_sys::TargetEntry>();
+                    if !te.is_null() && Self::is_null_const((*te).expr) {
+                        Self::retype_null_const((*te).expr, t, tm, coll);
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// True if `expr` is a NULL `Const` node.
+    unsafe fn is_null_const(expr: *mut pg_sys::Expr) -> bool {
+        !expr.is_null()
+            && (*expr).type_ == pg_sys::NodeTag::T_Const
+            && (*expr.cast::<pg_sys::Const>()).constisnull
+    }
+
+    /// Retype a NULL `Const` in place to the given type/typmod/collation.
+    unsafe fn retype_null_const(expr: *mut pg_sys::Expr, typ: pg_sys::Oid, typmod: i32, coll: pg_sys::Oid) {
+        let c = expr.cast::<pg_sys::Const>();
+        let mut typlen: i16 = 0;
+        let mut typbyval = false;
+        pg_sys::get_typlenbyval(typ, &mut typlen, &mut typbyval);
+        (*c).consttype = typ;
+        (*c).consttypmod = typmod;
+        (*c).constcollid = coll;
+        (*c).constlen = i32::from(typlen);
+        (*c).constbyval = typbyval;
+    }
+
     unsafe fn build_set_op_union(
         &mut self,
         all: bool,
         left: &RelExpr,
         right: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        let left_plan = self.build_plan(left)?;
-        let right_plan = self.build_plan(right)?;
+        // Flatten a UNION ALL spine into all leaf branches so column types can
+        // be resolved globally; UNION DISTINCT stays a 2-way Append + dedup.
+        let mut leaves: Vec<&RelExpr> = Vec::new();
+        if all {
+            Self::collect_union_all_leaves(left, &mut leaves);
+            Self::collect_union_all_leaves(right, &mut leaves);
+        } else {
+            leaves.push(left);
+            leaves.push(right);
+        }
+        let mut child_plans: Vec<*mut pg_sys::Plan> = Vec::with_capacity(leaves.len());
+        for leaf in &leaves {
+            let p = self.build_plan(leaf)?;
+            if p.is_null() {
+                return Err(PlanBuilderError::UnsupportedVariant("union child".to_owned()));
+            }
+            child_plans.push(p);
+        }
+        // Set-operation column type unification: NULL Consts (grouping-set NULL
+        // pads, literal NULLs) adopt the concrete type found in any sibling
+        // branch, so the Append's output descriptor — taken from the first
+        // branch — is correctly typed and every branch agrees. An irreconcilable
+        // mismatch between two concrete types defers to PG.
+        if !self.unify_setop_null_types_global(&child_plans) {
+            return Err(PlanBuilderError::UnsupportedVariant(
+                "set-op column type mismatch".to_owned(),
+            ));
+        }
         let node = self.alloc_node::<pg_sys::Append>();
         if node.is_null() {
             return Err(PlanBuilderError::NullPointer(
@@ -4956,53 +4875,29 @@ impl PlanBuilder {
         // to 0, which makes ExecInitAppend index an empty es_part_prune_infos[0]
         // and crash (even under EXPLAIN's EXEC_FLAG_EXPLAIN_ONLY init). Set -1.
         (*node).part_prune_index = -1;
-        // Build the appendplans list from the two child plans.
         let mut plans_list = std::ptr::null_mut::<pg_sys::List>();
-        if !left_plan.is_null() {
-            plans_list = pg_sys::lappend(plans_list, left_plan.cast());
-        }
-        if !right_plan.is_null() {
-            plans_list = pg_sys::lappend(plans_list, right_plan.cast());
+        let mut total_cost = 0.0;
+        let mut total_rows = 0.0;
+        for &p in &child_plans {
+            plans_list = pg_sys::lappend(plans_list, p.cast());
+            total_cost += (*p).total_cost;
+            total_rows += (*p).plan_rows;
         }
         (*node).appendplans = plans_list;
         // All subplans are non-partial (Ra emits no parallel-aware Append), so
         // the first partial plan is past the end. palloc0 leaves this 0, which
         // would make the executor treat every subplan as partial.
         (*node).first_partial_plan = pg_sys::list_length(plans_list);
-
-        // Propagate cost estimates from children.
-        let left_cost = if left_plan.is_null() {
-            0.0
-        } else {
-            (*left_plan).total_cost
-        };
-        let right_cost = if right_plan.is_null() {
-            0.0
-        } else {
-            (*right_plan).total_cost
-        };
-        let left_rows = if left_plan.is_null() {
-            0.0
-        } else {
-            (*left_plan).plan_rows
-        };
-        let right_rows = if right_plan.is_null() {
-            0.0
-        } else {
-            (*right_plan).plan_rows
-        };
-        (*node).plan.total_cost = left_cost + right_cost;
-        (*node).plan.plan_rows = left_rows + right_rows;
+        (*node).plan.total_cost = total_cost;
+        (*node).plan.plan_rows = total_rows;
         // Append returns child slots directly; its targetlist supplies the
         // result tuple descriptor (column types) and the deparse/plan-ref
         // column references. Emit fresh OUTER_VAR refs (not the first child's
         // aliased tlist) so PG resolves each output column one level down to
         // the first subplan — see `dummy_outer_tlist`.
-        if left_plan.is_null() || right_plan.is_null() {
-            return Err(PlanBuilderError::UnsupportedVariant("union child".to_owned()));
-        }
-        (*node).plan.targetlist = self.dummy_outer_tlist((*left_plan).targetlist);
-        (*node).plan.plan_width = (*left_plan).plan_width;
+        let first = child_plans[0];
+        (*node).plan.targetlist = self.dummy_outer_tlist((*first).targetlist);
+        (*node).plan.plan_width = (*first).plan_width;
         let append_plan = &mut (*node).plan as *mut pg_sys::Plan;
 
         if all {

@@ -169,6 +169,27 @@ impl SaturationBudgets {
     }
 }
 
+/// Apply input normalizations before e-graph conversion: grouping-set
+/// expansion (ROLLUP/CUBE/GROUPING SETS → UNION ALL of grouped aggregates)
+/// followed by subquery decorrelation. Returns `Some` only when a
+/// normalization applies, so callers avoid a needless clone on the hot path.
+fn normalize_input(expr: &RelExpr) -> Option<RelExpr> {
+    let has_grouping_sets = crate::grouping_sets::tree_contains_grouping_sets(expr);
+    let has_subquery = crate::subquery_decorrelation::tree_contains_subquery(expr);
+    if !has_grouping_sets && !has_subquery {
+        return None;
+    }
+    let mut result = if has_grouping_sets {
+        crate::grouping_sets::expand(expr)
+    } else {
+        expr.clone()
+    };
+    if crate::subquery_decorrelation::tree_contains_subquery(&result) {
+        result = crate::subquery_decorrelation::decorrelate(&result);
+    }
+    Some(result)
+}
+
 impl Optimizer {
     /// Create a new optimizer with default configuration.
     #[must_use]
@@ -941,13 +962,13 @@ impl Optimizer {
         // skips the e-graph — and thus the in-saturation decorrelation pass —
         // for simple-looking queries). This is a correctness normalization.
         let decorrelated_owned;
-        let expr: &RelExpr =
-            if crate::subquery_decorrelation::tree_contains_subquery(expr) {
-                decorrelated_owned = crate::subquery_decorrelation::decorrelate(expr);
+        let expr: &RelExpr = match normalize_input(expr) {
+            Some(normalized) => {
+                decorrelated_owned = normalized;
                 &decorrelated_owned
-            } else {
-                expr
-            };
+            }
+            None => expr,
+        };
 
         // 2a'. GRAPH_TABLE (SQL/PGQ) fast-path: opaque to the rewrite
         // rules and executed natively by PostgreSQL 19; return as-is.
@@ -1226,14 +1247,13 @@ impl Optimizer {
 
         // Pre-optimization: decorrelate subqueries
         let decorrelated;
-        let effective_expr =
-            if crate::subquery_decorrelation::tree_contains_subquery(expr) {
-                debug!("Decorrelating subqueries before e-graph conversion");
-                decorrelated = crate::subquery_decorrelation::decorrelate(expr);
+        let effective_expr = match normalize_input(expr) {
+            Some(normalized) => {
+                decorrelated = normalized;
                 &decorrelated
-            } else {
-                expr
-            };
+            }
+            None => expr,
+        };
 
         // Post-decorrelation budget adjustment.
         // When decorrelation converts EXISTS/IN subqueries into semi-joins,
@@ -1959,14 +1979,13 @@ impl Optimizer {
 
         // Pre-optimization: decorrelate subqueries before e-graph conversion
         let decorrelated;
-        let effective_expr =
-            if crate::subquery_decorrelation::tree_contains_subquery(expr) {
-                debug!("Decorrelating subqueries before e-graph conversion");
-                decorrelated = crate::subquery_decorrelation::decorrelate(expr);
+        let effective_expr = match normalize_input(expr) {
+            Some(normalized) => {
+                decorrelated = normalized;
                 &decorrelated
-            } else {
-                expr
-            };
+            }
+            None => expr,
+        };
 
         let rec_expr = to_rec_expr(effective_expr)?;
         let hardware = self.hardware_profile();
