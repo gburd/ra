@@ -678,6 +678,14 @@ impl PlanBuilder {
                     ..
                 } = &**input
                 {
+                    // ROLLUP/CUBE → rewrite to a UNION ALL of ordinary grouped
+                    // aggregates with NULL-padded columns (a normal GROUP BY
+                    // returns None here and builds directly below).
+                    if let Some(rewritten) =
+                        self.expand_grouping_sets(columns, group_by, agg_input)
+                    {
+                        return self.build_plan(&rewritten);
+                    }
                     return self.build_grouped_aggregate(columns, group_by, agg_input, None);
                 }
                 // Project over Filter over Aggregate is HAVING: the Filter
@@ -2081,6 +2089,141 @@ impl PlanBuilder {
         }
         pg_sys::table_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
         Some(out)
+    }
+
+    /// SQL type name (with typmod, e.g. "character(1)") of a column from the
+    /// single base relation the input scans. Used to type the NULL padding in
+    /// grouping-set expansion. Returns None if it can't be resolved.
+    unsafe fn column_type_name(
+        &self,
+        col: &ra_core::expr::ColumnRef,
+        input: &RelExpr,
+    ) -> Option<String> {
+        let table = col.table.as_deref().or_else(|| Self::base_scan_table(input))?;
+        let reloid = self.rel_oid_for(table).ok()?;
+        let cname = std::ffi::CString::new(col.column.as_str()).ok()?;
+        let attno = pg_sys::get_attnum(reloid, cname.as_ptr());
+        if attno <= 0 {
+            return None;
+        }
+        let mut typid = pg_sys::InvalidOid;
+        let mut typmod: i32 = -1;
+        let mut collid = pg_sys::InvalidOid;
+        pg_sys::get_atttypetypmodcoll(reloid, attno, &mut typid, &mut typmod, &mut collid);
+        if typid == pg_sys::InvalidOid {
+            return None;
+        }
+        // Use the internal type name (e.g. "bpchar", "int4") rather than the
+        // SQL name with typmod ("character(1)"): the cast translator resolves a
+        // bare type name and does not parse a typmod suffix. The dropped typmod
+        // is harmless here — the column is NULL in this branch, and the set-op
+        // output descriptor comes from the non-NULL branch.
+        let tup = pg_sys::SearchSysCache1(
+            pg_sys::SysCacheIdentifier::TYPEOID as i32,
+            pg_sys::Datum::from(typid),
+        );
+        if tup.is_null() {
+            return None;
+        }
+        let form = pg_sys::GETSTRUCT(tup).cast::<pg_sys::FormData_pg_type>();
+        let name = std::ffi::CStr::from_ptr((*form).typname.data.as_ptr())
+            .to_string_lossy()
+            .into_owned();
+        pg_sys::ReleaseSysCache(tup);
+        Some(name)
+    }
+
+    /// Expand a `ROLLUP`/`CUBE` grouping-set aggregate into a `UNION ALL` of
+    /// ordinary grouped aggregates with NULL-padded columns — semantically
+    /// equivalent to GROUP BY GROUPING SETS, reusing Ra's grouped-aggregate
+    /// and set-op builders instead of PostgreSQL's MixedAggregate machinery.
+    ///
+    /// `group_by` must be a single `__rollup(cols...)` or `__cube(cols...)`
+    /// marker (emitted by the parser). For each grouping set, a branch groups
+    /// by that set and replaces every grouping column not in the set with a
+    /// typed NULL in the output. Returns None for anything else (normal GROUP
+    /// BY, non-column grouping args, unresolved types) so the caller proceeds
+    /// with the regular grouped-aggregate build.
+    unsafe fn expand_grouping_sets(
+        &self,
+        columns: &[ProjectionColumn],
+        group_by: &[ra_core::expr::Expr],
+        agg_input: &RelExpr,
+    ) -> Option<RelExpr> {
+        use ra_core::expr::{Const, Expr};
+        let [Expr::Function { name, args }] = group_by else {
+            return None;
+        };
+        let cube = match name.as_str() {
+            "__rollup" => false,
+            "__cube" => true,
+            _ => return None,
+        };
+        let mut gcols: Vec<&ra_core::expr::ColumnRef> = Vec::new();
+        for a in args {
+            match a {
+                Expr::Column(c) => gcols.push(c),
+                _ => return None,
+            }
+        }
+        let n = gcols.len();
+        if n == 0 || n > 12 {
+            return None;
+        }
+        // Grouping sets as index lists into `gcols`.
+        let sets: Vec<Vec<usize>> = if cube {
+            (0..(1usize << n))
+                .map(|mask| (0..n).filter(|i| mask & (1 << i) != 0).collect())
+                .collect()
+        } else {
+            (0..=n).rev().map(|k| (0..k).collect()).collect()
+        };
+        // Typed NULL for each grouping column.
+        let mut null_exprs: Vec<Expr> = Vec::with_capacity(n);
+        for c in &gcols {
+            let tn = self.column_type_name(c, agg_input)?;
+            null_exprs.push(Expr::Cast {
+                expr: Box::new(Expr::Const(Const::Null)),
+                target_type: tn,
+            });
+        }
+        let mut branches: Vec<RelExpr> = Vec::with_capacity(sets.len());
+        for set in &sets {
+            let group_keys: Vec<Expr> =
+                set.iter().map(|&i| Expr::Column(gcols[i].clone())).collect();
+            let out: Vec<ProjectionColumn> = columns
+                .iter()
+                .map(|pc| {
+                    if let Expr::Column(pcol) = &pc.expr {
+                        if let Some(j) = gcols.iter().position(|g| {
+                            g.column.eq_ignore_ascii_case(&pcol.column) && g.table == pcol.table
+                        }) {
+                            if !set.contains(&j) {
+                                return ProjectionColumn {
+                                    expr: null_exprs[j].clone(),
+                                    alias: pc.alias.clone(),
+                                };
+                            }
+                        }
+                    }
+                    pc.clone()
+                })
+                .collect();
+            branches.push(RelExpr::Project {
+                columns: out,
+                input: Box::new(RelExpr::Aggregate {
+                    group_by: group_keys,
+                    aggregates: Vec::new(),
+                    input: Box::new(agg_input.clone()),
+                }),
+            });
+        }
+        let mut it = branches.into_iter();
+        let mut acc = it.next()?;
+        for b in it {
+            acc = RelExpr::Union { all: true, left: Box::new(acc), right: Box::new(b) };
+        }
+        Some(acc)
     }
 
     /// Expand `SELECT *` / `t.*` projection columns into one column per
@@ -3744,6 +3887,9 @@ impl PlanBuilder {
             pg_sys::NodeTag::T_RelabelType => {
                 self.remap_agg_input_vars((*node.cast::<pg_sys::RelabelType>()).arg.cast(), colmap)
             }
+            pg_sys::NodeTag::T_CoerceViaIO => {
+                self.remap_agg_input_vars((*node.cast::<pg_sys::CoerceViaIO>()).arg.cast(), colmap)
+            }
             pg_sys::NodeTag::T_CaseExpr => {
                 let ce = node.cast::<pg_sys::CaseExpr>();
                 if !(*ce).arg.is_null()
@@ -4033,6 +4179,16 @@ impl PlanBuilder {
             Expr::Const(_) => {
                 let e = expr_translator::translate(expr, &self.expr_ctx);
                 (!e.is_null()).then_some(e)
+            }
+            // A cast (e.g. NULL::type used to pad a grouping-set branch, or a
+            // cast over a column) — translate it and remap any column Vars to
+            // the aggregate input frame; constant casts have no Vars to remap.
+            Expr::Cast { .. } => {
+                let e = expr_translator::translate(expr, &self.expr_ctx);
+                if e.is_null() || !self.remap_agg_input_vars(e.cast(), colmap) {
+                    return None;
+                }
+                Some(e)
             }
             Expr::BinOp { op: ra_core::expr::BinOp::And, left, right } => {
                 let l = self.build_agg_out_expr(left, in_tlist, colmap, aggno)?;

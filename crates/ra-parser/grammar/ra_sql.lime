@@ -784,11 +784,13 @@ group_by_item(A) ::= IDENT IDENT LPAREN grouping_set_list(B) RPAREN.
     A = ra_func(ctx.user, "__grouping_sets", B);
 }
 
-/* ROLLUP (col1, col2, ...) */
-group_by_item(A) ::= IDENT LPAREN expr_list(B) RPAREN. 
+/* ROLLUP (col1, col2, ...) or CUBE (col1, col2, ...) */
+group_by_item(A) ::= IDENT(I) LPAREN expr_list(B) RPAREN. 
 %action_rust {
-    /* ROLLUP(...) or CUBE(...) - mark with function based on ident */
-    A = ra_func(ctx.user, "__rollup", B);
+    /* Distinguish ROLLUP from CUBE by the leading identifier; both carry
+       their grouping columns as args. Any other ident is treated as ROLLUP. */
+    let marker = if I.text().eq_ignore_ascii_case("cube") { "__cube" } else { "__rollup" };
+    A = ra_func(ctx.user, marker, B);
 }
 
 /* List of grouping sets: (col1, col2), (col1), () */
