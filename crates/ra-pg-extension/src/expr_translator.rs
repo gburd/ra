@@ -56,6 +56,22 @@ pub struct ExprContext {
     /// `Var(rtindex, position)` of that CTE's scan. A map (not a single scope)
     /// because a join can reference several CTEs at once.
     pub cte_join_scope: std::cell::RefCell<std::collections::HashMap<String, CteScope>>,
+    /// Active correlation parameters for a LATERAL / correlated inner subquery
+    /// built as the inner of a parameterized nested loop. Keyed by
+    /// `(lower(qualifier), lower(column))` of the OUTER column referenced
+    /// inside the inner; resolves to a PARAM_EXEC Param fed by nestParams.
+    pub correlation_scope:
+        std::cell::RefCell<std::collections::HashMap<(String, String), CorrParam>>,
+}
+
+/// A correlation parameter: the PARAM_EXEC id and type of an outer column
+/// referenced inside a LATERAL / correlated inner subquery.
+#[derive(Clone, Copy)]
+pub struct CorrParam {
+    pub paramid: i32,
+    pub typ: pg_sys::Oid,
+    pub typmod: i32,
+    pub coll: pg_sys::Oid,
 }
 
 /// One output column of an inlined subquery/derived table.
@@ -303,6 +319,24 @@ unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *m
                     return var.cast();
                 }
             }
+        }
+    }
+
+    // Correlation parameter resolution: inside a LATERAL / correlated inner
+    // subquery, a column qualified with the outer relation resolves to a
+    // PARAM_EXEC Param (fed by the nested loop's nestParams), not a Var.
+    if let Some(t) = col.table.as_deref() {
+        let key = (t.to_lowercase(), col.column.to_lowercase());
+        if let Some(cp) = ctx.correlation_scope.borrow().get(&key) {
+            let p = alloc::<pg_sys::Param>();
+            (*p).xpr.type_ = pg_sys::NodeTag::T_Param;
+            (*p).paramkind = pg_sys::ParamKind::PARAM_EXEC;
+            (*p).paramid = cp.paramid;
+            (*p).paramtype = cp.typ;
+            (*p).paramtypmod = cp.typmod;
+            (*p).paramcollid = cp.coll;
+            (*p).location = -1;
+            return p.cast();
         }
     }
 
