@@ -7211,6 +7211,23 @@ fn inline_cte_scan(body: &RelExpr, name: &str, def: &RelExpr) -> RelExpr {
             right: rec(right),
             all: *all,
         },
+        // Nested CTE: inline `name` into the inner CTE's definition and body so
+        // a multi-CTE query (`WITH a AS (...), b AS (...) ...`) resolves
+        // references to `a` that appear inside `b`'s scope or the final body.
+        // If the inner CTE shadows `name`, its body refers to the inner
+        // definition, so do not inline the outer one there.
+        RelExpr::CTE { name: cname, definition, body } => {
+            let new_body = if cname.eq_ignore_ascii_case(name) {
+                body.clone()
+            } else {
+                rec(body)
+            };
+            RelExpr::CTE {
+                name: cname.clone(),
+                definition: rec(definition),
+                body: new_body,
+            }
+        }
         RelExpr::Except { left, right, all } => RelExpr::Except {
             left: rec(left),
             right: rec(right),
