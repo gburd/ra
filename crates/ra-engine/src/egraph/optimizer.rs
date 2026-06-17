@@ -863,6 +863,18 @@ impl Optimizer {
         expr.children().iter().any(|c| Self::contains_graph_table(c))
     }
 
+    /// True if the tree contains a recursive CTE. Its recursive term scans the
+    /// CTE worktable (no catalog relation), so the rewrite rules must not be
+    /// applied to it — in particular index-access-path selection would turn the
+    /// worktable scan into an `IndexOnlyScan` of a non-existent relation. Like
+    /// GRAPH_TABLE, a recursive CTE is kept opaque to equality saturation.
+    fn contains_recursive_cte(expr: &RelExpr) -> bool {
+        if matches!(expr, RelExpr::RecursiveCTE { .. }) {
+            return true;
+        }
+        expr.children().iter().any(|c| Self::contains_recursive_cte(c))
+    }
+
     /// Optimize DML sub-relations without putting the DML envelope
     /// through equality saturation.
     ///
@@ -1033,6 +1045,15 @@ impl Optimizer {
         if Self::contains_graph_table(expr) {
             debug!("GRAPH_TABLE fast-path: skipping e-graph");
             self.record_fast_path_trace(expr, "graph_table_fast_path", 0.0);
+            return Ok(expr.clone());
+        }
+
+        // 2a''. Recursive-CTE fast-path: the recursive term scans the CTE
+        // worktable, which the rewrite rules would mis-optimize (e.g. into an
+        // IndexOnlyScan of a non-existent relation). Keep it opaque.
+        if Self::contains_recursive_cte(expr) {
+            debug!("Recursive-CTE fast-path: skipping e-graph");
+            self.record_fast_path_trace(expr, "recursive_cte_fast_path", 0.0);
             return Ok(expr.clone());
         }
 
@@ -2023,6 +2044,21 @@ impl Optimizer {
         // and PostgreSQL 19 executes GRAPH_TABLE natively. Return it
         // unchanged rather than failing extraction.
         if Self::contains_graph_table(expr) {
+            return Ok(OptimizationResult {
+                plan: expr.clone(),
+                cost: 0.0,
+                status: OptimizationStatus::Complete,
+                resource_usage: tracker.report(),
+                applied_rules: None,
+                rule_tracking: None,
+                provenance: None,
+                physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+            });
+        }
+
+        // Recursive-CTE fast-path: keep it opaque to the rewrite rules (the
+        // recursive term scans the CTE worktable, not a catalog relation).
+        if Self::contains_recursive_cte(expr) {
             return Ok(OptimizationResult {
                 plan: expr.clone(),
                 cost: 0.0,

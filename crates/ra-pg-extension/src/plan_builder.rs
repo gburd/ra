@@ -791,12 +791,19 @@ impl PlanBuilder {
                 // other shape falls through to the generic build below.
                 if let RelExpr::Filter { predicate, input: fi } = &**input {
                     if let RelExpr::Scan { table, alias } = &**fi {
+                        // The in-scope recursive-CTE worktable is not a catalog
+                        // relation; skip the catalog-dependent index peephole
+                        // (Scan(cte) builds as a WorkTableScan/CteScan below).
+                        let is_cte_worktable = self
+                            .cte_runtime
+                            .as_ref()
+                            .is_some_and(|rt| table.eq_ignore_ascii_case(&rt.name));
                         let scan_key = alias.as_deref().unwrap_or(table);
                         let force_seq = matches!(
                             self.physical_choices.scan_for(scan_key),
                             Some(ra_engine::plan_advice_physical::ScanStrategy::Seq)
                         );
-                        if !force_seq {
+                        if !force_seq && !is_cte_worktable {
                             if let Some(plan) =
                                 self.try_build_index_only_scan(table, "auto", columns, predicate)?
                             {
