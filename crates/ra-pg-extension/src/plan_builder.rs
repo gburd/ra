@@ -2442,7 +2442,11 @@ impl PlanBuilder {
         (*node).firstColType = first_type;
         (*node).firstColTypmod = first_typmod;
         (*node).firstColCollation = first_coll;
-        (*node).useHashTable = false;
+        // Hash the subquery result once for an uncorrelated IN/NOT IN, instead
+        // of rescanning it per outer row (PG's "hashed SubPlan"). The executor
+        // builds a separate null-hashtable when unknownEqFalse is false, so NOT
+        // IN's NULL semantics are preserved.
+        (*node).useHashTable = params.is_empty();
         // Keep UNKNOWN distinct from FALSE so NOT IN's NULL semantics hold.
         (*node).unknownEqFalse = false;
         (*node).parallel_safe = false;
