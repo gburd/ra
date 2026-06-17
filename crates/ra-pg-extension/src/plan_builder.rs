@@ -1882,9 +1882,11 @@ impl PlanBuilder {
         // empty (palloc0 default).
         (*node).indexorderdir = pg_sys::ScanDirection::ForwardScanDirection;
 
-        // indextlist: one entry per index key column, as an INDEX_VAR Var of
-        // the column's type. The executor uses it to reconstruct tuples from
-        // the index without touching the heap.
+        // indextlist: one entry per index key column. PostgreSQL maps each
+        // index position to the *underlying heap* Var (varno = scan rtindex,
+        // varattno = heap attno); EXPLAIN's resolve_special_varno follows this
+        // to name an INDEX_VAR. Using an INDEX_VAR here is self-referential and
+        // sends resolve_special_varno into an infinite loop (EXPLAIN hangs).
         let mut indextlist = std::ptr::null_mut::<pg_sys::List>();
         for (i, colname) in info.columns.iter().enumerate() {
             let Ok(cname) = std::ffi::CString::new(colname.as_str()) else {
@@ -1894,8 +1896,8 @@ impl PlanBuilder {
             let typ = pg_sys::get_atttype(rel_oid, attno);
             let var = self.alloc_node::<pg_sys::Var>();
             (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
-            (*var).varno = pg_sys::INDEX_VAR as i32;
-            (*var).varattno = (i + 1) as i16;
+            (*var).varno = rtindex as i32;
+            (*var).varattno = attno;
             (*var).vartype = typ;
             (*var).vartypmod = -1;
             (*var).varcollid = pg_sys::get_typcollation(typ);
