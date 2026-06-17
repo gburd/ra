@@ -202,6 +202,7 @@ impl PlanBuilder {
             rtoid_map,
             subplans: std::cell::RefCell::new(HashMap::new()),
             cte_scope: std::cell::RefCell::new(None),
+            subquery_scope: std::cell::RefCell::new(None),
         };
         let stats = gathered_stats
             .iter()
@@ -709,6 +710,23 @@ impl PlanBuilder {
                             Some(predicate),
                         );
                     }
+                    // Project(Filter(Project(Aggregate))) — an aggregating
+                    // derived table whose computed output is filtered and
+                    // projected by the outer query (a SubqueryScan in PG).
+                    // Build the inner aggregate, then a Result that applies the
+                    // outer filter + projection against its output columns.
+                    if matches!(&**fi, RelExpr::Project { input: pp, .. }
+                        if matches!(&**pp, RelExpr::Aggregate { .. }))
+                    {
+                        return self.build_subquery_scan(fi, Some(predicate), columns);
+                    }
+                }
+                // Project(Project(Aggregate)) — an aggregating derived table
+                // selected (no outer filter): SubqueryScan over the aggregate.
+                if matches!(&**input, RelExpr::Project { input: pp, .. }
+                    if matches!(&**pp, RelExpr::Aggregate { .. }))
+                {
+                    return self.build_subquery_scan(input, None, columns);
                 }
                 // Project over Join (optionally with a WHERE Filter between)
                 // is built as one NestLoop with remapped OUTER/INNER refs.
@@ -4230,6 +4248,105 @@ impl PlanBuilder {
             _ => None,
         }
     }
+    /// Output-column scope for an inlined subquery, derived from a child plan's
+    /// targetlist (1-based positions aligned with the targetlist so
+    /// `Var(scanrelid, pos)` references resolve correctly).
+    unsafe fn tlist_subquery_cols(
+        tlist: *mut pg_sys::List,
+    ) -> Vec<crate::expr_translator::SubqueryCol> {
+        let mut cols = Vec::new();
+        let n = pg_sys::list_length(tlist);
+        for i in 0..n {
+            let te = pg_sys::list_nth(tlist, i).cast::<pg_sys::TargetEntry>();
+            let (name, typ, coll) = if te.is_null() || (*te).expr.is_null() {
+                (String::new(), pg_sys::InvalidOid, pg_sys::InvalidOid)
+            } else {
+                let name = if (*te).resname.is_null() {
+                    String::new()
+                } else {
+                    std::ffi::CStr::from_ptr((*te).resname)
+                        .to_string_lossy()
+                        .to_lowercase()
+                };
+                (
+                    name,
+                    pg_sys::exprType((*te).expr.cast()),
+                    pg_sys::exprCollation((*te).expr.cast()),
+                )
+            };
+            cols.push(crate::expr_translator::SubqueryCol { name, typ, typmod: -1, coll });
+        }
+        cols
+    }
+
+    /// 1-based range-table index of the first `RTE_SUBQUERY` in the original
+    /// query — the derived table's RTE, used as a SubqueryScan's `scanrelid`.
+    unsafe fn first_subquery_rtindex(&self) -> Option<pg_sys::Index> {
+        let q = self.original_query;
+        if q.is_null() || (*q).rtable.is_null() {
+            return None;
+        }
+        let rt = (*q).rtable;
+        let e = (*rt).elements;
+        for i in 0..(*rt).length {
+            let rte = (*e.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+            if !rte.is_null() && (*rte).rtekind == pg_sys::RTEKind::RTE_SUBQUERY {
+                return Some((i + 1) as pg_sys::Index);
+            }
+        }
+        None
+    }
+
+    /// Build a `SubqueryScan` over an inlined derived table (an aggregating /
+    /// computing FROM sub-query) whose computed output is filtered and/or
+    /// projected by the outer query. Builds the inner subplan, then a
+    /// SubqueryScan whose `scanrelid` is the derived table's RTE and whose
+    /// qual/targetlist reference the subquery output via `Var(scanrelid, pos)`
+    /// (resolved by name through the subquery scope). Mirrors PostgreSQL.
+    unsafe fn build_subquery_scan(
+        &mut self,
+        inner: &RelExpr,
+        filter_pred: Option<&Expr>,
+        out_columns: &[ProjectionColumn],
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        let scanrelid = self
+            .first_subquery_rtindex()
+            .ok_or_else(|| unsupported("derived-table RTE not found"))?;
+        let child = self.build_plan(inner)?;
+        if child.is_null() || (*child).targetlist.is_null() {
+            return Err(unsupported("subquery scan input"));
+        }
+        *self.expr_ctx.subquery_scope.borrow_mut() =
+            Some(crate::expr_translator::SubqueryScope {
+                rtindex: scanrelid,
+                cols: Self::tlist_subquery_cols((*child).targetlist),
+            });
+
+        let node = self.alloc_node::<pg_sys::SubqueryScan>();
+        if node.is_null() {
+            self.expr_ctx.subquery_scope.replace(None);
+            return Err(PlanBuilderError::NullPointer("SubqueryScan".to_owned()));
+        }
+        (*node).scan.plan.type_ = pg_sys::NodeTag::T_SubqueryScan;
+        (*node).scan.scanrelid = scanrelid;
+        (*node).subplan = child;
+        let plan_ptr = &mut (*node).scan.plan as *mut pg_sys::Plan;
+        self.set_targetlist(plan_ptr, out_columns)?;
+        if let Some(pred) = filter_pred {
+            let q = expr_translator::translate(pred, &self.expr_ctx);
+            if q.is_null() {
+                self.expr_ctx.subquery_scope.replace(None);
+                return Err(unsupported("subquery scan filter not translatable"));
+            }
+            (*node).scan.plan.qual = pg_sys::lappend((*node).scan.plan.qual, q.cast());
+        }
+        (*node).scan.plan.plan_rows = (*child).plan_rows;
+        (*node).scan.plan.startup_cost = (*child).startup_cost;
+        (*node).scan.plan.total_cost = (*child).total_cost;
+        self.expr_ctx.subquery_scope.replace(None);
+        Ok(plan_ptr)
+    }
 
     /// Build an `Agg` plan node for `Project(out_columns)` over
     /// `Aggregate(group_by)`. Output columns may be group columns, supported
@@ -7131,6 +7248,48 @@ pub struct FlatRel {
     pub alias: Option<String>,
 }
 
+/// The single base relation a derived-table sub-query scans, as a `FlatRel`
+/// (alias `None`, so only the relation name is mapped — the derived table's
+/// own alias maps to its computed output, not to this relation). Returns
+/// `None` unless the sub-query's range table is exactly one base relation.
+/// Used to pull the scan of an aggregating/computing derived table up into the
+/// flat range table so the inlined scan resolves.
+unsafe fn subquery_single_base(rte: *mut pg_sys::RangeTblEntry) -> Option<FlatRel> {
+    let sq = (*rte).subquery;
+    if sq.is_null() || (*sq).rtable.is_null() {
+        return None;
+    }
+    let srt = (*sq).rtable;
+    if srt.is_null() {
+        return None;
+    }
+    // Find the single base relation among the sub-query's range table. A
+    // GROUP BY adds an RTE_GROUP entry (PG 16+) and aggregation may add an
+    // RTE_RESULT, so the range table is not necessarily length 1; require
+    // exactly one RTE_RELATION.
+    let sre = (*srt).elements;
+    let mut base: *mut pg_sys::RangeTblEntry = std::ptr::null_mut();
+    let mut relation_count = 0;
+    for i in 0..(*srt).length {
+        let e = (*sre.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
+        if !e.is_null() && (*e).rtekind == pg_sys::RTEKind::RTE_RELATION {
+            relation_count += 1;
+            base = e;
+        }
+    }
+    if relation_count != 1 || base.is_null() {
+        return None;
+    }
+    let inner = base;
+    let perminfo = if (*inner).perminfoindex > 0 && !(*sq).rteperminfos.is_null() {
+        pg_sys::list_nth((*sq).rteperminfos, ((*inner).perminfoindex - 1) as i32)
+            as *mut pg_sys::RTEPermissionInfo
+    } else {
+        std::ptr::null_mut()
+    };
+    Some(FlatRel { rte: inner, perminfo, alias: None })
+}
+
 /// Verify a derived-table sub-query is a single-relation *passthrough*
 /// (`SELECT <cols> FROM rel [WHERE ...]`, no rename/compute/aggregate/limit),
 /// returning the inner base relation and its perminfo. Only then is mapping
@@ -7297,6 +7456,15 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
                 continue;
             }
             let Some((inner, perminfo)) = subquery_passthrough(rte) else {
+                // Not a passthrough (e.g. an aggregating derived table
+                // `(SELECT k, sum(x) s FROM r GROUP BY k) t`). Pull up the
+                // single base relation it scans so the inlined scan resolves;
+                // the derived table's computed output columns (t.s) are
+                // resolved by the subquery-output scope when building the
+                // Result over the aggregate, NOT by mapping the alias.
+                if let Some(fr) = subquery_single_base(rte) {
+                    out.push(fr);
+                }
                 continue;
             };
             let alias = if !(*rte).eref.is_null() && !(*(*rte).eref).aliasname.is_null() {

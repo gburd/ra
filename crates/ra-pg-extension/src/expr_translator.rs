@@ -45,6 +45,27 @@ pub struct ExprContext {
     /// Active CTE output-column scope for recursive-CTE recursive-term / body
     /// translation (columns resolve to a WorkTableScan / CteScan, not catalog).
     pub cte_scope: std::cell::RefCell<Option<CteScope>>,
+    /// Active subquery output-column scope: when building a SubqueryScan over
+    /// an inlined derived table (whose computed output columns have no catalog
+    /// entry), columns resolve to `Var(rtindex, position)` of the subquery RTE
+    /// by name. Used for aggregating/computing derived tables.
+    pub subquery_scope: std::cell::RefCell<Option<SubqueryScope>>,
+}
+
+/// One output column of an inlined subquery/derived table.
+pub struct SubqueryCol {
+    /// Lower-cased output column name (or alias).
+    pub name: String,
+    pub typ: pg_sys::Oid,
+    pub typmod: i32,
+    pub coll: pg_sys::Oid,
+}
+
+/// The output columns of an in-scope derived table and the range-table index
+/// of its subquery RTE (the `SubqueryScan`'s `scanrelid`).
+pub struct SubqueryScope {
+    pub rtindex: pg_sys::Index,
+    pub cols: Vec<SubqueryCol>,
 }
 
 /// One output column of a CTE (no catalog entry; types come from the RTE_CTE).
@@ -225,6 +246,29 @@ unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *m
         Ok(cs) => cs,
         Err(_) => return std::ptr::null_mut(),
     };
+
+    // Subquery output-column resolution: when building a Filter/Project over an
+    // inlined derived table, a column refers to that subquery's computed output
+    // (no catalog entry). Resolve it to an OUTER_VAR reference into the child
+    // plan's output by name. Matched by column name (the subquery is the sole
+    // input at this level); a derived-table qualifier (`t.s`) is accepted.
+    if let Some(scope) = ctx.subquery_scope.borrow().as_ref() {
+        let want = col.column.to_lowercase();
+        for (i, c) in scope.cols.iter().enumerate() {
+            if c.name == want {
+                let var = alloc::<pg_sys::Var>();
+                (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+                (*var).varno = scope.rtindex as i32;
+                (*var).varattno = (i + 1) as i16;
+                (*var).vartype = c.typ;
+                (*var).vartypmod = c.typmod;
+                (*var).varcollid = c.coll;
+                (*var).varlevelsup = 0;
+                (*var).location = -1;
+                return var.cast();
+            }
+        }
+    }
 
     // CTE-column resolution: when building a recursive CTE's recursive term
     // or body, columns refer to the CTE's output (a WorkTableScan / CteScan),
