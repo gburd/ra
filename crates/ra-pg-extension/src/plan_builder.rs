@@ -4279,8 +4279,10 @@ impl PlanBuilder {
         cols
     }
 
-    /// 1-based range-table index of the first `RTE_SUBQUERY` in the original
-    /// query — the derived table's RTE, used as a SubqueryScan's `scanrelid`.
+    /// 1-based range-table index of the first `RTE_SUBQUERY` or `RTE_CTE` in
+    /// the original query — the derived table / CTE RTE used as a
+    /// SubqueryScan's `scanrelid` when building an inlined aggregating derived
+    /// table or CTE.
     unsafe fn first_subquery_rtindex(&self) -> Option<pg_sys::Index> {
         let q = self.original_query;
         if q.is_null() || (*q).rtable.is_null() {
@@ -4290,7 +4292,12 @@ impl PlanBuilder {
         let e = (*rt).elements;
         for i in 0..(*rt).length {
             let rte = (*e.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
-            if !rte.is_null() && (*rte).rtekind == pg_sys::RTEKind::RTE_SUBQUERY {
+            if !rte.is_null()
+                && matches!(
+                    (*rte).rtekind,
+                    pg_sys::RTEKind::RTE_SUBQUERY | pg_sys::RTEKind::RTE_CTE
+                )
+            {
                 return Some((i + 1) as pg_sys::Index);
             }
         }
@@ -7450,8 +7457,17 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
             let cre = (*crt).elements;
             for i in 0..(*crt).length {
                 let rte = (*cre.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
-                if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
-                    return Vec::new();
+                if rte.is_null() {
+                    continue;
+                }
+                match (*rte).rtekind {
+                    pg_sys::RTEKind::RTE_RELATION => {}
+                    // GROUP BY / aggregation add bookkeeping entries (PG16+);
+                    // they carry no scan, so skip them rather than bailing.
+                    pg_sys::RTEKind::RTE_GROUP | pg_sys::RTEKind::RTE_RESULT => continue,
+                    // A nested subquery/join/etc. in the CTE is beyond the
+                    // base-relation shape that flattens cleanly: defer.
+                    _ => return Vec::new(),
                 }
                 let perminfo = if (*rte).perminfoindex > 0 && !(*cq).rteperminfos.is_null() {
                     pg_sys::list_nth((*cq).rteperminfos, ((*rte).perminfoindex - 1) as i32)
