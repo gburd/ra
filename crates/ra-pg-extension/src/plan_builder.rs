@@ -217,6 +217,7 @@ impl PlanBuilder {
             cte_scope: std::cell::RefCell::new(None),
             subquery_scope: std::cell::RefCell::new(None),
             cte_join_scope: std::cell::RefCell::new(HashMap::new()),
+            correlation_scope: std::cell::RefCell::new(HashMap::new()),
         };
         let stats = gathered_stats
             .iter()
@@ -2428,6 +2429,44 @@ impl PlanBuilder {
         }
     }
 
+    /// Mark every node of a subplan tree as depending on the given PARAM_EXEC
+    /// parameters (`extParam`/`allParam`). Ra does not run PostgreSQL's
+    /// `SS_finalize_plan`, so without this a parameterized nested-loop inner
+    /// would never be rescanned when the outer correlation value changes.
+    unsafe fn mark_param_deps(plan: *mut pg_sys::Plan, pids: &[i32]) {
+        if plan.is_null() || pids.is_empty() {
+            return;
+        }
+        let mut bms: *mut pg_sys::Bitmapset = std::ptr::null_mut();
+        for &p in pids {
+            bms = pg_sys::bms_add_member(bms, p);
+        }
+        (*plan).extParam = pg_sys::bms_union((*plan).extParam, bms);
+        (*plan).allParam = pg_sys::bms_union((*plan).allParam, bms);
+        Self::mark_param_deps((*plan).lefttree, pids);
+        Self::mark_param_deps((*plan).righttree, pids);
+        if (*plan).type_ == pg_sys::NodeTag::T_SubqueryScan {
+            Self::mark_param_deps((*plan.cast::<pg_sys::SubqueryScan>()).subplan, pids);
+        }
+    }
+
+    /// The alias (eref aliasname) of the range-table entry at `rtindex`.
+    unsafe fn rte_alias_name(&self, rtindex: pg_sys::Index) -> Option<String> {
+        if self.original_query.is_null() || (*self.original_query).rtable.is_null() {
+            return None;
+        }
+        let rte = pg_sys::list_nth((*self.original_query).rtable, (rtindex - 1) as i32)
+            as *mut pg_sys::RangeTblEntry;
+        if rte.is_null() || (*rte).eref.is_null() || (*(*rte).eref).aliasname.is_null() {
+            return None;
+        }
+        Some(
+            std::ffi::CStr::from_ptr((*(*rte).eref).aliasname)
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+
     /// Locate the `RTE_CTE` for `name` in the original query's range table and
     /// extract its range-table index and output columns.
     unsafe fn find_cte_rte(
@@ -3131,6 +3170,212 @@ impl PlanBuilder {
         Ok(Some((join_plan, out_map, out_tl)))
     }
 
+    /// Build a correlated LATERAL join `outer JOIN LATERAL (inner) t ON true`
+    /// (where `inner` references outer columns) as a parameterized `NestLoop`:
+    /// each referenced outer column becomes a PARAM_EXEC parameter resolved
+    /// inside the inner, and `nestParams` feed the outer values in. The inner
+    /// is built directly (no SubqueryScan wrapper — matching PostgreSQL's own
+    /// plan for this shape). Returns `None` for anything it cannot handle.
+    unsafe fn try_correlated_lateral(
+        &mut self,
+        join_type: JoinType,
+        condition: &Expr,
+        left: &RelExpr,
+        right: &RelExpr,
+        where_pred: Option<&Expr>,
+        out_columns: Option<&[ProjectionColumn]>,
+    ) -> Result<Option<(*mut pg_sys::Plan, JoinColMap, *mut pg_sys::List)>, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        let cond_trivially_true = matches!(condition, Expr::Const(ra_core::expr::Const::Bool(true)))
+            || matches!(condition, Expr::Const(ra_core::expr::Const::Int(n)) if *n != 0);
+        if !matches!(join_type, JoinType::Inner) || !cond_trivially_true {
+            return Ok(None);
+        }
+        let Some(out_cols) = out_columns else {
+            return Ok(None);
+        };
+        let Some(outer_tbl) = single_base_table(left) else {
+            return Ok(None);
+        };
+        let outer_alias =
+            ra_engine::plan_advice_physical::inner_join_alias(left).unwrap_or(outer_tbl.clone());
+
+        // Correlation columns: outer-qualified columns referenced in the inner.
+        let allcols: Vec<ra_core::expr::ColumnRef> = right.referenced_columns();
+        let mut corr: Vec<ra_core::expr::ColumnRef> = Vec::new();
+        for c in allcols {
+            let is_outer = c.table.as_deref().is_some_and(|t| {
+                t.eq_ignore_ascii_case(&outer_alias) || t.eq_ignore_ascii_case(&outer_tbl)
+            });
+            if is_outer
+                && !corr
+                    .iter()
+                    .any(|e: &ra_core::expr::ColumnRef| e.column.eq_ignore_ascii_case(&c.column))
+            {
+                corr.push(c);
+            }
+        }
+        if corr.is_empty() {
+            return Ok(None);
+        }
+        let Some(t_rtindex) = self.first_subquery_rtindex() else {
+            return Ok(None);
+        };
+        let Some(t_alias) = self.rte_alias_name(t_rtindex) else {
+            return Ok(None);
+        };
+
+        // Build the outer; locate each correlation key's output position.
+        // Push an outer-only WHERE onto the outer input so the lateral inner is
+        // evaluated only for surviving outer rows (matching PG's filter
+        // pushdown); a WHERE that also references the lateral output must stay
+        // as the join qual.
+        let where_outer_only = match where_pred {
+            None => true,
+            Some(w) => {
+                let probe = RelExpr::Filter {
+                    predicate: w.clone(),
+                    input: Box::new(RelExpr::Scan {
+                        table: "__probe".to_owned(),
+                        alias: None,
+                    }),
+                };
+                !probe.referenced_columns().iter().any(|c| {
+                    c.table.as_deref().is_some_and(|t| t.eq_ignore_ascii_case(&t_alias))
+                })
+            }
+        };
+        let pushed_outer;
+        let outer_to_build: &RelExpr = match (where_outer_only, where_pred) {
+            (true, Some(w)) => {
+                pushed_outer = RelExpr::Filter {
+                    predicate: w.clone(),
+                    input: Box::new(left.clone()),
+                };
+                &pushed_outer
+            }
+            _ => left,
+        };
+        let (lplan, lmap, _ltl) = self.build_join_tree(outer_to_build)?;
+        let (Ok(outer_oid), Ok(outer_rti)) =
+            (self.rel_oid_for(&outer_tbl), self.rtindex_for(&outer_tbl))
+        else {
+            return Ok(None);
+        };
+        let mut nest_params: *mut pg_sys::List = std::ptr::null_mut();
+        let mut corr_pids: Vec<i32> = Vec::new();
+        for c in &corr {
+            let cname = match CString::new(c.column.as_str()) {
+                Ok(s) => s,
+                Err(_) => return Ok(None),
+            };
+            let attno = pg_sys::get_attnum(outer_oid, cname.as_ptr());
+            if attno <= 0 {
+                return Ok(None);
+            }
+            let typ = pg_sys::get_atttype(outer_oid, attno);
+            let Some(&outer_pos) = lmap.get(&(outer_rti as i32, attno)) else {
+                return Ok(None);
+            };
+            let pid = self.alloc_param(typ);
+            corr_pids.push(pid);
+            let coll = pg_sys::get_typcollation(typ);
+            self.expr_ctx.correlation_scope.borrow_mut().insert(
+                (outer_alias.to_lowercase(), c.column.to_lowercase()),
+                crate::expr_translator::CorrParam { paramid: pid, typ, typmod: -1, coll },
+            );
+            let nlp = self.alloc_node::<pg_sys::NestLoopParam>();
+            (*nlp).type_ = pg_sys::NodeTag::T_NestLoopParam;
+            (*nlp).paramno = pid;
+            let pv = self.alloc_node::<pg_sys::Var>();
+            (*pv).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*pv).varno = pg_sys::OUTER_VAR;
+            (*pv).varattno = outer_pos as i16;
+            (*pv).vartype = typ;
+            (*pv).vartypmod = -1;
+            (*pv).varcollid = coll;
+            (*pv).varlevelsup = 0;
+            (*nlp).paramval = pv;
+            nest_params = pg_sys::lappend(nest_params, nlp.cast());
+        }
+
+        // Build the inner directly (correlation cols resolve to Params). No
+        // SubqueryScan wrapper: PostgreSQL puts the Aggregate straight under
+        // the nested loop, and an extra hand-built SubqueryScan layer risks a
+        // tuple-descriptor / rescan inconsistency.
+        let inner_result = self.build_plan(right);
+        self.expr_ctx.correlation_scope.borrow_mut().clear();
+        let rplan = inner_result?;
+        if rplan.is_null() || (*rplan).targetlist.is_null() {
+            return Err(unsupported("lateral inner subplan"));
+        }
+        // Mark the inner as param-dependent so the nested loop rescans it.
+        Self::mark_param_deps(rplan, &corr_pids);
+
+        // The lateral alias resolves its output columns to the inner by
+        // position (rmap keyed on a synthetic t_rtindex).
+        let cols = Self::tlist_subquery_cols((*rplan).targetlist);
+        let mut rmap: JoinColMap = JoinColMap::new();
+        for i in 0..cols.len() {
+            rmap.insert((t_rtindex as i32, (i + 1) as i16), (i + 1) as i32);
+        }
+        let scope_cols: Vec<CteCol> = cols
+            .iter()
+            .map(|c| CteCol { name: c.name.clone(), typ: c.typ, typmod: c.typmod, coll: c.coll })
+            .collect();
+        self.expr_ctx.cte_join_scope.borrow_mut().insert(
+            t_alias.to_lowercase(),
+            CteScope { name: t_alias.to_lowercase(), rtindex: t_rtindex, cols: scope_cols },
+        );
+
+        // Output targetlist (projected, remapped to OUTER/INNER).
+        let cleanup = |s: &Self| {
+            s.expr_ctx.cte_join_scope.borrow_mut().remove(&t_alias.to_lowercase());
+        };
+        let mut out_tl: *mut pg_sys::List = std::ptr::null_mut();
+        for (i, pc) in out_cols.iter().enumerate() {
+            let e = expr_translator::translate(&pc.expr, &self.expr_ctx);
+            if e.is_null() || !self.remap_join_vars(e.cast(), &lmap, &rmap) {
+                cleanup(self);
+                return Ok(None);
+            }
+            let rn = pc
+                .alias
+                .as_deref()
+                .or_else(|| crate::sort_utils::extract_column_name(&pc.expr))
+                .and_then(|n| CString::new(n).ok())
+                .map_or(std::ptr::null_mut(), |c| pg_sys::pstrdup(c.as_ptr()));
+            let te = pg_sys::makeTargetEntry(e, (i + 1) as i16, rn, false);
+            out_tl = pg_sys::lappend(out_tl, te.cast());
+        }
+        let mut where_q = std::ptr::null_mut::<pg_sys::Node>();
+        if let Some(w) = where_pred {
+            if !where_outer_only {
+                let q = expr_translator::translate(w, &self.expr_ctx);
+                if q.is_null() || !self.remap_join_vars(q.cast(), &lmap, &rmap) {
+                    cleanup(self);
+                    return Ok(None);
+                }
+                where_q = q.cast();
+            }
+        }
+        cleanup(self);
+
+        let node = self.alloc_node::<pg_sys::NestLoop>();
+        (*node).join.plan.type_ = pg_sys::NodeTag::T_NestLoop;
+        (*node).join.jointype = ra_join_type_to_pg(join_type);
+        (*node).join.plan.lefttree = lplan;
+        (*node).join.plan.righttree = rplan;
+        (*node).nestParams = nest_params;
+        let join_plan = &mut (*node).join.plan as *mut pg_sys::Plan;
+        if !where_q.is_null() {
+            (*join_plan).qual = pg_sys::lappend((*join_plan).qual, where_q.cast());
+        }
+        (*join_plan).targetlist = out_tl;
+        self.propagate_costs_binary(&mut *join_plan, lplan, rplan);
+        Ok(Some((join_plan, JoinColMap::new(), out_tl)))
+    }
+
     /// Build one `NestLoop` join node over two (possibly nested) join inputs,
     /// with the ON `condition` as joinqual and an optional `where_pred` as the
     /// post-join `plan.qual` (both remapped to the children's OUTER/INNER
@@ -3151,6 +3396,12 @@ impl PlanBuilder {
             JoinType::FullOuter | JoinType::RightOuter | JoinType::Semi | JoinType::Anti
                 if out_columns.is_some() => {}
             _ => return Err(unsupported("nested join type")),
+        }
+        // A correlated LATERAL inner is built as a parameterized nested loop.
+        if let Some(r) = self
+            .try_correlated_lateral(join_type, condition, left, right, where_pred, out_columns)?
+        {
+            return Ok(r);
         }
         // Prefer an index nested-loop when the inner is indexed on the join key
         // and the outer is filtered (selective). Falls through to hash/nestloop
@@ -7443,7 +7694,18 @@ unsafe fn subquery_single_base(rte: *mut pg_sys::RangeTblEntry) -> Option<FlatRe
     } else {
         std::ptr::null_mut()
     };
-    Some(FlatRel { rte: inner, perminfo, alias: None })
+    // Carry the inner relation's alias (e.g. lineitem aliased `l` inside a
+    // LATERAL subquery) so alias-qualified columns of the inner resolve.
+    let alias = if !(*inner).eref.is_null() && !(*(*inner).eref).aliasname.is_null() {
+        Some(
+            std::ffi::CStr::from_ptr((*(*inner).eref).aliasname)
+                .to_string_lossy()
+                .to_lowercase(),
+        )
+    } else {
+        None
+    };
+    Some(FlatRel { rte: inner, perminfo, alias })
 }
 
 /// Verify a derived-table sub-query is a single-relation *passthrough*
