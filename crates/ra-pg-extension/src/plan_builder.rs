@@ -7349,7 +7349,11 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
     // Safety: if any pulled-up relation name collides with a relation already
     // in the main range table, name-based resolution would alias two distinct
     // scans to one rtindex (e.g. a self-referencing sub-query). Bail to the
-    // native planner in that case.
+    // native planner in that case. Exception: for a set operation, arms that
+    // scan the same base table are independent (separate Append subplans), so
+    // a duplicate relid is benign — dedupe it to a single shared rtindex
+    // rather than bailing.
+    let is_setop = !(*query).setOperations.is_null();
     let mut main_names = std::collections::HashSet::new();
     let mrt = (*query).rtable;
     let mre = (*mrt).elements;
@@ -7360,12 +7364,17 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
         }
     }
     let mut seen = main_names.clone();
-    for fr in &out {
+    let mut deduped = Vec::with_capacity(out.len());
+    for fr in out {
         if !seen.insert((*fr.rte).relid) {
+            if is_setop {
+                continue;
+            }
             return Vec::new();
         }
+        deduped.push(fr);
     }
-    out
+    deduped
 }
 
 /// Collect the sub-query of each SubLink reachable in a scalar expression
