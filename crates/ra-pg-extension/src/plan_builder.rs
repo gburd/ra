@@ -131,6 +131,9 @@ pub struct PlanBuilder {
     physical_choices: ra_engine::plan_advice_physical::PhysicalChoices,
     /// Inner plans for scalar sub-queries, in `PlannedStmt.subplans` order.
     subplans: Vec<*mut pg_sys::Plan>,
+    /// SubPlan nodes for uncorrelated scalar sub-queries, hoisted to InitPlans
+    /// (computed once) and attached to the top plan node's `initPlan` list.
+    init_subplans: Vec<*mut pg_sys::SubPlan>,
     /// PARAM_EXEC parameter types (becomes `PlannedStmt.paramExecTypes`).
     param_types: Vec<pg_sys::Oid>,
     /// Active recursive-CTE wiring while building its recursive term / body,
@@ -231,6 +234,7 @@ impl PlanBuilder {
             stats,
             physical_choices: ra_engine::plan_advice_physical::PhysicalChoices::new(),
             subplans: Vec::new(),
+            init_subplans: Vec::new(),
             param_types: Vec::new(),
             cte_runtime: None,
             cte_join_defs: HashMap::new(),
@@ -453,6 +457,13 @@ impl PlanBuilder {
         // translation can resolve them; Errs here defer to native PG.
         self.prepare_subplans(expr)?;
         let plan_tree = self.build_plan(expr)?;
+        // Attach hoisted InitPlans (uncorrelated scalar sub-queries) to the top
+        // plan node so they are computed once before the rest of the plan runs.
+        if !self.init_subplans.is_empty() && !plan_tree.is_null() {
+            for sp in &self.init_subplans {
+                (*plan_tree).initPlan = pg_sys::lappend((*plan_tree).initPlan, (*sp).cast());
+            }
+        }
 
         let stmt = self.alloc_node::<pg_sys::PlannedStmt>();
         if stmt.is_null() {
@@ -2326,6 +2337,28 @@ impl PlanBuilder {
         (*node).firstColCollation = first_coll;
         (*node).useHashTable = false;
         (*node).parallel_safe = false;
+        if params.is_empty() {
+            // Uncorrelated scalar sub-query: hoist to an InitPlan computed once
+            // (PostgreSQL does the same). Without this the SubPlan is
+            // re-executed for every outer row — e.g. `WHERE x < (SELECT avg(x)
+            // FROM t)` re-ran the aggregate 20k times (~31s). setParam carries
+            // the single result; the expression references it via a Param, and
+            // the SubPlan is attached to the top plan node's initPlan list.
+            let set_pid = self.alloc_param(first_type);
+            (*node).setParam = pg_sys::lappend_int(std::ptr::null_mut(), set_pid);
+            (*node).parParam = std::ptr::null_mut();
+            (*node).args = std::ptr::null_mut();
+            self.init_subplans.push(node);
+            let p = self.alloc_node::<pg_sys::Param>();
+            (*p).xpr.type_ = pg_sys::NodeTag::T_Param;
+            (*p).paramkind = pg_sys::ParamKind::PARAM_EXEC;
+            (*p).paramid = set_pid;
+            (*p).paramtype = first_type;
+            (*p).paramtypmod = first_typmod;
+            (*p).paramcollid = first_coll;
+            (*p).location = -1;
+            return Ok(p.cast());
+        }
         let mut par_param: *mut pg_sys::List = std::ptr::null_mut();
         let mut args: *mut pg_sys::List = std::ptr::null_mut();
         for (pid, var) in params {
