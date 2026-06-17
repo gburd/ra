@@ -3912,9 +3912,126 @@ impl PlanBuilder {
         Ok(node.cast())
     }
 
+    /// Build an ordered-set `Aggref` for `percentile_cont`/`percentile_disc`
+    /// (`agg(fraction) WITHIN GROUP (ORDER BY col)`), encoded by the parser as
+    /// `agg(fraction, __within_group(col))`. The fraction and the ordered
+    /// column are coerced to `float8` (matching PostgreSQL's own coercion of a
+    /// numeric input), so the `(float8, float8)` catalog aggregate is used.
+    /// Returns `None` (→ caller defers) for any other ordered-set aggregate,
+    /// arity, or unresolvable column/cast.
+    unsafe fn build_ordered_set_aggref(
+        &self,
+        name: &str,
+        direct_args: &[Expr],
+        order_args: &[Expr],
+        in_tlist: &mut *mut pg_sys::List,
+        colmap: &mut Vec<(i16, i32, pg_sys::Oid, pg_sys::Oid)>,
+        aggno: &mut i32,
+    ) -> Option<*mut pg_sys::Expr> {
+        let lower = name.to_lowercase();
+        // Only percentile_cont is built: it has a concrete (float8, float8)
+        // signature and returns float8. percentile_disc/mode return the input
+        // type (polymorphic) and need different handling, so they defer to PG.
+        if lower != "percentile_cont" {
+            return None;
+        }
+        if direct_args.len() != 1 || order_args.len() != 1 {
+            return None;
+        }
+        let to_float8 = |e: &Expr| Expr::Cast {
+            expr: Box::new(e.clone()),
+            target_type: "float8".to_owned(),
+        };
+        // Direct arg (the fraction): a constant, coerced to float8.
+        let direct_e = expr_translator::translate(&to_float8(&direct_args[0]), &self.expr_ctx);
+        if direct_e.is_null() {
+            return None;
+        }
+        // Ordered arg (the column): register it on the aggregate input, then
+        // build its float8 cast referencing the input frame (OUTER_VAR).
+        self.add_input_col(&order_args[0], in_tlist, colmap)?;
+        let order_e = expr_translator::translate(&to_float8(&order_args[0]), &self.expr_ctx);
+        if order_e.is_null() || !self.remap_agg_input_vars(order_e.cast(), colmap) {
+            return None;
+        }
+        let order_type = pg_sys::exprType(order_e.cast());
+        let order_coll = pg_sys::exprCollation(order_e.cast());
+
+        let argtypes = [pg_sys::FLOAT8OID, order_type];
+        let fname = CString::new(lower.as_str()).ok()?;
+        let name_node = pg_sys::makeString(fname.as_ptr().cast_mut());
+        let fname_list = pg_sys::lappend(std::ptr::null_mut(), name_node.cast());
+        let aggfnoid = pg_sys::LookupFuncName(fname_list, 2, argtypes.as_ptr(), true);
+        if aggfnoid == pg_sys::InvalidOid
+            || pg_sys::get_func_prokind(aggfnoid) != pg_sys::PROKIND_AGGREGATE as i8
+        {
+            return None;
+        }
+        let aggtup = pg_sys::SearchSysCache1(
+            pg_sys::SysCacheIdentifier::AGGFNOID as i32,
+            pg_sys::Datum::from(aggfnoid),
+        );
+        if aggtup.is_null() {
+            return None;
+        }
+        let mut isnull = false;
+        let transtype_datum = pg_sys::SysCacheGetAttr(
+            pg_sys::SysCacheIdentifier::AGGFNOID as i32,
+            aggtup,
+            17,
+            &mut isnull,
+        );
+        pg_sys::ReleaseSysCache(aggtup);
+        if isnull {
+            return None;
+        }
+        let aggtranstype = pg_sys::Oid::from(transtype_datum.value() as u32);
+        let rettype = pg_sys::get_func_rettype(aggfnoid);
+
+        // Sort/equality operators for the ordered column (aggorder).
+        let mut lt = pg_sys::InvalidOid;
+        let mut eq = pg_sys::InvalidOid;
+        let mut gt = pg_sys::InvalidOid;
+        let mut hashable = false;
+        pg_sys::get_sort_group_operators(order_type, true, true, false, &mut lt, &mut eq, &mut gt, &mut hashable);
+        if eq == pg_sys::InvalidOid || lt == pg_sys::InvalidOid {
+            return None;
+        }
+
+        let node = self.alloc_node::<pg_sys::Aggref>();
+        (*node).xpr.type_ = pg_sys::NodeTag::T_Aggref;
+        (*node).aggfnoid = aggfnoid;
+        (*node).aggtype = rettype;
+        (*node).aggcollid = pg_sys::get_typcollation(rettype);
+        (*node).inputcollid = order_coll;
+        (*node).aggtranstype = aggtranstype;
+        (*node).aggdirectargs = pg_sys::lappend(std::ptr::null_mut(), direct_e.cast());
+        let te = pg_sys::makeTargetEntry(order_e, 1, std::ptr::null_mut(), false);
+        (*te).ressortgroupref = 1;
+        (*node).args = pg_sys::lappend(std::ptr::null_mut(), te.cast());
+        let sgc = self.alloc_node::<pg_sys::SortGroupClause>();
+        (*sgc).type_ = pg_sys::NodeTag::T_SortGroupClause;
+        (*sgc).tleSortGroupRef = 1;
+        (*sgc).eqop = eq;
+        (*sgc).sortop = lt;
+        (*sgc).nulls_first = false;
+        (*sgc).hashable = hashable;
+        (*node).aggorder = pg_sys::lappend(std::ptr::null_mut(), sgc.cast());
+        // aggargtypes: direct then aggregated arg types.
+        (*node).aggargtypes = pg_sys::lappend_oid((*node).aggargtypes, pg_sys::FLOAT8OID);
+        (*node).aggargtypes = pg_sys::lappend_oid((*node).aggargtypes, order_type);
+        (*node).aggkind = b'o' as i8; // AGGKIND_ORDERED_SET
+        (*node).aggstar = false;
+        (*node).aggsplit = pg_sys::AggSplit::AGGSPLIT_SIMPLE;
+        (*node).aggno = *aggno;
+        (*node).aggtransno = *aggno;
+        (*node).agglevelsup = 0;
+        (*node).location = -1;
+        *aggno += 1;
+        Some(node.cast())
+    }
+
     /// Register the input columns referenced by any aggregate argument
-    /// reachable in `expr` (recursing through expressions, stopping at an
-    /// aggregate's own argument). Group-by columns are registered separately.
     unsafe fn register_agg_args(
         &self,
         expr: &Expr,
@@ -3999,6 +4116,26 @@ impl PlanBuilder {
         aggno: &mut i32,
     ) -> Option<*mut pg_sys::Expr> {
         match expr {
+            // Ordered-set aggregate: agg(direct...) WITHIN GROUP (ORDER BY ...)
+            // is encoded by the parser as agg(direct..., __within_group(cols)).
+            Expr::Function { name, args }
+                if args.iter().any(|a| {
+                    matches!(a, Expr::Function { name: n, .. } if n == "__within_group")
+                }) =>
+            {
+                let mut direct: Vec<Expr> = Vec::new();
+                let mut order: &[Expr] = &[];
+                for a in args {
+                    if let Expr::Function { name: n, args: oa } = a {
+                        if n == "__within_group" {
+                            order = oa;
+                            continue;
+                        }
+                    }
+                    direct.push(a.clone());
+                }
+                self.build_ordered_set_aggref(name, &direct, order, in_tlist, colmap, aggno)
+            }
             Expr::Function { name, args } if Self::is_supported_agg(name) => {
                 // Build each argument: a column becomes an input-tlist column
                 // referenced by OUTER_VAR; a constant (e.g. string_agg's

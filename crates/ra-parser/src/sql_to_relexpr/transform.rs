@@ -436,6 +436,25 @@ fn collect_aggs(expr: &Expr, out: &mut Vec<AggregateExpr>) {
         out.push(agg);
         return;
     }
+    // Ordered-set aggregate (`percentile_cont(...) WITHIN GROUP (ORDER BY ...)`,
+    // encoded as a function with a `__within_group` marker arg): not in the
+    // AggregateFunction enum, but it must still wrap the projection in an
+    // Aggregate so the plan builder's ordered-set path runs. The placeholder
+    // here is unused by the build (which reads the projection columns).
+    if let Expr::Function { args, .. } = expr {
+        if args
+            .iter()
+            .any(|a| matches!(a, Expr::Function { name, .. } if name == "__within_group"))
+        {
+            out.push(AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: None,
+                distinct: false,
+                alias: None,
+            });
+            return;
+        }
+    }
     match expr {
         Expr::BinOp { left, right, .. } => {
             collect_aggs(left, out);

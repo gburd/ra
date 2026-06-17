@@ -1865,6 +1865,46 @@ pub unsafe fn ra_func(
     })
 }
 
+/// Build an ordered-set aggregate call: `name(direct_args) WITHIN GROUP
+/// (ORDER BY ...)`. The WITHIN GROUP order columns are encoded in a trailing
+/// `__within_group(cols...)` marker argument that the plan builder decodes,
+/// but only when every order key is ascending (an explicit DESC changes the
+/// result); otherwise the bare `name(direct_args)` is emitted, which the plan
+/// builder cannot build as an ordered-set aggregate and defers to PG.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `name` must be a valid C string.
+/// - `direct_list` / `order_list` must be valid tagged pointers or null.
+pub unsafe fn ra_ordered_set_agg(
+    state: *mut RaParseState,
+    name: *const c_char,
+    direct_list: *mut RaNode,
+    order_list: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let func_name = unsafe { c_str_to_string(name) };
+    let mut args = collect_exprs(st, direct_list);
+    let order_keys = collect_sort_keys(st, order_list);
+    let all_asc = !order_keys.is_empty()
+        && order_keys
+            .iter()
+            .all(|k| matches!(k.direction, SortDirection::Asc));
+    if all_asc {
+        let order_exprs: Vec<Expr> = order_keys.into_iter().map(|k| k.expr).collect();
+        args.push(Expr::Function {
+            name: "__within_group".to_owned(),
+            args: order_exprs,
+        });
+    }
+    st.push_expr(Expr::Function {
+        name: func_name,
+        args,
+    })
+}
+
 /// Build an Array constructor expression.
 ///
 /// `elem_list` is a tagged list of `Expr` indices.

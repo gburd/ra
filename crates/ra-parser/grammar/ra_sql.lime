@@ -1878,8 +1878,7 @@ expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN.
 
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN WITHIN GROUP LPAREN ORDER BY sort_list(D) RPAREN. 
 %action_rust {
-    let _ = &D;
-    A = ra_func(ctx.user, B.text(), C);
+    A = ra_ordered_set_agg(ctx.user, B.text(), C, D);
 }
 
 /* -- Window function ----------------------------------------------- */
