@@ -136,6 +136,10 @@ pub struct PlanBuilder {
     /// Active recursive-CTE wiring while building its recursive term / body,
     /// so a `Scan` of the CTE name builds a WorkTableScan or CteScan.
     cte_runtime: Option<CteRuntime>,
+    /// Non-recursive CTEs that are referenced as a join side, keyed by
+    /// lower-cased name. Such a CTE is not inlined; it is built as a
+    /// SubqueryScan over its definition so the join can wire it like a scan.
+    cte_join_defs: HashMap<String, CteJoinDef>,
     /// True while building any term of a recursive CTE, so the anchor's
     /// no-FROM `Scan(__dual)` becomes a one-row Result (standalone no-FROM
     /// selects keep falling back to native PG).
@@ -154,6 +158,15 @@ enum CteScanMode {
     Recursive,
     /// Body reference → CteScan.
     Body,
+}
+
+/// A non-recursive CTE built as a join-side SubqueryScan: its definition (to
+/// build as the subplan), the range-table index of its RTE_CTE (the scan's
+/// `scanrelid`), and its output columns.
+struct CteJoinDef {
+    def: RelExpr,
+    rtindex: pg_sys::Index,
+    cols: Vec<CteCol>,
 }
 
 /// Wiring for the recursive CTE currently being built.
@@ -203,6 +216,7 @@ impl PlanBuilder {
             subplans: std::cell::RefCell::new(HashMap::new()),
             cte_scope: std::cell::RefCell::new(None),
             subquery_scope: std::cell::RefCell::new(None),
+            cte_join_scope: std::cell::RefCell::new(HashMap::new()),
         };
         let stats = gathered_stats
             .iter()
@@ -218,6 +232,7 @@ impl PlanBuilder {
             subplans: Vec::new(),
             param_types: Vec::new(),
             cte_runtime: None,
+            cte_join_defs: HashMap::new(),
             in_recursive_cte: false,
             active_join_map: None,
         }
@@ -560,6 +575,9 @@ impl PlanBuilder {
                         return self.build_cte_scan();
                     }
                 }
+                if self.cte_join_defs.contains_key(&table.to_lowercase()) {
+                    return self.build_cte_join_subqueryscan(&table.to_lowercase());
+                }
                 if table.eq_ignore_ascii_case("__dual") {
                     // No-FROM single-row source. As a recursive-CTE anchor
                     // (`SELECT 1`) it is a one-row Result; standalone no-FROM
@@ -871,11 +889,35 @@ impl PlanBuilder {
                 input,
             } => self.build_incremental_sort(prefix_keys, suffix_keys, input),
             RelExpr::CTE { name, definition, body } => {
-                // Inline the non-recursive CTE: replace Scan(name) in the body
-                // with the definition (PG's default). The definition's base
-                // relations are flattened into the rtable by cte_flatten_rtes.
-                let inlined = inline_cte_scan(body, name, definition);
-                self.build_plan(&inlined)
+                // A CTE referenced as a join side cannot be inlined: inlining
+                // replaces `Scan(name)` with the definition, losing the
+                // name → RTE_CTE link the join needs. Register it so the join
+                // builds it as a SubqueryScan; otherwise inline (PG's default).
+                if Self::cte_used_in_join(body, name) {
+                    let lname = name.to_lowercase();
+                    let (rtindex, cols) = self.find_cte_rte(&lname)?;
+                    let scope_cols: Vec<CteCol> = cols
+                        .iter()
+                        .map(|c| CteCol {
+                            name: c.name.clone(),
+                            typ: c.typ,
+                            typmod: c.typmod,
+                            coll: c.coll,
+                        })
+                        .collect();
+                    self.expr_ctx.cte_join_scope.borrow_mut().insert(
+                        lname.clone(),
+                        CteScope { name: lname.clone(), rtindex, cols: scope_cols },
+                    );
+                    self.cte_join_defs.insert(
+                        lname,
+                        CteJoinDef { def: (**definition).clone(), rtindex, cols },
+                    );
+                    self.build_plan(body)
+                } else {
+                    let inlined = inline_cte_scan(body, name, definition);
+                    self.build_plan(&inlined)
+                }
             }
             RelExpr::RecursiveCTE {
                 name,
@@ -2505,8 +2547,92 @@ impl PlanBuilder {
         tlist
     }
 
-    /// Build a recursive CTE as `CteScan(body) → RecursiveUnion{anchor,
-    /// WorkTableScan(recursive)}`, referencing PG's existing RTE_CTE.
+    /// Build the output targetlist for a join-side CTE's SubqueryScan: one
+    /// `Var(rtindex, attno)` per CTE column, referencing the subplan output by
+    /// position. Mirrors `cte_column_tlist` but takes the columns directly.
+    unsafe fn cte_join_var_tlist(&self, rtindex: pg_sys::Index, cols: &[CteCol]) -> *mut pg_sys::List {
+        let mut tlist: *mut pg_sys::List = std::ptr::null_mut();
+        for (i, c) in cols.iter().enumerate() {
+            let var = self.alloc_node::<pg_sys::Var>();
+            (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*var).varno = rtindex as i32;
+            (*var).varattno = (i + 1) as i16;
+            (*var).vartype = c.typ;
+            (*var).vartypmod = c.typmod;
+            (*var).varcollid = c.coll;
+            (*var).location = -1;
+            let rn = match std::ffi::CString::new(c.name.as_str()) {
+                Ok(s) => s.into_raw().cast::<i8>(),
+                Err(_) => std::ptr::null_mut(),
+            };
+            let te = pg_sys::makeTargetEntry(var.cast(), (i + 1) as i16, rn, false);
+            tlist = pg_sys::lappend(tlist, te.cast());
+        }
+        tlist
+    }
+
+    /// Build a non-recursive CTE that is referenced as a join side: a
+    /// `SubqueryScan` over the CTE's definition, with `scanrelid` set to the
+    /// CTE's RTE_CTE so the join wires it like a base scan. The qualified
+    /// columns of the CTE resolve through `cte_join_scope` to this scan.
+    unsafe fn build_cte_join_subqueryscan(
+        &mut self,
+        name: &str,
+    ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        // Copy the definition / index / columns out before building the
+        // subplan, so we don't hold a borrow of `self` across `build_plan`.
+        let (def, rtindex, cols) = {
+            let d = self
+                .cte_join_defs
+                .get(name)
+                .ok_or_else(|| unsupported("join-side CTE not registered"))?;
+            let cols: Vec<CteCol> = d
+                .cols
+                .iter()
+                .map(|c| CteCol { name: c.name.clone(), typ: c.typ, typmod: c.typmod, coll: c.coll })
+                .collect();
+            (d.def.clone(), d.rtindex, cols)
+        };
+        let child = self.build_plan(&def)?;
+        if child.is_null() || (*child).targetlist.is_null() {
+            return Err(unsupported("join-side CTE subplan"));
+        }
+        let tlist = self.cte_join_var_tlist(rtindex, &cols);
+        let node = self.alloc_node::<pg_sys::SubqueryScan>();
+        if node.is_null() {
+            return Err(PlanBuilderError::NullPointer("SubqueryScan".to_owned()));
+        }
+        (*node).scan.plan.type_ = pg_sys::NodeTag::T_SubqueryScan;
+        (*node).scan.scanrelid = rtindex;
+        (*node).subplan = child;
+        (*node).scan.plan.targetlist = tlist;
+        (*node).scan.plan.qual = std::ptr::null_mut();
+        Ok(node.cast())
+    }
+
+    /// True if `Scan(name)` appears anywhere within `expr`.
+    fn scan_appears(expr: &RelExpr, name: &str) -> bool {
+        if let RelExpr::Scan { table, .. } = expr {
+            if table.eq_ignore_ascii_case(name) {
+                return true;
+            }
+        }
+        expr.children().iter().any(|c| Self::scan_appears(c, name))
+    }
+
+    /// True if `name` is referenced as a side of a join anywhere in `expr`
+    /// (recursing through nested CTEs). Such a CTE must not be inlined; it is
+    /// built as a join-side SubqueryScan instead.
+    fn cte_used_in_join(expr: &RelExpr, name: &str) -> bool {
+        if let RelExpr::Join { left, right, .. } = expr {
+            if Self::scan_appears(left, name) || Self::scan_appears(right, name) {
+                return true;
+            }
+        }
+        expr.children().iter().any(|c| Self::cte_used_in_join(c, name))
+    }
+
     unsafe fn build_recursive_cte(
         &mut self,
         name: &str,
@@ -2743,6 +2869,12 @@ impl PlanBuilder {
                 let map = (1..=n as i16).map(|i| (i, i32::from(i))).collect();
                 return Ok((rti, tlist, map));
             }
+        }
+        if let Some(d) = self.cte_join_defs.get(&tab.to_lowercase()) {
+            let rti = d.rtindex;
+            let tlist = self.cte_join_var_tlist(rti, &d.cols);
+            let map = (1..=d.cols.len() as i16).map(|i| (i, i32::from(i))).collect();
+            return Ok((rti, tlist, map));
         }
         let ident = Self::base_scan_ident(side).unwrap_or(tab);
         let rti = self
