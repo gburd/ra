@@ -50,6 +50,12 @@ pub struct ExprContext {
     /// entry), columns resolve to `Var(rtindex, position)` of the subquery RTE
     /// by name. Used for aggregating/computing derived tables.
     pub subquery_scope: std::cell::RefCell<Option<SubqueryScope>>,
+    /// Active join-side CTE scopes, keyed by lower-cased CTE reference name.
+    /// When a non-recursive CTE is referenced as a join side it is built as a
+    /// SubqueryScan over its definition; a qualified column `a.col` resolves to
+    /// `Var(rtindex, position)` of that CTE's scan. A map (not a single scope)
+    /// because a join can reference several CTEs at once.
+    pub cte_join_scope: std::cell::RefCell<std::collections::HashMap<String, CteScope>>,
 }
 
 /// One output column of an inlined subquery/derived table.
@@ -282,6 +288,32 @@ unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *m
             .as_deref()
             .is_none_or(|t| t.eq_ignore_ascii_case(&scope.name));
         if qualifies {
+            let want = col.column.to_lowercase();
+            for (i, c) in scope.cols.iter().enumerate() {
+                if c.name == want {
+                    let var = alloc::<pg_sys::Var>();
+                    (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+                    (*var).varno = scope.rtindex as i32;
+                    (*var).varattno = (i + 1) as i16;
+                    (*var).vartype = c.typ;
+                    (*var).vartypmod = c.typmod;
+                    (*var).varcollid = c.coll;
+                    (*var).varlevelsup = 0;
+                    (*var).location = -1;
+                    return var.cast();
+                }
+            }
+        }
+    }
+
+    // Join-side CTE resolution: a column qualified with a join-referenced
+    // CTE's name (`a.col`) resolves to that CTE's SubqueryScan output. Keyed
+    // by qualifier, so only an explicitly `a.`-qualified column matches — an
+    // unqualified column of the CTE's own definition is left to catalog
+    // resolution and never mis-bound here.
+    if let Some(t) = col.table.as_deref() {
+        let scopes = ctx.cte_join_scope.borrow();
+        if let Some(scope) = scopes.get(&t.to_lowercase()) {
             let want = col.column.to_lowercase();
             for (i, c) in scope.cols.iter().enumerate() {
                 if c.name == want {
