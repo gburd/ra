@@ -2289,8 +2289,8 @@ impl PlanBuilder {
         let mut inner_rtis = std::collections::HashSet::new();
         let mut tables = Vec::new();
         Self::collect_scan_tables(query, &mut tables);
-        for t in tables {
-            if let Ok(rti) = self.rtindex_for(&t) {
+        for t in &tables {
+            if let Ok(rti) = self.rtindex_for(t) {
                 inner_rtis.insert(rti as i32);
             }
         }
@@ -2423,8 +2423,10 @@ impl PlanBuilder {
     }
 
     fn collect_scan_tables(expr: &RelExpr, out: &mut Vec<String>) {
-        if let RelExpr::Scan { table, .. } = expr {
-            out.push(table.clone());
+        if let RelExpr::Scan { table, alias } = expr {
+            // Prefer the alias so a self-correlated subquery's inner scan
+            // (`orders o2`) resolves to its own rtindex, not the outer's.
+            out.push(alias.clone().unwrap_or_else(|| table.clone()));
         }
         for c in expr.children() {
             Self::collect_scan_tables(c, out);
@@ -7910,12 +7912,20 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
     // rather than bailing.
     let is_setop = !(*query).setOperations.is_null();
     let mut main_names = std::collections::HashSet::new();
+    let mut main_aliases = std::collections::HashSet::new();
     let mrt = (*query).rtable;
     let mre = (*mrt).elements;
     for i in 0..(*mrt).length {
         let rte = (*mre.add(i as usize)).ptr_value as *mut pg_sys::RangeTblEntry;
         if !rte.is_null() && (*rte).rtekind == pg_sys::RTEKind::RTE_RELATION {
             main_names.insert((*rte).relid);
+            if !(*rte).eref.is_null() && !(*(*rte).eref).aliasname.is_null() {
+                main_aliases.insert(
+                    std::ffi::CStr::from_ptr((*(*rte).eref).aliasname)
+                        .to_string_lossy()
+                        .to_lowercase(),
+                );
+            }
         }
     }
     let mut seen = main_names.clone();
@@ -7925,7 +7935,17 @@ pub unsafe fn flatten_rtes(query: *mut pg_sys::Query) -> Vec<FlatRel> {
             if is_setop {
                 continue;
             }
-            return Vec::new();
+            // Same relid as an existing scan. Safe only when a distinct alias
+            // disambiguates it (e.g. a self-correlated `orders o2` against the
+            // outer `orders o`): build_table_map maps it by alias to its own
+            // appended rtindex.
+            let disambiguated = fr
+                .alias
+                .as_ref()
+                .is_some_and(|a| !main_aliases.contains(a));
+            if !disambiguated {
+                return Vec::new();
+            }
         }
         deduped.push(fr);
     }

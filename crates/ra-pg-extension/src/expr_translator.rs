@@ -383,17 +383,25 @@ unsafe fn column_to_var(col: &ra_core::expr::ColumnRef, ctx: &ExprContext) -> *m
         }
     };
     let (rtindex, reloid, attnum) = if table.is_empty() {
-        // Unqualified: search relations for the one owning this column.
-        let mut found = None;
+        // Unqualified: find the relation owning this column. When several
+        // range-table entries own a same-named column (e.g. a self-correlated
+        // subquery pulls a second `orders` instance into the range table), the
+        // outer query's unqualified column belongs to the outer relation, which
+        // is assigned the lower rtindex — pulled-up subquery relations are
+        // appended after it. Pick the lowest owning rtindex deterministically
+        // (a plain HashMap scan would pick an arbitrary instance and emit a Var
+        // whose varno mismatches its scan's scanrelid).
+        let mut best: Option<(pg_sys::Index, pg_sys::Oid, i16)> = None;
         for (t, &rtindex) in &ctx.rtindex_map {
             if let Some(&reloid) = ctx.rtoid_map.get(t) {
                 if let Some(r) = resolve(rtindex, reloid) {
-                    found = Some(r);
-                    break;
+                    if best.is_none_or(|(b, _, _)| rtindex < b) {
+                        best = Some(r);
+                    }
                 }
             }
         }
-        match found {
+        match best {
             Some(r) => r,
             None => return std::ptr::null_mut(),
         }
