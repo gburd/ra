@@ -373,6 +373,14 @@ pub fn ra_func(st: *mut RaParseState, name: &str, args: Value) -> Value {
 }
 
 #[must_use]
+pub fn ra_ordered_set_agg(st: *mut RaParseState, name: &str, direct: Value, order: Value) -> Value {
+    let name_c = CString::new(name).unwrap_or_default();
+    let handle =
+        unsafe { ffi::ra_ordered_set_agg(st, name_c.as_ptr(), direct.handle(), order.handle()) };
+    Value::from_node(handle)
+}
+
+#[must_use]
 pub fn ra_array(st: *mut RaParseState, elem_list: Value) -> Value {
     let handle = unsafe { ffi::ra_array(st, elem_list.handle()) };
     Value::from_node(handle)
