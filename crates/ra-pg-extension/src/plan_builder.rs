@@ -6035,6 +6035,12 @@ impl PlanBuilder {
         (*node).plan.type_ = pg_sys::NodeTag::T_WindowAgg;
         (*node).plan.lefttree = sorted;
         (*node).winref = 1;
+        // EXPLAIN's show_window_def calls quote_identifier(winname); a NULL
+        // winname (PG always names the window, e.g. "w1") segfaults the
+        // deparse. Name it to match the single winref we emit.
+        if let Ok(wn) = std::ffi::CString::new("w1") {
+            (*node).winname = pg_sys::pstrdup(wn.as_ptr());
+        }
         (*node).frameOptions = pg_sys::FRAMEOPTION_DEFAULTS as i32;
 
         let set_cols = |n: usize,
