@@ -398,11 +398,6 @@ impl PlanBuilder {
     /// (references_only soundness via qualifier tracking + `is_inner_join`
     /// guards + left-side `references_only`), verified row-identical to PG.
     fn wrong_result_risk(expr: &RelExpr) -> Option<&'static str> {
-        if let RelExpr::Filter { predicate, .. } = expr {
-            if expr_has_scalar_subquery(predicate) {
-                return Some("scalar subquery in a filter predicate");
-            }
-        }
         for child in expr.children() {
             if let Some(r) = Self::wrong_result_risk(child) {
                 return Some(r);
@@ -7036,48 +7031,6 @@ fn subtree_has_filter(expr: &RelExpr) -> bool {
 /// expression yields a single element). Used to isolate an indexable
 /// equality conjunct from the rest of a `WHERE` clause.
 
-/// True if `e` contains a scalar subquery anywhere (RFC correctness gate).
-fn expr_has_scalar_subquery(e: &Expr) -> bool {
-    expr_any_subquery(e, true)
-}
-
-/// Recursively test for a subquery in `e`; `scalar_only` restricts to scalar.
-fn expr_any_subquery(e: &Expr, scalar_only: bool) -> bool {
-    use ra_core::expr::SubQueryType;
-    match e {
-        Expr::SubQuery { subquery_type, .. } => {
-            !scalar_only || matches!(subquery_type, SubQueryType::Scalar)
-        }
-        Expr::BinOp { left, right, .. } => {
-            expr_any_subquery(left, scalar_only) || expr_any_subquery(right, scalar_only)
-        }
-        Expr::UnaryOp { operand, .. } => expr_any_subquery(operand, scalar_only),
-        Expr::Function { args, .. } | Expr::Array(args) => {
-            args.iter().any(|a| expr_any_subquery(a, scalar_only))
-        }
-        Expr::Case { operand, when_clauses, else_result } => {
-            operand.as_deref().is_some_and(|o| expr_any_subquery(o, scalar_only))
-                || when_clauses
-                    .iter()
-                    .any(|(c, r)| expr_any_subquery(c, scalar_only) || expr_any_subquery(r, scalar_only))
-                || else_result.as_deref().is_some_and(|x| expr_any_subquery(x, scalar_only))
-        }
-        Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => {
-            expr_any_subquery(expr, scalar_only)
-        }
-        Expr::ArrayIndex(a, b) => {
-            expr_any_subquery(a, scalar_only) || expr_any_subquery(b, scalar_only)
-        }
-        Expr::ArraySlice { array, start, end } => {
-            expr_any_subquery(array, scalar_only)
-                || start.as_deref().is_some_and(|s| expr_any_subquery(s, scalar_only))
-                || end.as_deref().is_some_and(|s| expr_any_subquery(s, scalar_only))
-        }
-        _ => false,
-    }
-}
-
-/// equality conjunct from the rest of a `WHERE` clause.
 /// Collect the names of all columns referenced anywhere in `expr` (for the
 /// index-only-scan coverage check).
 fn collect_column_names(expr: &Expr, out: &mut Vec<String>) {
