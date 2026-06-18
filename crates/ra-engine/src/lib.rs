@@ -373,3 +373,19 @@ pub fn parse_var(s: &str) -> egg::Var {
 
 
 
+/// Pay egg's one-time, process-global initialization up front.
+///
+/// The first `egg::EGraph::rebuild` in a process incurs a fixed ~200 ms
+/// initialization (observed empirically with egg 0.11; it reproduces with
+/// egg's own `SymbolLang`, so it is internal to egg/its dependencies and is
+/// not data- or analysis-dependent). Subsequent rebuilds are instant. Calling
+/// this at extension load (`_PG_init`, which runs in the preloaded postmaster
+/// and is inherited by forked backends via copy-on-write) moves that cost off
+/// every user query's planning time.
+pub fn warmup() {
+    let mut egraph: egg::EGraph<egg::SymbolLang, ()> = egg::EGraph::default();
+    if let Ok(expr) = "(f x)".parse::<egg::RecExpr<egg::SymbolLang>>() {
+        let _ = egraph.add_expr(&expr);
+    }
+    egraph.rebuild();
+}
