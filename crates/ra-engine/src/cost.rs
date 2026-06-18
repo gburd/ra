@@ -1513,8 +1513,30 @@ impl IntegratedCostFn {
     }
 }
 
+/// A plan cost that carries both the scalar cost egg minimizes and the
+/// estimated output cardinality of the sub-plan.
+///
+/// Carrying `est_rows` up the tree is what makes the cost model
+/// cardinality-aware: a `Filter` shrinks `est_rows` by its selectivity, so a
+/// `Join` over a filtered input is genuinely cheaper than the same `Join` with
+/// the filter left on top — which is what lets equality saturation prefer
+/// predicate pushdown. Ordered solely by `total_cost` for egg's extractor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlanCost {
+    /// The scalar cost egg minimizes.
+    pub total_cost: f64,
+    /// Estimated output row count of this sub-plan.
+    pub est_rows: f64,
+}
+
+impl PartialOrd for PlanCost {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.total_cost.partial_cmp(&other.total_cost)
+    }
+}
+
 impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
-    type Cost = f64;
+    type Cost = PlanCost;
 
     fn cost<C>(&mut self, enode: &crate::egraph::RelLang, mut costs: C) -> Self::Cost
     where
@@ -1522,132 +1544,231 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
     {
         use crate::egraph::RelLang;
 
-        let base_cost = match enode {
+        match enode {
             RelLang::Scan([table_id]) => {
-                let child_cost = costs(*table_id);
-                // Per-table row count resolved from the e-graph before
-                // extraction (else the average). RFC 0091 P3: cost comes solely
-                // from the `scan` rule.
-                let row_count = self.row_count_for_id(*table_id);
-                let ctx = self.op_cost_ctx(0.0, 0.0, row_count);
-                return child_cost + operator_cost("scan", &ctx);
+                // Cardinality = the table's row count; cost from the
+                // rule-provided `scan` model (already row-count aware).
+                let rows = self.row_count_for_id(*table_id);
+                let total = costs(*table_id).total_cost
+                    + operator_cost("scan", &self.op_cost_ctx(0.0, 0.0, rows));
+                PlanCost { total_cost: total, est_rows: rows }
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
-                let row_count = self.row_count_for_id(*table_id);
-                let ctx = self.op_cost_ctx(0.0, 0.0, row_count);
-                return costs(*table_id) + costs(*alias_id) + operator_cost("scan", &ctx);
+                let rows = self.row_count_for_id(*table_id);
+                let total = costs(*table_id).total_cost
+                    + costs(*alias_id).total_cost
+                    + operator_cost("scan", &self.op_cost_ctx(0.0, 0.0, rows));
+                PlanCost { total_cost: total, est_rows: rows }
             }
-            RelLang::Filter(_) | RelLang::Project(_) => {
-                let op = if matches!(enode, RelLang::Filter(_)) { "filter" } else { "project" };
-                self.flat_op_cost(op)
+            // A Filter reduces its subtree's cardinality by the predicate
+            // selectivity — this is what makes a Join over a *filtered* input
+            // genuinely cheaper than the same Join with the filter left on top,
+            // so equality saturation prefers predicate pushdown. The predicate
+            // is evaluated once per input row.
+            RelLang::Filter([pred_id, input_id]) => {
+                let ci = costs(*input_id);
+                let pred = costs(*pred_id).total_cost;
+                let sel = self.selectivity_for_cond(*pred_id);
+                let unit = operator_cost("filter", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
+                PlanCost {
+                    total_cost: ci.total_cost + pred + unit * ci.est_rows,
+                    est_rows: (ci.est_rows * sel).max(1.0),
+                }
             }
-            RelLang::Join(_) => self.flat_op_cost("join"),
-            // Per-method physical join cost (RFC 0090 Phase 3 chunk 3). Child
-            // *costs* (cl, cr) are monotonic proxies for input size (scan cost
-            // scales with pages -> rows). The final `child_cost` sum below adds
-            // cl+cr equally to every method, so only these base terms order the
-            // methods. Hash/Merge are linear; NestLoop is quadratic (scan inner
-            // per outer row); IndexNestLoop is linear in the outer side (one
-            // index probe per outer row), so it wins for a small driving side.
-            RelLang::HashJoinOp([_, _, l, r]) => {
-                let cl = costs(*l).max(1.0);
-                let cr = costs(*r).max(1.0);
-                operator_cost("hash-join", &self.op_cost_ctx(cl, cr, 0.0))
+            RelLang::Project([cols_id, input_id]) => {
+                let ci = costs(*input_id);
+                let cols = costs(*cols_id).total_cost;
+                let unit = operator_cost("project", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
+                PlanCost {
+                    total_cost: ci.total_cost + cols + unit * ci.est_rows,
+                    est_rows: ci.est_rows,
+                }
             }
-            RelLang::MergeJoinOp([_, _, l, r]) => {
-                let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
-                operator_cost("merge-join", &self.op_cost_ctx(cl, cr, 0.0))
+            // Logical join: the inputs' (post-filter) cardinalities drive the
+            // cost via the rule-provided `join` model, which now scales with the
+            // input row counts passed in the cost context. Output cardinality is
+            // bounded by the larger input (PK/FK heuristic) so join chains stay
+            // bounded.
+            RelLang::Join([_, cond_id, l, r]) => {
+                let cl = costs(*l);
+                let cr = costs(*r);
+                let cond = costs(*cond_id).total_cost;
+                let out = cl.est_rows.max(cr.est_rows);
+                let total = cl.total_cost
+                    + cr.total_cost
+                    + cond
+                    + operator_cost("join", &self.op_cost_ctx(cl.est_rows, cr.est_rows, out));
+                PlanCost { total_cost: total, est_rows: out }
             }
-            RelLang::NestLoopOp([_, _, l, r]) => {
-                let (cl, cr) = (costs(*l).max(1.0), costs(*r).max(1.0));
-                operator_cost("nest-loop", &self.op_cost_ctx(cl, cr, 0.0))
+            // Physical join methods (RFC 0090 Phase 3). The rule cost models now
+            // receive the children's estimated row counts (real cardinality — a
+            // better size proxy than the prior child-cost approximation).
+            RelLang::HashJoinOp([_, cond_id, l, r]) => {
+                let cl = costs(*l);
+                let cr = costs(*r);
+                let cond = costs(*cond_id).total_cost;
+                let out = cl.est_rows.max(cr.est_rows);
+                let total = cl.total_cost
+                    + cr.total_cost
+                    + cond
+                    + operator_cost(
+                        "hash-join",
+                        &self.op_cost_ctx(cl.est_rows.max(1.0), cr.est_rows.max(1.0), out),
+                    );
+                PlanCost { total_cost: total, est_rows: out }
             }
-            RelLang::IndexNestLoopOp([_, _, l, _r]) => {
-                let cl = costs(*l).max(1.0);
-                operator_cost("index-nest-loop", &self.op_cost_ctx(cl, 0.0, 0.0))
+            RelLang::MergeJoinOp([_, cond_id, l, r]) => {
+                let cl = costs(*l);
+                let cr = costs(*r);
+                let cond = costs(*cond_id).total_cost;
+                let out = cl.est_rows.max(cr.est_rows);
+                let total = cl.total_cost
+                    + cr.total_cost
+                    + cond
+                    + operator_cost(
+                        "merge-join",
+                        &self.op_cost_ctx(cl.est_rows.max(1.0), cr.est_rows.max(1.0), out),
+                    );
+                PlanCost { total_cost: total, est_rows: out }
             }
-            // RFC 0091 Option B: index-scan choice. Cost uses the table's row
-            // count (from the table-symbol child) + selectivity; it does NOT
-            // inherit the sequential scan child cost (the index scan replaces
-            // it). Selective + warm cache (cheap random I/O) → cheaper than the
-            // sequential `Filter(Scan)`; non-selective or cold → dearer.
+            RelLang::NestLoopOp([_, cond_id, l, r]) => {
+                let cl = costs(*l);
+                let cr = costs(*r);
+                let cond = costs(*cond_id).total_cost;
+                let out = cl.est_rows.max(cr.est_rows);
+                let total = cl.total_cost
+                    + cr.total_cost
+                    + cond
+                    + operator_cost(
+                        "nest-loop",
+                        &self.op_cost_ctx(cl.est_rows.max(1.0), cr.est_rows.max(1.0), out),
+                    );
+                PlanCost { total_cost: total, est_rows: out }
+            }
+            RelLang::IndexNestLoopOp([_, cond_id, l, _r]) => {
+                let cl = costs(*l);
+                let cond = costs(*cond_id).total_cost;
+                let total = cl.total_cost
+                    + cond
+                    + operator_cost(
+                        "index-nest-loop",
+                        &self.op_cost_ctx(cl.est_rows.max(1.0), 0.0, 0.0),
+                    );
+                PlanCost { total_cost: total, est_rows: cl.est_rows }
+            }
+            // RFC 0091 Option B: index-scan choice. Cost from the table's row
+            // count + predicate selectivity; output = selected rows.
             RelLang::IndexScanChoice([cond_id, table_id]) => {
-                let row_count = self.row_count_for_id(*table_id);
-                let mut ctx = self.op_cost_ctx(0.0, 0.0, row_count);
-                ctx.selectivity = self.selectivity_for_cond(*cond_id);
-                operator_cost("index-scan", &ctx)
+                let rows = self.row_count_for_id(*table_id);
+                let sel = self.selectivity_for_cond(*cond_id);
+                let mut ctx = self.op_cost_ctx(0.0, 0.0, rows);
+                ctx.selectivity = sel;
+                PlanCost {
+                    total_cost: operator_cost("index-scan", &ctx),
+                    est_rows: (rows * sel).max(1.0),
+                }
             }
-            RelLang::Aggregate(_) => self.flat_op_cost("aggregate"),
-            RelLang::Sort(_) => self.flat_op_cost("sort"),
-            RelLang::IncrementalSort(_) => self.flat_op_cost("incremental-sort"),
+            RelLang::Aggregate([group_id, aggs_id, input_id]) => {
+                let ci = costs(*input_id);
+                let extra = costs(*group_id).total_cost + costs(*aggs_id).total_cost;
+                let total = ci.total_cost
+                    + extra
+                    + operator_cost("aggregate", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
+                // Grouped output is far smaller than the input; a 10% group
+                // ratio is a neutral default until per-column NDV is threaded.
+                PlanCost { total_cost: total, est_rows: (ci.est_rows * 0.1).max(1.0) }
+            }
+            RelLang::Sort([keys_id, input_id]) => {
+                let ci = costs(*input_id);
+                let keys = costs(*keys_id).total_cost;
+                let total = ci.total_cost
+                    + keys
+                    + operator_cost("sort", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
+                PlanCost { total_cost: total, est_rows: ci.est_rows }
+            }
+            RelLang::IncrementalSort([keys_id, _presorted_id, input_id]) => {
+                let ci = costs(*input_id);
+                let keys = costs(*keys_id).total_cost;
+                let total = ci.total_cost
+                    + keys
+                    + operator_cost("incremental-sort", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
+                PlanCost { total_cost: total, est_rows: ci.est_rows }
+            }
             RelLang::Limit([n_id, _off_id, child_id]) => {
-                // Startup cost optimization: when LIMIT is present
-                // we only need a prefix of the child output. Plans
-                // with low startup cost (streaming operators like
-                // index scans, nested-loop joins) are preferred over
-                // plans with high startup cost (sort, hash join build).
-                //
-                // Model: effective_cost = limit_overhead + n_cost
-                //        + child_cost * startup_fraction
-                //
-                // The 0.3 fraction means LIMIT pays ~30% of the full
-                // child cost, biasing toward cheaper-to-start plans.
-                let child_cost = costs(*child_id);
-                let n_cost = costs(*n_id);
-                let startup_fraction = 0.3;
-                return 0.5 + n_cost + child_cost * startup_fraction;
+                // Startup-biased: LIMIT only needs a prefix, so it pays ~30% of
+                // the child cost, favouring cheap-to-start plans.
+                let ci = costs(*child_id);
+                let n_cost = costs(*n_id).total_cost;
+                PlanCost {
+                    total_cost: 0.5 + n_cost + ci.total_cost * 0.3,
+                    est_rows: ci.est_rows,
+                }
             }
-            RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => 50.0,
-            RelLang::RecursiveCTE(_) => 1000.0 * self.calibration.tuple_cost(),
+            RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => {
+                // Output cardinality ~ sum of input cardinalities (an upper
+                // bound for intersect/except, exact for union-all).
+                let mut total = 50.0;
+                let mut rows = 0.0;
+                for child in enode.children() {
+                    let pc = costs(*child);
+                    total += pc.total_cost;
+                    rows += pc.est_rows;
+                }
+                PlanCost { total_cost: total, est_rows: rows.max(1.0) }
+            }
+            RelLang::RecursiveCTE(_) => {
+                let mut total = 1000.0 * self.calibration.tuple_cost();
+                let mut rows = 0.0;
+                for child in enode.children() {
+                    let pc = costs(*child);
+                    total += pc.total_cost;
+                    rows += pc.est_rows;
+                }
+                PlanCost { total_cost: total, est_rows: rows.max(1.0) }
+            }
             RelLang::BitmapIndexScan(_) => {
-                // Without selectivity info, bitmap index scan costs at
-                // least as much as a sequential scan (random IO for
-                // index traversal plus heap access overhead).
-                120.0 * self.calibration.rand_page_cost()
+                let children: f64 =
+                    enode.children().iter().map(|c| costs(*c).total_cost).sum();
+                PlanCost {
+                    total_cost: 120.0 * self.calibration.rand_page_cost() + children,
+                    est_rows: (self.avg_row_count * DEFAULT_SELECTIVITY).max(1.0),
+                }
             }
-            RelLang::BitmapHeapScan(_) => 50.0 * self.calibration.seq_page_cost(),
-            RelLang::MetadataLookup(_) => {
-                // O(1) metadata lookup, cheaper than any scan
-                return 1.0;
+            RelLang::BitmapHeapScan(_) => {
+                let children: f64 =
+                    enode.children().iter().map(|c| costs(*c).total_cost).sum();
+                PlanCost {
+                    total_cost: 50.0 * self.calibration.seq_page_cost() + children,
+                    est_rows: (self.avg_row_count * DEFAULT_SELECTIVITY).max(1.0),
+                }
             }
+            RelLang::MetadataLookup(_) => PlanCost { total_cost: 1.0, est_rows: 1.0 },
             RelLang::IndexOnlyScan([table_id, _, cols_id, pred_id]) => {
                 // Index-only scan: B-tree descent + leaf page reads.
-                //
-                // Cost model (statistics-aware, per-table row count):
-                //   startup = log2(pages) * rand_page_cost (B-tree descent)
-                //   leaf_scan = index_pages * seq_page_cost * 0.3 (cache locality)
-                //
-                // For small tables (< 1000 rows), the B-tree startup cost
-                // dominates and makes index scan more expensive than a simple
-                // sequential scan of a few pages.
-                let child_cost = costs(*table_id);
-                let col_cost = costs(*cols_id);
-                let pred_cost = costs(*pred_id);
+                let child_cost = costs(*table_id).total_cost;
+                let col_cost = costs(*cols_id).total_cost;
+                let pred_cost = costs(*pred_id).total_cost;
 
                 let row_count = self.row_count_for_id(*table_id);
                 let pages = (row_count * 100.0 / 8192.0).max(1.0);
-
-                // B-tree descent: ~3-4 levels for typical tables
                 let btree_depth = pages.log2().max(1.0);
                 let startup_cost = btree_depth * self.calibration.rand_page_cost();
-
-                // Leaf page scan (assume moderate selectivity ~10%)
                 let index_pages = (pages * 0.1).max(1.0);
                 let leaf_cost = index_pages * self.calibration.seq_page_cost() * 0.3;
-
-                // For small tables, the startup overhead exceeds seq scan
                 let small_table_penalty =
                     if row_count < Self::SMALL_TABLE_THRESHOLD { 2.0 } else { 1.0 };
-
                 let total = (startup_cost + leaf_cost) * small_table_penalty;
-                return child_cost + col_cost + pred_cost + total;
+                PlanCost {
+                    total_cost: child_cost + col_cost + pred_cost + total,
+                    est_rows: (row_count * 0.1).max(1.0),
+                }
             }
-            _ => 0.1,
-        };
-
-        let child_cost: f64 = enode.children().iter().map(|child| costs(*child)).sum();
-
-        base_cost + child_cost
+            _ => {
+                let children: f64 =
+                    enode.children().iter().map(|c| costs(*c).total_cost).sum();
+                PlanCost { total_cost: 0.1 + children, est_rows: 1.0 }
+            }
+        }
     }
 }
 
@@ -1794,15 +1915,25 @@ mod tests {
                 avg_row_size: 100.0,
                 selectivity: 0.1,
             };
-            for (op, mult) in [("aggregate", 200.0), ("join", 500.0)] {
+            for (op, mult) in [("aggregate", 200.0)] {
                 let rule = rule_operator_cost(op, &ctx)
-                    .expect("aggregate/join cost model must be registered");
+                    .expect("aggregate cost model must be registered");
                 let builtin = mult * tc;
                 assert!(
                     (rule - builtin).abs() < 1e-12,
                     "rule-sourced {op} cost {rule} != built-in {builtin}"
                 );
             }
+            // The logical `join` cost is cardinality-aware: linear in the
+            // input row counts passed as left_cost/right_cost.
+            let join_ctx = OperatorCostCtx { left_cost: 100.0, right_cost: 200.0, ..ctx };
+            let join_rule = rule_operator_cost("join", &join_ctx)
+                .expect("join cost model must be registered");
+            assert!(
+                (join_rule - (100.0 + 200.0) * tc).abs() < 1e-12,
+                "rule-sourced join cost {join_rule} != (left+right)*tuple {}",
+                (100.0 + 200.0) * tc
+            );
         }
     }
 
@@ -2056,14 +2187,17 @@ mod tests {
         use crate::egraph::RelLang;
         use egg::{CostFunction, Id};
         let ids = [Id::from(0), Id::from(1), Id::from(2), Id::from(3)];
-        let c = |id: Id| if usize::from(id) >= 2 { 200.0 } else { 1.0 };
+        let c = |id: Id| {
+            let v = if usize::from(id) >= 2 { 200.0 } else { 1.0 };
+            PlanCost { total_cost: v, est_rows: v }
+        };
         let mut neutral = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
         let mut cached = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new())
             .with_live_conditions(LiveConditions { hit_rate: 0.99, io_saturation: 0.0, cpu_load: 0.0 });
-        let hash_neutral = neutral.cost(&RelLang::HashJoinOp(ids), c);
-        let hash_cached = cached.cost(&RelLang::HashJoinOp(ids), c);
-        let nest_neutral = neutral.cost(&RelLang::NestLoopOp(ids), c);
-        let nest_cached = cached.cost(&RelLang::NestLoopOp(ids), c);
+        let hash_neutral = neutral.cost(&RelLang::HashJoinOp(ids), c).total_cost;
+        let hash_cached = cached.cost(&RelLang::HashJoinOp(ids), c).total_cost;
+        let nest_neutral = neutral.cost(&RelLang::NestLoopOp(ids), c).total_cost;
+        let nest_cached = cached.cost(&RelLang::NestLoopOp(ids), c).total_cost;
         // CPU-dominant hash-join is cache-insensitive (tuple + sequential I/O,
         // neither moved by hit_rate at cpu_load=0).
         assert!(
@@ -2088,22 +2222,23 @@ mod tests {
         let mut cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
         // join children: [jt, cond, left, right] = ids 0,1,2,3
         let ids = [Id::from(0), Id::from(1), Id::from(2), Id::from(3)];
-        // child-cost closures: large vs tiny inputs (left=id2, right=id3)
-        let big = |id: Id| if usize::from(id) >= 2 { 10_000.0 } else { 1.0 };
-        let tiny = |id: Id| if usize::from(id) >= 2 { 5.0 } else { 1.0 };
+        // child-cost closures: large vs tiny inputs (left=id2, right=id3).
+        // est_rows now drives join sizing.
+        let big = |id: Id| { let v = if usize::from(id) >= 2 { 10_000.0 } else { 1.0 }; PlanCost { total_cost: v, est_rows: v } };
+        let tiny = |id: Id| { let v = if usize::from(id) >= 2 { 5.0 } else { 1.0 }; PlanCost { total_cost: v, est_rows: v } };
         // small outer (left), large inner (right) — the index-NLJ sweet spot
-        let small_outer = |id: Id| if usize::from(id) == 2 { 3.0 } else if usize::from(id) == 3 { 10_000.0 } else { 1.0 };
+        let small_outer = |id: Id| { let v = if usize::from(id) == 2 { 3.0 } else if usize::from(id) == 3 { 10_000.0 } else { 1.0 }; PlanCost { total_cost: v, est_rows: v } };
 
-        let hash_big = cfn.cost(&RelLang::HashJoinOp(ids), big);
-        let nl_big = cfn.cost(&RelLang::NestLoopOp(ids), big);
+        let hash_big = cfn.cost(&RelLang::HashJoinOp(ids), big).total_cost;
+        let nl_big = cfn.cost(&RelLang::NestLoopOp(ids), big).total_cost;
         assert!(nl_big > hash_big, "nest-loop {nl_big} should exceed hash {hash_big} on large inputs");
 
-        let hash_tiny = cfn.cost(&RelLang::HashJoinOp(ids), tiny);
-        let nl_tiny = cfn.cost(&RelLang::NestLoopOp(ids), tiny);
+        let hash_tiny = cfn.cost(&RelLang::HashJoinOp(ids), tiny).total_cost;
+        let nl_tiny = cfn.cost(&RelLang::NestLoopOp(ids), tiny).total_cost;
         assert!(nl_tiny <= hash_tiny, "nest-loop {nl_tiny} should be competitive on tiny inputs vs hash {hash_tiny}");
 
-        let hash_so = cfn.cost(&RelLang::HashJoinOp(ids), small_outer);
-        let inl_so = cfn.cost(&RelLang::IndexNestLoopOp(ids), small_outer);
+        let hash_so = cfn.cost(&RelLang::HashJoinOp(ids), small_outer).total_cost;
+        let inl_so = cfn.cost(&RelLang::IndexNestLoopOp(ids), small_outer).total_cost;
         assert!(inl_so < hash_so, "index-nest-loop {inl_so} should beat hash {hash_so} for a small driving side");
     }
     use ra_hardware::HardwareProfile;

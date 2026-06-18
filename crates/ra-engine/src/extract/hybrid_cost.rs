@@ -219,13 +219,13 @@ impl HybridCostFn {
 }
 
 impl egg::CostFunction<RelLang> for HybridCostFn {
-    type Cost = f64;
+    type Cost = crate::cost::PlanCost;
 
     fn cost<C>(&mut self, enode: &RelLang, mut costs: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
     {
-        // Compute traditional cost (delegates to IntegratedCostFn)
+        // Compute traditional cardinality-aware cost (delegates to IntegratedCostFn)
         let traditional = self.integrated.cost(enode, &mut costs);
 
         // Short-circuit if blend is effectively zero
@@ -234,18 +234,20 @@ impl egg::CostFunction<RelLang> for HybridCostFn {
         }
 
         // Compute child cost sum for neural features
-        let child_cost_sum: f64 = enode.children().iter().map(|c| costs(*c)).sum();
+        let child_cost_sum: f64 = enode.children().iter().map(|c| costs(*c).total_cost).sum();
 
         // Extract per-node features and get neural prediction
         let features = self.node_features(enode, child_cost_sum);
         let neural_multiplier = self.neural_weights.predict(&features);
 
-        // Neural cost: traditional cost adjusted by neural multiplier
-        let neural = traditional * neural_multiplier;
-
-        // Blend: alpha * neural + (1 - alpha) * traditional
+        // Blend the scalar cost; cardinality (est_rows) passes through from the
+        // analytic estimate so pushdown/cardinality signals are preserved.
         let alpha = f64::from(self.blend_alpha);
-        alpha * neural + (1.0 - alpha) * traditional
+        let neural = traditional.total_cost * neural_multiplier;
+        crate::cost::PlanCost {
+            total_cost: alpha * neural + (1.0 - alpha) * traditional.total_cost,
+            est_rows: traditional.est_rows,
+        }
     }
 }
 

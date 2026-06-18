@@ -343,7 +343,7 @@ pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
     .with_symbol_map(symbol_map);
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (cost, best_expr) = extractor.find_best(root);
-    tracing::debug!("Extracted plan with cardinality-aware cost: {}", cost);
+    tracing::debug!("Extracted plan with cardinality-aware cost: {:?}", cost);
     record_physical_choices(egraph, &best_expr);
     rec_expr_to_rel_expr(&best_expr)
 }
