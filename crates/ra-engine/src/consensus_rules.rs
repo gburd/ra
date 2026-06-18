@@ -64,15 +64,21 @@ fn extract_equijoin_predicate_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 /// - `DataFusion`: `filter_null_join_keys.rs`
 fn filter_null_join_keys_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
-        // Add IS NOT NULL on left join key
+        // Add IS NOT NULL on left join key — only when the left key actually
+        // references only the left input. Without this guard, eq-commutative
+        // can swap the key positions so ?lk references the *right* table, and
+        // the derived IS NOT NULL would be placed on the wrong (left) child
+        // (an unsound rewrite the cardinality-aware extractor would then pick).
         rewrite!("filter-null-join-key-left";
             "(join inner (eq ?lk ?rk) ?left ?right)" =>
             "(join inner (eq ?lk ?rk) (filter (is-not-null ?lk) ?left) ?right)"
+            if crate::conditions::references_only("?lk", "?left")
         ),
-        // Add IS NOT NULL on right join key
+        // Add IS NOT NULL on right join key — guarded symmetrically.
         rewrite!("filter-null-join-key-right";
             "(join inner (eq ?lk ?rk) ?left ?right)" =>
             "(join inner (eq ?lk ?rk) ?left (filter (is-not-null ?rk) ?right))"
+            if crate::conditions::references_only("?rk", "?right")
         ),
     ]
 }
