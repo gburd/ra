@@ -23,5 +23,10 @@ prefers a physical method.
 ## Cost Model
 
 ```rust
-500.0 * ctx.tuple_cost
+// Cardinality-aware: the logical join models a hash join (the usual best
+// for equi-joins), linear in the post-filter input row counts passed as
+// `left_cost`/`right_cost`. Scaling with input cardinality is what lets the
+// extractor prefer predicate pushdown (a filtered, smaller join input is
+// genuinely cheaper) and pick a good join order.
+(ctx.left_cost + ctx.right_cost) * ctx.tuple_cost
 ```
