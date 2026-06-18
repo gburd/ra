@@ -3419,6 +3419,98 @@ impl PlanBuilder {
         Ok(Some((join_plan, JoinColMap::new(), out_tl)))
     }
 
+    /// Split a (translated) qual `Node` on top-level AND into its conjuncts.
+    unsafe fn and_split(node: *mut pg_sys::Node, out: &mut Vec<*mut pg_sys::Node>) {
+        if node.is_null() {
+            return;
+        }
+        if (*node).type_ == pg_sys::NodeTag::T_BoolExpr {
+            let b = node.cast::<pg_sys::BoolExpr>();
+            if (*b).boolop == pg_sys::BoolExprType::AND_EXPR {
+                let args = (*b).args;
+                let e = (*args).elements;
+                for i in 0..(*args).length {
+                    Self::and_split((*e.add(i as usize)).ptr_value.cast(), out);
+                }
+                return;
+            }
+        }
+        out.push(node);
+    }
+
+    /// Record whether an expression references OUTER_VAR / INNER_VAR Vars.
+    /// Unknown node kinds set both (conservatively "mixed"), so they are never
+    /// mistaken for a clean single-sided hash key.
+    unsafe fn collect_sides(node: *mut pg_sys::Node, has_outer: &mut bool, has_inner: &mut bool) {
+        if node.is_null() {
+            return;
+        }
+        match (*node).type_ {
+            pg_sys::NodeTag::T_Var => {
+                let vno = (*node.cast::<pg_sys::Var>()).varno;
+                if vno == pg_sys::OUTER_VAR as i32 {
+                    *has_outer = true;
+                } else if vno == pg_sys::INNER_VAR as i32 {
+                    *has_inner = true;
+                } else {
+                    *has_outer = true;
+                    *has_inner = true;
+                }
+            }
+            pg_sys::NodeTag::T_Const | pg_sys::NodeTag::T_Param => {}
+            pg_sys::NodeTag::T_RelabelType => {
+                Self::collect_sides((*node.cast::<pg_sys::RelabelType>()).arg.cast(), has_outer, has_inner);
+            }
+            pg_sys::NodeTag::T_OpExpr => {
+                Self::collect_list_sides((*node.cast::<pg_sys::OpExpr>()).args, has_outer, has_inner);
+            }
+            pg_sys::NodeTag::T_FuncExpr => {
+                Self::collect_list_sides((*node.cast::<pg_sys::FuncExpr>()).args, has_outer, has_inner);
+            }
+            pg_sys::NodeTag::T_BoolExpr => {
+                Self::collect_list_sides((*node.cast::<pg_sys::BoolExpr>()).args, has_outer, has_inner);
+            }
+            _ => {
+                *has_outer = true;
+                *has_inner = true;
+            }
+        }
+    }
+
+    unsafe fn collect_list_sides(list: *mut pg_sys::List, has_outer: &mut bool, has_inner: &mut bool) {
+        if list.is_null() {
+            return;
+        }
+        let e = (*list).elements;
+        for i in 0..(*list).length {
+            Self::collect_sides((*e.add(i as usize)).ptr_value.cast(), has_outer, has_inner);
+        }
+    }
+
+    /// True if `node` is a hashable equality `OpExpr` whose two arguments are
+    /// each purely from one join side (one OUTER, one INNER) — i.e. a usable
+    /// hash-join clause.
+    unsafe fn is_hash_equi_clause(node: *mut pg_sys::Node) -> bool {
+        if node.is_null() || (*node).type_ != pg_sys::NodeTag::T_OpExpr {
+            return false;
+        }
+        let op = node.cast::<pg_sys::OpExpr>();
+        if pg_sys::list_length((*op).args) != 2 {
+            return false;
+        }
+        let a0 = pg_sys::list_nth((*op).args, 0).cast::<pg_sys::Node>();
+        let a1 = pg_sys::list_nth((*op).args, 1).cast::<pg_sys::Node>();
+        if !pg_sys::op_hashjoinable((*op).opno, pg_sys::exprType(a0)) {
+            return false;
+        }
+        let (mut o0, mut i0, mut o1, mut i1) = (false, false, false, false);
+        Self::collect_sides(a0, &mut o0, &mut i0);
+        Self::collect_sides(a1, &mut o1, &mut i1);
+        let pure_outer = |o: bool, i: bool| o && !i;
+        let pure_inner = |o: bool, i: bool| i && !o;
+        (pure_outer(o0, i0) && pure_inner(o1, i1)) || (pure_inner(o0, i0) && pure_outer(o1, i1))
+    }
+
     /// Build one `NestLoop` join node over two (possibly nested) join inputs,
     /// with the ON `condition` as joinqual and an optional `where_pred` as the
     /// post-join `plan.qual` (both remapped to the children's OUTER/INNER
@@ -3509,14 +3601,25 @@ impl PlanBuilder {
         // carried on `physical_choices`, keyed by the inner relation's alias.
         // This builder only renders that choice, falling back to "hash when
         // feasible" when layer 2 expressed no preference.
-        let is_equi = !cond_q.is_null()
-            && (*cond_q).type_ == pg_sys::NodeTag::T_OpExpr
-            && pg_sys::op_hashjoinable(
-                (*cond_q.cast::<pg_sys::OpExpr>()).opno,
-                pg_sys::exprType(
-                    pg_sys::list_nth((*cond_q.cast::<pg_sys::OpExpr>()).args, 0).cast(),
-                ),
-            );
+        // Split the join condition into hashable equi-clauses (each side from
+        // one relation) and a residual. Any equi-clause makes this a hash join;
+        // the residual becomes the join's other quals. A bare single OpExpr and
+        // an AND of (equi + filter) — what subquery decorrelation produces for
+        // semi-joins — both yield hash clauses here.
+        let mut conjuncts: Vec<*mut pg_sys::Node> = Vec::new();
+        if !cond_q.is_null() {
+            Self::and_split(cond_q, &mut conjuncts);
+        }
+        let mut hash_ops: Vec<*mut pg_sys::OpExpr> = Vec::new();
+        let mut residual: Vec<*mut pg_sys::Node> = Vec::new();
+        for c in conjuncts {
+            if Self::is_hash_equi_clause(c) {
+                hash_ops.push(c.cast());
+            } else {
+                residual.push(c);
+            }
+        }
+        let is_equi = !hash_ops.is_empty();
         let needs_hash = matches!(join_type, JoinType::FullOuter | JoinType::RightOuter);
         if needs_hash && !is_equi {
             return Err(unsupported("full/right join needs a hashable equi-condition"));
@@ -3557,46 +3660,49 @@ impl PlanBuilder {
             (*node).join.jointype = ra_join_type_to_pg(join_type);
             (*node).join.plan.lefttree = lplan;
             (*node).join.plan.righttree = &mut (*hash).plan as *mut pg_sys::Plan;
-            (*node).hashclauses = pg_sys::lappend(std::ptr::null_mut(), cond_q.cast());
-            // The hashclauses only drive the per-match equality *recheck*.
-            // The executor builds its hash functions and key expressions from
-            // the HashJoin's hashoperators / hashcollations / hashkeys (outer)
-            // and the Hash node's hashkeys (inner). Without them every row
-            // computes a constant hash value -> one bucket -> O(n*m) probe
-            // (results stay correct via the recheck, just catastrophically
-            // slow). Wire all of them from the single hashable equi-OpExpr.
-            let op = cond_q.cast::<pg_sys::OpExpr>();
-            let a0 = pg_sys::list_nth((*op).args, 0).cast::<pg_sys::Node>();
-            let a1 = pg_sys::list_nth((*op).args, 1).cast::<pg_sys::Node>();
+            // Wire every hashable equi-clause: hashclauses (per-match recheck),
+            // hashoperators/hashcollations, the outer hash keys (HashJoin) and
+            // the inner hash keys (Hash node). Without per-key wiring every row
+            // hashes to one bucket -> O(n*m) (correct via recheck, but slow).
             let is_inner = |n: *mut pg_sys::Node| {
                 !n.is_null()
                     && (*n).type_ == pg_sys::NodeTag::T_Var
                     && (*n.cast::<pg_sys::Var>()).varno == pg_sys::INNER_VAR as i32
             };
-            let (outer_key, inner_key) = if is_inner(a0) { (a1, a0) } else { (a0, a1) };
-            (*node).hashoperators =
-                pg_sys::lappend_oid(std::ptr::null_mut(), (*op).opno);
-            (*node).hashcollations =
-                pg_sys::lappend_oid(std::ptr::null_mut(), (*op).inputcollid);
-            // Outer (probe) key: evaluated against the outer tuple — the
-            // OUTER_VAR operand is already correct.
-            (*node).hashkeys = pg_sys::lappend(std::ptr::null_mut(), outer_key.cast());
-            // Inner (build) key: ExecHash evaluates the Hash node's hashkeys
-            // against its child tuple, which occupies the *outer* slot of the
-            // Hash node's expr context — so rewrite varno INNER_VAR -> OUTER_VAR
-            // (same attno) on a copy (mutating the shared clause would corrupt
-            // the equality recheck).
-            let hk = if !inner_key.is_null()
-                && (*inner_key).type_ == pg_sys::NodeTag::T_Var
-            {
-                let v = self.alloc_node::<pg_sys::Var>();
-                *v = *inner_key.cast::<pg_sys::Var>();
-                (*v).varno = pg_sys::OUTER_VAR as i32;
-                v.cast::<pg_sys::Node>()
-            } else {
-                inner_key
+            // A purely-inner argument (may be an expression, not just a Var).
+            let arg_is_inner = |n: *mut pg_sys::Node| {
+                let (mut o, mut i) = (false, false);
+                Self::collect_sides(n, &mut o, &mut i);
+                i && !o
             };
-            (*hash).hashkeys = pg_sys::lappend(std::ptr::null_mut(), hk.cast());
+            for op in &hash_ops {
+                let op = *op;
+                let a0 = pg_sys::list_nth((*op).args, 0).cast::<pg_sys::Node>();
+                let a1 = pg_sys::list_nth((*op).args, 1).cast::<pg_sys::Node>();
+                let (outer_key, inner_key) = if arg_is_inner(a0) { (a1, a0) } else { (a0, a1) };
+                (*node).hashclauses = pg_sys::lappend((*node).hashclauses, op.cast());
+                (*node).hashoperators = pg_sys::lappend_oid((*node).hashoperators, (*op).opno);
+                (*node).hashcollations =
+                    pg_sys::lappend_oid((*node).hashcollations, (*op).inputcollid);
+                (*node).hashkeys = pg_sys::lappend((*node).hashkeys, outer_key.cast());
+                // ExecHash evaluates the Hash node's hashkeys against its child
+                // tuple, which sits in the *outer* slot of the Hash's expr
+                // context — rewrite INNER_VAR -> OUTER_VAR (same attno) on a
+                // copy, so the shared recheck clause is not corrupted.
+                let hk = if is_inner(inner_key) {
+                    let v = self.alloc_node::<pg_sys::Var>();
+                    *v = *inner_key.cast::<pg_sys::Var>();
+                    (*v).varno = pg_sys::OUTER_VAR as i32;
+                    v.cast::<pg_sys::Node>()
+                } else {
+                    inner_key
+                };
+                (*hash).hashkeys = pg_sys::lappend((*hash).hashkeys, hk.cast());
+            }
+            // Residual (non-hash) conditions become the join's other quals.
+            for r in &residual {
+                (*node).join.joinqual = pg_sys::lappend((*node).join.joinqual, (*r).cast());
+            }
             &mut (*node).join.plan as *mut pg_sys::Plan
         } else {
             let node = self.alloc_node::<pg_sys::NestLoop>();
