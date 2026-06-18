@@ -1507,7 +1507,9 @@ impl IntegratedCostFn {
     }
 
     /// Rule-provided cost for an operator whose cost ignores child costs and
-    /// cardinality (filter/project/join/aggregate/sort/...).
+    /// cardinality. Retained for tests that compare flat operator costs; the
+    /// production cost function now passes real cardinality context.
+    #[cfg(test)]
     fn flat_op_cost(&self, operator: &str) -> f64 {
         operator_cost(operator, &self.op_cost_ctx(0.0, 0.0, 0.0))
     }

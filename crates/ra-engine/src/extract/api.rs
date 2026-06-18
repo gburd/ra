@@ -150,7 +150,7 @@ pub fn extract_best<S: BuildHasher>(
 /// table in `table_stats`, records the canonical Id → `row_count` mapping.
 /// This is O(n) in the number of e-classes (typically small) and runs
 /// once before extraction.
-fn resolve_table_row_counts<S: BuildHasher>(
+pub(crate) fn resolve_table_row_counts<S: BuildHasher>(
     egraph: &egg::EGraph<RelLang, RelAnalysis>,
     table_stats: &HashMap<String, Statistics, S>,
 ) -> HashMap<Id, f64> {
