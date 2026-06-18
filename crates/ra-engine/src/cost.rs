@@ -1562,16 +1562,20 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             }
             // A Filter reduces its subtree's cardinality by the predicate
             // selectivity — this is what makes a Join over a *filtered* input
-            // genuinely cheaper than the same Join with the filter left on top,
-            // so equality saturation prefers predicate pushdown. The predicate
-            // is evaluated once per input row.
+            // genuinely cheaper than the same Join with the filter left on top
+            // (or merged into the join condition), so equality saturation
+            // prefers predicate pushdown. The filter's own cost is a flat
+            // per-node unit: charging it per input row would make pushing a
+            // filter to a large base table look more expensive than evaluating
+            // it on the join output, defeating pushdown — the cardinality
+            // *reduction* is the lever, not the eval cost.
             RelLang::Filter([pred_id, input_id]) => {
                 let ci = costs(*input_id);
                 let pred = costs(*pred_id).total_cost;
                 let sel = self.selectivity_for_cond(*pred_id);
                 let unit = operator_cost("filter", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
                 PlanCost {
-                    total_cost: ci.total_cost + pred + unit * ci.est_rows,
+                    total_cost: ci.total_cost + pred + unit,
                     est_rows: (ci.est_rows * sel).max(1.0),
                 }
             }
@@ -1580,7 +1584,7 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let cols = costs(*cols_id).total_cost;
                 let unit = operator_cost("project", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
                 PlanCost {
-                    total_cost: ci.total_cost + cols + unit * ci.est_rows,
+                    total_cost: ci.total_cost + cols + unit,
                     est_rows: ci.est_rows,
                 }
             }
