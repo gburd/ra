@@ -1494,6 +1494,101 @@ mod tests {
             .run(&all_rules())
     }
 
+    /// Regression: the cardinality-aware extractor must never pick a plan that
+    /// pushes a predicate to a join child it does not reference. Before the
+    /// filter-null-join-key guards, eq-commutative let `filter-null-join-key`
+    /// derive `IS NOT NULL(left_key)` onto the right child, and the new cost
+    /// model then preferred that unsound pushed form.
+    #[test]
+    fn inner_join_pushdown_extraction_is_sound() {
+        use egg::Runner;
+        let qcol = |t: &str, c: &str| {
+            Expr::Column(ColumnRef { table: Some(t.to_string()), column: c.to_string() })
+        };
+        let join = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(qcol("o", "o_custkey")),
+                right: Box::new(qcol("c", "c_custkey")),
+            },
+            left: Box::new(RelExpr::Scan { table: "orders".into(), alias: Some("o".into()) }),
+            right: Box::new(RelExpr::Scan { table: "customer".into(), alias: Some("c".into()) }),
+        };
+        let expr = RelExpr::Filter {
+            predicate: Expr::BinOp {
+                op: BinOp::Lt,
+                left: Box::new(qcol("o", "o_orderkey")),
+                right: Box::new(Expr::Const(Const::Int(50))),
+            },
+            input: Box::new(join),
+        };
+        let rec = to_rec_expr(&expr).expect("conv");
+        let runner = Runner::default()
+            .with_expr(&rec)
+            .with_iter_limit(10)
+            .with_node_limit(50_000)
+            .run(&all_rules());
+        let mut stats = std::collections::HashMap::new();
+        let mut o = ra_core::statistics::Statistics::new(15000.0);
+        o.avg_row_size = 100;
+        o.total_size = 1_500_000;
+        stats.insert("orders".to_string(), o);
+        let mut c = ra_core::statistics::Statistics::new(3000.0);
+        c.avg_row_size = 100;
+        c.total_size = 300_000;
+        stats.insert("customer".to_string(), c);
+        let best = crate::extract::extract_best(
+            &runner.egraph,
+            runner.roots[0],
+            &stats,
+            &ra_hardware::HardwareProfile::cpu_only(),
+            crate::cost::LiveConditions::NEUTRAL,
+            None,
+        )
+        .expect("extract");
+        // Soundness: collect the tables/aliases under a subtree, and check each
+        // Filter's predicate references only qualifiers present in its input.
+        fn tables(e: &RelExpr, out: &mut std::collections::HashSet<String>) {
+            match e {
+                RelExpr::Scan { table, alias } => {
+                    out.insert(table.to_lowercase());
+                    if let Some(a) = alias { out.insert(a.to_lowercase()); }
+                }
+                RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => tables(input, out),
+                RelExpr::Join { left, right, .. } => { tables(left, out); tables(right, out); }
+                _ => {}
+            }
+        }
+        fn quals(e: &Expr, out: &mut std::collections::HashSet<String>) {
+            match e {
+                Expr::Column(c) => { if let Some(t) = &c.table { out.insert(t.to_lowercase()); } }
+                Expr::BinOp { left, right, .. } => { quals(left, out); quals(right, out); }
+                Expr::UnaryOp { operand, .. } => quals(operand, out),
+                _ => {}
+            }
+        }
+        fn check(e: &RelExpr, bad: &mut Vec<String>) {
+            if let RelExpr::Filter { predicate, input } = e {
+                let mut avail = std::collections::HashSet::new();
+                tables(input, &mut avail);
+                let mut used = std::collections::HashSet::new();
+                quals(predicate, &mut used);
+                if !used.is_subset(&avail) {
+                    bad.push(format!("UNSOUND: pred quals {used:?} not in input tables {avail:?}"));
+                }
+            }
+            match e {
+                RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => check(input, bad),
+                RelExpr::Join { left, right, .. } => { check(left, bad); check(right, bad); }
+                _ => {}
+            }
+        }
+        let mut bad = Vec::new();
+        check(&best, &mut bad);
+        assert!(bad.is_empty(), "unsound pushdown extracted: {bad:?}\nplan: {best:?}");
+    }
+
     #[test]
     fn filter_merge_creates_conjunction() {
         let expr = RelExpr::scan("t")

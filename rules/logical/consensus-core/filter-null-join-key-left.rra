@@ -19,3 +19,4 @@ Migrated from the hand-coded `filter_null_join_keys_rules` to a declarative `.rr
 
 lhs: (join inner (eq ?lk ?rk) ?left ?right)
 rhs: (join inner (eq ?lk ?rk) (filter (is-not-null ?lk) ?left) ?right)
+when: references_only("?lk", "?left")
