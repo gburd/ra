@@ -370,8 +370,16 @@ unsafe fn read_stat_slots(
                 }
             }
         } else if kind == pg_sys::STATISTIC_KIND_HISTOGRAM as i16 {
-            // Histogram bounds are stored in stavalues
+            // Histogram bounds are stored in stavalues (sorted ascending), so
+            // the first and last bounds give the column's min/max — used by the
+            // planner's range-selectivity estimate.
             if let Some(bounds) = read_stavalues_as_strings(tuple, slot_idx) {
+                if let Some(first) = bounds.first() {
+                    col_stats.min_value = Some(first.clone());
+                }
+                if let Some(last) = bounds.last() {
+                    col_stats.max_value = Some(last.clone());
+                }
                 col_stats.histogram = Some(create_equidepth_histogram(bounds, row_count, distinct));
             }
         }
