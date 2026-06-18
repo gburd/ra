@@ -22,7 +22,6 @@ pub(crate) mod parser_hook;
 mod plan_advice_explain;
 mod plan_builder;
 mod planner_hook;
-mod query_parser;
 pub(crate) mod sort_utils;
 pub mod stats_bridge;
 
