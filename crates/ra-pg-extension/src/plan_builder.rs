@@ -1527,6 +1527,29 @@ impl PlanBuilder {
             return Ok(None);
         }
 
+        // Stats-driven access-path choice. Estimate the predicate's
+        // selectivity from gathered column statistics; when the scan is
+        // non-selective enough that a sequential scan is cheaper than this
+        // index scan, decline the index path and let the SeqScan fold handle
+        // it. A unique-index equality (matches at most one row) always wins,
+        // and an explicit INDEX_SCAN / INDEX_ONLY_SCAN plan advice overrides
+        // the cost comparison.
+        let est_selectivity = if has_unique_eq {
+            0.0
+        } else {
+            self.estimate_scan_selectivity(table, predicate)
+        };
+        let advice_forces_index = matches!(
+            self.physical_choices.scan_for(table),
+            Some(
+                ra_engine::plan_advice_physical::ScanStrategy::Index { .. }
+                    | ra_engine::plan_advice_physical::ScanStrategy::IndexOnly { .. }
+            )
+        );
+        if !has_unique_eq && !advice_forces_index && self.seq_beats_index(table, est_selectivity) {
+            return Ok(None);
+        }
+
         let node = self.alloc_node::<pg_sys::IndexScan>();
         if node.is_null() {
             return Err(PlanBuilderError::NullPointer("IndexScan allocation".to_owned()));
@@ -1538,10 +1561,7 @@ impl PlanBuilder {
         (*node).indexqualorig = indexqualorig;
         (*node).indexorderdir = pg_sys::ScanDirection::ForwardScanDirection;
         (*node).scan.plan.qual = qual;
-        // A unique-index equality matches at most one row; otherwise use a
-        // generic index selectivity.
-        let selectivity = if has_unique_eq { 0.0 } else { 0.1 };
-        self.set_index_costs(&mut (*node).scan.plan, table, selectivity);
+        self.set_index_costs(&mut (*node).scan.plan, table, est_selectivity);
         Ok(Some(&mut (*node).scan.plan as *mut pg_sys::Plan))
     }
 
@@ -6875,6 +6895,94 @@ impl PlanBuilder {
         }
     }
 
+    /// Estimate the fraction of `table`'s rows selected by `predicate` using
+    /// gathered column statistics. Conjuncts are combined assuming
+    /// independence (product of per-conjunct selectivities). Falls back to a
+    /// neutral 0.1 when nothing can be estimated; the result is clamped to
+    /// `[1/row_count, 1.0]`.
+    fn estimate_scan_selectivity(&self, table: &str, predicate: &Expr) -> f64 {
+        let Some(stats) = self.stats.get(&table.to_lowercase()) else {
+            return 0.1;
+        };
+        let mut conjuncts: Vec<&Expr> = Vec::new();
+        split_conjuncts(predicate, &mut conjuncts);
+        let mut selectivity = 1.0_f64;
+        let mut estimated_any = false;
+        for c in &conjuncts {
+            if let Some(s) = Self::conjunct_selectivity(c, stats) {
+                selectivity *= s;
+                estimated_any = true;
+            }
+        }
+        if !estimated_any {
+            return 0.1;
+        }
+        let floor = 1.0 / stats.row_count.max(1.0);
+        selectivity.clamp(floor, 1.0)
+    }
+
+    /// Estimate the selectivity of a single `col <op> const` comparison (in
+    /// either argument order). Equality uses `1/ndv`; range predicates
+    /// interpolate the constant against the column's min/max. Returns `None`
+    /// when the clause is not an estimable column-vs-constant comparison.
+    fn conjunct_selectivity(clause: &Expr, stats: &Statistics) -> Option<f64> {
+        let Expr::BinOp { op, left, right } = clause else {
+            return None;
+        };
+        if !is_comparison(*op) {
+            return None;
+        }
+        // Normalise to `column <op> constant`, flipping the operator when the
+        // constant is on the left.
+        let (cref, konst, op) = match (&**left, &**right) {
+            (Expr::Column(c), Expr::Const(k)) => (c, k, *op),
+            (Expr::Const(k), Expr::Column(c)) => (c, k, flip_comparison(*op)),
+            _ => return None,
+        };
+        let col = stats.columns.get(&cref.column.to_lowercase())?;
+        match op {
+            BinOp::Eq => Some(col.equality_selectivity()),
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                let k = const_to_f64(konst)?;
+                let lo = col.min_value.as_ref()?.parse::<f64>().ok()?;
+                let hi = col.max_value.as_ref()?.parse::<f64>().ok()?;
+                if hi <= lo {
+                    return Some(0.5);
+                }
+                let frac_below = ((k - lo) / (hi - lo)).clamp(0.0, 1.0);
+                Some(match op {
+                    BinOp::Lt | BinOp::Le => frac_below,
+                    _ => 1.0 - frac_below,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// True when a sequential scan of `table` is strictly cheaper than an
+    /// index scan at the given `selectivity`, under the host-calibrated cost
+    /// parameters. Mirrors the formulas in `set_costs_from_stats` and
+    /// `set_index_costs`.
+    fn seq_beats_index(&self, table: &str, selectivity: f64) -> bool {
+        let Some(stats) = self.stats.get(&table.to_lowercase()) else {
+            return false;
+        };
+        let (seq_page_cost, random_page_cost, cpu_tuple_cost, cpu_index_tuple_cost) =
+            host_cost_params();
+        let reltuples = stats.row_count.max(1.0);
+        let relpages = if stats.total_size > 0 {
+            (stats.total_size as f64 / 8192.0).max(1.0)
+        } else {
+            (reltuples / 50.0).max(1.0)
+        };
+        let seq_cost = relpages * seq_page_cost + reltuples * cpu_tuple_cost;
+        let selected = (reltuples * selectivity).max(1.0);
+        let pages_fetched = (relpages * selectivity).max(1.0);
+        let index_cost =
+            pages_fetched * random_page_cost + selected * (cpu_index_tuple_cost + cpu_tuple_cost);
+        seq_cost < index_cost
+    }
+
     /// Propagate costs from two child nodes to a join node.
     unsafe fn propagate_costs_binary(
         &self,
@@ -7345,6 +7453,29 @@ fn host_cost_params() -> (f64, f64, f64, f64) {
         base_cpu * cpu_factor,
         base_cpu * 0.5 * cpu_factor, // index tuples are narrower
     )
+}
+
+/// Flip a comparison operator so `const <op> col` is rewritten as the
+/// equivalent `col <flipped-op> const`.
+fn flip_comparison(op: BinOp) -> BinOp {
+    match op {
+        BinOp::Lt => BinOp::Gt,
+        BinOp::Le => BinOp::Ge,
+        BinOp::Gt => BinOp::Lt,
+        BinOp::Ge => BinOp::Le,
+        other => other,
+    }
+}
+
+/// Interpret a constant as an `f64` for range-selectivity interpolation.
+/// Numeric strings are parsed; non-numeric constants return `None`.
+fn const_to_f64(k: &ra_core::expr::Const) -> Option<f64> {
+    match k {
+        ra_core::expr::Const::Int(i) => Some(*i as f64),
+        ra_core::expr::Const::Float(f) => Some(*f),
+        ra_core::expr::Const::String(s) => s.parse::<f64>().ok(),
+        ra_core::expr::Const::Bool(_) | ra_core::expr::Const::Null => None,
+    }
 }
 
 /// True if `op` is a comparison that can map to a btree index strategy.
