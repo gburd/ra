@@ -51,6 +51,11 @@ pub extern "C-unwind" fn _PG_init() {
     // Load BitNet cost model from disk (if available)
     extension_state::init_cost_model();
 
+    // Pay egg's one-time ~200ms global init now (in the preloaded postmaster,
+    // inherited by forked backends) so it never lands on a user query's
+    // planning time.
+    ra_engine::warmup();
+
     // Initialize system fingerprint monitor for neural optimization
     monitor::init();
 
