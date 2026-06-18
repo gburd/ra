@@ -3213,6 +3213,39 @@ impl PlanBuilder {
         Ok(Some((join_plan, out_map, out_tl)))
     }
 
+    /// Split an `Expr` on top-level AND into conjuncts.
+    fn and_split_expr<'e>(e: &'e Expr, out: &mut Vec<&'e Expr>) {
+        if let Expr::BinOp { op: ra_core::expr::BinOp::And, left, right } = e {
+            Self::and_split_expr(left, out);
+            Self::and_split_expr(right, out);
+        } else {
+            out.push(e);
+        }
+    }
+
+    /// True for a constant that is always true (`true` / non-zero int).
+    fn expr_trivially_true(e: &Expr) -> bool {
+        matches!(e, Expr::Const(ra_core::expr::Const::Bool(true)))
+            || matches!(e, Expr::Const(ra_core::expr::Const::Int(n)) if *n != 0)
+    }
+
+    /// True if every column referenced by `e` is qualified with `alias` or
+    /// `tbl` (and there is at least one column) — i.e. `e` depends only on the
+    /// given outer relation.
+    fn expr_only_qualifies(e: &Expr, alias: &str, tbl: &str) -> bool {
+        let probe = RelExpr::Filter {
+            predicate: e.clone(),
+            input: Box::new(RelExpr::Scan { table: "__probe".to_owned(), alias: None }),
+        };
+        let cols = probe.referenced_columns();
+        !cols.is_empty()
+            && cols.iter().all(|c| {
+                c.table
+                    .as_deref()
+                    .is_some_and(|t| t.eq_ignore_ascii_case(alias) || t.eq_ignore_ascii_case(tbl))
+            })
+    }
+
     /// Build a correlated LATERAL join `outer JOIN LATERAL (inner) t ON true`
     /// (where `inner` references outer columns) as a parameterized `NestLoop`:
     /// each referenced outer column becomes a PARAM_EXEC parameter resolved
@@ -3229,9 +3262,7 @@ impl PlanBuilder {
         out_columns: Option<&[ProjectionColumn]>,
     ) -> Result<Option<(*mut pg_sys::Plan, JoinColMap, *mut pg_sys::List)>, PlanBuilderError> {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
-        let cond_trivially_true = matches!(condition, Expr::Const(ra_core::expr::Const::Bool(true)))
-            || matches!(condition, Expr::Const(ra_core::expr::Const::Int(n)) if *n != 0);
-        if !matches!(join_type, JoinType::Inner) || !cond_trivially_true {
+        if !matches!(join_type, JoinType::Inner) {
             return Ok(None);
         }
         let Some(out_cols) = out_columns else {
@@ -3242,6 +3273,43 @@ impl PlanBuilder {
         };
         let outer_alias =
             ra_engine::plan_advice_physical::inner_join_alias(left).unwrap_or(outer_tbl.clone());
+
+        // A lateral's ON condition is logically `true`, but the optimizer may
+        // push outer-only WHERE predicates into it (e.g. `true AND
+        // o.o_orderkey < 30`). Split it: drop trivially-true conjuncts, fold
+        // outer-only conjuncts into the effective outer filter, and defer if
+        // any conjunct references the lateral output (not a plain `ON true`).
+        let mut cond_conjuncts: Vec<&Expr> = Vec::new();
+        Self::and_split_expr(condition, &mut cond_conjuncts);
+        let mut cond_outer_filters: Vec<Expr> = Vec::new();
+        for c in cond_conjuncts {
+            if Self::expr_trivially_true(c) {
+                continue;
+            }
+            if Self::expr_only_qualifies(c, &outer_alias, &outer_tbl) {
+                cond_outer_filters.push(c.clone());
+            } else {
+                return Ok(None);
+            }
+        }
+        // Effective outer filter = the original WHERE plus any outer-only
+        // predicates the optimizer pushed into the ON condition.
+        let combined_where: Option<Expr> = {
+            let mut parts: Vec<Expr> = Vec::new();
+            if let Some(w) = where_pred {
+                parts.push(w.clone());
+            }
+            parts.extend(cond_outer_filters);
+            let mut iter = parts.into_iter();
+            iter.next().map(|first| {
+                iter.fold(first, |acc, p| Expr::BinOp {
+                    op: ra_core::expr::BinOp::And,
+                    left: Box::new(acc),
+                    right: Box::new(p),
+                })
+            })
+        };
+        let where_pred: Option<&Expr> = combined_where.as_ref();
 
         // Correlation columns: outer-qualified columns referenced in the inner.
         let allcols: Vec<ra_core::expr::ColumnRef> = right.referenced_columns();
