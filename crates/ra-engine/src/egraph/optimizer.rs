@@ -1536,7 +1536,7 @@ impl Optimizer {
                 break;
             }
 
-            if let Some(reason) = Self::check_iteration_termination(
+            if let Some(reason) = self.check_iteration_termination(
                 &mut ctx, &egraph, root, iteration, actual_iterations,
                 prev_classes, continuation_gate, convergence_behavior,
                 table_count, stop_reason.as_ref(),
@@ -1630,6 +1630,7 @@ impl Optimizer {
                   into a builder; the call site is single and self-explanatory"
     )]
     fn check_iteration_termination(
+        &self,
         ctx: &mut LoopContext,
         egraph: &EGraph<RelLang, RelAnalysis>,
         root: Id,
@@ -1638,7 +1639,7 @@ impl Optimizer {
         prev_classes: usize,
         continuation_gate: &mut Option<ContinuationGate>,
         convergence_behavior: ConvergenceBehavior,
-        table_count: usize,
+        _table_count: usize,
         stop_reason: Option<&egg::StopReason>,
     ) -> Option<&'static str> {
         use tracing::debug;
@@ -1656,11 +1657,45 @@ impl Optimizer {
             total_classes: curr_classes,
         });
 
+        // Cardinality-aware cost signal: use the same cost model as final
+        // extraction (IntegratedCostFn) when statistics are available, so the
+        // convergence detector can see cost-improving rewrites — predicate
+        // pushdown, join reordering — that a flat cost model is blind to. Falls
+        // back to the structural RelCostFn when no stats are present.
         let current_cost = ctx.hardware_cached.as_ref().map(|hardware| {
-            let cost_fn = crate::extract::RelCostFn::new(hardware.clone());
-            let extractor = egg::Extractor::new(egraph, cost_fn);
-            extractor.find_best(root).0
+            if self.table_stats.is_empty() {
+                let cost_fn = crate::extract::RelCostFn::new(hardware.clone());
+                egg::Extractor::new(egraph, cost_fn).find_best(root).0
+            } else {
+                let staleness: HashMap<String, ra_stats::accuracy::Staleness> = self
+                    .table_stats
+                    .keys()
+                    .map(|k| (k.clone(), ra_stats::accuracy::Staleness::Fresh))
+                    .collect();
+                let id_row_counts =
+                    crate::extract::resolve_table_row_counts(egraph, &*self.table_stats);
+                let cost_fn = crate::cost::IntegratedCostFn::with_id_row_counts(
+                    hardware.clone(),
+                    (*self.table_stats).clone(),
+                    staleness,
+                    id_row_counts,
+                );
+                egg::Extractor::new(egraph, cost_fn).find_best(root).0.total_cost
+            }
         });
+
+        // Cost-aware convergence bookkeeping: track whether the cardinality-aware
+        // cost is still improving. This replaces the blind per-iteration cap —
+        // cost-neutral rewrite explosions (e.g. set ops) plateau immediately and
+        // stop fast, while cost-improving rewrites keep the loop alive.
+        if let Some(cost) = current_cost {
+            if cost < ctx.best_cost * (1.0 - 0.001) {
+                ctx.best_cost = cost;
+                ctx.cost_improvement_stalled = 0;
+            } else {
+                ctx.cost_improvement_stalled = ctx.cost_improvement_stalled.saturating_add(1);
+            }
+        }
 
         if let Some(reason) = Self::check_cost_trackers(
             ctx, current_cost, root, iteration,
@@ -1684,10 +1719,21 @@ impl Optimizer {
             return Some("converged");
         }
 
-        if let Some(reason) = Self::check_convergence_policy(
-            convergence_behavior, actual_iterations, table_count,
-        ) {
-            return Some(reason);
+        // Adaptive cost-plateau convergence: stop when the cardinality-aware
+        // cost has not improved for >= 2 iterations (after at least 2 iterations
+        // of saturation). This replaces the previous hard "stop simple queries
+        // after 2 iterations" cap, which cut off cost-improving rewrites such as
+        // predicate pushdown and join reordering before they materialized in the
+        // e-graph. Cost-neutral rewrite explosions (e.g. set ops) plateau at
+        // once and still stop promptly.
+        match convergence_behavior {
+            ConvergenceBehavior::Immediate => return Some("convergence_immediate"),
+            ConvergenceBehavior::Adaptive
+                if actual_iterations >= 2 && ctx.cost_improvement_stalled >= 2 =>
+            {
+                return Some("cost_plateau");
+            }
+            _ => {}
         }
 
         if stop_reason.is_some_and(|r| matches!(r, egg::StopReason::Saturated)) {
@@ -1708,22 +1754,11 @@ impl Optimizer {
 
         if let Some(pruner) = ctx.cost_pruner.as_mut() {
             if let Some(cost) = current_cost {
+                // Record the cost for the pruner's internal tracking. The
+                // stall-based early-stop is handled by the unified cost-plateau
+                // convergence in `check_iteration_termination`, so it is not
+                // duplicated here (doing so double-counted the stall counter).
                 pruner.record_cost(root, cost);
-                let threshold = 0.01;
-                if cost < ctx.best_cost * (1.0 - threshold) {
-                    ctx.best_cost = cost;
-                    ctx.cost_improvement_stalled = 0;
-                } else {
-                    ctx.cost_improvement_stalled += 1;
-                    if ctx.cost_improvement_stalled >= 3 {
-                        debug!(
-                            "Early termination: cost stagnant for 3 \
-                             iterations (best: {:.2})",
-                            ctx.best_cost
-                        );
-                        return Some("cost_stagnant");
-                    }
-                }
             }
         }
 
@@ -1772,38 +1807,6 @@ impl Optimizer {
                 Some("speculative_model_stop")
             }
             ContinuationDecision::Continue => None,
-        }
-    }
-
-    /// Check convergence behavior policy for early termination.
-    fn check_convergence_policy(
-        behavior: ConvergenceBehavior,
-        actual_iterations: usize,
-        table_count: usize,
-    ) -> Option<&'static str> {
-        use tracing::debug;
-
-        match behavior {
-            ConvergenceBehavior::Immediate => {
-                debug!(
-                    "Immediate convergence: stopping after {} iteration(s)",
-                    actual_iterations,
-                );
-                Some("convergence_immediate")
-            }
-            ConvergenceBehavior::Adaptive if actual_iterations >= 2 => {
-                if is_simple_query(table_count) {
-                    debug!(
-                        "Adaptive convergence: simple query, \
-                         stopping after {} iterations",
-                        actual_iterations,
-                    );
-                    Some("convergence_adaptive_simple")
-                } else {
-                    None
-                }
-            }
-            _ => None,
         }
     }
 
