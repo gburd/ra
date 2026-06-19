@@ -181,14 +181,18 @@ unsafe fn capture_feedback(query_desc: *mut pg_sys::QueryDesc) {
     if let Ok(mut state) = FEEDBACK_STATE.lock() {
         state.collector.record(feedback.clone());
 
-        // Drain batch and feed to training coordinator when threshold is reached.
+        // Drain batch and feed to training coordinator when threshold is
+        // reached — unless online learning is frozen (deterministic mode), in
+        // which case telemetry is still collected but the model never evolves.
         if state.collector.buffered_count() >= TRAINING_BATCH_THRESHOLD {
             let batch = state.collector.drain();
 
             // Feed each feedback sample to the training coordinator.
-            if let Ok(mut coord) = state.training_coordinator.lock() {
-                for item in &batch {
-                    coord.record_feedback(&item.features, item.actual_time_ms);
+            if crate::extension_state::online_learning_enabled() {
+                if let Ok(mut coord) = state.training_coordinator.lock() {
+                    for item in &batch {
+                        coord.record_feedback(&item.features, item.actual_time_ms);
+                    }
                 }
             }
 

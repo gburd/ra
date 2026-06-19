@@ -2762,3 +2762,66 @@ impl ra_core::cost::StatisticsProvider for TableStatsProvider {
         self.stats.get(table)
     }
 }
+
+#[cfg(test)]
+mod determinism_tests {
+    use super::Optimizer;
+
+    /// Planning must be deterministic: optimizing the same query repeatedly
+    /// (with a fixed model — none is loaded here) must yield an identical plan.
+    /// This is the foundation for reproducible tests; the extension freezes the
+    /// BitNet model via `ra_planner.online_learning=off` so the model can't
+    /// evolve between runs.
+    #[test]
+    fn optimize_is_deterministic_across_runs() {
+        // Inner equi-join chains take the deterministic LEFT_DEEP route.
+        // NOTE: e-graph-routed shapes (outer joins, set ops) are NOT yet
+        // deterministic — see `egraph_extraction_determinism_gap` below.
+        let queries = [
+            "SELECT o.o_orderkey FROM orders o JOIN customer c \
+             ON o.o_custkey = c.c_custkey WHERE o.o_orderkey < 50",
+            "SELECT * FROM orders o JOIN customer c ON o.o_custkey = c.c_custkey \
+             JOIN nation n ON c.c_nationkey = n.n_nationkey",
+        ];
+        for sql in queries {
+            let Ok(expr) = ra_parser::sql_to_relexpr(sql) else { continue };
+            let baseline = {
+                let opt = Optimizer::new();
+                format!("{:?}", opt.optimize(&expr).expect("optimize"))
+            };
+            for run in 0..8 {
+                let opt = Optimizer::new();
+                let again = format!("{:?}", opt.optimize(&expr).expect("optimize"));
+                assert_eq!(
+                    baseline, again,
+                    "non-deterministic plan on run {run} for query: {sql}"
+                );
+            }
+        }
+    }
+
+    /// KNOWN GAP (tracked): e-graph extraction is NOT yet deterministic. For a
+    /// query routed through the e-graph, multiple equivalent forms (e.g.
+    /// filter-on-top vs filter-pushed vs filter-merged-into-condition) can have
+    /// tied/near-tied cost, and egg's extractor breaks the tie by internal
+    /// HashMap iteration order, which varies run-to-run. This produces
+    /// different (correct, equivalent) plan shapes across runs. Deterministic
+    /// tie-breaking in extraction is the prerequisite for a clean Phase 2
+    /// (routing inner joins through the e-graph). Un-ignore when fixed.
+    #[test]
+    #[ignore = "e-graph extraction tie-breaking is non-deterministic; tracked"]
+    fn egraph_extraction_determinism_gap() {
+        let sql = "SELECT o.o_orderkey FROM orders o LEFT JOIN customer c \
+                   ON o.o_custkey = c.c_custkey WHERE o.o_orderkey < 50";
+        let expr = ra_parser::sql_to_relexpr(sql).expect("parse");
+        let baseline = {
+            let opt = Optimizer::new();
+            format!("{:?}", opt.optimize(&expr).expect("optimize"))
+        };
+        for _ in 0..16 {
+            let opt = Optimizer::new();
+            let again = format!("{:?}", opt.optimize(&expr).expect("optimize"));
+            assert_eq!(baseline, again, "e-graph extraction is non-deterministic");
+        }
+    }
+}
