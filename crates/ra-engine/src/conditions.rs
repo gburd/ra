@@ -121,6 +121,47 @@ impl Condition<RelLang, RelAnalysis> for ReferencesOnly {
     }
 }
 
+/// Condition: predicate references columns from BOTH join sides.
+#[expect(clippy::struct_field_names, reason = "parallel naming with ReferencesOnly")]
+pub struct ReferencesBoth {
+    pred_var: Var,
+    left_var: Var,
+    right_var: Var,
+}
+
+impl ReferencesBoth {
+    #[must_use]
+    pub fn new(pred: &str, left: &str, right: &str) -> Self {
+        Self {
+            pred_var: parse_var(pred, "?pred"),
+            left_var: parse_var(left, "?left"),
+            right_var: parse_var(right, "?right"),
+        }
+    }
+}
+
+impl Condition<RelLang, RelAnalysis> for ReferencesBoth {
+    fn check(
+        &self,
+        egraph: &mut EGraph<RelLang, RelAnalysis>,
+        _eclass: Id,
+        subst: &Subst,
+    ) -> bool {
+        let pred_id = subst[self.pred_var];
+        let left_id = subst[self.left_var];
+        let right_id = subst[self.right_var];
+
+        let pred_quals = &egraph[pred_id].data.qualifiers;
+        let left_quals = &egraph[left_id].data.qualifiers;
+        let right_quals = &egraph[right_id].data.qualifiers;
+
+        // Predicate must reference at least one qualifier from each side.
+        let refs_left = pred_quals.iter().any(|q| left_quals.contains(q));
+        let refs_right = pred_quals.iter().any(|q| right_quals.contains(q));
+        refs_left && refs_right
+    }
+}
+
 /// Condition: an expression is deterministic (no side effects, no randomness).
 pub struct IsDeterministic {
     expr_var: Var,
@@ -277,6 +318,18 @@ pub fn single_reference(name: &str, body: &str) -> SafeCondition<SingleReference
 #[must_use]
 pub fn references_only(pred: &str, side: &str) -> SafeCondition<ReferencesOnly> {
     SafeCondition::new(ReferencesOnly::new(pred, side), "references_only")
+}
+
+/// Returns a condition that checks if a predicate references columns from
+/// BOTH sides of a join (i.e., it's a true cross-table join condition, not a
+/// single-table filter that should be pushed down).
+#[must_use]
+pub fn references_both(
+    pred: &str,
+    left: &str,
+    right: &str,
+) -> SafeCondition<ReferencesBoth> {
+    SafeCondition::new(ReferencesBoth::new(pred, left, right), "references_both")
 }
 
 /// Returns a condition that checks if an expression is deterministic.

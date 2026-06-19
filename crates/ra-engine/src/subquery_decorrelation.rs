@@ -687,15 +687,23 @@ fn try_decorrelate_correlated_scalar(
     subquery: &RelExpr,
     input: RelExpr,
 ) -> Option<RelExpr> {
-    // Match: Project { columns, input: Filter { predicate, input: inner } }
+    // Match patterns:
+    //   Project { columns, input: Filter { predicate, input: inner } }
+    //   Project { columns, input: Aggregate { input: Filter { predicate, input: inner }, .. } }
     let (proj_columns, filter_pred, inner_rel) = match subquery {
         RelExpr::Project {
             columns,
-            input: filter_box,
-        } => match filter_box.as_ref() {
+            input: next_box,
+        } => match next_box.as_ref() {
             RelExpr::Filter { predicate, input } => {
                 Some((columns, predicate, input.as_ref()))
             }
+            RelExpr::Aggregate { input: agg_in, .. } => match agg_in.as_ref() {
+                RelExpr::Filter { predicate, input } => {
+                    Some((columns, predicate, input.as_ref()))
+                }
+                _ => None,
+            },
             _ => None,
         },
         _ => None,

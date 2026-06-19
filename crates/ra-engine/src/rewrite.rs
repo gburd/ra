@@ -622,11 +622,22 @@ pub(crate) fn predicate_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(join inner ?cond ?left (filter ?pred ?right))"
             if crate::conditions::references_only("?pred", "?right")
         ),
-        // Merge filter into join condition
-        rewrite!("filter-into-join-condition";
-            "(filter ?pred (join inner ?cond ?left ?right))" =>
-            "(join inner (and ?cond ?pred) ?left ?right)"
+        // Push left conjunct of AND through join (left side)
+        rewrite!("filter-and-push-left";
+            "(filter (and ?p1 ?p2) (join inner ?cond ?left ?right))" =>
+            "(filter ?p2 (join inner ?cond (filter ?p1 ?left) ?right))"
+            if crate::conditions::references_only("?p1", "?left")
         ),
+        // Push right conjunct of AND through join (right side)
+        rewrite!("filter-and-push-right";
+            "(filter (and ?p1 ?p2) (join inner ?cond ?left ?right))" =>
+            "(filter ?p1 (join inner ?cond ?left (filter ?p2 ?right)))"
+            if crate::conditions::references_only("?p2", "?right")
+        ),
+        // Note: filter-into-join-condition removed — it counterproductively
+        // absorbs single-table predicates into the join condition, preventing
+        // filter pushdown. The join condition should only contain actual join
+        // predicates (column-to-column equalities across tables).
         // Merge adjacent filters
         rewrite!("filter-merge";
             "(filter ?p1 (filter ?p2 ?input))" =>

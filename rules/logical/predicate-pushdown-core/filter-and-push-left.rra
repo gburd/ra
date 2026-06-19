@@ -1,0 +1,26 @@
+---
+id: filter-and-push-left
+name: "filter-and-push-left"
+category: logical/predicate-pushdown-core
+databases: [postgresql, mysql, duckdb, sqlite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [predicate-pushdown, filter, join, conjunct]
+---
+
+# filter-and-push-left
+
+## Description
+
+Push the left conjunct of an AND filter below a join when it references
+only the left input. This enables early filtering before the join,
+reducing intermediate row counts.
+
+## Rewrite
+
+```
+lhs: (filter (and ?p1 ?p2) (join inner ?cond ?left ?right))
+rhs: (filter ?p2 (join inner ?cond (filter ?p1 ?left) ?right))
+conditions:
+  - references_only(?p1, ?left)
+```

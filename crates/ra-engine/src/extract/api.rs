@@ -13,7 +13,6 @@ use crate::egraph::{EGraphError, RelLang};
 use crate::state::SystemFingerprint;
 
 use super::convert::rec_expr_to_rel_expr;
-use super::cost::RelCostFn;
 use super::hybrid_cost::HybridCostFn;
 
 use crate::plan_advice_physical::{physical_choices_from_recexpr, PhysicalChoices};
@@ -105,13 +104,10 @@ pub fn extract_best<S: BuildHasher>(
     live: crate::cost::LiveConditions,
     page_size_bytes: Option<f64>,
 ) -> Result<RelExpr, EGraphError> {
-    if table_stats.is_empty() {
-        let cost_fn = RelCostFn::new(hardware.clone());
-        let extractor = egg::Extractor::new(egraph, cost_fn);
-        let (_, best_expr) = extractor.find_best(root);
-        record_physical_choices(egraph, &best_expr);
-        rec_expr_to_rel_expr(&best_expr)
-    } else {
+    // Always use the cardinality-aware cost function (IntegratedCostFn).
+    // Even without per-table statistics, the default selectivity estimates
+    // allow correct pushdown decisions.
+    {
         // Pre-resolve: scan the e-graph to build a mapping from
         // canonical symbol Ids → row counts. This allows the cost
         // function to access per-table statistics without needing

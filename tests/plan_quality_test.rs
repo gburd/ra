@@ -163,3 +163,20 @@ fn window_function_preserved() {
     assert!(debug.contains("Window") || debug.contains("window"),
         "window function missing: {debug}");
 }
+
+/// Compound AND predicates should be split and pushed to correct join sides.
+#[test]
+fn compound_filter_pushdown_through_join() {
+    let plan = optimize(
+        "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id WHERE t1.a = 1 AND t2.b = 2"
+    );
+    let debug = format!("{plan:?}");
+    // After optimization, t1.a=1 should be pushed below the join (on t1 side)
+    // and t2.b=2 should be pushed below the join (on t2 side).
+    // The plan should NOT have a compound Filter above the Join.
+    let has_compound_above_join = debug.contains("And") && debug.find("And").unwrap() < debug.find("Join").unwrap_or(usize::MAX);
+    assert!(
+        !has_compound_above_join,
+        "compound predicate should be pushed through join, got: {debug}"
+    );
+}

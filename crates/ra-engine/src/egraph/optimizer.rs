@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use egg::{EGraph, Id, Rewrite, Runner};
 use ra_core::algebra::RelExpr;
+use ra_core::algebra::JoinType;
+use ra_core::expr::{BinOp, Expr};
 #[cfg(feature = "timeline")]
 use ra_stats::delta::DeltaSet;
 
@@ -173,6 +175,162 @@ impl SaturationBudgets {
 /// expansion (ROLLUP/CUBE/GROUPING SETS → UNION ALL of grouped aggregates)
 /// followed by subquery decorrelation. Returns `Some` only when a
 /// normalization applies, so callers avoid a needless clone on the hot path.
+/// Post-optimization pass: push single-table predicates below joins.
+/// Splits AND conjunctions and pushes each conjunct to the appropriate side.
+fn push_filters_down(expr: RelExpr) -> RelExpr {
+    match expr {
+        RelExpr::Filter { predicate, input } => {
+            let input = push_filters_down(*input);
+            push_filter_into(predicate, input)
+        }
+        RelExpr::Project { columns, input } => RelExpr::Project {
+            columns,
+            input: Box::new(push_filters_down(*input)),
+        },
+        RelExpr::Join { join_type, condition, left, right } => RelExpr::Join {
+            join_type,
+            condition,
+            left: Box::new(push_filters_down(*left)),
+            right: Box::new(push_filters_down(*right)),
+        },
+        RelExpr::Sort { keys, input } => RelExpr::Sort {
+            keys,
+            input: Box::new(push_filters_down(*input)),
+        },
+        RelExpr::Limit { count, offset, input } => RelExpr::Limit {
+            count,
+            offset,
+            input: Box::new(push_filters_down(*input)),
+        },
+        RelExpr::Aggregate { group_by, aggregates, input } => RelExpr::Aggregate {
+            group_by,
+            aggregates,
+            input: Box::new(push_filters_down(*input)),
+        },
+        other => other,
+    }
+}
+
+/// Push a predicate as close to the data as possible.
+fn push_filter_into(predicate: Expr, input: RelExpr) -> RelExpr {
+    // Split AND conjunctions
+    let conjuncts = flatten_conjuncts(&predicate);
+
+    match input {
+        RelExpr::Join { join_type: JoinType::Inner, condition, left, right } => {
+            let left_tables = collect_qualifiers(&left);
+            let right_tables = collect_qualifiers(&right);
+
+            let mut left_preds = Vec::new();
+            let mut right_preds = Vec::new();
+            let mut remaining = Vec::new();
+
+            for conj in conjuncts {
+                let pred_tables = expr_qualifiers(&conj);
+                if !pred_tables.is_empty() && pred_tables.is_subset(&left_tables) {
+                    left_preds.push(conj);
+                } else if !pred_tables.is_empty() && pred_tables.is_subset(&right_tables) {
+                    right_preds.push(conj);
+                } else {
+                    remaining.push(conj);
+                }
+            }
+
+            let new_left = if left_preds.is_empty() {
+                push_filters_down(*left)
+            } else {
+                push_filters_down(wrap_filters(left_preds, *left))
+            };
+            let new_right = if right_preds.is_empty() {
+                push_filters_down(*right)
+            } else {
+                push_filters_down(wrap_filters(right_preds, *right))
+            };
+
+            let join = RelExpr::Join {
+                join_type: JoinType::Inner,
+                condition,
+                left: Box::new(new_left),
+                right: Box::new(new_right),
+            };
+            if remaining.is_empty() {
+                join
+            } else {
+                wrap_filters(remaining, join)
+            }
+        }
+        other => RelExpr::Filter {
+            predicate,
+            input: Box::new(push_filters_down(other)),
+        },
+    }
+}
+
+fn flatten_conjuncts(expr: &Expr) -> Vec<Expr> {
+    match expr {
+        Expr::BinOp { op: BinOp::And, left, right } => {
+            let mut result = flatten_conjuncts(left);
+            result.extend(flatten_conjuncts(right));
+            result
+        }
+        other => vec![other.clone()],
+    }
+}
+
+fn wrap_filters(preds: Vec<Expr>, input: RelExpr) -> RelExpr {
+    let mut result = input;
+    for pred in preds {
+        result = RelExpr::Filter {
+            predicate: pred,
+            input: Box::new(result),
+        };
+    }
+    result
+}
+
+fn collect_qualifiers(expr: &RelExpr) -> std::collections::HashSet<String> {
+    let mut quals = std::collections::HashSet::new();
+    collect_qualifiers_rec(expr, &mut quals);
+    quals
+}
+
+fn collect_qualifiers_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String>) {
+    match expr {
+        RelExpr::Scan { table, alias } => {
+            out.insert(table.clone());
+            if let Some(a) = alias { out.insert(a.clone()); }
+        }
+        _ => {
+            for child in expr.children() {
+                collect_qualifiers_rec(child, out);
+            }
+        }
+    }
+}
+
+fn expr_qualifiers(expr: &Expr) -> std::collections::HashSet<String> {
+    let mut quals = std::collections::HashSet::new();
+    expr_qualifiers_rec(expr, &mut quals);
+    quals
+}
+
+fn expr_qualifiers_rec(expr: &Expr, out: &mut std::collections::HashSet<String>) {
+    match expr {
+        Expr::Column(c) => {
+            if let Some(t) = &c.table { out.insert(t.clone()); }
+        }
+        Expr::BinOp { left, right, .. } => {
+            expr_qualifiers_rec(left, out);
+            expr_qualifiers_rec(right, out);
+        }
+        Expr::UnaryOp { operand, .. } => expr_qualifiers_rec(operand, out),
+        Expr::Function { args, .. } => {
+            for a in args { expr_qualifiers_rec(a, out); }
+        }
+        _ => {}
+    }
+}
+
 fn normalize_input(expr: &RelExpr) -> Option<RelExpr> {
     let has_grouping_sets = crate::grouping_sets::tree_contains_grouping_sets(expr);
     let has_subquery = crate::subquery_decorrelation::tree_contains_subquery(expr);
@@ -1037,6 +1195,7 @@ impl Optimizer {
     ///
     /// Returns an error if the expression cannot be converted to
     /// the e-graph representation or if extraction fails.
+    #[expect(clippy::too_many_lines, reason = "main optimizer entry point with many fast paths")]
     pub fn optimize(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
         use std::time::Instant;
         use tracing::{debug, info};
@@ -1138,7 +1297,7 @@ impl Optimizer {
         if let Some(result) =
             self.try_fast_route(expr, &mut route_prediction, fingerprint.as_ref(), total_start)?
         {
-            return Ok(result);
+            return Ok(push_filters_down(result));
         }
 
         // 4. Large join check
@@ -1186,7 +1345,13 @@ impl Optimizer {
             sat.egraph_nodes, sat.runner_elapsed, sat.continuation_gate.as_ref(),
         );
 
-        // 10. Cache + return
+        // 10. Post-optimization: push single-table filters below joins.
+        // The e-graph may discover equivalent forms but extraction doesn't
+        // always prefer the pushed form due to node-count tie-breaking.
+        // This deterministic pass ensures filters land on the correct side.
+        let result = push_filters_down(result);
+
+        // 11. Cache + return
         self.insert_into_cache(fingerprint.as_ref(), &result);
         Ok(result)
     }
