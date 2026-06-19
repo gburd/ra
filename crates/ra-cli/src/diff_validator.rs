@@ -172,6 +172,7 @@ fn compare_node(
         | RelExpr::Update { .. }
         | RelExpr::Delete { .. }
         | RelExpr::Merge { .. }
+        | RelExpr::DistinctOn { .. }
         | RelExpr::GraphTable { .. } => {}
     }
 }

@@ -248,6 +248,11 @@ impl SqlEmitter {
                 format!("SELECT DISTINCT * FROM {}", self.emit_subquery(input))
             }
 
+            RelExpr::DistinctOn { on, input } => {
+                let keys = on.iter().map(|e| self.emit_expr(e)).collect::<Vec<_>>().join(", ");
+                format!("SELECT DISTINCT ON ({keys}) * FROM {}", self.emit_subquery(input))
+            }
+
             RelExpr::Values { rows } => self.emit_values(rows),
 
             RelExpr::CTE { name, definition, body } => {

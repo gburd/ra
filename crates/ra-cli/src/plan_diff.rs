@@ -227,6 +227,7 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::Delete { table, .. } => format!("Delete({table})"),
         RelExpr::Merge { target, .. } => format!("Merge({target})"),
         RelExpr::GraphTable { graph, .. } => format!("GraphTable({graph})"),
+        RelExpr::DistinctOn { .. } => "DistinctOn".to_string(),
     }
 }
 
