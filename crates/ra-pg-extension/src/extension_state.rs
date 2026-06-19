@@ -22,6 +22,20 @@ pub static RA_ENABLED: GucSetting<bool> = GucSetting::<bool>::new(true);
 /// GUC: log all optimizer decisions for debugging.
 pub static RA_LOG_DECISIONS: GucSetting<bool> = GucSetting::<bool>::new(false);
 
+/// GUC: whether the BitNet cost model learns online from execution feedback
+/// (`ra_planner.online_learning`). On by default. Set to off to FREEZE the
+/// model so planning is deterministic run-to-run — required for reproducible
+/// tests and for comparing plan shapes across fixed model snapshots. With it
+/// off, the executor-end feedback hook still records telemetry but never
+/// updates the training coordinator, so the loaded model never evolves.
+pub static RA_ONLINE_LEARNING: GucSetting<bool> = GucSetting::<bool>::new(true);
+
+/// Whether online learning (model evolution from execution feedback) is enabled.
+#[must_use]
+pub fn online_learning_enabled() -> bool {
+    RA_ONLINE_LEARNING.get()
+}
+
 /// GUC: path to the BitNet cost model file (`ra_planner.model_path`).
 pub static RA_MODEL_PATH: GucSetting<Option<CString>> =
     GucSetting::<Option<CString>>::new(Some(c"models/cost_model.bitnet.json"));
@@ -251,6 +265,16 @@ pub fn register_gucs() {
         c"Writes optimizer decisions to the PostgreSQL log at \
           LOG level.",
         &RA_LOG_DECISIONS,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    GucRegistry::define_bool_guc(
+        c"ra_planner.online_learning",
+        c"Learn the cost model online from execution feedback.",
+        c"On by default. Set off to freeze the BitNet cost model so planning \
+          is deterministic run-to-run (required for reproducible tests).",
+        &RA_ONLINE_LEARNING,
         GucContext::Userset,
         GucFlags::default(),
     );
