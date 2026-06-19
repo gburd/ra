@@ -459,7 +459,7 @@ proptest! {
         let stats: HashMap<String, ra_core::statistics::Statistics> =
             HashMap::new();
         let hardware = ra_hardware::HardwareProfile::cpu_only();
-        let result = extract_best(&runner.egraph, root, &stats, &hardware, ra_engine::LiveConditions::NEUTRAL);
+        let result = extract_best(&runner.egraph, root, &stats, &hardware, ra_engine::LiveConditions::NEUTRAL, None);
         prop_assert!(
             result.is_ok(),
             "extract_best should succeed: {:?}",
@@ -488,7 +488,7 @@ proptest! {
         let stats: HashMap<String, ra_core::statistics::Statistics> =
             HashMap::new();
         let hardware = ra_hardware::HardwareProfile::cpu_only();
-        let result = extract_best(&runner.egraph, root, &stats, &hardware, ra_engine::LiveConditions::NEUTRAL);
+        let result = extract_best(&runner.egraph, root, &stats, &hardware, ra_engine::LiveConditions::NEUTRAL, None);
         // Extraction may fail on certain rewritten expressions where
         // node types change during saturation (e.g., Symbol → ConstInt).
         // This is a known limitation tracked for improvement.
@@ -806,6 +806,7 @@ fn contains_joins(expr: &RelExpr) -> bool {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
+        | RelExpr::DistinctOn { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::TopK { input, .. }
@@ -930,14 +931,14 @@ proptest! {
 
         // Verify costs are finite and positive (basic sanity check)
         prop_assert!(
-            uniform_cost > 0.0 && uniform_cost.is_finite(),
+            uniform_cost.total_cost > 0.0 && uniform_cost.total_cost.is_finite(),
             "Uniform cost invalid: {:.2}",
-            uniform_cost
+            uniform_cost.total_cost
         );
         prop_assert!(
-            skewed_cost > 0.0 && skewed_cost.is_finite(),
+            skewed_cost.total_cost > 0.0 && skewed_cost.total_cost.is_finite(),
             "Skewed cost invalid: {:.2}",
-            skewed_cost
+            skewed_cost.total_cost
         );
 
         // TODO: Once cardinality-aware cost model is implemented,
@@ -1002,6 +1003,7 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         | RelExpr::VectorFilter { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Distinct { input, .. }
+        | RelExpr::DistinctOn { input, .. }
         | RelExpr::RowPattern { input, .. }
         | RelExpr::ParallelAggregate { input, .. }
         | RelExpr::Gather { input, .. } => {

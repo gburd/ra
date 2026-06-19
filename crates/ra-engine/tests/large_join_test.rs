@@ -122,7 +122,7 @@ fn test_greedy_join_order_empty() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider);
+    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
 
     let result = optimizer.optimize(vec![]);
     assert!(result.is_err());
@@ -133,7 +133,7 @@ fn test_greedy_join_order_single_table() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider);
+    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
 
     let joins = vec![JoinNode {
         table: "users".to_string(),
@@ -150,7 +150,7 @@ fn test_greedy_join_order_two_tables() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider);
+    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
 
     let joins = vec![
         JoinNode {
@@ -186,7 +186,7 @@ fn test_greedy_join_order_multiple_tables() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider);
+    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
 
     let joins = vec![
         JoinNode {
@@ -232,6 +232,7 @@ fn test_simulated_annealing_basic() {
         },
         cost_model,
         stats_provider,
+        42,
     );
 
     let joins = vec![
@@ -270,6 +271,7 @@ fn test_simulated_annealing_convergence() {
         },
         cost_model.clone(),
         stats_provider.clone(),
+        42,
     );
 
     let joins = vec![
@@ -314,6 +316,7 @@ fn test_large_join_20_tables() {
         LargeJoinStrategy::Greedy,
         cost_model.clone(),
         stats_provider.clone(),
+        42,
     );
 
     let mut joins = Vec::new();
@@ -343,6 +346,7 @@ fn test_large_join_20_tables() {
         },
         cost_model,
         stats_provider,
+        42,
     );
 
     let start = std::time::Instant::now();
@@ -461,6 +465,7 @@ fn test_perturb_produces_different_plans() {
         },
         cost_model,
         stats_provider,
+        42,
     );
 
     let joins = vec![

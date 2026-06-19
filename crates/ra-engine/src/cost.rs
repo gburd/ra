@@ -1123,7 +1123,7 @@ enum OperationType {
 
 /// Extract a table name from an operator description like
 /// `SeqScan on lineitem` or `Index Scan on orders`.
-#[cfg_attr(not(feature = "timeline"), expect(dead_code, reason = "only used with timeline feature"))]
+#[allow(dead_code, reason = "used only with timeline feature")]
 fn extract_table_from_operator(operator: &str) -> Option<String> {
     let lower = operator.to_lowercase();
     if let Some(pos) = lower.find(" on ") {
@@ -1142,7 +1142,7 @@ fn extract_table_from_operator(operator: &str) -> Option<String> {
 }
 
 /// Extract the first table name from a SQL query's FROM clause.
-#[cfg_attr(not(feature = "timeline"), expect(dead_code, reason = "only used with timeline feature"))]
+#[allow(dead_code, reason = "used only with timeline feature")]
 fn extract_table_from_query(query: &str) -> Option<String> {
     let lower = query.to_lowercase();
     let from_pos = lower.find(" from ")?;

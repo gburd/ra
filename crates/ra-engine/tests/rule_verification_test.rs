@@ -66,6 +66,7 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
+        | RelExpr::DistinctOn { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::TopK { input, .. }
@@ -161,6 +162,7 @@ fn depth(expr: &RelExpr) -> usize {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
+        | RelExpr::DistinctOn { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::TopK { input, .. }
