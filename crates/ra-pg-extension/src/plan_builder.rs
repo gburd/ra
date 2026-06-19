@@ -2109,6 +2109,45 @@ impl PlanBuilder {
                 lmap,
                 rmap,
             ),
+            pg_sys::NodeTag::T_CoerceViaIO => self.remap_join_vars(
+                (*node.cast::<pg_sys::CoerceViaIO>()).arg.cast(),
+                lmap,
+                rmap,
+            ),
+            pg_sys::NodeTag::T_ArrayCoerceExpr => self.remap_join_vars(
+                (*node.cast::<pg_sys::ArrayCoerceExpr>()).arg.cast(),
+                lmap,
+                rmap,
+            ),
+            pg_sys::NodeTag::T_CaseExpr => {
+                let ce = node.cast::<pg_sys::CaseExpr>();
+                let ok_arg = if (*ce).arg.is_null() {
+                    true
+                } else {
+                    self.remap_join_vars((*ce).arg.cast(), lmap, rmap)
+                };
+                let ok_default = if (*ce).defresult.is_null() {
+                    true
+                } else {
+                    self.remap_join_vars((*ce).defresult.cast(), lmap, rmap)
+                };
+                ok_arg && ok_default && self.remap_var_list((*ce).args, lmap, rmap)
+            }
+            pg_sys::NodeTag::T_CaseWhen => {
+                let cw = node.cast::<pg_sys::CaseWhen>();
+                self.remap_join_vars((*cw).expr.cast(), lmap, rmap)
+                    && self.remap_join_vars((*cw).result.cast(), lmap, rmap)
+            }
+            pg_sys::NodeTag::T_CoalesceExpr => {
+                self.remap_var_list((*node.cast::<pg_sys::CoalesceExpr>()).args, lmap, rmap)
+            }
+            pg_sys::NodeTag::T_SubscriptingRef => {
+                let sr = node.cast::<pg_sys::SubscriptingRef>();
+                let ok_expr = self.remap_join_vars((*sr).refexpr.cast(), lmap, rmap);
+                let ok_upper = self.remap_var_list((*sr).refupperindexpr, lmap, rmap);
+                let ok_lower = self.remap_var_list((*sr).reflowerindexpr, lmap, rmap);
+                ok_expr && ok_upper && ok_lower
+            }
             _ => false,
         }
     }

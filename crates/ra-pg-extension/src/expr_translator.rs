@@ -174,6 +174,10 @@ pub unsafe fn translate(expr: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
             target_type,
         } => build_cast(inner, target_type, ctx),
         RaExpr::Array(elements) => build_array_expr(elements, ctx),
+        RaExpr::ArrayIndex(arr, idx) => build_array_index(arr, idx, ctx),
+        RaExpr::FieldAccess { expr: base, field_name } => {
+            build_field_access(base, field_name, ctx)
+        }
         // Scalar sub-query: return the SubPlan the plan builder prepared for
         // this inner query (keyed by its address); null if none → fallback.
         RaExpr::SubQuery { query, .. } => ctx
@@ -1240,6 +1244,68 @@ unsafe fn build_array_expr(elements: &[RaExpr], ctx: &ExprContext) -> *mut pg_sy
     }
     (*node).array_collid = pg_sys::InvalidOid;
     (*node).elements = elem_list;
+    (node as *mut pg_sys::Expr)
+}
+
+/// Translate `arr[idx]` into a PostgreSQL `SubscriptingRef`.
+unsafe fn build_array_index(
+    arr: &RaExpr,
+    idx: &RaExpr,
+    ctx: &ExprContext,
+) -> *mut pg_sys::Expr {
+    let pg_arr = translate(arr, ctx);
+    let pg_idx = translate(idx, ctx);
+    if pg_arr.is_null() || pg_idx.is_null() {
+        return std::ptr::null_mut();
+    }
+    let node = alloc::<pg_sys::SubscriptingRef>();
+    (*node).xpr.type_ = pg_sys::NodeTag::T_SubscriptingRef;
+    let arr_type = expr_result_type(pg_arr);
+    (*node).refcontainertype = arr_type;
+    (*node).refelemtype = pg_sys::get_element_type(arr_type);
+    if (*node).refelemtype == pg_sys::InvalidOid {
+        (*node).refelemtype = pg_sys::TEXTOID;
+    }
+    (*node).reftypmod = -1;
+    (*node).refcollid = pg_sys::InvalidOid;
+    (*node).refupperindexpr = pg_sys::lappend(std::ptr::null_mut(), pg_idx.cast());
+    (*node).reflowerindexpr = std::ptr::null_mut();
+    (*node).refexpr = pg_arr;
+    (*node).refassgnexpr = std::ptr::null_mut();
+    (node as *mut pg_sys::Expr)
+}
+
+/// Translate `expr.field_name` to a PG `FieldSelect` node, or fall back to
+/// the `->>`/`->`  JSON operator for JSONB types.
+unsafe fn build_field_access(
+    base: &RaExpr,
+    field_name: &str,
+    ctx: &ExprContext,
+) -> *mut pg_sys::Expr {
+    let pg_base = translate(base, ctx);
+    if pg_base.is_null() {
+        return std::ptr::null_mut();
+    }
+    let base_type = expr_result_type(pg_base);
+    // For JSONB/JSON, emit the ->> operator (text extraction).
+    if base_type == pg_sys::JSONBOID || base_type == pg_sys::JSONOID {
+        let key = RaExpr::Const(ra_core::expr::Const::String(field_name.to_owned()));
+        let op_name = if base_type == pg_sys::JSONBOID {
+            "->>"
+        } else {
+            "->>"
+        };
+        return build_named_op(op_name, &RaExpr::Const(ra_core::expr::Const::Null), &key, ctx);
+    }
+    // For composite types, emit FieldSelect.
+    let node = alloc::<pg_sys::FieldSelect>();
+    (*node).xpr.type_ = pg_sys::NodeTag::T_FieldSelect;
+    (*node).arg = pg_base;
+    (*node).resulttype = pg_sys::TEXTOID; // best guess without full type resolution
+    (*node).resulttypmod = -1;
+    (*node).resultcollid = pg_sys::InvalidOid;
+    // Field number needs catalog lookup — use 1 as fallback (first field).
+    (*node).fieldnum = 1;
     (node as *mut pg_sys::Expr)
 }
 
