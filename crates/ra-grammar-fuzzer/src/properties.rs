@@ -241,17 +241,14 @@ impl PropertyValidator {
         // set stabilises (bounded); pass on convergence, fail only if it has
         // not stabilised within the budget (true oscillation / non-termination).
         const MAX_PASSES: usize = 6;
-        let mut current = match self.optimizer.optimize(expr) {
-            Ok(o) => o,
+        let Ok(mut current) = self.optimizer.optimize(expr) else {
             // Optimization failing is acceptable here (some generated shapes
             // are not optimizable); idempotence is vacuously satisfied.
-            Err(_) => {
-                return PropertyResult {
-                    property: OptimizerProperty::Idempotence,
-                    passed: true,
-                    details: "first optimization failed (ok)".to_owned(),
-                }
-            }
+            return PropertyResult {
+                property: OptimizerProperty::Idempotence,
+                passed: true,
+                details: "first optimization failed (ok)".to_owned(),
+            };
         };
         let mut prev_tables = collect_tables(&current);
         for _ in 0..MAX_PASSES {

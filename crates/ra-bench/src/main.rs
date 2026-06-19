@@ -530,7 +530,9 @@ fn run_train(args: TrainArgs) -> Result<()> {
     use crate::training_collector::TrainingCollector;
 
     println!("Loading training data from: {}", args.input.display());
-    let samples = TrainingCollector::load_from_file(args.input.to_str().unwrap())?;
+    let input_str = args.input.to_str()
+        .ok_or_else(|| anyhow::anyhow!("input path is not valid UTF-8"))?;
+    let samples = TrainingCollector::load_from_file(input_str)?;
     if samples.is_empty() {
         anyhow::bail!("No training samples found in {}", args.input.display());
     }

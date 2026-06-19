@@ -186,7 +186,7 @@ impl SqlEmitter {
     // RelExpr → SQL
     // -----------------------------------------------------------------------
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn emit_rel(&self, expr: &RelExpr) -> String {
         match expr {
             RelExpr::Scan { table, alias } => {
@@ -590,7 +590,7 @@ impl SqlEmitter {
     // -----------------------------------------------------------------------
 
     /// Emit a scalar expression as SQL.
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     #[must_use]
     pub fn emit_expr(&self, expr: &Expr) -> String {
         match expr {

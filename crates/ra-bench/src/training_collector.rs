@@ -397,7 +397,7 @@ impl TrainingCollector {
     }
 
     /// Execute a single query under the production configuration.
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     fn execute_production_sample(
         &self,
         sql: &str,
@@ -425,7 +425,7 @@ impl TrainingCollector {
     }
 
     /// Execute a single query and collect metrics.
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     fn execute_and_measure(
         &self,
         sql: &str,

@@ -4,7 +4,7 @@
 //! `UNION ALL` of ordinary grouped aggregates with NULL-padded columns. This
 //! is a `RelExpr` → `RelExpr` rewrite run as a pre-optimization normalization
 //! (alongside subquery decorrelation), so the equivalence lives in the rewrite
-//! layer rather than being hard-coded in the PostgreSQL plan builder, and the
+//! layer rather than being hard-coded in the `PostgreSQL` plan builder, and the
 //! e-graph sees ordinary aggregates and set operations it already understands.
 //!
 //! `GROUP BY GROUPING SETS S1, S2, ...` is, by definition, the union of the
@@ -32,7 +32,7 @@ const GS_ITEM: &str = "__gs_item";
 
 /// Maximum number of distinct grouping columns to expand. `CUBE(n)` produces
 /// `2^n` branches; cap it to avoid pathological blow-up (such queries fall back
-/// to PostgreSQL).
+/// to `PostgreSQL`).
 const MAX_GROUPING_COLS: usize = 12;
 
 /// True if `group_by` is a single grouping-set marker function.
@@ -171,7 +171,7 @@ fn expand_marker(
     // Order branches by descending set size so the leftmost branch covers the
     // most grouping columns. This lets the plan builder's set-op type
     // unification resolve every NULL pad against a typed sibling.
-    sets.sort_by(|a, b| b.len().cmp(&a.len()));
+    sets.sort_by_key(|s| std::cmp::Reverse(s.len()));
 
     // Recurse into the aggregate input once; every branch shares the result.
     let expanded_input = expand(agg_input);
@@ -259,14 +259,13 @@ fn grouping_sets_for(name: &str, args: &[Expr]) -> Option<(Vec<ColumnRef>, Vec<V
                     let Expr::Column(c) = a else {
                         return None;
                     };
-                    let idx = match gcols.iter().position(|g| {
+                    let idx = if let Some(i) = gcols.iter().position(|g| {
                         g.column.eq_ignore_ascii_case(&c.column) && g.table == c.table
                     }) {
-                        Some(i) => i,
-                        None => {
-                            gcols.push(c.clone());
-                            gcols.len() - 1
-                        }
+                        i
+                    } else {
+                        gcols.push(c.clone());
+                        gcols.len() - 1
                     };
                     set.push(idx);
                 }

@@ -707,7 +707,7 @@ impl EnhancedPropertyValidator {
                 let mut facts_provider = DynamicFactsProvider::with_deployment_profile(scenario, profile);
 
                 // Pre-generate statistics for tables mentioned in the query
-                self.populate_facts_for_query(&mut facts_provider, expr);
+                Self::populate_facts_for_query(&mut facts_provider, expr);
 
                 // Create optimizer with scenario-specific configuration
                 let budget = ra_engine::ResourceBudget::unlimited()
@@ -728,8 +728,8 @@ impl EnhancedPropertyValidator {
     }
 
     /// Pre-populate facts provider with statistics for all tables in the query.
-    fn populate_facts_for_query(&self, facts: &mut DynamicFactsProvider, expr: &ra_core::algebra::RelExpr) {
-        let tables = self.collect_table_names(expr);
+    fn populate_facts_for_query(facts: &mut DynamicFactsProvider, expr: &ra_core::algebra::RelExpr) {
+        let tables = Self::collect_table_names(expr);
         for table in tables {
             facts.generate_table_stats(&table);
             facts.generate_schema(&table);
@@ -744,7 +744,6 @@ impl EnhancedPropertyValidator {
 
     /// Extract all table names from a query expression (iterative).
     fn collect_table_names(
-        &self,
         expr: &ra_core::algebra::RelExpr,
     ) -> std::collections::HashSet<String> {
         use ra_core::algebra::RelExpr;

@@ -867,7 +867,7 @@ impl Optimizer {
     /// CTE worktable (no catalog relation), so the rewrite rules must not be
     /// applied to it — in particular index-access-path selection would turn the
     /// worktable scan into an `IndexOnlyScan` of a non-existent relation. Like
-    /// GRAPH_TABLE, a recursive CTE is kept opaque to equality saturation.
+    /// `GRAPH_TABLE`, a recursive CTE is kept opaque to equality saturation.
     fn contains_recursive_cte(expr: &RelExpr) -> bool {
         if matches!(expr, RelExpr::RecursiveCTE { .. }) {
             return true;

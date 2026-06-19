@@ -10,7 +10,7 @@ use ra_parser::sql_to_relexpr::sql_to_relexpr;
 
 /// Result of running a single query through the benchmark harness.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // sql and pg_explain_ms are for JSON reporting and future use
+#[expect(dead_code, reason = "fields used for JSON reporting")]
 pub struct QueryResult {
     /// The original SQL string.
     pub sql: String,
@@ -161,7 +161,7 @@ pub fn run_query(
 
 /// Attempt a Postgres plan comparison.  Returns `(None, None, None)` when
 /// either the feature is disabled or no connection string is configured.
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 fn run_pg_comparison(
     sql: &str,
     plan: &ra_core::algebra::RelExpr,
@@ -196,7 +196,7 @@ fn run_pg_comparison(
 ///
 /// Returns `(Some(true), None)` if results match, `(Some(false), Some(detail))`
 /// if they differ, or `(None, None)` if verification cannot be performed.
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 fn verify_result_correctness(
     original_sql: &str,
     optimized_plan: &ra_core::algebra::RelExpr,

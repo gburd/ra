@@ -259,7 +259,9 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
         | ra_core::algebra::RelExpr::MultiUnnest { .. }
         | ra_core::algebra::RelExpr::TableFunction { .. }
         | ra_core::algebra::RelExpr::RowPattern { .. }
-        | ra_core::algebra::RelExpr::MvScan { .. } => {}
+        | ra_core::algebra::RelExpr::MvScan { .. }
+        | ra_core::algebra::RelExpr::GraphTable { .. }
+        | ra_core::algebra::RelExpr::DistinctOn { .. } => {}
         ra_core::algebra::RelExpr::Insert { source, .. }
         | ra_core::algebra::RelExpr::Merge { source, .. } => {
             collect_tables_recursive(source, out);
@@ -274,7 +276,5 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
                 collect_tables_recursive(u, out);
             }
         }
-        ra_core::algebra::RelExpr::GraphTable { .. }
-        | ra_core::algebra::RelExpr::DistinctOn { .. } => {}
     }
 }

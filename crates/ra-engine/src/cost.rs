@@ -1123,7 +1123,7 @@ enum OperationType {
 
 /// Extract a table name from an operator description like
 /// `SeqScan on lineitem` or `Index Scan on orders`.
-#[allow(dead_code, reason = "used only with timeline feature")]
+#[cfg(any(feature = "timeline", test))]
 fn extract_table_from_operator(operator: &str) -> Option<String> {
     let lower = operator.to_lowercase();
     if let Some(pos) = lower.find(" on ") {
@@ -1142,7 +1142,7 @@ fn extract_table_from_operator(operator: &str) -> Option<String> {
 }
 
 /// Extract the first table name from a SQL query's FROM clause.
-#[allow(dead_code, reason = "used only with timeline feature")]
+#[cfg(any(feature = "timeline", test))]
 fn extract_table_from_query(query: &str) -> Option<String> {
     let lower = query.to_lowercase();
     let from_pos = lower.find(" from ")?;
@@ -1534,7 +1534,7 @@ pub struct PlanCost {
     pub nodes: u32,
     /// Deterministic structural fingerprint of this sub-plan (final
     /// tie-breaker so equal-cost, equal-size plans are still chosen
-    /// deterministically — never by egg's HashMap iteration order).
+    /// deterministically — never by egg's `HashMap` iteration order).
     pub shape_hash: u64,
 }
 
@@ -1559,6 +1559,7 @@ impl PartialOrd for PlanCost {
 impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
     type Cost = PlanCost;
 
+    #[expect(clippy::too_many_lines, reason = "cost function has inherent complexity")]
     fn cost<C>(&mut self, enode: &crate::egraph::RelLang, mut costs: C) -> Self::Cost
     where
         C: FnMut(egg::Id) -> Self::Cost,
