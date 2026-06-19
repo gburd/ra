@@ -430,3 +430,127 @@ mod selectivity_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod model_variation_tests {
+    use super::RelAnalysis;
+    use crate::cost_model::BitNetCostModel;
+    use crate::egraph::to_rec_expr;
+    use crate::egraph::RelLang;
+    use crate::extract::HybridCostFn;
+    use crate::rewrite::all_rules;
+    use crate::state::SystemFingerprint;
+    use ra_core::statistics::Statistics;
+    use std::collections::HashMap;
+
+    /// Build a high-confidence fingerprint so the neural blend is active
+    /// (`blend_alpha` rises with `model_samples_trained` and falls with system
+    /// pressure / staleness). Without this the blend is 0 and the model is
+    /// deliberately shape-inert.
+    fn trusted_fingerprint() -> SystemFingerprint {
+        let mut fp = SystemFingerprint::default();
+        fp.model_samples_trained = 100_000;
+        fp.memory_pressure = 0.0;
+        fp.io_saturation = 0.0;
+        fp.cpu_load_fraction = 0.0;
+        fp.avg_staleness = 0.0;
+        fp.stats_coverage = 1.0;
+        fp
+    }
+
+    /// A second well-known model: an all-zero-weight model (`new_zeros`). Same
+    /// architecture, different weights — the "preserve a few models with
+    /// different weights" scenario. A zero-weight model emits a constant
+    /// multiplier (no per-plan discrimination); the trained model varies per
+    /// plan, so their cost evaluations diverge.
+    fn saturate(
+        sql: &str,
+    ) -> (egg::EGraph<RelLang, RelAnalysis>, egg::Id) {
+        let expr = ra_parser::sql_to_relexpr(sql).expect("parse");
+        let rec = to_rec_expr(&expr).expect("to_rec");
+        let mut egraph: egg::EGraph<RelLang, RelAnalysis> = egg::EGraph::default();
+        let root = egraph.add_expr(&rec);
+        let runner = egg::Runner::default()
+            .with_egraph(egraph)
+            .with_node_limit(500)
+            .with_iter_limit(2)
+            .with_time_limit(std::time::Duration::from_secs(2))
+            .run(&all_rules());
+        let root = runner.egraph.find(root);
+        (runner.egraph, root)
+    }
+
+    fn extract_cost(
+        egraph: &egg::EGraph<RelLang, RelAnalysis>,
+        root: egg::Id,
+        model: &BitNetCostModel,
+        fp: &SystemFingerprint,
+    ) -> (f64, String) {
+        let cost_fn = HybridCostFn::new(
+            ra_hardware::HardwareProfile::cpu_only(),
+            HashMap::<String, Statistics>::new(),
+            HashMap::new(),
+            model,
+            fp,
+        );
+        assert!(
+            cost_fn.blend_alpha() > 0.001,
+            "neural blend must be active for this test (alpha={})",
+            cost_fn.blend_alpha()
+        );
+        let extractor = egg::Extractor::new(egraph, cost_fn);
+        let (cost, expr) = extractor.find_best(root);
+        (cost.total_cost, format!("{expr}"))
+    }
+
+    /// Different model weights must produce a different cost evaluation (and may
+    /// therefore select a different plan) once the neural blend is active. This
+    /// is the guard that the BitNet model genuinely influences planning and that
+    /// swapping model snapshots is observable — the prerequisite for trusting
+    /// (and freezing, via `ra_planner.online_learning`) a specific model.
+    #[test]
+    fn different_model_weights_change_plan_cost() {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let path = format!("{manifest}/../../models/cost_model.bitnet.json");
+        let trained = BitNetCostModel::load_from_file(&path).expect("load trained model");
+        let zeros = BitNetCostModel::new_zeros();
+        let fp = trusted_fingerprint();
+
+        // A 3-table join: the e-graph holds several equivalent join orders,
+        // so the cost model's scoring decides which is cheapest.
+        let (egraph, root) = saturate(
+            "SELECT a FROM t1 JOIN t2 ON t1.x = t2.x \
+             JOIN t3 ON t2.y = t3.y",
+        );
+
+        let (c_trained, _) = extract_cost(&egraph, root, &trained, &fp);
+        let (c_zeros, _) = extract_cost(&egraph, root, &zeros, &fp);
+
+        // Two different weight sets must not collapse to one cost; the model is
+        // not inert when the blend is active.
+        assert!(
+            (c_trained - c_zeros).abs() > f64::EPSILON,
+            "model weights had no effect on cost: trained={c_trained}, zeros={c_zeros}"
+        );
+    }
+
+    /// The same fixed model must always score a plan identically (no run-to-run
+    /// drift in the cost function itself), so a frozen model yields reproducible
+    /// planning.
+    #[test]
+    fn same_model_scores_identically_across_runs() {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let path = format!("{manifest}/../../models/cost_model.bitnet.json");
+        let trained = BitNetCostModel::load_from_file(&path).expect("load trained model");
+        let fp = trusted_fingerprint();
+        let (egraph, root) = saturate(
+            "SELECT a FROM t1 JOIN t2 ON t1.x = t2.x",
+        );
+        let (baseline, baseline_plan) = extract_cost(&egraph, root, &trained, &fp);
+        for _ in 0..8 {
+            let (c, plan) = extract_cost(&egraph, root, &trained, &fp);
+            assert!((c - baseline).abs() < f64::EPSILON, "cost drifted: {c} vs {baseline}");
+            assert_eq!(plan, baseline_plan, "plan drifted for a fixed model");
+        }
+    }
+}
