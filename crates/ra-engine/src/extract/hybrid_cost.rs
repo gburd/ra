@@ -247,6 +247,10 @@ impl egg::CostFunction<RelLang> for HybridCostFn {
         crate::cost::PlanCost {
             total_cost: alpha * neural + (1.0 - alpha) * traditional.total_cost,
             est_rows: traditional.est_rows,
+            // Tie-breaker carries through unchanged: the neural blend only
+            // rescales the scalar cost, not the plan structure.
+            nodes: traditional.nodes,
+            shape_hash: traditional.shape_hash,
         }
     }
 }
