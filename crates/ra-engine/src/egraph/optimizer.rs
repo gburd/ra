@@ -1241,6 +1241,7 @@ impl Optimizer {
             self.config.large_join_strategy.clone(),
             cost_model,
             stats_provider,
+            self.config.random_seed,
         );
 
         let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
@@ -1438,9 +1439,18 @@ impl Optimizer {
         let initial_nodes = egraph.total_size();
         let mut cumulative_applications: usize = 0;
 
+        // Determinism: the wall-clock is a runaway-safety backstop ONLY — it must
+        // not be the normal termination, or saturation depth (and thus the
+        // extracted plan) would vary run-to-run with CPU load. egg 0.11 itself is
+        // deterministic (FxBuildHasher + deterministic scheduler); the only
+        // nondeterminism was the small route timeout cutting saturation at
+        // different depths. Normal termination is the deterministic set:
+        // iteration limit, cost plateau, convergence, and node-growth budget.
+        let safety_timeout = timeout.max(std::time::Duration::from_secs(10));
+
         for iteration in 0..iter_limit {
-            if runner_start.elapsed() >= timeout {
-                termination_reason = "timeout";
+            if runner_start.elapsed() >= safety_timeout {
+                termination_reason = "safety_timeout";
                 break;
             }
 
@@ -1468,7 +1478,7 @@ impl Optimizer {
                         .with_egraph(egraph)
                         .with_node_limit(self.config.node_limit)
                         .with_iter_limit(1)
-                        .with_time_limit(timeout.saturating_sub(runner_start.elapsed()))
+                        .with_time_limit(safety_timeout.saturating_sub(runner_start.elapsed()))
                         .run(rules)
                 }),
             );
@@ -2771,17 +2781,24 @@ mod determinism_tests {
     /// (with a fixed model — none is loaded here) must yield an identical plan.
     /// This is the foundation for reproducible tests; the extension freezes the
     /// BitNet model via `ra_planner.online_learning=off` so the model can't
-    /// evolve between runs.
+    /// evolve between runs. Covers both the LEFT_DEEP route (inner equi-join
+    /// chains) and the e-graph route (outer joins, set ops). The e-graph route
+    /// is deterministic because (a) egg 0.11 uses a deterministic hasher and
+    /// scheduler, and (b) saturation terminates on deterministic conditions
+    /// (iteration limit, cost plateau, convergence) rather than the wall-clock
+    /// timeout, which previously cut saturation at CPU-load-dependent depths.
     #[test]
     fn optimize_is_deterministic_across_runs() {
-        // Inner equi-join chains take the deterministic LEFT_DEEP route.
-        // NOTE: e-graph-routed shapes (outer joins, set ops) are NOT yet
-        // deterministic — see `egraph_extraction_determinism_gap` below.
         let queries = [
+            // Inner equi-join chains -> deterministic LEFT_DEEP route.
             "SELECT o.o_orderkey FROM orders o JOIN customer c \
              ON o.o_custkey = c.c_custkey WHERE o.o_orderkey < 50",
             "SELECT * FROM orders o JOIN customer c ON o.o_custkey = c.c_custkey \
              JOIN nation n ON c.c_nationkey = n.n_nationkey",
+            // Outer join + set op -> e-graph route (previously non-deterministic).
+            "SELECT o.o_orderkey FROM orders o LEFT JOIN customer c \
+             ON o.o_custkey = c.c_custkey WHERE o.o_orderkey < 50",
+            "SELECT a FROM t UNION SELECT b FROM u",
         ];
         for sql in queries {
             let Ok(expr) = ra_parser::sql_to_relexpr(sql) else { continue };
@@ -2789,7 +2806,7 @@ mod determinism_tests {
                 let opt = Optimizer::new();
                 format!("{:?}", opt.optimize(&expr).expect("optimize"))
             };
-            for run in 0..8 {
+            for run in 0..16 {
                 let opt = Optimizer::new();
                 let again = format!("{:?}", opt.optimize(&expr).expect("optimize"));
                 assert_eq!(
@@ -2797,31 +2814,6 @@ mod determinism_tests {
                     "non-deterministic plan on run {run} for query: {sql}"
                 );
             }
-        }
-    }
-
-    /// KNOWN GAP (tracked): e-graph extraction is NOT yet deterministic. For a
-    /// query routed through the e-graph, multiple equivalent forms (e.g.
-    /// filter-on-top vs filter-pushed vs filter-merged-into-condition) can have
-    /// tied/near-tied cost, and egg's extractor breaks the tie by internal
-    /// HashMap iteration order, which varies run-to-run. This produces
-    /// different (correct, equivalent) plan shapes across runs. Deterministic
-    /// tie-breaking in extraction is the prerequisite for a clean Phase 2
-    /// (routing inner joins through the e-graph). Un-ignore when fixed.
-    #[test]
-    #[ignore = "e-graph extraction tie-breaking is non-deterministic; tracked"]
-    fn egraph_extraction_determinism_gap() {
-        let sql = "SELECT o.o_orderkey FROM orders o LEFT JOIN customer c \
-                   ON o.o_custkey = c.c_custkey WHERE o.o_orderkey < 50";
-        let expr = ra_parser::sql_to_relexpr(sql).expect("parse");
-        let baseline = {
-            let opt = Optimizer::new();
-            format!("{:?}", opt.optimize(&expr).expect("optimize"))
-        };
-        for _ in 0..16 {
-            let opt = Optimizer::new();
-            let again = format!("{:?}", opt.optimize(&expr).expect("optimize"));
-            assert_eq!(baseline, again, "e-graph extraction is non-deterministic");
         }
     }
 }
