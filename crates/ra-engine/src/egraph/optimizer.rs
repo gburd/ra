@@ -241,6 +241,58 @@ impl Optimizer {
         }
     }
 
+    /// Optimize a tree that contains subqueries the decorrelation pass couldn't
+    /// remove. Walk the tree: any child subtree that is subquery-free gets full
+    /// e-graph optimization; nodes containing subqueries are preserved
+    /// structurally with their children optimized recursively.
+    fn optimize_around_subqueries(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
+        use crate::subquery_decorrelation::tree_contains_subquery;
+
+        // If this subtree has no subqueries, optimize it normally.
+        if !tree_contains_subquery(expr) {
+            return self.optimize(expr);
+        }
+
+        // Otherwise, preserve this node and recurse into children.
+        match expr {
+            RelExpr::Filter { predicate, input } => Ok(RelExpr::Filter {
+                predicate: predicate.clone(),
+                input: Box::new(self.optimize_around_subqueries(input)?),
+            }),
+            RelExpr::Project { columns, input } => Ok(RelExpr::Project {
+                columns: columns.clone(),
+                input: Box::new(self.optimize_around_subqueries(input)?),
+            }),
+            RelExpr::Sort { keys, input } => Ok(RelExpr::Sort {
+                keys: keys.clone(),
+                input: Box::new(self.optimize_around_subqueries(input)?),
+            }),
+            RelExpr::Limit { count, offset, input } => Ok(RelExpr::Limit {
+                count: *count,
+                offset: *offset,
+                input: Box::new(self.optimize_around_subqueries(input)?),
+            }),
+            RelExpr::Aggregate { group_by, aggregates, input } => Ok(RelExpr::Aggregate {
+                group_by: group_by.clone(),
+                aggregates: aggregates.clone(),
+                input: Box::new(self.optimize_around_subqueries(input)?),
+            }),
+            RelExpr::Join { join_type, condition, left, right } => Ok(RelExpr::Join {
+                join_type: *join_type,
+                condition: condition.clone(),
+                left: Box::new(self.optimize_around_subqueries(left)?),
+                right: Box::new(self.optimize_around_subqueries(right)?),
+            }),
+            RelExpr::CTE { name, definition, body } => Ok(RelExpr::CTE {
+                name: name.clone(),
+                definition: Box::new(self.optimize_around_subqueries(definition)?),
+                body: Box::new(self.optimize_around_subqueries(body)?),
+            }),
+            // Leaf nodes and nodes we can't decompose: return as-is.
+            _ => Ok(expr.clone()),
+        }
+    }
+
     /// Create a new optimizer with default configuration.
     #[must_use]
     pub fn new() -> Self {
@@ -1063,6 +1115,14 @@ impl Optimizer {
             self.record_fast_path_trace(expr, "trivial_fast_path", 0.0);
             self.insert_into_cache(fingerprint.as_ref(), expr);
             return Ok(expr.clone());
+        }
+
+        // 2b. Subquery passthrough: if subqueries remain after
+        // decorrelation and can't enter the e-graph, optimize
+        // subquery-free subtrees independently.
+        if crate::subquery_decorrelation::tree_contains_subquery(expr) {
+            debug!("subquery passthrough: optimizing subtrees independently");
+            return self.optimize_around_subqueries(expr);
         }
 
         // 3. Speculative routing

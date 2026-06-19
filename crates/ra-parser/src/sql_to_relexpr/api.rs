@@ -5,6 +5,33 @@ use super::transform;
 use crate::ffi::node::ParseErrors;
 use crate::lime_parser;
 
+/// Strip trailing locking clauses (FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE)
+/// which don't affect the relational plan — they're executor hints.
+fn strip_locking_clause(sql: &str) -> &str {
+    // Case-insensitive search for FOR followed by a locking keyword at the end.
+    let upper = sql.to_uppercase();
+    for pat in &[
+        " FOR UPDATE",
+        " FOR NO KEY UPDATE",
+        " FOR SHARE",
+        " FOR KEY SHARE",
+    ] {
+        if let Some(pos) = upper.rfind(pat) {
+            // Verify nothing after the locking clause except optional
+            // NOWAIT/SKIP LOCKED/OF table
+            let after = upper[pos + pat.len()..].trim();
+            if after.is_empty()
+                || after.starts_with("NOWAIT")
+                || after.starts_with("SKIP LOCKED")
+                || after.starts_with("OF ")
+            {
+                return sql[..pos].trim_end();
+            }
+        }
+    }
+    sql
+}
+
 /// Convert a `ParseErrors` into a `SqlConversionError`.
 fn convert_parse_errors(errs: ParseErrors) -> SqlConversionError {
     match errs {
@@ -40,7 +67,7 @@ pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
     statements
         .iter()
         .map(|stmt| {
-            lime_parser::parse_sql(stmt)
+            lime_parser::parse_sql(strip_locking_clause(stmt))
                 .map(transform::apply_all)
                 .map_err(convert_parse_errors)
         })
@@ -71,7 +98,8 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
     // Try each statement; return the first successful parse.
     let mut last_err = None;
     for stmt in &statements {
-        match lime_parser::parse_sql(stmt) {
+        let cleaned = strip_locking_clause(stmt);
+        match lime_parser::parse_sql(cleaned) {
             Ok(rel) => return Ok(transform::apply_all(rel)),
             Err(errs) => {
                 last_err = Some(errs);

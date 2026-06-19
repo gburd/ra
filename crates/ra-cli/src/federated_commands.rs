@@ -276,6 +276,5 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
                 collect_tables_recursive(u, out);
             }
         }
-        ra_core::algebra::RelExpr::GraphTable { .. } => {}
     }
 }
