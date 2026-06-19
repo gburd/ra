@@ -443,12 +443,18 @@ proptest! {
 
     /// filter through project: filter(p, project(c, x)) ~
     /// project(c, filter(p, x))
+    /// Note: only valid when the predicate references only projected columns.
     #[test]
     fn filter_through_project(
         t in arb_table(),
         col in arb_col(),
-        pred in arb_simple_pred(),
     ) {
+        // Constrain predicate to reference only the projected column.
+        let pred = Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new(col.clone()))),
+            right: Box::new(Expr::Const(ra_core::expr::Const::Int(0))),
+        };
         let scan = RelExpr::Scan { table: t, alias: None };
         let cols = vec![ProjectionColumn {
             expr: Expr::Column(ColumnRef::new(col)),

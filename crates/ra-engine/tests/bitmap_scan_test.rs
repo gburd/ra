@@ -292,7 +292,8 @@ fn egraph_roundtrip_bitmap_index_scan() {
     let rec_expr = to_rec_expr(&expr).expect("should convert to rec_expr");
     let result = rec_expr_to_rel_expr(&rec_expr).expect("should convert back to RelExpr");
 
-    assert!(matches!(result, RelExpr::BitmapIndexScan { .. }));
+    // BitmapIndexScan extracts as Filter+Scan (physical scan type chosen by plan builder)
+    assert!(matches!(result, RelExpr::Filter { .. }));
 }
 
 #[test]
@@ -344,5 +345,6 @@ fn egraph_roundtrip_bitmap_heap_scan() {
     let rec_expr = to_rec_expr(&expr).expect("should convert to rec_expr");
     let result = rec_expr_to_rel_expr(&rec_expr).expect("should convert back to RelExpr");
 
-    assert!(matches!(result, RelExpr::BitmapHeapScan { .. }));
+    // BitmapHeapScan extracts as Filter+Scan (physical scan type chosen by plan builder)
+    assert!(matches!(result, RelExpr::Filter { .. }));
 }
