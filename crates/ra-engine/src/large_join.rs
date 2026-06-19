@@ -13,6 +13,7 @@ use ra_core::{
     cost::{CostModel, StatisticsProvider},
 };
 use rand::prelude::*;
+use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
 /// Strategy for optimizing large join graphs.
@@ -70,6 +71,10 @@ pub struct LargeJoinOptimizer {
     strategy: LargeJoinStrategy,
     cost_model: Arc<dyn CostModel>,
     stats_provider: Arc<dyn StatisticsProvider>,
+    /// Seed for the simulated-annealing RNG. A fixed seed makes large-join
+    /// planning reproducible; callers that want fresh randomness can pass an
+    /// entropy-derived value.
+    seed: u64,
 }
 
 impl LargeJoinOptimizer {
@@ -78,11 +83,13 @@ impl LargeJoinOptimizer {
         strategy: LargeJoinStrategy,
         cost_model: Arc<dyn CostModel>,
         stats_provider: Arc<dyn StatisticsProvider>,
+        seed: u64,
     ) -> Self {
         Self {
             strategy,
             cost_model,
             stats_provider,
+            seed,
         }
     }
 
@@ -209,12 +216,12 @@ impl LargeJoinOptimizer {
         };
 
         let mut temp = *initial_temp;
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::seed_from_u64(self.seed);
 
         // 3. Annealing loop
         for _iteration in 0..*max_iterations {
             // Perturb: create a neighbor solution
-            let Ok(neighbor) = self.perturb_join_order(&current, &joins) else {
+            let Ok(neighbor) = self.perturb_join_order(&current, &joins, &mut rng) else {
                 continue;
             };
 
@@ -253,13 +260,17 @@ impl LargeJoinOptimizer {
     }
 
     /// Perturb a join order by swapping two random joins in the tree.
-    fn perturb_join_order(&self, _plan: &RelExpr, joins: &[JoinNode]) -> Result<RelExpr> {
+    fn perturb_join_order(
+        &self,
+        _plan: &RelExpr,
+        joins: &[JoinNode],
+        rng: &mut StdRng,
+    ) -> Result<RelExpr> {
         // For simplicity, we'll regenerate the plan with a randomized join order
         // A more sophisticated implementation would swap subtrees in the existing plan
 
-        let mut rng = rand::thread_rng();
         let mut shuffled_joins = joins.to_vec();
-        shuffled_joins.shuffle(&mut rng);
+        shuffled_joins.shuffle(rng);
 
         // Build a new join tree with the shuffled order
         if shuffled_joins.is_empty() {
@@ -508,6 +519,7 @@ mod tests {
             strategy,
             Arc::new(MockCostModel),
             Arc::new(MockStats::new(table_rows)),
+            0,
         )
     }
 

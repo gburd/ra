@@ -90,6 +90,11 @@ pub struct OptimizerConfig {
     /// strings cause `Optimizer::optimize_*` to log a warning
     /// and proceed without advice; they don't fail the call.
     pub plan_advice: Option<String>,
+    /// Seed for any randomized planning heuristic (currently the large-join
+    /// simulated-annealing search). A fixed seed keeps planning reproducible
+    /// run-to-run; tests and the extension rely on this for determinism. Set
+    /// to an entropy-derived value only if non-reproducible search is wanted.
+    pub random_seed: u64,
 }
 
 /// Configuration for parallel query execution.
@@ -150,6 +155,8 @@ impl Default for OptimizerConfig {
             // RelExpr) and purely advisory; default on.
             use_shape_aware_filtering: true,
             plan_advice: None,
+            // Fixed default => reproducible planning. "Ra" in ASCII.
+            random_seed: 0x5261,
         }
     }
 }
