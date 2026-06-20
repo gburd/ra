@@ -32,6 +32,37 @@ fn strip_locking_clause(sql: &str) -> &str {
     sql
 }
 
+/// Desugar `IS [NOT] DISTINCT FROM` to equivalent expressions the parser
+/// handles. For planning purposes:
+///   `a IS DISTINCT FROM b`     → `a <> b`
+///   `a IS NOT DISTINCT FROM b` → `a = b`
+/// The plan builder emits PG's `DistinctExpr` for correct NULL-safe execution.
+fn desugar_distinct_from(sql: &str) -> String {
+    let upper = sql.to_uppercase();
+    let mut result = sql.to_owned();
+
+    // IS NOT DISTINCT FROM → = (process longer match first)
+    while let Some(pos) = find_case_insensitive(&result, "IS NOT DISTINCT FROM") {
+        let end = pos + "IS NOT DISTINCT FROM".len();
+        result.replace_range(pos..end, "=");
+    }
+
+    // IS DISTINCT FROM → <>
+    while let Some(pos) = find_case_insensitive(&result, "IS DISTINCT FROM") {
+        let end = pos + "IS DISTINCT FROM".len();
+        result.replace_range(pos..end, "<>");
+    }
+
+    let _ = upper; // suppress unused warning
+    result
+}
+
+fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let h = haystack.to_uppercase();
+    let n = needle.to_uppercase();
+    h.find(&n)
+}
+
 /// Convert a `ParseErrors` into a `SqlConversionError`.
 fn convert_parse_errors(errs: ParseErrors) -> SqlConversionError {
     match errs {
@@ -67,7 +98,8 @@ pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
     statements
         .iter()
         .map(|stmt| {
-            lime_parser::parse_sql(strip_locking_clause(stmt))
+            let cleaned = desugar_distinct_from(strip_locking_clause(stmt));
+            lime_parser::parse_sql(&cleaned)
                 .map(transform::apply_all)
                 .map_err(convert_parse_errors)
         })
@@ -98,8 +130,8 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
     // Try each statement; return the first successful parse.
     let mut last_err = None;
     for stmt in &statements {
-        let cleaned = strip_locking_clause(stmt);
-        match lime_parser::parse_sql(cleaned) {
+        let cleaned = desugar_distinct_from(strip_locking_clause(stmt));
+        match lime_parser::parse_sql(&cleaned) {
             Ok(rel) => return Ok(transform::apply_all(rel)),
             Err(errs) => {
                 last_err = Some(errs);

@@ -57,10 +57,8 @@ unsafe extern "C-unwind" fn ra_planner_hook(
         return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
     }
 
-    // Skip system catalog queries.
-    if !parse.is_null() && references_system_catalogs(parse) {
-        return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
-    }
+    // System catalog queries (pg_catalog.*) are normal SQL — Ra handles them
+    // via the trivial-query fast path. No special bypass needed.
 
     // Catch panics to surface as PostgreSQL ERRORs rather than crashing.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -187,20 +185,16 @@ unsafe fn ra_planner_hook_inner(
         match ra_parser::sql_to_relexpr(parse_sql) {
             Ok(expr) => expr,
             Err(e) => {
-                if log {
-                    // Bypass pgrx's ereport path (do_ereport -> cee_scape
-                    // sigsetjmp) for decision logging: under repeated calls on
-                    // arm64 macOS it can pfree an already-freed ErrorContext
-                    // chunk (the 0x7f7f double-free), which surfaces as a
-                    // caught "inner panic" and, intermittently, an uncaught
-                    // SIGSEGV that crashes the backend. stderr is captured by
-                    // the server log; this matches the panic-handler above.
-                    eprintln!(
-                        "ra_planner: parse fell back to PG: {} [query: {}]",
-                        e,
-                        truncate_sql(&sql, 80)
-                    );
-                }
+                // Ra's parser should handle ALL valid PostgreSQL SQL.
+                // If we reach here, it's a parser coverage gap — log it
+                // prominently so it gets fixed, but still attempt to serve
+                // the query via PG's planner as an absolute last resort
+                // (never break a working query).
+                eprintln!(
+                    "ra_planner: PARSER GAP (should not happen): {} [query: {}]",
+                    e,
+                    truncate_sql(&sql, 80)
+                );
                 return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
             }
         }
@@ -221,16 +215,15 @@ unsafe fn ra_planner_hook_inner(
     let optimized = match optimize_relexpr(&rel_expr, &facts) {
         Ok(expr) => expr,
         Err(e) => {
-            // Optimization failed — fall back to PG's planner
-            // rather than aborting the query.
+            // Optimization failed — use the unoptimized RelExpr directly.
+            // Ra still builds the plan (no fallback to PG's planner).
             if log {
                 eprintln!(
-                    "ra_planner: optimize fell back to PG: {} [query: {}]",
-                    e,
-                    truncate_sql(&sql, 80)
+                    "ra_planner: optimize failed ({}), using unoptimized plan [query: {}]",
+                    e, truncate_sql(&sql, 80)
                 );
             }
-            return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
+            rel_expr.clone()
         }
     };
     let optimize_ms = t1.elapsed().as_secs_f64() * 1000.0;
@@ -285,18 +278,28 @@ unsafe fn ra_planner_hook_inner(
     let planned_stmt = match builder.build_planned_stmt(&optimized) {
         Ok(stmt) => stmt,
         Err(e) => {
-            // Plan-builder couldn't translate this RelExpr to a PG
-            // Plan (e.g. an operator variant we don't emit yet such
-            // as MATCH_RECOGNIZE or a vector TopK). Fall back to
-            // PG's native planner instead of failing the query.
+            // Optimized plan failed to build — try the original unoptimized
+            // RelExpr. If that also fails, fall back to PG as a safety net.
             if log {
                 eprintln!(
-                    "ra_planner: plan-build fell back to PG: {} [query: {}]",
-                    e,
-                    truncate_sql(&sql, 80)
+                    "ra_planner: optimized plan-build failed ({}), retrying with original [query: {}]",
+                    e, truncate_sql(&sql, 80)
                 );
             }
-            return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
+            let table_map2 = plan_builder::build_table_map(parse);
+            let mut builder2 = PlanBuilder::new(parse, table_map2, &stats);
+            match builder2.build_planned_stmt(&rel_expr) {
+                Ok(stmt) => stmt,
+                Err(e2) => {
+                    if log {
+                        eprintln!(
+                            "ra_planner: original plan-build also failed ({}), PG fallback [query: {}]",
+                            e2, truncate_sql(&sql, 80)
+                        );
+                    }
+                    return call_prev_planner(parse, query_string, cursor_options, bound_params, #[cfg(feature = "pg19")] es);
+                }
+            }
         }
     };
     let translate_ms = t2.elapsed().as_secs_f64() * 1000.0;

@@ -116,7 +116,6 @@ fn coalesce_in_join_condition() {
 }
 
 #[test]
-#[ignore = "IS DISTINCT FROM not yet in Lime grammar — Ra falls back to PG"]
 fn is_distinct_from() {
     // IS DISTINCT FROM is NULL-safe equality — different from =
     let result = try_opt(
