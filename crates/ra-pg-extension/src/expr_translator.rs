@@ -186,8 +186,98 @@ pub unsafe fn translate(expr: &RaExpr, ctx: &ExprContext) -> *mut pg_sys::Expr {
             .get(&(std::ptr::from_ref::<RelExpr>(query.as_ref()) as usize))
             .copied()
             .unwrap_or(std::ptr::null_mut()),
-        // Unsupported: FullTextMatch, VectorDistance, Pattern*, ArraySlice, etc.
-        _ => std::ptr::null_mut(),
+        RaExpr::FullTextMatch { columns, query, .. } => {
+            // PostgreSQL: to_tsvector(col) @@ to_tsquery(query)
+            // Emit as a function call: ts_match(col, query)
+            let col_expr = if let Some(first) = columns.first() {
+                RaExpr::Column(ra_core::expr::ColumnRef::new(first))
+            } else {
+                return std::ptr::null_mut();
+            };
+            let query_expr = RaExpr::Const(ra_core::expr::Const::String(query.clone()));
+            build_named_op("@@", &col_expr, &query_expr, ctx)
+        }
+        RaExpr::VectorDistance { metric, column, target } => {
+            // pgvector operators: <-> (L2), <#> (inner product), <=> (cosine)
+            let op_name = match metric.as_str() {
+                "l2" => "<->",
+                "inner_product" => "<#>",
+                "cosine" => "<=>",
+                _ => "<->",
+            };
+            build_named_op(op_name, column, target, ctx)
+        }
+        RaExpr::ArraySlice { array, start, end } => {
+            let pg_arr = translate(array, ctx);
+            if pg_arr.is_null() {
+                return std::ptr::null_mut();
+            }
+            let node = alloc::<pg_sys::SubscriptingRef>();
+            (*node).xpr.type_ = pg_sys::NodeTag::T_SubscriptingRef;
+            let arr_type = expr_result_type(pg_arr);
+            (*node).refcontainertype = arr_type;
+            (*node).refelemtype = pg_sys::get_element_type(arr_type);
+            if (*node).refelemtype == pg_sys::InvalidOid {
+                (*node).refelemtype = pg_sys::TEXTOID;
+            }
+            (*node).reftypmod = -1;
+            (*node).refcollid = pg_sys::InvalidOid;
+            (*node).refupperindexpr = if let Some(e) = end {
+                let pg_e = translate(e, ctx);
+                if pg_e.is_null() { std::ptr::null_mut() }
+                else { pg_sys::lappend(std::ptr::null_mut(), pg_e.cast()) }
+            } else {
+                std::ptr::null_mut()
+            };
+            (*node).reflowerindexpr = if let Some(s) = start {
+                let pg_s = translate(s, ctx);
+                if pg_s.is_null() { std::ptr::null_mut() }
+                else { pg_sys::lappend(std::ptr::null_mut(), pg_s.cast()) }
+            } else {
+                std::ptr::null_mut()
+            };
+            (*node).refexpr = pg_arr;
+            (*node).refassgnexpr = std::ptr::null_mut();
+            (node as *mut pg_sys::Expr)
+        }
+        // Row pattern navigation (MATCH_RECOGNIZE) — these are opaque to PG's
+        // standard executor; emit as function calls that the pattern engine
+        // would intercept. In practice these never reach the plan builder
+        // because MATCH_RECOGNIZE queries bypass the e-graph.
+        RaExpr::PatternPrev(expr, offset) => {
+            let args = vec![
+                expr.as_ref().clone(),
+                RaExpr::Const(ra_core::expr::Const::Int(*offset as i64)),
+            ];
+            build_func_expr("__pattern_prev", &args, ctx)
+        }
+        RaExpr::PatternNext(expr, offset) => {
+            let args = vec![
+                expr.as_ref().clone(),
+                RaExpr::Const(ra_core::expr::Const::Int(*offset as i64)),
+            ];
+            build_func_expr("__pattern_next", &args, ctx)
+        }
+        RaExpr::PatternFirst(expr, var) => {
+            let args = vec![
+                expr.as_ref().clone(),
+                RaExpr::Const(ra_core::expr::Const::String(var.clone())),
+            ];
+            build_func_expr("__pattern_first", &args, ctx)
+        }
+        RaExpr::PatternLast(expr, var) => {
+            let args = vec![
+                expr.as_ref().clone(),
+                RaExpr::Const(ra_core::expr::Const::String(var.clone())),
+            ];
+            build_func_expr("__pattern_last", &args, ctx)
+        }
+        RaExpr::PatternClassifier => {
+            build_func_expr("__pattern_classifier", &[], ctx)
+        }
+        RaExpr::PatternMatchNumber => {
+            build_func_expr("__pattern_match_number", &[], ctx)
+        }
     }
 }
 
