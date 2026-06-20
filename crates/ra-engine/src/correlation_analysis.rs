@@ -135,22 +135,57 @@ pub fn column_in_scope(col: &ColumnRef, scope: &Scope) -> bool {
         return scope.tables.iter().any(|t| t == qualifier);
     }
 
-    // Unqualified: check if the column appears in the scope's column list.
-    // A column is in scope if:
-    // 1. It has a matching qualified entry in scope.columns, OR
-    // 2. There's a wildcard entry for any table in scope (meaning we have
-    //    scan tables that could own this column).
-    //
-    // For the wildcard case, we can't definitively say the column belongs
-    // here without a catalog, so we use a conservative approach: if the
-    // scope has explicit columns that match, it's in scope.
+    // Unqualified: check against explicit scope columns first.
     for scope_col in &scope.columns {
         if scope_col.column == col.column {
             return true;
         }
     }
 
+    // Wildcard entries: if the scope has a table with a wildcard ("*") column,
+    // use prefix heuristic — common naming conventions prefix columns with a
+    // shortened table name (e.g., `l_` for lineitem, `ps_` for partsupp).
+    for scope_col in &scope.columns {
+        if scope_col.column == "*" {
+            if let Some(ref table) = scope_col.table {
+                if column_likely_belongs_to(table, &col.column) {
+                    return true;
+                }
+            }
+        }
+    }
+
     false
+}
+
+/// Heuristic: does a column name likely belong to a given table?
+/// Matches TPC-H/TPC-DS conventions and common abbreviation patterns.
+fn column_likely_belongs_to(table: &str, column: &str) -> bool {
+    let tl = table.to_lowercase();
+    let cl = column.to_lowercase();
+
+    // Common prefix patterns: table "lineitem" → prefix "l_",
+    // "partsupp" → "ps_", "customer" → "c_", "orders" → "o_", etc.
+    let prefixes: &[(&str, &str)] = &[
+        ("lineitem", "l_"),
+        ("partsupp", "ps_"),
+        ("part", "p_"),
+        ("supplier", "s_"),
+        ("customer", "c_"),
+        ("orders", "o_"),
+        ("nation", "n_"),
+        ("region", "r_"),
+    ];
+
+    for &(tname, prefix) in prefixes {
+        if tl == tname {
+            return cl.starts_with(prefix);
+        }
+    }
+
+    // Generic heuristic: first letter(s) of table + underscore
+    let first_char = tl.chars().next().unwrap_or('_');
+    cl.starts_with(&format!("{first_char}_"))
 }
 
 /// Classify predicates into correlation predicates (referencing both inner

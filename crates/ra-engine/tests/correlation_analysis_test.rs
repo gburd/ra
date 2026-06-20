@@ -148,7 +148,6 @@ fn tpch_q2_style_correlated_scalar() {
 
 /// Regression: TPC-H Q20 nested correlated subquery still works.
 #[test]
-#[ignore = "Q20 has nested correlated subqueries (IN inside correlated agg) — requires multi-level decorrelation"]
 fn tpch_q20_regression() {
     let sql = "SELECT s_name, s_address \
                FROM supplier, nation \
