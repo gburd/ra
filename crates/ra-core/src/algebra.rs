@@ -1991,3 +1991,32 @@ mod tests {
         assert_eq!(SortDirection::Desc.to_string(), "DESC");
     }
 }
+
+
+/// Row-level locking mode for SELECT ... FOR UPDATE/SHARE.
+///
+/// This is an executor hint — it does not affect the relational plan.
+/// The parser strips locking clauses before optimization; the plan builder
+/// sets `rowMarks` on the PlannedStmt when this metadata is present.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LockingMode {
+    /// FOR UPDATE — exclusive row lock.
+    ForUpdate,
+    /// FOR NO KEY UPDATE — exclusive without blocking key-share.
+    ForNoKeyUpdate,
+    /// FOR SHARE — shared row lock.
+    ForShare,
+    /// FOR KEY SHARE — shared, doesn't block no-key-update.
+    ForKeyShare,
+}
+
+/// Locking clause metadata stripped during parsing.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LockingClause {
+    /// The locking strength.
+    pub mode: LockingMode,
+    /// NOWAIT option.
+    pub nowait: bool,
+    /// SKIP LOCKED option.
+    pub skip_locked: bool,
+}

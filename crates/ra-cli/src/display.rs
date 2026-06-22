@@ -517,6 +517,8 @@ fn format_binop(op: BinOp) -> &'static str {
         BinOp::Or => "OR",
         BinOp::Concat => "||",
         BinOp::JsonAccess => "->>",
+        BinOp::IsDistinctFrom => "IS DISTINCT FROM",
+        BinOp::IsNotDistinctFrom => "IS NOT DISTINCT FROM",
     }
 }
 

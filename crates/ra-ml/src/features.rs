@@ -351,6 +351,8 @@ fn encode_binop(op: BinOp, features: &mut [f64]) {
         BinOp::Mod => 12,
         BinOp::Concat => 13,
         BinOp::JsonAccess => 14,
+        BinOp::IsDistinctFrom => 15,
+        BinOp::IsNotDistinctFrom => 16,
     };
     features[PRED_OP_OFFSET + idx] = 1.0;
 }

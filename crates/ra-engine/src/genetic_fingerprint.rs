@@ -501,6 +501,8 @@ fn binop_discriminant(op: BinOp) -> u8 {
         BinOp::Mod => 12,
         BinOp::Concat => 13,
         BinOp::JsonAccess => 14,
+        BinOp::IsDistinctFrom => 15,
+        BinOp::IsNotDistinctFrom => 16,
     }
 }
 

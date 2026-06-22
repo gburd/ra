@@ -487,6 +487,10 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                 BinOp::Or => RelLang::Or([left_id, right_id]),
                 BinOp::Concat => RelLang::Concat([left_id, right_id]),
                 BinOp::JsonAccess => RelLang::JsonAccess([left_id, right_id]),
+                // IS [NOT] DISTINCT FROM treated as Ne/Eq in the e-graph
+                // (NULL-safety is an execution concern, not a plan concern)
+                BinOp::IsDistinctFrom => RelLang::Ne([left_id, right_id]),
+                BinOp::IsNotDistinctFrom => RelLang::Eq([left_id, right_id]),
             };
             Ok(rec.add(node))
         }

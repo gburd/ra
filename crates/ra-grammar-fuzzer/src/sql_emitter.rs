@@ -753,6 +753,8 @@ fn emit_binop(op: BinOp) -> &'static str {
         BinOp::Mod => "%",
         BinOp::Concat => "||",
         BinOp::JsonAccess => "->>",
+        BinOp::IsDistinctFrom => "IS DISTINCT FROM",
+        BinOp::IsNotDistinctFrom => "IS NOT DISTINCT FROM",
     }
 }
 

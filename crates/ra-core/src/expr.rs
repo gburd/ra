@@ -241,6 +241,10 @@ pub enum BinOp {
     Concat,
     /// JSON field access (`->>`).
     JsonAccess,
+    /// NULL-safe inequality (`IS DISTINCT FROM`).
+    IsDistinctFrom,
+    /// NULL-safe equality (`IS NOT DISTINCT FROM`).
+    IsNotDistinctFrom,
 }
 
 /// Unary operators for expressions.
@@ -284,6 +288,8 @@ impl std::fmt::Display for BinOp {
             Self::Mod => "%",
             Self::Concat => "||",
             Self::JsonAccess => "->>",
+            Self::IsDistinctFrom => "IS DISTINCT FROM",
+            Self::IsNotDistinctFrom => "IS NOT DISTINCT FROM",
         };
         write!(f, "{sym}")
     }

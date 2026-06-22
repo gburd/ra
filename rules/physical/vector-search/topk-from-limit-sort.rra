@@ -1,0 +1,37 @@
+---
+id: topk-from-limit-sort
+name: "topk-from-limit-sort"
+category: physical/vector-search
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [vector-search, topk, physical, pgvector]
+---
+
+# topk-from-limit-sort
+
+## Description
+
+Recognize the `LIMIT k + ORDER BY distance_fn()` pattern and rewrite to a
+TopK operator that can use a vector index (HNSW/IVFFlat) for approximate
+nearest-neighbor search.
+
+Pattern: `Limit(k, Sort([distance(col, target)], input))`
+Rewrite: `TopK(k, distance, col, target, input)`
+
+This is the SQL-level expression of `ORDER BY embedding <-> '[...]' LIMIT k`
+which pgvector optimizes via index-only scans when a TopK operator is present.
+
+## Relational Algebra
+
+```
+Limit(k, 0, Sort([distance(col, target) ASC], R))
+  ≡ TopK(k, distance, col, target, R)
+```
+
+## Notes
+
+Currently implemented as a post-parse transform in `transform.rs::try_topk`.
+This rule documents the transformation for the declarative rule system;
+the actual firing is via the transform pass until the e-graph gains
+TopK as a RelLang variant.

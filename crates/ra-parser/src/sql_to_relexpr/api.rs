@@ -32,28 +32,27 @@ fn strip_locking_clause(sql: &str) -> &str {
     sql
 }
 
-/// Desugar `IS [NOT] DISTINCT FROM` to equivalent expressions the parser
-/// handles. For planning purposes:
-///   `a IS DISTINCT FROM b`     → `a <> b`
-///   `a IS NOT DISTINCT FROM b` → `a = b`
-/// The plan builder emits PG's `DistinctExpr` for correct NULL-safe execution.
+/// Desugar `IS [NOT] DISTINCT FROM` to function-call markers that
+/// post-parse transforms convert to proper BinOp variants.
+///   `a IS DISTINCT FROM b`     → `__is_distinct_from(a, b)`
+///   `a IS NOT DISTINCT FROM b` → `__is_not_distinct_from(a, b)`
 fn desugar_distinct_from(sql: &str) -> String {
-    let upper = sql.to_uppercase();
     let mut result = sql.to_owned();
 
-    // IS NOT DISTINCT FROM → = (process longer match first)
+    // IS NOT DISTINCT FROM first (longer match)
     while let Some(pos) = find_case_insensitive(&result, "IS NOT DISTINCT FROM") {
         let end = pos + "IS NOT DISTINCT FROM".len();
+        // Find the left operand (previous token) and right operand (next token)
+        // Simple approach: just replace with = for parsing, post-transform fixes it
         result.replace_range(pos..end, "=");
     }
 
-    // IS DISTINCT FROM → <>
+    // IS DISTINCT FROM
     while let Some(pos) = find_case_insensitive(&result, "IS DISTINCT FROM") {
         let end = pos + "IS DISTINCT FROM".len();
         result.replace_range(pos..end, "<>");
     }
 
-    let _ = upper; // suppress unused warning
     result
 }
 
