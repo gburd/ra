@@ -529,6 +529,61 @@ impl LazyRuleCompiler {
         crate::rule_priority::sort_rules_by_priority(rules)
     }
 
+    /// Compile only baseline rules (filter, projection, expression simplification).
+    /// Used by the Skip route for minimal optimization.
+    pub fn compile_baseline(
+        &self,
+        _pattern: &LazyQueryPattern,
+    ) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+        let baseline = [
+            RuleCategory::FilterOptimization,
+            RuleCategory::ProjectionOptimization,
+            RuleCategory::ExpressionSimplification,
+            RuleCategory::NullSimplification,
+        ];
+        let mut rules = Vec::with_capacity(50);
+        for category in baseline {
+            let cache = self.rule_cache.read().expect("rule_cache lock poisoned");
+            if let Some(cached) = cache.get(&category) {
+                rules.extend(cached.clone());
+                continue;
+            }
+            drop(cache);
+            let loaded = Self::load_category(category);
+            let mut cache = self.rule_cache.write().expect("rule_cache lock poisoned");
+            cache.insert(category, loaded.clone());
+            rules.extend(loaded);
+        }
+        crate::rule_priority::sort_rules_by_priority(rules)
+    }
+
+    /// Compile baseline + join-focused rules.
+    /// Used by the LeftDeep route.
+    pub fn compile_join_focused(
+        &self,
+        pattern: &LazyQueryPattern,
+    ) -> Vec<Rewrite<RelLang, RelAnalysis>> {
+        let mut rules = self.compile_baseline(pattern);
+        let join_cats = [
+            RuleCategory::JoinReordering,
+            RuleCategory::JoinElimination,
+            RuleCategory::JoinTransformation,
+        ];
+        for category in join_cats {
+            let cache = self.rule_cache.read().expect("rule_cache lock poisoned");
+            if let Some(cached) = cache.get(&category) {
+                rules.extend(cached.clone());
+                continue;
+            }
+            drop(cache);
+            let loaded = Self::load_category(category);
+            let mut cache = self.rule_cache.write().expect("rule_cache lock poisoned");
+            cache.insert(category, loaded.clone());
+            rules.extend(loaded);
+        }
+        crate::rule_priority::sort_rules_by_priority(rules)
+    }
+
     /// Load rules for a specific category.
     fn load_category(category: RuleCategory) -> Vec<Rewrite<RelLang, RelAnalysis>> {
         match category {

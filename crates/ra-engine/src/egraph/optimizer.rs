@@ -391,7 +391,8 @@ impl Optimizer {
     /// budget's [`RuleSelectionBehavior`].
     /// Load rules filtered by the speculative route. `Skip` loads only
     /// predicate-pushdown rules (cheap, always beneficial). `LeftDeep` adds
-    /// join ordering. `EGraph*` loads the full advisor-selected set.
+    /// join ordering. `EGraph*` loads the full advisor-selected set with
+    /// neural priority ordering.
     fn load_rules_for_route(
         &self,
         expr: &RelExpr,
@@ -399,34 +400,24 @@ impl Optimizer {
     ) -> Vec<Rewrite<RelLang, RelAnalysis>> {
         match route {
             OptRoute::Skip => {
-                // Minimal: only filter-related rules (split, push, merge).
-                crate::rewrite::all_rules()
-                    .into_iter()
-                    .filter(|r| {
-                        let name = r.name.as_str();
-                        name.starts_with("filter-")
-                    })
-                    .collect()
+                // Minimal: baseline categories only (filter, projection, expr simplification).
+                let pattern = crate::lazy_rules::LazyQueryPattern::analyze(expr);
+                let compiler = crate::lazy_rules::LazyRuleCompiler::new();
+                compiler.compile_baseline(&pattern)
             }
             OptRoute::LeftDeep => {
-                // Filter + join + expression simplification rules.
-                crate::rewrite::all_rules()
-                    .into_iter()
-                    .filter(|r| {
-                        let name = r.name.as_str();
-                        name.starts_with("filter-")
-                            || name.starts_with("join-")
-                            || name.contains("commut")
-                            || name.contains("assoc")
-                            || name.starts_with("and-")
-                            || name.starts_with("or-")
-                            || name.starts_with("not-")
-                            || name.starts_with("double-")
-                    })
-                    .collect()
+                // Baseline + join-related categories.
+                let pattern = crate::lazy_rules::LazyQueryPattern::analyze(expr);
+                let compiler = crate::lazy_rules::LazyRuleCompiler::new();
+                compiler.compile_join_focused(&pattern)
             }
             OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => {
-                self.load_rules(expr)
+                // Full advisor path with neural priority ordering.
+                let mut rules = self.load_rules(expr);
+                // Apply neural priority: high-scored rules at front so they
+                // fire in early iterations (egg applies rules in order).
+                rules = crate::rule_priority::sort_rules_by_priority(rules);
+                rules
             }
         }
     }
