@@ -64,10 +64,10 @@ fn from_node(
         RelLang::IndexScanChoice([pred_id, table_id]) => {
             let predicate = extract_scalar_expr(egraph, *pred_id)?;
             let table = extract_symbol(egraph, *table_id)?;
-            Ok(RelExpr::Filter {
-                predicate,
-                input: Box::new(RelExpr::Scan { table, alias: None }),
-            })
+            // Extract the indexed column from the predicate (first column ref).
+            let column = extract_first_column(&predicate)
+                .unwrap_or_else(|| "id".to_string());
+            Ok(RelExpr::IndexScan { table, column })
         }
         RelLang::Project([cols_id, input_id]) => {
             let columns = extract_projection_list(egraph, *cols_id)?;
@@ -372,6 +372,17 @@ fn extract_join_type(
     Err(EGraphError::ExtractionError(format!(
         "expected join type node at e-class {id:?}"
     )))
+}
+
+/// Extract the first column name from a predicate expression.
+fn extract_first_column(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Column(cr) => Some(cr.column.clone()),
+        Expr::BinOp { left, right, .. } => {
+            extract_first_column(left).or_else(|| extract_first_column(right))
+        }
+        _ => None,
+    }
 }
 
 fn extract_scalar_expr(egraph: &EGraph<RelLang, RelAnalysis>, id: Id) -> Result<Expr, EGraphError> {

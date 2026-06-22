@@ -1472,6 +1472,12 @@ impl PlanBuilder {
     /// condition is never produced. The resulting node behaves exactly like
     /// the SeqScan it replaces (same `scanrelid`, same targetlist path, same
     /// residual qual) — only the equality conjunct moves into `indexqual`.
+    ///
+    /// DEPRECATED: With the unified e-graph pipeline (Phase 1+4), the cost
+    /// extractor handles index-vs-seq selection via the `scan-to-index-scan`
+    /// rule. This peephole is retained as a fallback for edge cases where
+    /// the e-graph doesn't have index metadata. Will be removed once
+    /// the catalog resolver feeds index info to the e-graph conditions.
     unsafe fn try_build_index_scan(
         &mut self,
         table: &str,
