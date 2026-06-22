@@ -1,0 +1,65 @@
+---
+id: grouping-set-expansion
+name: "grouping-set-expansion"
+category: logical/decorrelation-core
+databases: [postgresql, mysql, duckdb]
+kind: macro-generative
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [grouping-sets, cube, rollup, normalization, macro-rule, generative]
+---
+
+# grouping-set-expansion
+
+## Description
+
+Expands `CUBE`, `ROLLUP`, and `GROUPING SETS` markers into an equivalent
+`UNION ALL` of per-set aggregates with NULL padding for absent columns.
+
+This is a **generative** macro-rule: the output has more nodes than the
+input (one Aggregate branch per grouping set). Standard egg rewrites are
+1:1 pattern matches and cannot express this. The expansion runs as a
+pre-optimization normalization pass (`normalize_input`), before the
+expression enters the e-graph.
+
+## Transformation
+
+```
+CUBE(a, b):
+  Aggregate(GROUP BY a, b)
+  UNION ALL Aggregate(GROUP BY a, NULL)
+  UNION ALL Aggregate(GROUP BY NULL, b)
+  UNION ALL Aggregate(GROUP BY NULL, NULL)
+
+ROLLUP(a, b, c):
+  Aggregate(GROUP BY a, b, c)
+  UNION ALL Aggregate(GROUP BY a, b, NULL)
+  UNION ALL Aggregate(GROUP BY a, NULL, NULL)
+  UNION ALL Aggregate(GROUP BY NULL, NULL, NULL)
+
+GROUPING SETS ((a), (b), ()):
+  Aggregate(GROUP BY a, NULL_b)
+  UNION ALL Aggregate(GROUP BY NULL_a, b)
+  UNION ALL Aggregate(GROUP BY NULL_a, NULL_b)
+```
+
+## Why it cannot be an egg rewrite
+
+1. Generative: 1 input node → N output nodes (N = 2^k for CUBE(k cols))
+2. Combinatorial: output structure depends on the number of columns
+3. NULL padding: requires constructing new Const(NULL) expressions
+4. Column unification: output branches must have matching schemas
+
+## Implementation
+
+Implemented in `crates/ra-engine/src/grouping_sets.rs::expand()`.
+Called from `normalize_input()` before the e-graph.
+
+The expansion is bounded by `MAX_GROUPING_COLS = 12` to prevent
+pathological blowup (2^12 = 4096 branches). Queries exceeding this
+limit fall back to PG.
+
+## References
+
+- SQL:1999 §7.12 — CUBE, ROLLUP, GROUPING SETS
+- PostgreSQL: `expand_grouping_sets()` in `parse_agg.c`

@@ -1,0 +1,75 @@
+---
+id: correlated-scalar-decorrelation
+name: "correlated-scalar-decorrelation"
+category: logical/decorrelation-core
+databases: [postgresql, mysql, duckdb, sqlite]
+kind: macro-generative
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [decorrelation, correlated, scalar-subquery, macro-rule, generative, scope-analysis]
+---
+
+# correlated-scalar-decorrelation
+
+## Description
+
+Decorrelates a correlated scalar subquery (e.g., `WHERE x > (SELECT AVG(y)
+FROM t2 WHERE t2.id = t1.id)`) into a LeftJoin + GroupBy aggregate.
+
+This is the most complex decorrelation pattern. It requires **scope
+analysis** to distinguish inner-scope columns from outer-scope columns
+in the correlation predicates. This cannot be expressed as an egg rewrite
+because:
+
+1. It requires semantic analysis (column scope resolution)
+2. The transformation constructs new GROUP BY expressions from the
+   correlation predicates' inner-side columns
+3. It rewrites aggregates (replacing function calls with column references
+   to the computed aggregate)
+4. The join condition is synthesized from correlation equalities
+
+## Transformation
+
+```
+Filter(outer.x OP (SELECT AGG(inner.y)
+                   FROM inner_rel
+                   WHERE inner.col = outer.col), outer_rel)
+
+→ Filter(outer.x OP __agg_0,
+    LeftJoin(outer.col = inner.col,
+      outer_rel,
+      Aggregate(GROUP BY inner.col, AGG(inner.y) AS __agg_0, inner_rel)))
+```
+
+## Why it cannot be an egg rewrite
+
+1. **Scope analysis**: must determine which columns are "inner" vs "outer"
+   by building a scope from the subquery's base relations and checking
+   each column reference against it
+2. **Predicate classification**: equality predicates must be split into
+   correlation (cross-scope) and local (within inner scope) sets
+3. **GROUP BY synthesis**: the GROUP BY columns are the inner-side columns
+   of the correlation equalities — derived from analysis, not pattern match
+4. **Aggregate rewriting**: the projected aggregate function is replaced
+   with a column reference to the materialized aggregate
+
+## Implementation
+
+Implemented in `subquery_decorrelation.rs::try_decorrelate_correlated_scalar()`.
+Uses `correlation_analysis::{build_scope, classify_predicates, classify_eq_sides}`.
+
+Called from `normalize_input()` → `decorrelate()` → `try_decorrelate_predicate()`
+before the expression enters the e-graph.
+
+## Patterns handled
+
+- `WHERE x > (SELECT AVG(y) FROM t2 WHERE t2.id = t1.id)` — single correlation
+- `WHERE x > (SELECT AVG(y) FROM t2 WHERE t2.a = t1.a AND t2.b = t1.b)` — multi-correlation
+- TPC-H Q2 (uncorrelated scalar — passes through unchanged)
+- TPC-H Q20 (nested: IN inside correlated scalar — decorrelated recursively)
+
+## References
+
+- Kim, "On Optimizing an SQL-like Nested Query", TODS 1982
+- Seshadri et al., "Generalized Optimization of Relational Queries", ICDE 1996
+- Neumann, Kemper, "Unnesting Arbitrary Queries", BTW 2015

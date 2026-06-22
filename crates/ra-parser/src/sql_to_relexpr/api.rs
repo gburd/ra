@@ -2,34 +2,48 @@ use ra_core::algebra::{RelExpr, Statement};
 
 use super::error::SqlConversionError;
 use super::transform;
+
+/// A parsed query with optional metadata (locking clause).
+#[derive(Debug, Clone)]
+pub struct ParsedQuery {
+    /// The relational expression tree.
+    pub rel_expr: RelExpr,
+    /// Optional row-level locking (FOR UPDATE/SHARE/etc.).
+    pub locking: Option<ra_core::algebra::LockingClause>,
+}
 use crate::ffi::node::ParseErrors;
 use crate::lime_parser;
 
-/// Strip trailing locking clauses (FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE)
-/// which don't affect the relational plan — they're executor hints.
-fn strip_locking_clause(sql: &str) -> &str {
-    // Case-insensitive search for FOR followed by a locking keyword at the end.
+/// Parse and extract a trailing locking clause (FOR UPDATE/SHARE/etc.),
+/// returning the SQL without the clause and the parsed locking metadata.
+fn extract_locking_clause(sql: &str) -> (&str, Option<ra_core::algebra::LockingClause>) {
+    use ra_core::algebra::{LockingClause, LockingMode};
     let upper = sql.to_uppercase();
-    for pat in &[
-        " FOR UPDATE",
-        " FOR NO KEY UPDATE",
-        " FOR SHARE",
-        " FOR KEY SHARE",
+    for (pat, mode) in &[
+        (" FOR UPDATE", LockingMode::ForUpdate),
+        (" FOR NO KEY UPDATE", LockingMode::ForNoKeyUpdate),
+        (" FOR SHARE", LockingMode::ForShare),
+        (" FOR KEY SHARE", LockingMode::ForKeyShare),
     ] {
         if let Some(pos) = upper.rfind(pat) {
-            // Verify nothing after the locking clause except optional
-            // NOWAIT/SKIP LOCKED/OF table
             let after = upper[pos + pat.len()..].trim();
             if after.is_empty()
                 || after.starts_with("NOWAIT")
                 || after.starts_with("SKIP LOCKED")
                 || after.starts_with("OF ")
             {
-                return sql[..pos].trim_end();
+                let nowait = after.contains("NOWAIT");
+                let skip_locked = after.contains("SKIP LOCKED");
+                let clause = LockingClause {
+                    mode: *mode,
+                    nowait,
+                    skip_locked,
+                };
+                return (sql[..pos].trim_end(), Some(clause));
             }
         }
     }
-    sql
+    (sql, None)
 }
 
 /// Desugar `IS [NOT] DISTINCT FROM` to function-call markers that
@@ -97,7 +111,8 @@ pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
     statements
         .iter()
         .map(|stmt| {
-            let cleaned = desugar_distinct_from(strip_locking_clause(stmt));
+            let (stripped, _locking) = extract_locking_clause(stmt);
+            let cleaned = desugar_distinct_from(stripped);
             lime_parser::parse_sql(&cleaned)
                 .map(transform::apply_all)
                 .map_err(convert_parse_errors)
@@ -129,7 +144,8 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
     // Try each statement; return the first successful parse.
     let mut last_err = None;
     for stmt in &statements {
-        let cleaned = desugar_distinct_from(strip_locking_clause(stmt));
+        let (stripped, _locking) = extract_locking_clause(stmt);
+        let cleaned = desugar_distinct_from(stripped);
         match lime_parser::parse_sql(&cleaned) {
             Ok(rel) => return Ok(transform::apply_all(rel)),
             Err(errs) => {
@@ -148,7 +164,47 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
     ))
 }
 
-/// Parse a SQL string into a [`Statement`].
+/// Parse SQL and return a [`ParsedQuery`] with the relational expression
+/// and any locking clause metadata.
+///
+/// # Errors
+///
+/// Returns error if SQL is invalid or contains unsupported features.
+pub fn sql_to_parsed_query(sql: &str) -> Result<ParsedQuery, SqlConversionError> {
+    let statements: Vec<&str> = sql
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if statements.is_empty() {
+        return Err(SqlConversionError::InvalidSql(
+            "no SQL statement found".to_owned(),
+        ));
+    }
+
+    let mut last_err = None;
+    for stmt in &statements {
+        let (stripped, locking) = extract_locking_clause(stmt);
+        let cleaned = desugar_distinct_from(stripped);
+        match lime_parser::parse_sql(&cleaned) {
+            Ok(rel) => {
+                return Ok(ParsedQuery {
+                    rel_expr: transform::apply_all(rel),
+                    locking,
+                });
+            }
+            Err(errs) => {
+                last_err = Some(errs);
+            }
+        }
+    }
+
+    Err(last_err.map_or_else(
+        || SqlConversionError::InvalidSql("no SQL statement found".to_owned()),
+        convert_parse_errors,
+    ))
+}/// Parse a SQL string into a [`Statement`].
 ///
 /// Classifies the input as Query, DML, DDL, Utility, or Transaction
 /// and returns the appropriate variant. For Query and DML, the
