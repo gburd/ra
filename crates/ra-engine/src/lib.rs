@@ -86,6 +86,7 @@ pub mod partition_pruning;
 pub mod join_transformations;
 pub mod large_join;
 pub mod lazy_rules;
+pub mod macro_rules;
 pub mod left_deep;
 pub mod memo;
 #[cfg(feature = "ml")]

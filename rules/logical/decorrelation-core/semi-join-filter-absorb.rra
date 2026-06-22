@@ -1,0 +1,35 @@
+---
+id: semi-join-filter-absorb
+name: "semi-join-filter-absorb"
+category: logical/decorrelation-core
+databases: [postgresql, mysql, duckdb, sqlite]
+kind: macro
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [decorrelation, semi-join, subquery, macro-rule]
+---
+
+# semi-join-filter-absorb
+
+## Description
+
+Absorb a filter predicate referencing only the inner (right) side of a
+semi-join into the semi-join condition. This is the e-graph expression of
+decorrelation: a correlated predicate that ends up as a separate Filter
+above the SemiJoin can be pushed into the join condition for more efficient
+execution (the inner side is probed per-outer-row anyway).
+
+## Rewrite
+
+```
+lhs: (filter ?pred (join semi ?cond ?left ?right))
+rhs: (join semi (and ?cond ?pred) ?left ?right)
+conditions:
+  - references_only(?pred, ?right)
+```
+
+## Notes
+
+This is a macro-rule: it's compiled from the macro_rules module rather
+than the standard .rra compiler, because it requires the `references_only`
+condition which operates on e-graph analysis data.

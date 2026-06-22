@@ -255,6 +255,13 @@ fn build_all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         }
     }
 
+    // Macro-rules: multi-step transformations (decorrelation patterns, etc.)
+    for rule in crate::macro_rules::load_macro_rules() {
+        if seen.insert(transform_sig(&rule)) {
+            rules.push(rule);
+        }
+    }
+
     rules
 }
 

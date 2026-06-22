@@ -1,0 +1,27 @@
+---
+id: anti-join-filter-absorb
+name: "anti-join-filter-absorb"
+category: logical/decorrelation-core
+databases: [postgresql, mysql, duckdb, sqlite]
+kind: macro
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [decorrelation, anti-join, subquery, macro-rule]
+---
+
+# anti-join-filter-absorb
+
+## Description
+
+Absorb a filter predicate referencing only the inner (right) side of an
+anti-join into the anti-join condition. Same principle as semi-join filter
+absorption — predicates on the probed side belong in the join condition.
+
+## Rewrite
+
+```
+lhs: (filter ?pred (join anti ?cond ?left ?right))
+rhs: (join anti (and ?cond ?pred) ?left ?right)
+conditions:
+  - references_only(?pred, ?right)
+```
