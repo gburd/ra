@@ -20,6 +20,7 @@ pub mod model_safety;
 pub mod monitor;
 pub(crate) mod parser_hook;
 mod plan_advice_explain;
+mod catalog_resolver;
 mod plan_builder;
 mod planner_hook;
 pub(crate) mod sort_utils;

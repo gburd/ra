@@ -153,6 +153,10 @@ pub struct PlanBuilder {
     /// references the join's full passthrough output via `OUTER_VAR(position)`
     /// instead of appending to a fresh scan targetlist.
     active_join_map: Option<JoinColMap>,
+    /// Catalog-resolved rtable (when built without PG Query dependency).
+    catalog_rtable: Option<*mut pg_sys::List>,
+    /// Catalog-resolved permission infos (when built without PG Query).
+    catalog_perm_infos: Option<*mut pg_sys::List>,
 }
 
 /// How a `Scan` of the in-scope recursive CTE should be built.
@@ -240,7 +244,27 @@ impl PlanBuilder {
             cte_join_defs: HashMap::new(),
             in_recursive_cte: false,
             active_join_map: None,
+            catalog_rtable: None,
+            catalog_perm_infos: None,
         }
+    }
+
+    /// Create a PlanBuilder from catalog-resolved tables (no PG Query dependency).
+    ///
+    /// # Safety
+    ///
+    /// `rtable` and `perm_infos` must be valid PG List pointers.
+    pub unsafe fn new_from_catalog(
+        table_map: HashMap<String, (pg_sys::Index, pg_sys::Oid)>,
+        rtable: *mut pg_sys::List,
+        perm_infos: *mut pg_sys::List,
+        gathered_stats: &[(String, Statistics)],
+    ) -> Self {
+        let mut base = Self::new(std::ptr::null_mut(), table_map, gathered_stats);
+        // Store the constructed rtable/perminfos for use in build_planned_stmt.
+        base.catalog_rtable = Some(rtable);
+        base.catalog_perm_infos = Some(perm_infos);
+        base
     }
 
     /// Set the physical-strategy choices the builder should consult
@@ -484,8 +508,15 @@ impl PlanBuilder {
         (*stmt).commandType = cmd_type;
         (*stmt).planTree = plan_tree;
 
-        // Copy range table and result relations from original query
-        if !self.original_query.is_null() {
+        // Copy range table and result relations.
+        // Prefer catalog-resolved rtable (no PG Query dependency).
+        if let Some(rtable) = self.catalog_rtable {
+            (*stmt).rtable = rtable;
+            #[cfg(not(any(feature = "pg13", feature = "pg14", feature = "pg15")))]
+            if let Some(pi) = self.catalog_perm_infos {
+                (*stmt).permInfos = pi;
+            }
+        } else if !self.original_query.is_null() {
             // Flatten any non-recursive CTE relations into a fresh rtable copy
             // (never mutate PG's parse tree — fallback would then see it). The
             // appended order matches build_table_map's index assignment.
