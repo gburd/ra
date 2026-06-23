@@ -173,9 +173,10 @@ impl SaturationBudgets {
 /// expansion (ROLLUP/CUBE/GROUPING SETS → UNION ALL of grouped aggregates)
 /// followed by subquery decorrelation. Returns `Some` only when a
 /// normalization applies, so callers avoid a needless clone on the hot path.
-fn normalize_input(expr: &RelExpr) -> Option<RelExpr> {
+fn normalize_input(expr: &RelExpr, decorrelate: bool) -> Option<RelExpr> {
     let has_grouping_sets = crate::grouping_sets::tree_contains_grouping_sets(expr);
-    let has_subquery = crate::subquery_decorrelation::tree_contains_subquery(expr);
+    let has_subquery = decorrelate
+        && crate::subquery_decorrelation::tree_contains_subquery(expr);
     if !has_grouping_sets && !has_subquery {
         return None;
     }
@@ -184,7 +185,7 @@ fn normalize_input(expr: &RelExpr) -> Option<RelExpr> {
     } else {
         expr.clone()
     };
-    if crate::subquery_decorrelation::tree_contains_subquery(&result) {
+    if has_subquery && crate::subquery_decorrelation::tree_contains_subquery(&result) {
         result = crate::subquery_decorrelation::decorrelate(&result);
     }
     Some(result)
@@ -1118,7 +1119,7 @@ impl Optimizer {
         // skips the e-graph — and thus the in-saturation decorrelation pass —
         // for simple-looking queries). This is a correctness normalization.
         let decorrelated_owned;
-        let expr: &RelExpr = match normalize_input(expr) {
+        let expr: &RelExpr = match normalize_input(expr, self.config.decorrelate_subqueries) {
             Some(normalized) => {
                 decorrelated_owned = normalized;
                 &decorrelated_owned
@@ -1344,7 +1345,7 @@ impl Optimizer {
 
         // Pre-optimization: decorrelate subqueries
         let decorrelated;
-        let effective_expr = match normalize_input(expr) {
+        let effective_expr = match normalize_input(expr, self.config.decorrelate_subqueries) {
             Some(normalized) => {
                 decorrelated = normalized;
                 &decorrelated
@@ -2103,7 +2104,7 @@ impl Optimizer {
 
         // Pre-optimization: decorrelate subqueries before e-graph conversion
         let decorrelated;
-        let effective_expr = match normalize_input(expr) {
+        let effective_expr = match normalize_input(expr, self.config.decorrelate_subqueries) {
             Some(normalized) => {
                 decorrelated = normalized;
                 &decorrelated

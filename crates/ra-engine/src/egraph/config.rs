@@ -90,6 +90,10 @@ pub struct OptimizerConfig {
     /// strings cause `Optimizer::optimize_*` to log a warning
     /// and proceed without advice; they don't fail the call.
     pub plan_advice: Option<String>,
+    /// Whether to decorrelate subqueries (IN→SemiJoin, EXISTS→SemiJoin).
+    /// Set to false for PG extension (PG handles SubPlans natively).
+    /// Default: true (standalone/CLI decorrelation produces better analysis).
+    pub decorrelate_subqueries: bool,
     /// Seed for any randomized planning heuristic (currently the large-join
     /// simulated-annealing search). A fixed seed keeps planning reproducible
     /// run-to-run; tests and the extension rely on this for determinism. Set
@@ -155,6 +159,7 @@ impl Default for OptimizerConfig {
             // RelExpr) and purely advisory; default on.
             use_shape_aware_filtering: true,
             plan_advice: None,
+            decorrelate_subqueries: true,
             // Fixed default => reproducible planning. "Ra" in ASCII.
             random_seed: 0x5261,
         }
