@@ -2542,7 +2542,10 @@ impl PlanBuilder {
         // of rescanning it per outer row (PG's "hashed SubPlan"). The executor
         // builds a separate null-hashtable when unknownEqFalse is false, so NOT
         // IN's NULL semantics are preserved.
-        (*node).useHashTable = params.is_empty();
+        // Disable hash table for now — per-row evaluation is slower but
+        // correct. The hashed SubPlan requires specific operator metadata
+        // that we don't fully wire yet.
+        (*node).useHashTable = false;
         // Keep UNKNOWN distinct from FALSE so NOT IN's NULL semantics hold.
         (*node).unknownEqFalse = false;
         (*node).parallel_safe = false;
