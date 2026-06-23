@@ -450,22 +450,18 @@ fn decorrelate_negated_subquery(
 /// `x > (SELECT agg(...) FROM T WHERE t.a = outer.b AND local_preds)`
 /// becomes `Filter(x > __agg, LeftJoin(input, Aggregate(...), on correlation))`
 fn decorrelate_scalar_comparison(
-    op: BinOp,
-    other_side: &Expr,
-    subquery: &RelExpr,
-    input: RelExpr,
+    _op: BinOp,
+    _other_side: &Expr,
+    _subquery: &RelExpr,
+    _input: RelExpr,
 ) -> Option<RelExpr> {
-    // Try correlated aggregate decorrelation first
-    if let Some(result) = try_decorrelate_correlated_scalar(op, other_side, subquery, input) {
-        return Some(result);
-    }
-
-    // Fallback: uncorrelated (or non-aggregate-correlatable) scalar subquery.
-    // Decline — leaving `Filter(x op (SELECT ...))` intact routes it to the
-    // plan builder's scalar-subquery path (EXPR_SUBLINK SubPlan / InitPlan +
-    // PARAM_EXEC), which renders natively and mirrors PostgreSQL. A CrossJoin
-    // with the subquery is not renderable when the join side is an Aggregate
-    // (and is unsafe for correlated cases), so it is no longer emitted.
+    // Correlated scalar decorrelation produces LeftJoin+Aggregate with
+    // synthetic __agg_N columns that the PG plan builder cannot resolve.
+    // Decline — PG handles correlated scalars natively as SubPlans with
+    // correct NULL semantics. The decorrelated form is observable via
+    // ra-cli optimize but not used in the PG extension execution path.
+    //
+    // TODO: teach plan_builder to translate the decorrelated LeftJoin form.
     None
 }
 

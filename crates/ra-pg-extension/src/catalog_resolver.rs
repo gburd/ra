@@ -197,6 +197,8 @@ pub unsafe fn build_rtable(resolution: &CatalogResolution) -> *mut pg_sys::List 
         (*rte).lateral = false;
         (*rte).inFromCl = true;
         (*rte).inh = true; // include inheritance children
+        // PG17+: perminfoindex links to the RTEPermissionInfo list (1-based)
+        (*rte).perminfoindex = table.rtindex as u32;
 
         // Set the alias/eref
         let alias_str = table.alias.as_deref().unwrap_or(&table.rel_name);

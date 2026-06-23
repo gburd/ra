@@ -4006,27 +4006,16 @@ impl PlanBuilder {
             .cloned();
         match (join_type, join_strategy) {
             // Hash join: explicit advice or default for inner / outer joins.
+            // Semi/Anti always use NestLoop (hashclauses wiring not supported).
             (
                 JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter,
                 Some(JoinInnerStrategy::Hash) | None,
             ) => self.build_hash_join(join_type, left_plan, right_plan, pg_condition),
 
-            // Hash advice on a join type that defaults to nestloop.
-            // PG allows hash joins on cross/semi/anti when the
-            // condition is hashable; we honor the advice and emit
-            // a HashJoin.
+            // Semi/Anti: always NestLoop (simpler, correct for all conditions).
             (
                 JoinType::Cross | JoinType::Semi | JoinType::Anti,
-                Some(JoinInnerStrategy::Hash),
-            ) => self.build_hash_join(join_type, left_plan, right_plan, pg_condition),
-
-            // Nested-loop variants: explicit advice OR cross/semi/anti default.
-            (
-                JoinType::Cross | JoinType::Semi | JoinType::Anti,
-                None
-                | Some(JoinInnerStrategy::NestedLoopPlain)
-                | Some(JoinInnerStrategy::NestedLoopMaterialize)
-                | Some(JoinInnerStrategy::NestedLoopMemoize),
+                _,
             ) => self.build_nested_loop(join_type, left_plan, right_plan, pg_condition),
 
             // Nested-loop advice on a join type that defaults to hash.
@@ -4137,27 +4126,23 @@ impl PlanBuilder {
         (*node).join.plan.righttree = &mut (*hash_node).plan as *mut pg_sys::Plan;
 
         // Wire the join condition into hashclauses. PostgreSQL expects
-        // hashclauses to contain OpExpr nodes (equality operators) for
-        // hash-compatible join conditions. For non-hashable conditions the
-        // executor would need a different join strategy, but since Ra's
-        // optimizer selected HashJoin it should have ensured equi-join
-        // compatibility. If the condition translates to a non-OpExpr
-        // (e.g., BoolExpr AND of multiple clauses), we place it in
-        // joinqual as a fallback — the executor applies it as a filter
-        // after the hash probe.
+        // hashclauses to contain OpExpr equality operators for the hash probe.
+        // For compound conditions (AND of multiple clauses), split: equalities
+        // go to hashclauses, non-equalities go to joinqual.
         if !condition.is_null() {
-            if (*condition).type_ == pg_sys::NodeTag::T_OpExpr {
-                (*node).hashclauses = pg_sys::lappend((*node).hashclauses, condition.cast());
-            } else {
-                // Non-OpExpr condition (e.g., AND of multiple conditions):
-                // place in joinqual where the executor evaluates it post-match.
-                debug!(
-                    "HashJoin condition is not a simple OpExpr (tag={:?}); \
-                     placing in joinqual instead of hashclauses",
-                    (*condition).type_
-                );
-                (*node).join.joinqual = pg_sys::lappend((*node).join.joinqual, condition.cast());
-            }
+            // Wire condition into hashclauses with proper metadata.
+            // PG requires hashoperators, hashcollations, and hashkeys
+            // to be in sync with hashclauses.
+            let hash_node_ptr = (*node).join.plan.righttree as *mut pg_sys::Hash;
+            self.wire_hash_condition(
+                condition,
+                &mut (*node).hashclauses,
+                &mut (*node).hashoperators,
+                &mut (*node).hashcollations,
+                &mut (*node).hashkeys,
+                &mut (*hash_node_ptr).hashkeys,
+                &mut (*node).join.joinqual,
+            );
         }
 
         self.propagate_costs_binary(&mut (*node).join.plan, left_plan, right_plan);
@@ -7060,6 +7045,112 @@ impl PlanBuilder {
     }
 
     /// Propagate costs from two child nodes to a join node.
+    /// Wire a join condition into hashclauses/hashoperators/hashkeys.
+    /// Splits compound AND conditions: OpExpr → hashclauses, rest → joinqual.
+    #[expect(clippy::too_many_arguments)]
+    unsafe fn wire_hash_condition(
+        &self,
+        condition: *mut pg_sys::Expr,
+        hashclauses: &mut *mut pg_sys::List,
+        hashoperators: &mut *mut pg_sys::List,
+        hashcollations: &mut *mut pg_sys::List,
+        outer_hashkeys: &mut *mut pg_sys::List,
+        inner_hashkeys: &mut *mut pg_sys::List,
+        joinqual: &mut *mut pg_sys::List,
+    ) {
+        let cond_node = condition as *mut pg_sys::Node;
+        if (*cond_node).type_ == pg_sys::NodeTag::T_OpExpr {
+            self.add_hash_clause(
+                condition.cast(),
+                hashclauses,
+                hashoperators,
+                hashcollations,
+                outer_hashkeys,
+                inner_hashkeys,
+                joinqual,
+            );
+        } else if (*cond_node).type_ == pg_sys::NodeTag::T_BoolExpr {
+            let bexpr = cond_node.cast::<pg_sys::BoolExpr>();
+            if (*bexpr).boolop == pg_sys::BoolExprType::AND_EXPR {
+                let args = (*bexpr).args;
+                let len = pg_sys::list_length(args);
+                for i in 0..len {
+                    let arg = pg_sys::list_nth(args, i) as *mut pg_sys::Node;
+                    if !arg.is_null() && (*arg).type_ == pg_sys::NodeTag::T_OpExpr {
+                        self.add_hash_clause(
+                            arg.cast(),
+                            hashclauses,
+                            hashoperators,
+                            hashcollations,
+                            outer_hashkeys,
+                            inner_hashkeys,
+                            joinqual,
+                        );
+                    } else if !arg.is_null() {
+                        *joinqual = pg_sys::lappend(*joinqual, arg.cast());
+                    }
+                }
+            } else {
+                *joinqual = pg_sys::lappend(*joinqual, cond_node.cast());
+            }
+        } else {
+            *joinqual = pg_sys::lappend(*joinqual, cond_node.cast());
+        }
+    }
+
+    /// Add a single OpExpr to hashclauses with proper operator/key metadata.
+    unsafe fn add_hash_clause(
+        &self,
+        op_expr: *mut pg_sys::OpExpr,
+        hashclauses: &mut *mut pg_sys::List,
+        hashoperators: &mut *mut pg_sys::List,
+        hashcollations: &mut *mut pg_sys::List,
+        outer_hashkeys: &mut *mut pg_sys::List,
+        inner_hashkeys: &mut *mut pg_sys::List,
+        joinqual: &mut *mut pg_sys::List,
+    ) {
+        let op = op_expr;
+        let args = (*op).args;
+        if pg_sys::list_length(args) != 2 {
+            *joinqual = pg_sys::lappend(*joinqual, op.cast());
+            return;
+        }
+        let a0 = pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
+        let a1 = pg_sys::list_nth(args, 1) as *mut pg_sys::Node;
+
+        // Determine which arg is outer (OUTER_VAR) vs inner (INNER_VAR).
+        let a0_is_inner = Self::node_references_inner(a0);
+        let (outer_key, inner_key) = if a0_is_inner { (a1, a0) } else { (a0, a1) };
+
+        *hashclauses = pg_sys::lappend(*hashclauses, op.cast());
+        *hashoperators = pg_sys::lappend_oid(*hashoperators, (*op).opno);
+        *hashcollations = pg_sys::lappend_oid(*hashcollations, (*op).inputcollid);
+        *outer_hashkeys = pg_sys::lappend(*outer_hashkeys, outer_key.cast());
+
+        // Hash node's hashkeys use OUTER_VAR (the inner tuple is in the
+        // outer slot of the Hash's expr context).
+        if Self::node_references_inner(inner_key) {
+            let v = pg_sys::palloc(std::mem::size_of::<pg_sys::Var>()) as *mut pg_sys::Var;
+            std::ptr::copy_nonoverlapping(inner_key.cast::<pg_sys::Var>(), v, 1);
+            (*v).varno = pg_sys::OUTER_VAR as i32;
+            *inner_hashkeys = pg_sys::lappend(*inner_hashkeys, v.cast());
+        } else {
+            *inner_hashkeys = pg_sys::lappend(*inner_hashkeys, inner_key.cast());
+        }
+    }
+
+    /// Check if a node references the INNER_VAR side.
+    unsafe fn node_references_inner(node: *mut pg_sys::Node) -> bool {
+        if node.is_null() {
+            return false;
+        }
+        if (*node).type_ == pg_sys::NodeTag::T_Var {
+            let var = node.cast::<pg_sys::Var>();
+            return (*var).varno == pg_sys::INNER_VAR as i32;
+        }
+        false
+    }
+
     unsafe fn propagate_costs_binary(
         &self,
         plan: &mut pg_sys::Plan,
