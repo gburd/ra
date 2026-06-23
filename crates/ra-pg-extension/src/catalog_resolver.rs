@@ -192,7 +192,7 @@ pub unsafe fn build_rtable(resolution: &CatalogResolution) -> *mut pg_sys::List 
         (*rte).type_ = pg_sys::NodeTag::T_RangeTblEntry;
         (*rte).rtekind = pg_sys::RTEKind::RTE_RELATION;
         (*rte).relid = table.relid;
-        (*rte).relkind = table.relkind as u8;
+        (*rte).relkind = table.relkind as std::ffi::c_char;
         (*rte).rellockmode = pg_sys::AccessShareLock as i32;
         (*rte).lateral = false;
         (*rte).inFromCl = true;

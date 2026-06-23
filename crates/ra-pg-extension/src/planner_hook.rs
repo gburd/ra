@@ -205,12 +205,8 @@ unsafe fn ra_planner_hook_inner(
     let t1 = Instant::now();
 
     // Gather statistics for the optimizer.
-    // Gather table names from Ra's RelExpr (not PG's Query).
-    let table_refs_for_stats = crate::catalog_resolver::collect_table_refs(&rel_expr);
-    let table_names: Vec<(String, String)> = table_refs_for_stats
-        .iter()
-        .map(|(name, _alias)| ("public".to_string(), name.clone()))
-        .collect();
+    // Gather table names from PG's rtable for statistics.
+    let table_names = extract_rtable_schema_names(parse);
     let stats = stats_bridge::gather_all_stats(&table_names);
     let facts = SimpleFactsProvider::new(&table_names, &stats);
 
@@ -236,15 +232,10 @@ unsafe fn ra_planner_hook_inner(
     // ─── Step 3: Translate to PostgreSQL Plan nodes ────────────────────
     let t2 = Instant::now();
 
-    // Resolve tables directly from Ra's RelExpr against the catalog —
-    // no dependency on PG's parsed Query tree.
-    let table_refs = crate::catalog_resolver::collect_table_refs(&optimized);
-    let search_ns = pg_sys::get_namespace_oid(c"public".as_ptr(), true);
-    let resolution = crate::catalog_resolver::resolve_tables(&table_refs, search_ns);
-    let table_map = resolution.table_map.clone();
-    let rtable = crate::catalog_resolver::build_rtable(&resolution);
-    let perm_infos = crate::catalog_resolver::build_perm_infos(&resolution);
-    let mut builder = PlanBuilder::new_from_catalog(table_map, rtable, perm_infos, &stats);
+    // Use PG's Query rtable for now (catalog_resolver needs live debugging).
+    // TODO: switch to catalog_resolver::resolve_tables once validated.
+    let table_map = plan_builder::build_table_map(parse);
+    let mut builder = PlanBuilder::new(parse, table_map, &stats);
 
     // Honor user-supplied scan/join/parallelism advice by handing
     // the derived per-relation physical-strategy preferences to the
@@ -299,12 +290,8 @@ unsafe fn ra_planner_hook_inner(
                     e, truncate_sql(&sql, 80)
                 );
             }
-            let table_refs2 = crate::catalog_resolver::collect_table_refs(&rel_expr);
-            let resolution2 = crate::catalog_resolver::resolve_tables(&table_refs2, search_ns);
-            let table_map2 = resolution2.table_map.clone();
-            let rtable2 = crate::catalog_resolver::build_rtable(&resolution2);
-            let pi2 = crate::catalog_resolver::build_perm_infos(&resolution2);
-            let mut builder2 = PlanBuilder::new_from_catalog(table_map2, rtable2, pi2, &stats);
+            let table_map2 = plan_builder::build_table_map(parse);
+            let mut builder2 = PlanBuilder::new(parse, table_map2, &stats);
             match builder2.build_planned_stmt(&rel_expr) {
                 Ok(stmt) => stmt,
                 Err(e2) => {
