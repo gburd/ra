@@ -458,7 +458,7 @@ fn optimize_relexpr(
     let mut config = ra_engine::OptimizerConfig::default();
     // PG handles subqueries natively as SubPlans — don't decorrelate to
     // SemiJoin (the plan builder's Var remapping doesn't handle it correctly).
-    config.decorrelate_subqueries = false;
+    config.decorrelate_subqueries = true;
     if let Some(s) = crate::extension_state::effective_plan_advice() {
         config.plan_advice = Some(s);
     }

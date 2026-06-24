@@ -4105,16 +4105,16 @@ impl PlanBuilder {
             .and_then(|a| self.physical_choices.join_for(a))
             .cloned();
         match (join_type, join_strategy) {
-            // Hash join: explicit advice or default for inner / outer joins.
-            // Semi/Anti always use NestLoop (hashclauses wiring not supported).
+            // Hash join: default for inner/outer/semi/anti joins.
             (
-                JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter,
+                JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter
+                | JoinType::FullOuter | JoinType::Semi | JoinType::Anti,
                 Some(JoinInnerStrategy::Hash) | None,
             ) => self.build_hash_join(join_type, left_plan, right_plan, pg_condition),
 
-            // Semi/Anti: always NestLoop (simpler, correct for all conditions).
+            // Cross join or explicit NestLoop advice
             (
-                JoinType::Cross | JoinType::Semi | JoinType::Anti,
+                JoinType::Cross,
                 _,
             ) => self.build_nested_loop(join_type, left_plan, right_plan, pg_condition),
 

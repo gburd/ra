@@ -36,16 +36,280 @@ use crate::correlation_analysis;
     reason = "single-pass walk over RelExpr; per-variant decorrelation is clearer inline"
 )]
 pub fn decorrelate(expr: &RelExpr) -> RelExpr {
-    // Decorrelation disabled: PG's executor handles subqueries natively
-    // as SubPlans. The SemiJoin form produced by decorrelation causes
-    // wrong results in the plan builder's HashJoin/NestLoop translation
-    // (Var remapping mismatch). Until the plan builder is fixed to handle
-    // SemiJoin correctly, return the expression unchanged.
-    //
-    // The optimizer's subquery passthrough (optimize_around_subqueries)
-    // still optimizes subquery-free subtrees via the e-graph.
-    expr.clone()
+    match expr {
+        RelExpr::Filter { predicate, input } => {
+            // First, recursively decorrelate the input
+            let new_input = decorrelate(input);
+
+            // Check if the predicate contains a subquery
+            if let Some(result) = try_decorrelate_predicate(predicate, new_input.clone()) {
+                result
+            } else {
+                // No subquery in predicate; rebuild with decorrelated input
+                RelExpr::Filter {
+                    predicate: predicate.clone(),
+                    input: Box::new(new_input),
+                }
+            }
+        }
+        RelExpr::Join {
+            join_type,
+            condition,
+            left,
+            right,
+        } => {
+            let new_left = decorrelate(left);
+            let new_right = decorrelate(right);
+            // If join condition contains a subquery, convert to
+            // CrossJoin + Filter and re-decorrelate the filter.
+            if contains_subquery(condition) {
+                let cross = RelExpr::Join {
+                    join_type: JoinType::Cross,
+                    condition: Expr::Const(Const::Bool(true)),
+                    left: Box::new(new_left),
+                    right: Box::new(new_right),
+                };
+                let filter = RelExpr::Filter {
+                    predicate: condition.clone(),
+                    input: Box::new(cross),
+                };
+                decorrelate(&filter)
+            } else {
+                RelExpr::Join {
+                    join_type: *join_type,
+                    condition: condition.clone(),
+                    left: Box::new(new_left),
+                    right: Box::new(new_right),
+                }
+            }
+        }
+        RelExpr::Project { columns, input } => {
+            // Subqueries in projection columns (scalar `(SELECT ...)`) are
+            // handled by the plan builder as SubPlan/Param nodes, which is
+            // correct for correlated cases; leave the columns intact and only
+            // decorrelate the input.
+            RelExpr::Project {
+                columns: columns.clone(),
+                input: Box::new(decorrelate(input)),
+            }
+        }
+        RelExpr::Aggregate {
+            group_by,
+            aggregates,
+            input,
+        } => RelExpr::Aggregate {
+            group_by: group_by.clone(),
+            aggregates: aggregates.clone(),
+            input: Box::new(decorrelate(input)),
+        },
+        RelExpr::Sort { keys, input } => RelExpr::Sort {
+            keys: keys.clone(),
+            input: Box::new(decorrelate(input)),
+        },
+        RelExpr::Limit {
+            count,
+            offset,
+            input,
+        } => RelExpr::Limit {
+            count: *count,
+            offset: *offset,
+            input: Box::new(decorrelate(input)),
+        },
+        RelExpr::Distinct { input } => RelExpr::Distinct {
+            input: Box::new(decorrelate(input)),
+        },
+        RelExpr::Union { left, right, all } => RelExpr::Union {
+            left: Box::new(decorrelate(left)),
+            right: Box::new(decorrelate(right)),
+            all: *all,
+        },
+        RelExpr::Intersect { left, right, all } => RelExpr::Intersect {
+            left: Box::new(decorrelate(left)),
+            right: Box::new(decorrelate(right)),
+            all: *all,
+        },
+        RelExpr::Except { left, right, all } => RelExpr::Except {
+            left: Box::new(decorrelate(left)),
+            right: Box::new(decorrelate(right)),
+            all: *all,
+        },
+        RelExpr::CTE {
+            name,
+            definition,
+            body,
+        } => RelExpr::CTE {
+            name: name.clone(),
+            definition: Box::new(decorrelate(definition)),
+            body: Box::new(decorrelate(body)),
+        },
+        RelExpr::Window { functions, input } => RelExpr::Window {
+            functions: functions.clone(),
+            input: Box::new(decorrelate(input)),
+        },
+        RelExpr::Insert {
+            table,
+            columns,
+            source,
+            on_conflict,
+            returning,
+        } => RelExpr::Insert {
+            table: table.clone(),
+            columns: columns.clone(),
+            source: Box::new(decorrelate(source)),
+            on_conflict: on_conflict.clone(),
+            returning: returning.clone(),
+        },
+        RelExpr::Update {
+            table,
+            assignments,
+            filter,
+            from,
+            returning,
+        } => {
+            let new_from = from.as_deref().map(|f| Box::new(decorrelate(f)));
+            let new_filter = filter.as_ref().map(decorrelate_scalar_subqueries);
+            let new_assignments = assignments
+                .iter()
+                .map(|(col, expr)| (col.clone(), decorrelate_scalar_subqueries(expr)))
+                .collect();
+            RelExpr::Update {
+                table: table.clone(),
+                assignments: new_assignments,
+                filter: new_filter,
+                from: new_from,
+                returning: returning.clone(),
+            }
+        }
+        RelExpr::Delete {
+            table,
+            filter,
+            using,
+            returning,
+        } => {
+            let new_using = using.as_deref().map(|u| Box::new(decorrelate(u)));
+            let new_filter = filter.as_ref().map(decorrelate_scalar_subqueries);
+            RelExpr::Delete {
+                table: table.clone(),
+                filter: new_filter,
+                using: new_using,
+                returning: returning.clone(),
+            }
+        }
+        // Leaf nodes and nodes without subexpression inputs
+        _ => expr.clone(),
+    }
 }
+
+/// Try to decorrelate a filter predicate containing a subquery.
+///
+/// Returns `Some(new_rel_expr)` if the predicate contains a subquery
+/// that was successfully converted to a join. Returns `None` if no
+/// subquery is present or if the pattern isn't supported.
+fn try_decorrelate_predicate(predicate: &Expr, input: RelExpr) -> Option<RelExpr> {
+    match predicate {
+        // Direct subquery in filter position
+        Expr::SubQuery {
+            subquery_type,
+            query,
+            test_expr,
+        } => decorrelate_subquery(subquery_type, query, test_expr.as_deref(), input),
+
+        // NOT wrapping a subquery: NOT EXISTS → AntiJoin, NOT IN → AntiJoin
+        Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand,
+        } => {
+            if let Expr::SubQuery {
+                subquery_type,
+                query,
+                test_expr,
+            } = operand.as_ref()
+            {
+                decorrelate_negated_subquery(subquery_type, query, test_expr.as_deref(), input)
+            } else {
+                None
+            }
+        }
+
+        // Binary operations: handle AND specially, then scalar subquery comparisons
+        Expr::BinOp { op, left, right } => {
+            // AND: try to decorrelate each conjunct, then recurse
+            // on the remaining predicate so nested subqueries are
+            // also transformed.
+            if *op == BinOp::And {
+                if let Some(result) = try_decorrelate_predicate(left, input.clone()) {
+                    let wrapped = RelExpr::Filter {
+                        predicate: *right.clone(),
+                        input: Box::new(result),
+                    };
+                    return Some(decorrelate(&wrapped));
+                }
+                if let Some(result) = try_decorrelate_predicate(right, input) {
+                    let wrapped = RelExpr::Filter {
+                        predicate: *left.clone(),
+                        input: Box::new(result),
+                    };
+                    return Some(decorrelate(&wrapped));
+                }
+                return None;
+            }
+
+            // Check right side for scalar subquery
+            if let Expr::SubQuery {
+                subquery_type: SubQueryType::Scalar,
+                query,
+                ..
+            } = right.as_ref()
+            {
+                return decorrelate_scalar_comparison(*op, left, query, input);
+            }
+            // Check left side for scalar subquery
+            if let Expr::SubQuery {
+                subquery_type: SubQueryType::Scalar,
+                query,
+                ..
+            } = left.as_ref()
+            {
+                return decorrelate_scalar_comparison(*op, right, query, input);
+            }
+
+            // Nested subquery: e.g., `agg > 0.95 * (SELECT scalar)`
+            // Use replace_subquery_in_expr to hoist into CrossJoin.
+            if contains_subquery(left) || contains_subquery(right) {
+                let mut counter = 0usize;
+                let (new_pred, new_input) = replace_subquery_in_expr(
+                    &Expr::BinOp {
+                        op: *op,
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                    input,
+                    &mut counter,
+                );
+                return Some(RelExpr::Filter {
+                    predicate: new_pred,
+                    input: Box::new(new_input),
+                });
+            }
+            None
+        }
+
+        other => {
+            if contains_subquery(other) {
+                let mut counter = 0usize;
+                let (new_pred, new_input) =
+                    replace_subquery_in_expr(other, input, &mut counter);
+                Some(RelExpr::Filter {
+                    predicate: new_pred,
+                    input: Box::new(new_input),
+                })
+            } else {
+                None
+            }
+        }
+    }
+}
+
 /// Convert a subquery expression to a join form.
 fn decorrelate_subquery(
     subquery_type: &SubQueryType,
@@ -294,18 +558,37 @@ fn leaf_scan_rel(query: &RelExpr) -> Option<String> {
 fn extract_correlation_predicate(query: &RelExpr) -> (RelExpr, Expr) {
     match query {
         RelExpr::Filter { predicate, input } => {
-            // The filter predicate is the correlation condition
-            (*input.clone(), predicate.clone())
+            // Only extract predicates that reference OUTER columns (correlation).
+            // Local predicates (single-table on the inner) must stay as filters.
+            let inner_scope = crate::correlation_analysis::build_scope(input);
+            let conjuncts = flatten_and(predicate);
+            let (corr_preds, _local_preds) =
+                crate::correlation_analysis::classify_predicates(&conjuncts, &inner_scope);
+
+            if corr_preds.is_empty() {
+                // No correlation — keep the query as-is (uncorrelated subquery).
+                (query.clone(), Expr::Const(Const::Bool(true)))
+            } else {
+                // Has correlation — extract correlation predicates into join cond,
+                // keep local predicates as a filter on the inner.
+                let corr_expr = and_together(&corr_preds)
+                    .unwrap_or(Expr::Const(Const::Bool(true)));
+                let local_expr = and_together(&_local_preds);
+                let inner = if let Some(local) = local_expr {
+                    RelExpr::Filter {
+                        predicate: local,
+                        input: input.clone(),
+                    }
+                } else {
+                    *input.clone()
+                };
+                (inner, corr_expr)
+            }
         }
-        // Look through Project and Limit nodes (e.g., SELECT 1 FROM ... WHERE corr,
-        // or SELECT ... LIMIT 1) — both look through to the inner correlation.
         RelExpr::Project { input, .. } | RelExpr::Limit { input, .. } => {
             extract_correlation_predicate(input)
         }
         _ => {
-            // No correlation filter; uncorrelated EXISTS
-            // SemiJoin with TRUE condition preserves all outer rows
-            // when the subquery returns at least one row.
             (query.clone(), Expr::Const(Const::Bool(true)))
         }
     }
