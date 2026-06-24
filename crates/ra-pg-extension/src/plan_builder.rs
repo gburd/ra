@@ -3788,8 +3788,9 @@ impl PlanBuilder {
     ) -> Result<(*mut pg_sys::Plan, JoinColMap, *mut pg_sys::List), PlanBuilderError> {
         let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::Cross => {}
-            JoinType::FullOuter | JoinType::RightOuter | JoinType::Semi | JoinType::Anti
+            JoinType::Inner | JoinType::LeftOuter | JoinType::Cross
+            | JoinType::Semi | JoinType::Anti => {}
+            JoinType::FullOuter | JoinType::RightOuter
                 if out_columns.is_some() => {}
             _ => return Err(unsupported("nested join type")),
         }
@@ -4230,8 +4231,6 @@ impl PlanBuilder {
         // go to hashclauses, non-equalities go to joinqual.
         if !condition.is_null() {
             // Wire condition into hashclauses with proper metadata.
-            // PG requires hashoperators, hashcollations, and hashkeys
-            // to be in sync with hashclauses.
             let hash_node_ptr = (*node).join.plan.righttree as *mut pg_sys::Hash;
             self.wire_hash_condition(
                 condition,
@@ -4242,6 +4241,8 @@ impl PlanBuilder {
                 &mut (*hash_node_ptr).hashkeys,
                 &mut (*node).join.joinqual,
             );
+            if (*node).hashclauses.is_null() || pg_sys::list_length((*node).hashclauses) == 0 {
+            }
         }
 
         self.propagate_costs_binary(&mut (*node).join.plan, left_plan, right_plan);
