@@ -2491,7 +2491,6 @@ impl PlanBuilder {
         if plan.is_null() || (*plan).targetlist.is_null() {
             return Err(unsupported("IN subquery plan"));
         }
-        eprintln!("ra_planner:   inner_rtis={:?}, tables={:?}", inner_rtis, tables);
         let mut params: Vec<(i32, *mut pg_sys::Var)> = Vec::new();
         // Extract first col type BEFORE paramification (paramify may corrupt it).
         let first_te = (*(*plan).targetlist).elements;
@@ -2601,11 +2600,9 @@ impl PlanBuilder {
             let a1 = pg_sys::list_nth((*op).args, 1) as *mut pg_sys::Node;
             if (*a0).type_ == pg_sys::NodeTag::T_Var {
                 let v = a0 as *mut pg_sys::Var;
-                eprintln!("ra_planner:   LHS Var: varno={}, varattno={}, vartype={}", (*v).varno, (*v).varattno, (*v).vartype);
             }
             if (*a1).type_ == pg_sys::NodeTag::T_Param {
                 let p = a1 as *mut pg_sys::Param;
-                eprintln!("ra_planner:   RHS Param: paramid={}, paramtype={}", (*p).paramid, (*p).paramtype);
             }
         }
         // Log inner plan first col
@@ -3803,12 +3800,14 @@ impl PlanBuilder {
             return Ok(r);
         }
         // Prefer an index nested-loop when the inner is indexed on the join key
-        // and the outer is filtered (selective). Falls through to hash/nestloop
-        // when not applicable.
-        if let Some(r) =
-            self.try_index_nestloop(join_type, condition, left, right, where_pred, out_columns)?
-        {
-            return Ok(r);
+        // and the outer is filtered (selective). Skip for Semi/Anti where
+        // HashJoin is O(N+M) vs IndexNestLoop O(N*logM).
+        if !matches!(join_type, JoinType::Semi | JoinType::Anti) {
+            if let Some(r) =
+                self.try_index_nestloop(join_type, condition, left, right, where_pred, out_columns)?
+            {
+                return Ok(r);
+            }
         }
         let (lplan, lmap, _) = self.build_join_tree(left)?;
         let (rplan, rmap, _) = self.build_join_tree(right)?;
@@ -7271,6 +7270,12 @@ impl PlanBuilder {
 
         // Determine which arg is outer (OUTER_VAR) vs inner (INNER_VAR).
         let a0_is_inner = Self::node_references_inner(a0);
+        if (*a0).type_ == pg_sys::NodeTag::T_Var {
+            let v = a0.cast::<pg_sys::Var>();
+        }
+        if (*a1).type_ == pg_sys::NodeTag::T_Var {
+            let v = a1.cast::<pg_sys::Var>();
+        }
         let (outer_key, inner_key) = if a0_is_inner { (a1, a0) } else { (a0, a1) };
 
         *hashclauses = pg_sys::lappend(*hashclauses, op.cast());
