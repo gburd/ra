@@ -2491,9 +2491,9 @@ impl PlanBuilder {
         if plan.is_null() || (*plan).targetlist.is_null() {
             return Err(unsupported("IN subquery plan"));
         }
+        eprintln!("ra_planner:   inner_rtis={:?}, tables={:?}", inner_rtis, tables);
         let mut params: Vec<(i32, *mut pg_sys::Var)> = Vec::new();
-        self.paramify_plan(plan, &inner_rtis, &mut params);
-
+        // Extract first col type BEFORE paramification (paramify may corrupt it).
         let first_te = (*(*plan).targetlist).elements;
         let te0 = (*first_te.add(0)).ptr_value as *mut pg_sys::TargetEntry;
         if te0.is_null() || (*te0).expr.is_null() {
@@ -2502,6 +2502,30 @@ impl PlanBuilder {
         let first_type = pg_sys::exprType((*te0).expr.cast());
         let first_typmod = pg_sys::exprTypmod((*te0).expr.cast());
         let first_coll = pg_sys::exprCollation((*te0).expr.cast());
+
+        // Save the inner relation's rtindex for targetlist fix.
+        let inner_rti = inner_rtis.iter().next().copied().unwrap_or(0);
+
+        self.paramify_plan(plan, &inner_rtis, &mut params);
+
+        // Fix: if paramify_plan converted the targetlist output Var to a Param
+        // (because column_to_var resolved it against an outer table's rtindex),
+        // reconstruct the correct Var pointing to the inner relation.
+        if !(*te0).expr.is_null() && (*(*te0).expr).type_ == pg_sys::NodeTag::T_Param && inner_rti > 0 {
+            let var = self.alloc_node::<pg_sys::Var>();
+            (*var).xpr.type_ = pg_sys::NodeTag::T_Var;
+            (*var).varno = inner_rti;
+            (*var).varattno = 1; // first col of inner relation
+            (*var).vartype = first_type;
+            (*var).vartypmod = first_typmod;
+            (*var).varcollid = first_coll;
+            (*var).varlevelsup = 0;
+            (*var).location = -1;
+            (*te0).expr = var.cast();
+            // The paramified entry was spurious — clear it.
+            params.clear();
+        }
+
 
         self.subplans.push(plan);
         let plan_id = self.subplans.len() as i32;
@@ -2554,6 +2578,57 @@ impl PlanBuilder {
             (*node).parParam = par_param;
             (*node).args = args;
         }
+
+        // Diagnostic: log SubPlan details for debugging the 0-rows issue.
+        eprintln!(
+            "ra_planner: IN SubPlan built: plan_id={}, result_pid={}, \
+             firstColType={}, useHash={}, paramIds_len={}, testexpr_type={:?}",
+            (*node).plan_id,
+            result_pid,
+            (*node).firstColType,
+            (*node).useHashTable,
+            if (*node).paramIds.is_null() { 0 } else { (*(*node).paramIds).length },
+            (*(*node).testexpr).type_,
+        );
+        // Log the testexpr OpExpr details
+        if (*(*node).testexpr).type_ == pg_sys::NodeTag::T_OpExpr {
+            let op = (*node).testexpr as *mut pg_sys::OpExpr;
+            eprintln!(
+                "ra_planner:   testexpr opno={}, opfuncid={}, inputcollid={}",
+                (*op).opno, (*op).opfuncid, (*op).inputcollid,
+            );
+            let a0 = pg_sys::list_nth((*op).args, 0) as *mut pg_sys::Node;
+            let a1 = pg_sys::list_nth((*op).args, 1) as *mut pg_sys::Node;
+            if (*a0).type_ == pg_sys::NodeTag::T_Var {
+                let v = a0 as *mut pg_sys::Var;
+                eprintln!("ra_planner:   LHS Var: varno={}, varattno={}, vartype={}", (*v).varno, (*v).varattno, (*v).vartype);
+            }
+            if (*a1).type_ == pg_sys::NodeTag::T_Param {
+                let p = a1 as *mut pg_sys::Param;
+                eprintln!("ra_planner:   RHS Param: paramid={}, paramtype={}", (*p).paramid, (*p).paramtype);
+            }
+        }
+        // Log inner plan first col
+        if !(*plan).targetlist.is_null() && (*(*plan).targetlist).length > 0 {
+            let el = (*(*plan).targetlist).elements;
+            let te = (*el).ptr_value as *mut pg_sys::TargetEntry;
+            if !te.is_null() && !(*te).expr.is_null() {
+                let inner_type = pg_sys::exprType((*te).expr.cast());
+                let inner_tag = (*(*te).expr).type_;
+                eprintln!(
+                    "ra_planner:   inner col: resno={}, type={}, expr_tag={:?}",
+                    (*te).resno, inner_type, inner_tag,
+                );
+                if inner_tag == pg_sys::NodeTag::T_Var {
+                    let iv = (*te).expr as *mut pg_sys::Var;
+                    eprintln!(
+                        "ra_planner:   inner Var: varno={}, varattno={}, vartype={}",
+                        (*iv).varno, (*iv).varattno, (*iv).vartype,
+                    );
+                }
+            }
+        }
+
         Ok(node.cast())
     }
     fn collect_scan_tables(expr: &RelExpr, out: &mut Vec<String>) {
