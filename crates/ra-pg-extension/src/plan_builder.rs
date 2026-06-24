@@ -2336,16 +2336,6 @@ impl PlanBuilder {
                 let key = std::ptr::from_ref::<RelExpr>(query.as_ref()) as usize;
                 if matches!(subquery_type, SubQueryType::Scalar) {
                     if !self.expr_ctx.subplans.borrow().contains_key(&key) {
-                        // Correlated scalar subqueries as per-row SubPlans are
-                        // O(N*M) — prohibitively slow. Defer to PG which
-                        // decorrelates them to efficient Hash Joins.
-                        let mut inner_tables = Vec::new();
-                        Self::collect_scan_tables(query, &mut inner_tables);
-                        if Self::subquery_filter_has_outer_refs(query, &inner_tables) {
-                            return Err(PlanBuilderError::UnsupportedVariant(
-                                "correlated scalar subquery".to_owned(),
-                            ));
-                        }
                         let sp = self.build_scalar_subplan(query)?;
                         self.expr_ctx.subplans.borrow_mut().insert(key, sp);
                     }
@@ -2355,17 +2345,8 @@ impl PlanBuilder {
                     // SubPlan. Requires the test expression.
                     if let Some(t) = test_expr {
                         if !self.expr_ctx.subplans.borrow().contains_key(&key) {
-                            match self.build_in_subplan(query, t) {
-                                Ok(sp) => {
-                                    self.expr_ctx.subplans.borrow_mut().insert(key, sp);
-                                }
-                                Err(e) => {
-                                    eprintln!("ra_planner: build_in_subplan failed: {e}");
-                                    // Don't propagate — let the filter fall through
-                                    // to PG's native handling via the error path.
-                                    return Err(e);
-                                }
-                            }
+                            let sp = self.build_in_subplan(query, t)?;
+                            self.expr_ctx.subplans.borrow_mut().insert(key, sp);
                         }
                     }
                 }
@@ -2493,16 +2474,87 @@ impl PlanBuilder {
     /// correctly yields no rows in that case.
     unsafe fn build_in_subplan(
         &mut self,
-        _query: &RelExpr,
-        _test_expr: &Expr,
+        query: &RelExpr,
+        test_expr: &Expr,
     ) -> Result<*mut pg_sys::Expr, PlanBuilderError> {
-        // IN SubPlan disabled: the constructed SubPlan produces 0 rows due to
-        // a param/testexpr wiring issue. Let the Filter path fall through to
-        // "predicate not translatable" → PG fallback which handles IN correctly
-        // as a native Hash Semi Join.
-        Err(PlanBuilderError::UnsupportedVariant(
-            "IN subplan disabled (correctness issue)".to_owned(),
-        ))
+        let unsupported = |m: &str| PlanBuilderError::UnsupportedVariant(m.to_owned());
+        self.prepare_subplans(query)?;
+        let mut inner_rtis = std::collections::HashSet::new();
+        let mut tables = Vec::new();
+        Self::collect_scan_tables(query, &mut tables);
+        for t in &tables {
+            if let Ok(rti) = self.rtindex_for(t) {
+                inner_rtis.insert(rti as i32);
+            }
+        }
+        let plan = self.build_plan(query)?;
+        if plan.is_null() || (*plan).targetlist.is_null() {
+            return Err(unsupported("IN subquery plan"));
+        }
+        let mut params: Vec<(i32, *mut pg_sys::Var)> = Vec::new();
+        self.paramify_plan(plan, &inner_rtis, &mut params);
+
+        let first_te = (*(*plan).targetlist).elements;
+        let te0 = (*first_te.add(0)).ptr_value as *mut pg_sys::TargetEntry;
+        if te0.is_null() || (*te0).expr.is_null() {
+            return Err(unsupported("IN subquery output"));
+        }
+        let first_type = pg_sys::exprType((*te0).expr.cast());
+        let first_typmod = pg_sys::exprTypmod((*te0).expr.cast());
+        let first_coll = pg_sys::exprCollation((*te0).expr.cast());
+
+        self.subplans.push(plan);
+        let plan_id = self.subplans.len() as i32;
+
+        // Result param: the inner col value goes here for testexpr evaluation.
+        let result_pid = self.alloc_param(first_type);
+        let param = self.alloc_node::<pg_sys::Param>();
+        (*param).xpr.type_ = pg_sys::NodeTag::T_Param;
+        (*param).paramkind = pg_sys::ParamKind::PARAM_EXEC;
+        (*param).paramid = result_pid;
+        (*param).paramtype = first_type;
+        (*param).paramtypmod = first_typmod;
+        (*param).paramcollid = first_coll;
+        (*param).location = -1;
+
+        // testexpr: outer_val = param (the param gets the inner row's value)
+        let lhs = expr_translator::translate(test_expr, &self.expr_ctx);
+        if lhs.is_null() {
+            return Err(unsupported("IN test expression"));
+        }
+        let testexpr = expr_translator::op_expr_from_nodes("=", lhs, param.cast());
+        if testexpr.is_null() {
+            return Err(unsupported("IN test operator"));
+        }
+
+        let node = self.alloc_node::<pg_sys::SubPlan>();
+        (*node).xpr.type_ = pg_sys::NodeTag::T_SubPlan;
+        (*node).subLinkType = pg_sys::SubLinkType::ANY_SUBLINK;
+        (*node).testexpr = testexpr.cast();
+        (*node).plan_id = plan_id;
+        (*node).firstColType = first_type;
+        (*node).firstColTypmod = first_typmod;
+        (*node).firstColCollation = first_coll;
+        (*node).unknownEqFalse = false;
+        (*node).parallel_safe = false;
+
+        let is_correlated = !params.is_empty();
+        // Use per-row evaluation (not hashed) — simpler, correct.
+        // The executor re-scans the inner plan per outer row and evaluates
+        // testexpr for each inner tuple.
+        (*node).useHashTable = false;
+        (*node).paramIds = pg_sys::lappend_int(std::ptr::null_mut(), result_pid);
+        if is_correlated {
+            let mut par_param: *mut pg_sys::List = std::ptr::null_mut();
+            let mut args: *mut pg_sys::List = std::ptr::null_mut();
+            for (pid, var) in &params {
+                par_param = pg_sys::lappend_int(par_param, *pid);
+                args = pg_sys::lappend(args, (*var).cast());
+            }
+            (*node).parParam = par_param;
+            (*node).args = args;
+        }
+        Ok(node.cast())
     }
     fn collect_scan_tables(expr: &RelExpr, out: &mut Vec<String>) {
         if let RelExpr::Scan { table, alias } = expr {
@@ -5670,12 +5722,59 @@ impl PlanBuilder {
         &mut self,
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        // DISTINCT crashes due to a collation/sort issue in dedup_plan.
-        // Defer to PG's native planner which handles DISTINCT correctly.
-        // TODO: fix the null-deref in Sort/Unique targetlist construction.
-        Err(PlanBuilderError::UnsupportedVariant(
-            "DISTINCT (defer to PG)".to_owned(),
-        ))
+        // Build child, then wrap in Sort + Unique for DISTINCT semantics.
+        // Use a HashAggregate instead of Sort+Unique — it's simpler and
+        // doesn't require collation/sort operator resolution.
+        let child = self.build_plan(input)?;
+        if child.is_null() || (*child).targetlist.is_null() {
+            return Err(PlanBuilderError::UnsupportedVariant(
+                "DISTINCT input has no targetlist".to_owned(),
+            ));
+        }
+
+        // Build a HashAggregate that groups by ALL output columns (= DISTINCT).
+        let ncols = (*(*child).targetlist).length;
+        let node = self.alloc_node::<pg_sys::Agg>();
+        (*node).plan.type_ = pg_sys::NodeTag::T_Agg;
+        (*node).aggstrategy = pg_sys::AggStrategy::AGG_HASHED;
+        (*node).numCols = ncols;
+        (*node).plan.lefttree = child;
+        (*node).plan.targetlist = (*child).targetlist;
+
+        // Allocate group key arrays
+        let grp_col_idx = pg_sys::palloc0(ncols as usize * std::mem::size_of::<pg_sys::AttrNumber>())
+            as *mut pg_sys::AttrNumber;
+        let grp_operators = pg_sys::palloc0(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
+            as *mut pg_sys::Oid;
+        let grp_collations = pg_sys::palloc0(ncols as usize * std::mem::size_of::<pg_sys::Oid>())
+            as *mut pg_sys::Oid;
+
+        let elements = (*(*child).targetlist).elements;
+        for i in 0..ncols as usize {
+            let te = (*elements.add(i)).ptr_value as *mut pg_sys::TargetEntry;
+            *grp_col_idx.add(i) = if !te.is_null() { (*te).resno } else { (i + 1) as i16 };
+            let type_oid = if !te.is_null() && !(*te).expr.is_null() {
+                pg_sys::exprType((*te).expr.cast())
+            } else {
+                pg_sys::INT4OID
+            };
+            *grp_operators.add(i) = crate::sort_utils::resolve_equality_op(type_oid);
+            *grp_collations.add(i) = if !te.is_null() && !(*te).expr.is_null() {
+                pg_sys::exprCollation((*te).expr.cast())
+            } else {
+                pg_sys::InvalidOid
+            };
+        }
+
+        (*node).grpColIdx = grp_col_idx;
+        (*node).grpOperators = grp_operators;
+        (*node).grpCollations = grp_collations;
+        (*node).numGroups = ((*child).plan_rows as f64).max(1.0);
+        (*node).plan.plan_rows = (*child).plan_rows * 0.75;
+        (*node).plan.plan_width = (*child).plan_width;
+        (*node).plan.total_cost = (*child).total_cost * 1.1;
+
+        Ok(&mut (*node).plan as *mut pg_sys::Plan)
     }
 
     /// Build `DISTINCT ON (keys)` as a `Unique` on the key columns over the
