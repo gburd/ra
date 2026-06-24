@@ -2336,6 +2336,16 @@ impl PlanBuilder {
                 let key = std::ptr::from_ref::<RelExpr>(query.as_ref()) as usize;
                 if matches!(subquery_type, SubQueryType::Scalar) {
                     if !self.expr_ctx.subplans.borrow().contains_key(&key) {
+                        // Correlated scalar subqueries as per-row SubPlans are
+                        // O(N*M) — prohibitively slow. Defer to PG which
+                        // decorrelates them to efficient Hash Joins.
+                        let mut inner_tables = Vec::new();
+                        Self::collect_scan_tables(query, &mut inner_tables);
+                        if Self::subquery_filter_has_outer_refs(query, &inner_tables) {
+                            return Err(PlanBuilderError::UnsupportedVariant(
+                                "correlated scalar subquery".to_owned(),
+                            ));
+                        }
                         let sp = self.build_scalar_subplan(query)?;
                         self.expr_ctx.subplans.borrow_mut().insert(key, sp);
                     }
@@ -2496,12 +2506,38 @@ impl PlanBuilder {
     }
     fn collect_scan_tables(expr: &RelExpr, out: &mut Vec<String>) {
         if let RelExpr::Scan { table, alias } = expr {
-            // Prefer the alias so a self-correlated subquery's inner scan
-            // (`orders o2`) resolves to its own rtindex, not the outer's.
             out.push(alias.clone().unwrap_or_else(|| table.clone()));
         }
         for c in expr.children() {
             Self::collect_scan_tables(c, out);
+        }
+    }
+
+    /// Check if a subquery's filter predicates reference columns from tables
+    /// NOT in the subquery's own scan set (i.e., outer/correlated references).
+    fn subquery_filter_has_outer_refs(expr: &RelExpr, inner_tables: &[String]) -> bool {
+        match expr {
+            RelExpr::Filter { predicate, input } => {
+                Self::pred_has_outer_refs(predicate, inner_tables)
+                    || Self::subquery_filter_has_outer_refs(input, inner_tables)
+            }
+            _ => expr.children().iter().any(|c| Self::subquery_filter_has_outer_refs(c, inner_tables)),
+        }
+    }
+
+    fn pred_has_outer_refs(expr: &ra_core::expr::Expr, inner_tables: &[String]) -> bool {
+        use ra_core::expr::Expr as E;
+        match expr {
+            E::Column(cr) => cr.table.as_ref().is_some_and(|t|
+                !inner_tables.iter().any(|it| it.eq_ignore_ascii_case(t))
+            ),
+            E::BinOp { left, right, .. } => {
+                Self::pred_has_outer_refs(left, inner_tables)
+                    || Self::pred_has_outer_refs(right, inner_tables)
+            }
+            E::UnaryOp { operand, .. } => Self::pred_has_outer_refs(operand, inner_tables),
+            E::Function { args, .. } => args.iter().any(|a| Self::pred_has_outer_refs(a, inner_tables)),
+            _ => false,
         }
     }
 
@@ -5634,8 +5670,12 @@ impl PlanBuilder {
         &mut self,
         input: &RelExpr,
     ) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
-        let raw_child = self.build_plan(input)?;
-        Ok(self.dedup_plan(raw_child))
+        // DISTINCT crashes due to a collation/sort issue in dedup_plan.
+        // Defer to PG's native planner which handles DISTINCT correctly.
+        // TODO: fix the null-deref in Sort/Unique targetlist construction.
+        Err(PlanBuilderError::UnsupportedVariant(
+            "DISTINCT (defer to PG)".to_owned(),
+        ))
     }
 
     /// Build `DISTINCT ON (keys)` as a `Unique` on the key columns over the
@@ -5747,11 +5787,11 @@ impl PlanBuilder {
                         pg_sys::INT4OID
                     };
                     *operators.add(i) = crate::sort_utils::resolve_equality_op(type_oid);
-                    *collations.add(i) = pg_sys::exprCollation(if !te.is_null() {
-                        (*te).expr as *mut pg_sys::Node
+                    *collations.add(i) = if !te.is_null() && !(*te).expr.is_null() {
+                        pg_sys::exprCollation((*te).expr as *mut pg_sys::Node)
                     } else {
-                        std::ptr::null_mut()
-                    });
+                        pg_sys::InvalidOid
+                    };
                 }
 
                 (*node).numCols = ncols;
