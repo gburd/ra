@@ -520,6 +520,11 @@ fn write_coverage_and_failures(md: &mut String, report: &BenchmarkReport) {
     clippy::expect_used,
     reason = "benchmark binary, panicking on IO failure is acceptable"
 )]
+#[expect(
+    clippy::too_many_lines,
+    reason = "benchmark runner: linear setup/run/report flow; splitting adds \
+              indirection without clarity."
+)]
 fn main() {
     let base_dir = PathBuf::from("benchmarks/planner_comparison");
     let results_dir = base_dir.join("results");

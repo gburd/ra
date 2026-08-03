@@ -70,6 +70,10 @@ fn queries_dir() -> PathBuf {
     dir
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "profiling example: linear load/optimize/report flow."
+)]
 fn main() {
     let dir = queries_dir();
     let stats = table_stats();

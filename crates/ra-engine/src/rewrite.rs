@@ -1511,6 +1511,11 @@ mod tests {
     /// derive `IS NOT NULL(left_key)` onto the right child, and the new cost
     /// model then preferred that unsound pushed form.
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "soundness test: sets up an e-graph, runs extraction, and \
+                  asserts the pushed form is rejected — one coherent scenario."
+    )]
     fn inner_join_pushdown_extraction_is_sound() {
         use egg::Runner;
         // Soundness helpers: collect tables/aliases under a subtree, and check

@@ -1191,6 +1191,11 @@ fn run_training_round(
 // Main
 // ============================================================================
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "example driver: sequential training/reporting steps read better \
+              as one main() than split across helpers."
+)]
 fn main() {
     let total_start = Instant::now();
 
