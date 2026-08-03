@@ -265,11 +265,15 @@ Cache functionality is split into two crates:
 - **`ra-cache-api`** (core layer) — trait definitions and interfaces
 - **`ra-cache-impl`** (experimental layer) — LRU/LFU/adaptive implementations
 
-## Workspace Quality (as of 2026-05-29)
+## Workspace Quality (as of 2026-08 steering Phase 1–3)
 
-- **0 clippy errors** (`cargo clippy --all-targets --all-features -- -D warnings`)
+- **0 clippy errors** (`cargo clippy --all-targets --all-features -- -D warnings`, verified on a clean checkout)
 - **0 compiler warnings** on `cargo build --workspace --all-features`
-- **168 test suites, 7816 tests passing, 0 failing, 58 ignored** (`cargo test --workspace --all-features`)
+- **~120 test binaries, 6632 tests passing, 0 failing** with 1 test `#[ignore]`d
+  (`bootstrap_model_is_actually_trained`, pre-existing defect, Codeberg #7).
+  Run memory-bounded (`-j4 --test-threads=4`) on small hosts: the full
+  parallel run can OOM a 16 GB box (`proptest_optimization` gets SIGKILLed,
+  not a real failure).
 - Known flaky test mitigations:
   - `saturation_terminates_quickly` skips Aggregate, self-ref-join, joins of the
     same base table, constant predicates, constant sort keys, and `UnaryOp` over
