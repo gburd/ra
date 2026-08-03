@@ -8,6 +8,11 @@ license.workspace = true
 repository.workspace = true
 
 [[bin]]
+name = "ra"
+path = "src/main.rs"
+
+# Back-compat alias: the historical binary name builds the same CLI.
+[[bin]]
 name = "ra-cli"
 path = "src/main.rs"
 

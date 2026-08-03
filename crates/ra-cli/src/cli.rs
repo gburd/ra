@@ -10,21 +10,21 @@ use crate::timeline_commands;
 // ── Top-level CLI ──────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "ra-cli")]
+#[command(name = "ra")]
 #[command(
     about = "Ra -- the relational algebra query optimizer toolkit",
     long_about = "Ra is a toolkit for analyzing, optimizing, and testing SQL queries \
         using relational algebra rewrite rules.\n\n\
         Common workflows:\n  \
-        ra-cli explain 'SELECT ...'     Parse SQL into a relational algebra plan\n  \
-        ra-cli optimize 'SELECT ...'    Optimize a SQL query with rewrite rules\n  \
-        ra-cli validate rules/          Validate .rra rule files\n  \
-        ra-cli test rules/              Run embedded test cases in rule files\n  \
-        ra-cli list                     List available optimization rules\n\n\
+        ra explain 'SELECT ...'     Parse SQL into a relational algebra plan\n  \
+        ra optimize 'SELECT ...'    Optimize a SQL query with rewrite rules\n  \
+        ra validate rules/          Validate .rra rule files\n  \
+        ra test rules/              Run embedded test cases in rule files\n  \
+        ra list                     List available optimization rules\n\n\
         Use --help on any subcommand for detailed usage.",
     version,
     propagate_version = true,
-    after_help = "See 'ra-cli <command> --help' for details on a specific command."
+    after_help = "See 'ra <command> --help' for details on a specific command."
 )]
 pub struct Cli {
     /// Increase output verbosity (show per-file results, debug info).
