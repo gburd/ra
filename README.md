@@ -10,18 +10,25 @@ parsing, planning, and optimization with results logically identical to the
 native planner, but that parity is unproven and a fallback to the native
 planner is still present. Progress is tracked mechanically:
 
-| Tier | Corpus | Status | Harness |
-|------|--------|--------|---------|
-| 0 | 120-query smoke suite | 3 known correctness defects (tracked) | `cargo run --release -p ra-engine --bin planner_comparison_runner` |
-| 1 | PostgreSQL `src/test/regress` | not yet run | — |
-| 2 | sqllogictest | not yet run | — |
-| 3 | TPC-H / TPC-DS / JOB (results) | not yet run | — |
-| 4 | Differential fuzzing | not yet run | — |
+| Tier | Corpus | Structural (parse+optimize) | Answer-correctness vs PG | Harness |
+|------|--------|------|------|---------|
+| 0 | 120-query smoke suite | 117/120 parse+optimize | 3 known wrong-answer defects (tracked) | `ra verify --tier 0 --report` |
+| 1 | PostgreSQL `src/test/regress` | not yet run | not yet run | — |
+| 2 | sqllogictest | not yet run | not yet run | — |
+| 3 | TPC-H / TPC-DS / JOB (results) | not yet run | not yet run | — |
+| 4 | Differential fuzzing | not yet run | not yet run | — |
 
-The native-planner fallback is instrumented and counted; the fallback count
-is the project's headline number until it reaches zero. No performance claim
-is published until correctness parity is reached and measured end-to-end
-(plan + execute) against native PostgreSQL.
+`ra verify` checks *structural* success (Ra parses and optimizes each query
+without error). It does **not** check answer-correctness — that Ra's plan
+produces the same rows as PostgreSQL's — which requires the PG oracle (a live
+connection, tracked as an open issue). The 3 wrong-answer defects parse and
+optimize fine but produce incorrect results, so structural success is not a
+correctness score.
+
+The native-planner fallback is **not yet instrumented** (tracked): once it is,
+the fallback count becomes the project's headline number until it reaches
+zero. No performance claim is published until correctness parity is reached
+and measured end-to-end (plan + execute) against native PostgreSQL.
 
 ## Overview
 
@@ -319,23 +326,31 @@ CREATE EXTENSION pg_ra_planner;
 SET ra_planner.enabled = off;
 ```
 
-### CLI
+### CLI: `ra`
 
 ```bash
-cargo build -p ra-cli
+cargo build -p ra-cli        # produces the `ra` binary
 
-ra-cli explain  'SELECT ...'           # Show relational algebra tree
-ra-cli optimize 'SELECT ...'           # Optimize with rewrite rules
-ra-cli optimize 'SELECT ...' --diff    # Before/after diff
-ra-cli translate --from postgres --to mysql 'SELECT ...'
+ra explain  'SELECT ...'            # Show relational algebra tree
+ra optimize 'SELECT ...'            # Optimize with rewrite rules
+ra optimize 'SELECT ...' --diff     # Before/after plan diff
+ra optimize 'SELECT ...' --trace    # Per-iteration rules fired, cost deltas
+ra optimize 'SELECT ...' --rules-applied   # Which rules changed the plan
+ra list                             # List active rules
+ra verify --tier 0 --report         # Run the qualification corpus
 
-# `ra-cli benchmark` compares Ra against a real PostgreSQL instance.
+# `ra verify --tier 0` runs the 120-query corpus and reports per-category
+# parse+optimize success. It checks STRUCTURAL success only (Ra parses and
+# optimizes without error) — NOT answer-correctness vs PostgreSQL, which
+# needs the PG oracle (a live connection; tracked, not yet wired).
+
+# `ra benchmark` compares Ra against a real PostgreSQL instance.
 # Set RA_BENCHMARK_PG_URL to a libpq-style URL and the command will run
 # `EXPLAIN (ANALYZE, FORMAT JSON)` on PG for each query. Without the
 # variable the command fails with a clear error rather than fabricating
 # output (the prior `simulate_native_*` helpers were removed in E1).
 RA_BENCHMARK_PG_URL='host=localhost user=postgres dbname=tpch' \
-    ra-cli benchmark --workload tpch
+    ra benchmark --workload tpch
 ```
 
 ## Project Structure
