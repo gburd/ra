@@ -49,12 +49,12 @@ test_query() {
     echo "Testing query $query_num from $file..."
 
     # Test parse
-    if cargo run --bin ra-cli -- parse "$query" > "$results_dir/parse_${query_num}.txt" 2>&1; then
+    if cargo run --bin ra -- parse "$query" > "$results_dir/parse_${query_num}.txt" 2>&1; then
         parse_success=$((parse_success + 1))
         echo -e "${GREEN}✓${NC} Parse succeeded"
 
         # Test optimize
-        if cargo run --bin ra-cli -- optimize "$query" > "$results_dir/optimize_${query_num}.txt" 2>&1; then
+        if cargo run --bin ra -- optimize "$query" > "$results_dir/optimize_${query_num}.txt" 2>&1; then
             optimize_success=$((optimize_success + 1))
             echo -e "${GREEN}✓${NC} Optimize succeeded"
         else

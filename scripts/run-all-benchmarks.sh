@@ -124,9 +124,9 @@ run_benchmarks() {
     # Build ra-cli first
     log_info "Building ra-cli..."
     cd "${PROJECT_ROOT}"
-    cargo build --release --bin ra-cli 2>&1 | grep -v "^warning:" || true
+    cargo build --release --bin ra 2>&1 | grep -v "^warning:" || true
 
-    local RA_CLI="${PROJECT_ROOT}/target/release/ra-cli"
+    local RA_CLI="${PROJECT_ROOT}/target/release/ra"
 
     if [[ ! -x "${RA_CLI}" ]]; then
         log_error "ra-cli binary not found at ${RA_CLI}"

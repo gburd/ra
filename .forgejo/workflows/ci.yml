@@ -27,6 +27,9 @@ jobs:
       - name: Check formatting
         run: nix develop --command cargo fmt -- --check
 
+      - name: Truth-in-claims lint
+        run: nix develop --command ./scripts/claims-lint.sh
+
       - name: Run clippy
         run: nix develop --command cargo clippy --all-targets --all-features -- -D warnings
 

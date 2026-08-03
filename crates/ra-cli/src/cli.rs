@@ -441,14 +441,44 @@ pub enum Commands {
         #[arg(long, default_value = "markdown")]
         format: String,
     },
+    /// Run the correctness/qualification corpus and report pass rates.
+    #[command(
+        long_about = "Run Ra against the query corpus and report per-category \
+            results (RA-STEERING §5.3).\n\n\
+            NOTE: without --db this checks *structural* success only — that Ra \
+            parses and optimizes each query without error. It does NOT verify \
+            answer-correctness against PostgreSQL; that requires the PG oracle \
+            (--db, future work) which executes both plans and compares results.\n\n\
+            Tiers (RA-STEERING §5.3):\n  \
+            0  smoke: the 120-query qualification corpus (default)\n  \
+            1  PostgreSQL src/test/regress   (not yet wired)\n  \
+            2  sqllogictest                   (not yet wired)\n\n\
+            Examples:\n  \
+            ra verify\n  \
+            ra verify --tier 0 --report"
+    )]
+    Verify {
+        /// Corpus tier to run (0 = smoke/qualification; 1-4 not yet wired).
+        #[arg(long, default_value = "0")]
+        tier: u8,
+        /// Emit a machine-readable + headline report (the numbers for the README).
+        #[arg(long)]
+        report: bool,
+        /// Path to the corpus directory (defaults to the built-in 120-query suite).
+        #[arg(long)]
+        corpus: Option<PathBuf>,
+        /// Output format: text (default) or json.
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
     /// Generate shell completion scripts.
     #[command(long_about = "Generate tab-completion scripts for your shell.\n\n\
             Source the output in your shell profile to enable completions.\n\n\
             Examples:\n  \
-            ra-cli completions bash  > ~/.local/share/bash-completion/completions/ra-cli\n  \
-            ra-cli completions zsh   > ~/.zfunc/_ra-cli\n  \
-            ra-cli completions fish  > ~/.config/fish/completions/ra-cli.fish\n  \
-            ra-cli completions elvish")]
+            ra completions bash  > ~/.local/share/bash-completion/completions/ra\n  \
+            ra completions zsh   > ~/.zfunc/_ra\n  \
+            ra completions fish  > ~/.config/fish/completions/ra.fish\n  \
+            ra completions elvish")]
     Completions {
         /// Target shell: bash, zsh, fish, elvish, powershell.
         shell: Shell,

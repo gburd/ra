@@ -23,4 +23,4 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
 
       - name: Validate all rule files
-        run: nix develop --command cargo run --bin ra-cli -- validate rules/
+        run: nix develop --command cargo run --bin ra -- validate rules/

@@ -72,8 +72,8 @@ validate_rule() {
 }
 
 # Try ra-cli first
-if command -v ra-cli &> /dev/null || [[ -f "${REPO_ROOT}/target/debug/ra-cli" ]]; then
-    ra_cli="${REPO_ROOT}/target/debug/ra-cli"
+if command -v ra-cli &> /dev/null || [[ -f "${REPO_ROOT}/target/debug/ra" ]]; then
+    ra_cli="${REPO_ROOT}/target/debug/ra"
     if command -v ra-cli &> /dev/null; then
         ra_cli="ra-cli"
     fi
@@ -84,7 +84,7 @@ if command -v ra-cli &> /dev/null || [[ -f "${REPO_ROOT}/target/debug/ra-cli" ]]
 fi
 
 echo "ra-cli not found, using basic structural validation"
-echo "Run 'cargo build --bin ra-cli' for full validation"
+echo "Run 'cargo build --bin ra' for full validation"
 echo ""
 
 while IFS= read -r -d '' rra_file; do

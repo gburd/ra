@@ -627,7 +627,7 @@ mod tests {
     /// `colored` callers but want to inspect the natural output.
     /// Currently unused — kept available so future tests that need
     /// off-or-natural color state don't have to re-derive the helper.
-    #[allow(dead_code, reason = "available for future plan-diff tests")]
+    #[expect(dead_code, reason = "available for future plan-diff tests")]
     fn hold_color_lock() -> ColorGuard {
         let guard = COLOR_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         ColorGuard { _guard: guard }
