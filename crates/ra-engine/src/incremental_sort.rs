@@ -305,8 +305,8 @@ mod tests {
     fn small_input_still_works() {
         let costs = estimate_costs(10.0, 5.0);
         assert!(costs.is_beneficial());
-        assert!(costs.estimated_groups == 5.0);
-        assert!(costs.avg_group_size == 2.0);
+        assert_eq!(costs.estimated_groups, 5.0);
+        assert_eq!(costs.avg_group_size, 2.0);
     }
 
     #[test]

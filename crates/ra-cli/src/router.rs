@@ -230,7 +230,9 @@ fn dispatch_pg_snapshot(sub: PgSnapshotCommands) -> Result<()> {
             tables,
             output,
             label,
-        } => pg_snapshot_commands::capture_pg_snapshot(&database, &tables, &output, label.as_deref()),
+        } => {
+            pg_snapshot_commands::capture_pg_snapshot(&database, &tables, &output, label.as_deref())
+        }
         PgSnapshotCommands::GenerateScript {
             tables,
             output_dir,

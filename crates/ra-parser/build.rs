@@ -52,10 +52,7 @@ fn main() {
     // The host lime tool is compiled from lime.c + the src/ emitters; rebuild
     // it (and regenerate the parser) when any of that source changes, so an
     // in-place Lime source edit can't leave a stale tool/parser behind.
-    println!(
-        "cargo:rerun-if-changed={}",
-        lime_root.join("src").display()
-    );
+    println!("cargo:rerun-if-changed={}", lime_root.join("src").display());
 }
 
 /// Compile lime.c into the `lime` host tool.

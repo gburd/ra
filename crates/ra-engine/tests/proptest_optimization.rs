@@ -10,7 +10,10 @@
 //! - Hash determinism: same expression always hashes identically
 
 #![expect(clippy::expect_used)]
-#![expect(clippy::float_cmp, reason = "intentional exact comparison in property test")]
+#![expect(
+    clippy::float_cmp,
+    reason = "intentional exact comparison in property test"
+)]
 
 use proptest::prelude::*;
 
@@ -843,12 +846,8 @@ fn contains_joins(expr: &RelExpr) -> bool {
         }
         RelExpr::BitmapHeapScan { bitmap, .. } => contains_joins(bitmap),
         RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => contains_joins(source),
-        RelExpr::Update { from, .. } => {
-            from.as_ref().is_some_and(|f| contains_joins(f))
-        }
-        RelExpr::Delete { using, .. } => {
-            using.as_ref().is_some_and(|u| contains_joins(u))
-        }
+        RelExpr::Update { from, .. } => from.as_ref().is_some_and(|f| contains_joins(f)),
+        RelExpr::Delete { using, .. } => using.as_ref().is_some_and(|u| contains_joins(u)),
     }
 }
 

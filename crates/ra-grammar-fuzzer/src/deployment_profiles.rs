@@ -102,7 +102,10 @@ impl ClusterTopology {
             | Self::MediumCluster(n)
             | Self::LargeCluster(n)
             | Self::MassiveCluster(n) => n,
-            Self::MultiRegion { regions, nodes_per_region } => regions * nodes_per_region,
+            Self::MultiRegion {
+                regions,
+                nodes_per_region,
+            } => regions * nodes_per_region,
         }
     }
 
@@ -161,7 +164,13 @@ impl StorageInstance {
             StorageTier::ObjectArchive => (50, 100, 60_000_000), // minutes
             StorageTier::NetworkFs => (500, 12000, 200),
         };
-        Self { tier, capacity_gb, bandwidth_mbps, iops, latency_us }
+        Self {
+            tier,
+            capacity_gb,
+            bandwidth_mbps,
+            iops,
+            latency_us,
+        }
     }
 }
 
@@ -184,7 +193,11 @@ impl DeploymentProfile {
         storage: Vec<StorageInstance>,
         topology: ClusterTopology,
     ) -> Self {
-        Self { compute, storage, topology }
+        Self {
+            compute,
+            storage,
+            topology,
+        }
     }
 
     /// Convert this deployment profile to a `HardwareProfile` for the optimizer.
@@ -194,7 +207,7 @@ impl DeploymentProfile {
             CpuArchitecture::X86_64 => match self.compute.class {
                 InstanceClass::Nano | InstanceClass::Micro => 128, // SSE
                 InstanceClass::HighFrequency | InstanceClass::ManyCore => 512, // AVX-512
-                _ => 256, // AVX2 default
+                _ => 256,                                          // AVX2 default
             },
             CpuArchitecture::ARM64 | CpuArchitecture::RISCV => 128, // NEON / RVV baseline
         };
@@ -207,10 +220,16 @@ impl DeploymentProfile {
 
         let (l1, l2, l3) = match self.compute.class {
             InstanceClass::Nano | InstanceClass::Micro => (16 * 1024, 128 * 1024, 2 * 1024 * 1024),
-            InstanceClass::Large | InstanceClass::ComputeOptimal => (32 * 1024, 512 * 1024, 16 * 1024 * 1024),
-            InstanceClass::ExtraLarge | InstanceClass::MemoryOptimal
-            | InstanceClass::GpuTraining | InstanceClass::GpuInference => (64 * 1024, 1024 * 1024, 64 * 1024 * 1024),
-            InstanceClass::ManyCore | InstanceClass::HighMemory => (64 * 1024, 2 * 1024 * 1024, 128 * 1024 * 1024),
+            InstanceClass::Large | InstanceClass::ComputeOptimal => {
+                (32 * 1024, 512 * 1024, 16 * 1024 * 1024)
+            }
+            InstanceClass::ExtraLarge
+            | InstanceClass::MemoryOptimal
+            | InstanceClass::GpuTraining
+            | InstanceClass::GpuInference => (64 * 1024, 1024 * 1024, 64 * 1024 * 1024),
+            InstanceClass::ManyCore | InstanceClass::HighMemory => {
+                (64 * 1024, 2 * 1024 * 1024, 128 * 1024 * 1024)
+            }
             InstanceClass::HighFrequency => (64 * 1024, 512 * 1024, 32 * 1024 * 1024),
             _ => (32 * 1024, 256 * 1024, 8 * 1024 * 1024),
         };
@@ -299,7 +318,11 @@ mod tests {
         assert_eq!(ClusterTopology::LargeCluster(128).node_count(), 128);
         assert_eq!(ClusterTopology::MassiveCluster(1024).node_count(), 1024);
         assert_eq!(
-            ClusterTopology::MultiRegion { regions: 3, nodes_per_region: 8 }.node_count(),
+            ClusterTopology::MultiRegion {
+                regions: 3,
+                nodes_per_region: 8
+            }
+            .node_count(),
             24
         );
     }
@@ -308,7 +331,11 @@ mod tests {
     fn cluster_topology_is_distributed() {
         assert!(!ClusterTopology::SingleNode.is_distributed());
         assert!(ClusterTopology::SmallCluster(3).is_distributed());
-        assert!(ClusterTopology::MultiRegion { regions: 2, nodes_per_region: 4 }.is_distributed());
+        assert!(ClusterTopology::MultiRegion {
+            regions: 2,
+            nodes_per_region: 4
+        }
+        .is_distributed());
     }
 
     #[test]

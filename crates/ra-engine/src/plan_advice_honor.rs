@@ -54,22 +54,17 @@ pub fn demoted_rule_groups(advice: &Advice) -> HashSet<&'static str> {
     out
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ra_plan_advice::ast::{
-        AdviceItem, AdviceTarget, RelationIdentifier,
-    };
+    use ra_plan_advice::ast::{AdviceItem, AdviceTarget, RelationIdentifier};
 
     fn item(tag: AdviceTag, names: &[&str]) -> AdviceItem {
         AdviceItem {
             tag,
             targets: names
                 .iter()
-                .map(|n| {
-                    AdviceTarget::identifier(RelationIdentifier::simple(*n))
-                })
+                .map(|n| AdviceTarget::identifier(RelationIdentifier::simple(*n)))
                 .collect(),
         }
     }

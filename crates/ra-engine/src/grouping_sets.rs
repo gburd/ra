@@ -51,7 +51,9 @@ pub fn tree_contains_grouping_sets(expr: &RelExpr) -> bool {
             return true;
         }
     }
-    expr.children().iter().any(|c| tree_contains_grouping_sets(c))
+    expr.children()
+        .iter()
+        .any(|c| tree_contains_grouping_sets(c))
 }
 
 /// Expand every grouping-set aggregate in the tree into a `UNION ALL` of
@@ -69,9 +71,7 @@ pub fn expand(expr: &RelExpr) -> RelExpr {
                 input: agg_input,
             } = &**input
             {
-                if let Some(rewritten) =
-                    expand_marker(columns, group_by, aggregates, agg_input)
-                {
+                if let Some(rewritten) = expand_marker(columns, group_by, aggregates, agg_input) {
                     return rewritten;
                 }
             }
@@ -178,8 +178,10 @@ fn expand_marker(
 
     let mut branches: Vec<RelExpr> = Vec::with_capacity(sets.len());
     for set in &sets {
-        let group_keys: Vec<Expr> =
-            set.iter().map(|&i| Expr::Column(gcols[i].clone())).collect();
+        let group_keys: Vec<Expr> = set
+            .iter()
+            .map(|&i| Expr::Column(gcols[i].clone()))
+            .collect();
         let out: Vec<ProjectionColumn> = columns
             .iter()
             .map(|pc| {
@@ -248,7 +250,11 @@ fn grouping_sets_for(name: &str, args: &[Expr]) -> Option<(Vec<ColumnRef>, Vec<V
             let mut gcols: Vec<ColumnRef> = Vec::new();
             let mut sets: Vec<Vec<usize>> = Vec::with_capacity(args.len());
             for item in args {
-                let Expr::Function { name: inm, args: iargs } = item else {
+                let Expr::Function {
+                    name: inm,
+                    args: iargs,
+                } = item
+                else {
                     return None;
                 };
                 if inm != GS_ITEM {
@@ -326,15 +332,20 @@ mod tests {
 
     /// Collect the leaf branches of a UNION ALL spine.
     fn union_branches(expr: &RelExpr) -> Vec<&RelExpr> {
-        let mut out = Vec::new();
         fn go<'a>(e: &'a RelExpr, out: &mut Vec<&'a RelExpr>) {
-            if let RelExpr::Union { all: true, left, right } = e {
+            if let RelExpr::Union {
+                all: true,
+                left,
+                right,
+            } = e
+            {
                 go(left, out);
                 go(right, out);
             } else {
                 out.push(e);
             }
         }
+        let mut out = Vec::new();
         go(expr, &mut out);
         out
     }
@@ -356,7 +367,10 @@ mod tests {
             ROLLUP,
             vec![col("a")],
             vec![
-                ProjectionColumn { expr: col("a"), alias: None },
+                ProjectionColumn {
+                    expr: col("a"),
+                    alias: None,
+                },
                 count_star(),
             ],
         );
@@ -376,8 +390,14 @@ mod tests {
             CUBE,
             vec![col("a"), col("b")],
             vec![
-                ProjectionColumn { expr: col("a"), alias: None },
-                ProjectionColumn { expr: col("b"), alias: None },
+                ProjectionColumn {
+                    expr: col("a"),
+                    alias: None,
+                },
+                ProjectionColumn {
+                    expr: col("b"),
+                    alias: None,
+                },
                 count_star(),
             ],
         );
@@ -410,8 +430,14 @@ mod tests {
                 },
             ],
             vec![
-                ProjectionColumn { expr: col("a"), alias: None },
-                ProjectionColumn { expr: col("b"), alias: None },
+                ProjectionColumn {
+                    expr: col("a"),
+                    alias: None,
+                },
+                ProjectionColumn {
+                    expr: col("b"),
+                    alias: None,
+                },
                 count_star(),
             ],
         );
@@ -425,7 +451,13 @@ mod tests {
     fn ordinary_group_by_is_unchanged() {
         // A plain GROUP BY (no marker) must not be rewritten.
         let q = RelExpr::Project {
-            columns: vec![ProjectionColumn { expr: col("a"), alias: None }, count_star()],
+            columns: vec![
+                ProjectionColumn {
+                    expr: col("a"),
+                    alias: None,
+                },
+                count_star(),
+            ],
             input: Box::new(RelExpr::Aggregate {
                 group_by: vec![col("a")],
                 aggregates: Vec::new(),
@@ -436,4 +468,3 @@ mod tests {
         assert!(matches!(expand(&q), RelExpr::Project { .. }));
     }
 }
-

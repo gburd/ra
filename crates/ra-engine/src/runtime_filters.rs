@@ -548,7 +548,10 @@ pub struct FilterOpportunity {
 ///   `probe_col`, `build_rows`, `probe_rows`, `build_ndv`, `probe_ndv`)
 /// `scan_cost_per_row`: base cost of reading one probe-side row
 #[must_use]
-#[expect(clippy::type_complexity, reason = "tuple type matches documented parameter list")]
+#[expect(
+    clippy::type_complexity,
+    reason = "tuple type matches documented parameter list"
+)]
 pub fn identify_filter_opportunities(
     join_pairs: &[(String, String, String, String, f64, f64, f64, f64)],
     scan_cost_per_row: f64,
@@ -733,9 +736,7 @@ fn equi_columns(condition: &ra_core::expr::Expr) -> Option<(String, String)> {
 fn scan_alias(expr: &ra_core::algebra::RelExpr) -> Option<String> {
     use ra_core::algebra::RelExpr;
     match expr {
-        RelExpr::Scan { table, alias } => {
-            Some(alias.clone().unwrap_or_else(|| table.clone()))
-        }
+        RelExpr::Scan { table, alias } => Some(alias.clone().unwrap_or_else(|| table.clone())),
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }

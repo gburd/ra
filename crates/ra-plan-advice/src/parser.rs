@@ -46,8 +46,7 @@
 use thiserror::Error;
 
 use crate::ast::{
-    Advice, AdviceItem, AdviceTag, AdviceTarget, AdviceTargetKind,
-    IndexTarget, RelationIdentifier,
+    Advice, AdviceItem, AdviceTag, AdviceTarget, AdviceTargetKind, IndexTarget, RelationIdentifier,
 };
 
 /// Parse failure with a position and message.
@@ -157,7 +156,10 @@ impl<'a> Parser<'a> {
         } else {
             msg = format!("{msg} at end of input");
         }
-        ParseError { position: self.pos, message: msg }
+        ParseError {
+            position: self.pos,
+            message: msg,
+        }
     }
 
     /// Skip whitespace and `/* ... */` C-style comments. Returns
@@ -231,10 +233,7 @@ impl<'a> Parser<'a> {
         if self.eat(b) {
             Ok(())
         } else {
-            Err(self.error(format!(
-                "syntax error: expected '{}'",
-                b as char
-            )))
+            Err(self.error(format!("syntax error: expected '{}'", b as char)))
         }
     }
 
@@ -300,9 +299,7 @@ impl<'a> Parser<'a> {
                         self.pos += 1;
                     } else {
                         if buf.is_empty() {
-                            return Err(self.error(
-                                "zero-length delimited identifier",
-                            ));
+                            return Err(self.error("zero-length delimited identifier"));
                         }
                         return Ok(buf);
                     }
@@ -334,14 +331,10 @@ impl<'a> Parser<'a> {
                 Some(b'_') => {
                     self.pos += 1;
                     let Some(d) = self.peek() else {
-                        return Err(self.error(
-                            "integer literal cannot end in '_'",
-                        ));
+                        return Err(self.error("integer literal cannot end in '_'"));
                     };
                     if !d.is_ascii_digit() {
-                        return Err(self.error(
-                            "integer literal cannot have '_' before non-digit",
-                        ));
+                        return Err(self.error("integer literal cannot have '_' before non-digit"));
                     }
                     buf.push(d as char);
                     self.pos += 1;
@@ -353,11 +346,9 @@ impl<'a> Parser<'a> {
                 _ => break,
             }
         }
-        buf.parse::<u32>().map_err(|_| {
-            ParseError {
-                position: start,
-                message: "integer out of range".to_string(),
-            }
+        buf.parse::<u32>().map_err(|_| ParseError {
+            position: start,
+            message: "integer out of range".to_string(),
         })
     }
 
@@ -372,9 +363,7 @@ impl<'a> Parser<'a> {
         let Some(tag) = AdviceTag::from_lowercase(&raw) else {
             return Err(ParseError {
                 position: self.pos.saturating_sub(raw.len()),
-                message: format!(
-                    "unrecognized advice tag at or near \"{raw}\""
-                ),
+                message: format!("unrecognized advice tag at or near \"{raw}\""),
             });
         };
 
@@ -394,15 +383,11 @@ impl<'a> Parser<'a> {
 
         // Validation borrowed from pgpa_parser.y.
         if tag == AdviceTag::JoinOrder && targets.is_empty() {
-            return Err(self.error(
-                "JOIN_ORDER must have at least one target",
-            ));
+            return Err(self.error("JOIN_ORDER must have at least one target"));
         }
         if tag == AdviceTag::ForeignJoin {
             for t in &targets {
-                if matches!(t.kind, AdviceTargetKind::Identifier)
-                    || t.children.len() <= 1
-                {
+                if matches!(t.kind, AdviceTargetKind::Identifier) || t.children.len() <= 1 {
                     return Err(self.error(
                         "FOREIGN_JOIN targets must contain more than one relation identifier",
                     ));
@@ -502,7 +487,10 @@ impl<'a> Parser<'a> {
                 name: second,
             })
         } else {
-            Ok(IndexTarget { schema: None, name: first })
+            Ok(IndexTarget {
+                schema: None,
+                name: first,
+            })
         }
     }
 
@@ -519,9 +507,7 @@ impl<'a> Parser<'a> {
             self.skip_ws_or_err()?;
             let n = self.parse_integer()?;
             if n == 0 {
-                return Err(self.error(
-                    "only positive occurrence numbers are permitted",
-                ));
+                return Err(self.error("only positive occurrence numbers are permitted"));
             }
             self.skip_ws_or_err()?;
             n

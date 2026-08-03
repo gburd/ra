@@ -44,10 +44,7 @@ impl ContinuationGate {
     /// - `stagnation_threshold`: Stop if improvement < this (default: 0.001 = 0.1%)
     /// - `continuation_threshold`: Stop if model confidence < this (default: 0.3)
     #[must_use]
-    pub fn new(
-        base_features: OptimizationFeatures,
-        model: Option<Arc<BitNetCostModel>>,
-    ) -> Self {
+    pub fn new(base_features: OptimizationFeatures, model: Option<Arc<BitNetCostModel>>) -> Self {
         Self {
             model,
             base_features,
@@ -147,9 +144,9 @@ impl ContinuationGate {
             self.base_features.equi_join_fraction,
             self.base_features.cross_join_present,
             iteration as f32 / 20.0,               // normalized iteration
-            (current_cost as f32).log2().max(0.0),  // log cost
-            improvement_rate as f32,                // recent improvement
-            (egraph_nodes as f32).log2().max(0.0),  // log graph size
+            (current_cost as f32).log2().max(0.0), // log cost
+            improvement_rate as f32,               // recent improvement
+            (egraph_nodes as f32).log2().max(0.0), // log graph size
             self.base_features.avg_predicate_selectivity,
             self.base_features.has_limit,
             // Trailing 4 dims: padding to match model F=16. The
@@ -217,8 +214,7 @@ mod tests {
 
     #[test]
     fn stops_on_cost_stagnation() {
-        let mut gate = ContinuationGate::new(test_features(), None)
-            .with_check_interval(2);
+        let mut gate = ContinuationGate::new(test_features(), None).with_check_interval(2);
 
         // Simulate iterations with no improvement
         gate.should_continue(0, 100.0, 500);
@@ -229,8 +225,7 @@ mod tests {
 
     #[test]
     fn continues_with_improvement() {
-        let mut gate = ContinuationGate::new(test_features(), None)
-            .with_check_interval(2);
+        let mut gate = ContinuationGate::new(test_features(), None).with_check_interval(2);
 
         // Simulate iterations with meaningful improvement
         gate.should_continue(0, 100.0, 500);
@@ -241,8 +236,7 @@ mod tests {
 
     #[test]
     fn respects_check_interval() {
-        let mut gate = ContinuationGate::new(test_features(), None)
-            .with_check_interval(3);
+        let mut gate = ContinuationGate::new(test_features(), None).with_check_interval(3);
 
         // No checks until iteration 3
         gate.should_continue(0, 100.0, 500);

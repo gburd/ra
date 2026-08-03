@@ -41,9 +41,7 @@
 //! to extend.
 
 use ra_core::algebra::RelExpr;
-use ra_plan_advice::ast::{
-    Advice, AdviceItem, AdviceTag, AdviceTarget, RelationIdentifier,
-};
+use ra_plan_advice::ast::{Advice, AdviceItem, AdviceTag, AdviceTarget, RelationIdentifier};
 
 /// Walk `expr` and emit an [`Advice`] document.
 ///
@@ -78,10 +76,7 @@ pub fn emit_advice(expr: &RelExpr) -> Advice {
     if !scans.is_empty() {
         out.push(AdviceItem {
             tag: AdviceTag::SeqScan,
-            targets: scans
-                .into_iter()
-                .map(AdviceTarget::identifier)
-                .collect(),
+            targets: scans.into_iter().map(AdviceTarget::identifier).collect(),
         });
     }
 
@@ -118,11 +113,18 @@ fn collect_join_orders(expr: &RelExpr, out: &mut Vec<AdviceTarget>) {
             collect_join_orders(left, out);
             collect_join_orders(right, out);
         }
-        RelExpr::CTE { definition, body, .. } => {
+        RelExpr::CTE {
+            definition, body, ..
+        } => {
             collect_join_orders(definition, out);
             collect_join_orders(body, out);
         }
-        RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
             collect_join_orders(base_case, out);
             collect_join_orders(recursive_case, out);
             collect_join_orders(body, out);
@@ -202,7 +204,9 @@ fn render_join_member(expr: &RelExpr) -> Option<AdviceTarget> {
     match expr {
         RelExpr::Scan { table, alias } => {
             let alias_name = alias.clone().unwrap_or_else(|| table.clone());
-            Some(AdviceTarget::identifier(RelationIdentifier::simple(alias_name)))
+            Some(AdviceTarget::identifier(RelationIdentifier::simple(
+                alias_name,
+            )))
         }
         RelExpr::Join { .. } => render_join(expr),
         // Operators that wrap a single subexpression — for join
@@ -267,7 +271,10 @@ mod tests {
     use ra_core::expr::{BinOp, ColumnRef, Expr};
 
     fn scan(name: &str) -> RelExpr {
-        RelExpr::Scan { table: name.into(), alias: None }
+        RelExpr::Scan {
+            table: name.into(),
+            alias: None,
+        }
     }
 
     fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
@@ -294,12 +301,7 @@ mod tests {
 
     #[test]
     fn outer_deep_join_chain_emits_flat_join_order() {
-        let q = eq_join(
-            eq_join(scan("a"), scan("b"), "a", "b"),
-            scan("c"),
-            "a",
-            "c",
-        );
+        let q = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
         let advice = emit_advice(&q);
 
         // Item 0: JOIN_ORDER(a b c)
@@ -345,12 +347,7 @@ mod tests {
 
     #[test]
     fn rendered_advice_round_trips_through_parser() {
-        let q = eq_join(
-            eq_join(scan("a"), scan("b"), "a", "b"),
-            scan("c"),
-            "a",
-            "c",
-        );
+        let q = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
         let advice = emit_advice(&q);
         let s = ra_plan_advice::render_advice(&advice);
         let reparsed = ra_plan_advice::parse_advice(&s).unwrap();
@@ -365,10 +362,7 @@ mod tests {
         // get #1 / #2.
         let q = eq_join(scan("users"), scan("users"), "users", "users");
         let advice = emit_advice(&q);
-        let scans_item = advice
-            .iter()
-            .find(|i| i.tag == AdviceTag::SeqScan)
-            .unwrap();
+        let scans_item = advice.iter().find(|i| i.tag == AdviceTag::SeqScan).unwrap();
         assert_eq!(scans_item.targets.len(), 2);
         let first = scans_item.targets[0].identifier.as_ref().unwrap();
         let second = scans_item.targets[1].identifier.as_ref().unwrap();

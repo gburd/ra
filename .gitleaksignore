@@ -1,0 +1,7 @@
+# gitleaks false-positive allowlist.
+# Format: <fingerprint> per line (see `gitleaks protect --staged --verbose`).
+
+# TPC-H self-join SQL in the fuzzer corpus — "s2.s_nationkey" trips the
+# high-entropy generic-api-key heuristic. It is a SQL column reference, not
+# a secret.
+crates/ra-grammar-fuzzer/src/corpus.rs:generic-api-key:402

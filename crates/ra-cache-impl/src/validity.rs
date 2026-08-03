@@ -33,7 +33,10 @@ fn bucket_count(hist: &Histogram) -> usize {
 ///
 /// Now checks row counts, column NDVs, histogram shapes,
 /// and index presence (RFC 0059).
-#[expect(clippy::too_many_lines, reason = "drift check across multiple stat dimensions")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "drift check across multiple stat dimensions"
+)]
 pub(crate) fn check_plan_drift(
     plan: &CachedPlan,
     current_stats: &dyn StatisticsProvider,

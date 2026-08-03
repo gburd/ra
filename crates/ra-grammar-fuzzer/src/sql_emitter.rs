@@ -8,9 +8,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering,
-    ProjectionColumn, RelExpr, SortDirection, SortKey, WindowExpr,
-    WindowFunction,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
+    SortDirection, SortKey, WindowExpr, WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
 
@@ -36,10 +35,22 @@ impl EmitterSchema {
         tables.insert(
             "lineitem".to_owned(),
             vec![
-                "l_orderkey", "l_partkey", "l_suppkey", "l_linenumber",
-                "l_quantity", "l_extendedprice", "l_discount", "l_tax",
-                "l_returnflag", "l_linestatus", "l_shipdate", "l_commitdate",
-                "l_receiptdate", "l_shipinstruct", "l_shipmode", "l_comment",
+                "l_orderkey",
+                "l_partkey",
+                "l_suppkey",
+                "l_linenumber",
+                "l_quantity",
+                "l_extendedprice",
+                "l_discount",
+                "l_tax",
+                "l_returnflag",
+                "l_linestatus",
+                "l_shipdate",
+                "l_commitdate",
+                "l_receiptdate",
+                "l_shipinstruct",
+                "l_shipmode",
+                "l_comment",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -48,8 +59,14 @@ impl EmitterSchema {
         tables.insert(
             "orders".to_owned(),
             vec![
-                "o_orderkey", "o_custkey", "o_orderstatus", "o_totalprice",
-                "o_orderdate", "o_orderpriority", "o_clerk", "o_shippriority",
+                "o_orderkey",
+                "o_custkey",
+                "o_orderstatus",
+                "o_totalprice",
+                "o_orderdate",
+                "o_orderpriority",
+                "o_clerk",
+                "o_shippriority",
                 "o_comment",
             ]
             .into_iter()
@@ -59,8 +76,14 @@ impl EmitterSchema {
         tables.insert(
             "customer".to_owned(),
             vec![
-                "c_custkey", "c_name", "c_address", "c_nationkey", "c_phone",
-                "c_acctbal", "c_mktsegment", "c_comment",
+                "c_custkey",
+                "c_name",
+                "c_address",
+                "c_nationkey",
+                "c_phone",
+                "c_acctbal",
+                "c_mktsegment",
+                "c_comment",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -69,8 +92,13 @@ impl EmitterSchema {
         tables.insert(
             "supplier".to_owned(),
             vec![
-                "s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone",
-                "s_acctbal", "s_comment",
+                "s_suppkey",
+                "s_name",
+                "s_address",
+                "s_nationkey",
+                "s_phone",
+                "s_acctbal",
+                "s_comment",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -79,8 +107,15 @@ impl EmitterSchema {
         tables.insert(
             "part".to_owned(),
             vec![
-                "p_partkey", "p_name", "p_mfgr", "p_brand", "p_type",
-                "p_size", "p_container", "p_retailprice", "p_comment",
+                "p_partkey",
+                "p_name",
+                "p_mfgr",
+                "p_brand",
+                "p_type",
+                "p_size",
+                "p_container",
+                "p_retailprice",
+                "p_comment",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -89,7 +124,10 @@ impl EmitterSchema {
         tables.insert(
             "partsupp".to_owned(),
             vec![
-                "ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost",
+                "ps_partkey",
+                "ps_suppkey",
+                "ps_availqty",
+                "ps_supplycost",
                 "ps_comment",
             ]
             .into_iter()
@@ -111,8 +149,14 @@ impl EmitterSchema {
                 .collect(),
         );
         // Fallback generic tables used by the fuzzer
-        for name in &["users", "products", "customers", "items",
-                       "categories", "inventory"] {
+        for name in &[
+            "users",
+            "products",
+            "customers",
+            "items",
+            "categories",
+            "inventory",
+        ] {
             tables.entry((*name).to_owned()).or_insert_with(|| {
                 vec!["id", "name", "status", "created_at"]
                     .into_iter()
@@ -189,9 +233,7 @@ impl SqlEmitter {
     #[expect(clippy::too_many_lines)]
     fn emit_rel(&self, expr: &RelExpr) -> String {
         match expr {
-            RelExpr::Scan { table, alias } => {
-                self.emit_scan(table, alias.as_deref())
-            }
+            RelExpr::Scan { table, alias } => self.emit_scan(table, alias.as_deref()),
 
             RelExpr::Project { columns, input } => {
                 let cols = self.emit_projection_list(columns);
@@ -205,13 +247,18 @@ impl SqlEmitter {
                 format!("SELECT * FROM {src} WHERE {pred}")
             }
 
-            RelExpr::Join { join_type, condition, left, right } => {
-                self.emit_join(join_type, condition, left, right)
-            }
+            RelExpr::Join {
+                join_type,
+                condition,
+                left,
+                right,
+            } => self.emit_join(join_type, condition, left, right),
 
-            RelExpr::Aggregate { group_by, aggregates, input } => {
-                self.emit_aggregate(group_by, aggregates, input)
-            }
+            RelExpr::Aggregate {
+                group_by,
+                aggregates,
+                input,
+            } => self.emit_aggregate(group_by, aggregates, input),
 
             RelExpr::Sort { keys, input } => {
                 let order = self.emit_order_by(keys);
@@ -219,7 +266,11 @@ impl SqlEmitter {
                 format!("SELECT * FROM {src} ORDER BY {order}")
             }
 
-            RelExpr::Limit { count, offset, input } => {
+            RelExpr::Limit {
+                count,
+                offset,
+                input,
+            } => {
                 let src = self.emit_subquery(input);
                 let offset_clause = if *offset > 0 {
                     format!(" OFFSET {offset}")
@@ -249,18 +300,35 @@ impl SqlEmitter {
             }
 
             RelExpr::DistinctOn { on, input } => {
-                let keys = on.iter().map(|e| self.emit_expr(e)).collect::<Vec<_>>().join(", ");
-                format!("SELECT DISTINCT ON ({keys}) * FROM {}", self.emit_subquery(input))
+                let keys = on
+                    .iter()
+                    .map(|e| self.emit_expr(e))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "SELECT DISTINCT ON ({keys}) * FROM {}",
+                    self.emit_subquery(input)
+                )
             }
 
             RelExpr::Values { rows } => self.emit_values(rows),
 
-            RelExpr::CTE { name, definition, body } => {
+            RelExpr::CTE {
+                name,
+                definition,
+                body,
+            } => {
                 let def = self.emit_rel(definition);
                 format!("WITH {name} AS ({def}) {}", self.emit_rel(body))
             }
 
-            RelExpr::RecursiveCTE { name, base_case, recursive_case, body, .. } => {
+            RelExpr::RecursiveCTE {
+                name,
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => {
                 let base = self.emit_rel(base_case);
                 let rec = self.emit_rel(recursive_case);
                 format!(
@@ -270,10 +338,8 @@ impl SqlEmitter {
             }
 
             RelExpr::Window { functions, input } => {
-                let fn_exprs: Vec<String> = functions
-                    .iter()
-                    .map(|w| self.emit_window_expr(w))
-                    .collect();
+                let fn_exprs: Vec<String> =
+                    functions.iter().map(|w| self.emit_window_expr(w)).collect();
                 format!(
                     "SELECT *, {} FROM {}",
                     fn_exprs.join(", "),
@@ -314,9 +380,7 @@ impl SqlEmitter {
             RelExpr::IndexScan { table, .. }
             | RelExpr::BitmapIndexScan { table, .. }
             | RelExpr::ParallelScan { table, .. }
-            | RelExpr::IndexOnlyScan { table, .. } => {
-                table.clone()
-            }
+            | RelExpr::IndexOnlyScan { table, .. } => table.clone(),
 
             RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
                 if let Some(first) = inputs.first() {
@@ -326,17 +390,22 @@ impl SqlEmitter {
                 }
             }
 
-            RelExpr::ParallelHashJoin { join_type, condition, left, right, .. } => {
-                self.emit_join(join_type, condition, left, right)
-            }
+            RelExpr::ParallelHashJoin {
+                join_type,
+                condition,
+                left,
+                right,
+                ..
+            } => self.emit_join(join_type, condition, left, right),
 
-            RelExpr::ParallelAggregate { group_by, aggregates, input, .. } => {
-                self.emit_aggregate(group_by, aggregates, input)
-            }
+            RelExpr::ParallelAggregate {
+                group_by,
+                aggregates,
+                input,
+                ..
+            } => self.emit_aggregate(group_by, aggregates, input),
 
-            RelExpr::MvScan { view_name, alias } => {
-                self.emit_scan(view_name, alias.as_deref())
-            }
+            RelExpr::MvScan { view_name, alias } => self.emit_scan(view_name, alias.as_deref()),
 
             RelExpr::Insert { source, .. } => {
                 format!("SELECT * FROM {}", self.emit_subquery(source))
@@ -357,9 +426,7 @@ impl SqlEmitter {
                     "SELECT 1".to_owned()
                 }
             }
-            RelExpr::Merge {
-                target, source, ..
-            } => {
+            RelExpr::Merge { target, source, .. } => {
                 format!(
                     "MERGE INTO {} USING ({}) AS __s ON true WHEN MATCHED THEN DO NOTHING",
                     target,
@@ -397,9 +464,7 @@ impl SqlEmitter {
 
     fn emit_subquery(&self, expr: &RelExpr) -> String {
         match expr {
-            RelExpr::Scan { table, alias } => {
-                self.emit_scan(table, alias.as_deref())
-            }
+            RelExpr::Scan { table, alias } => self.emit_scan(table, alias.as_deref()),
             other => {
                 let alias = fresh_alias();
                 format!("({}) AS {alias}", self.emit_rel(other))
@@ -444,16 +509,12 @@ impl SqlEmitter {
         input: &RelExpr,
     ) -> String {
         let src = self.emit_subquery(input);
-        let agg_cols: Vec<String> = aggregates
-            .iter()
-            .map(|a| self.emit_agg_expr(a))
-            .collect();
+        let agg_cols: Vec<String> = aggregates.iter().map(|a| self.emit_agg_expr(a)).collect();
 
         if group_by.is_empty() {
             format!("SELECT {} FROM {src}", agg_cols.join(", "))
         } else {
-            let keys: Vec<String> =
-                group_by.iter().map(|e| self.emit_expr(e)).collect();
+            let keys: Vec<String> = group_by.iter().map(|e| self.emit_expr(e)).collect();
             let keys_sql = keys.join(", ");
             format!(
                 "SELECT {keys_sql}, {} FROM {src} GROUP BY {keys_sql}",
@@ -475,7 +536,10 @@ impl SqlEmitter {
             AggregateFunction::ArrayAgg => "ARRAY_AGG",
         };
         let distinct = if agg.distinct { "DISTINCT " } else { "" };
-        let arg = agg.arg.as_ref().map_or("*".to_owned(), |e| self.emit_expr(e));
+        let arg = agg
+            .arg
+            .as_ref()
+            .map_or("*".to_owned(), |e| self.emit_expr(e));
         let alias = agg
             .alias
             .as_ref()
@@ -535,8 +599,7 @@ impl SqlEmitter {
         let row_strs: Vec<String> = rows
             .iter()
             .map(|row| {
-                let vals: Vec<String> =
-                    row.iter().map(|e| self.emit_expr(e)).collect();
+                let vals: Vec<String> = row.iter().map(|e| self.emit_expr(e)).collect();
                 format!("({})", vals.join(", "))
             })
             .collect();
@@ -567,16 +630,17 @@ impl SqlEmitter {
         };
         let arg = w.arg.as_ref().map_or("*".to_owned(), |e| self.emit_expr(e));
         let over_clause = self.emit_over_clause(w);
-        let alias = w.alias.as_ref().map_or(String::new(), |a| format!(" AS {a}"));
+        let alias = w
+            .alias
+            .as_ref()
+            .map_or(String::new(), |a| format!(" AS {a}"));
         format!("{fn_name}({arg}) OVER ({over_clause}){alias}")
     }
 
     fn emit_over_clause(&self, w: &WindowExpr) -> String {
         let mut parts = Vec::new();
         if !w.partition_by.is_empty() {
-            let exprs: Vec<_> = w.partition_by.iter()
-                .map(|e| self.emit_expr(e))
-                .collect();
+            let exprs: Vec<_> = w.partition_by.iter().map(|e| self.emit_expr(e)).collect();
             parts.push(format!("PARTITION BY {}", exprs.join(", ")));
         }
         if !w.order_by.is_empty() {
@@ -618,7 +682,11 @@ impl SqlEmitter {
                 format!("{name}({})", args_sql.join(", "))
             }
 
-            Expr::Case { operand, when_clauses, else_result } => {
+            Expr::Case {
+                operand,
+                when_clauses,
+                else_result,
+            } => {
                 let mut out = "CASE".to_owned();
                 if let Some(op) = operand {
                     out.push(' ');
@@ -651,24 +719,31 @@ impl SqlEmitter {
                 format!("{}[{}]", self.emit_expr(arr), self.emit_expr(idx))
             }
 
-            Expr::SubQuery { subquery_type, query, test_expr } => {
+            Expr::SubQuery {
+                subquery_type,
+                query,
+                test_expr,
+            } => {
                 use ra_core::expr::SubQueryType;
                 let inner = self.emit_rel(query);
                 match subquery_type {
                     SubQueryType::Scalar => format!("({inner})"),
                     SubQueryType::Exists => format!("EXISTS ({inner})"),
                     SubQueryType::In => {
-                        let lhs = test_expr.as_ref()
+                        let lhs = test_expr
+                            .as_ref()
                             .map_or("?".to_owned(), |e| self.emit_expr(e));
                         format!("{lhs} IN ({inner})")
                     }
                     SubQueryType::Any => {
-                        let lhs = test_expr.as_ref()
+                        let lhs = test_expr
+                            .as_ref()
                             .map_or("?".to_owned(), |e| self.emit_expr(e));
                         format!("{lhs} = ANY ({inner})")
                     }
                     SubQueryType::All => {
-                        let lhs = test_expr.as_ref()
+                        let lhs = test_expr
+                            .as_ref()
                             .map_or("?".to_owned(), |e| self.emit_expr(e));
                         format!("{lhs} > ALL ({inner})")
                     }
@@ -773,7 +848,10 @@ mod tests {
     }
 
     fn scan(table: &str) -> RelExpr {
-        RelExpr::Scan { table: table.to_owned(), alias: None }
+        RelExpr::Scan {
+            table: table.to_owned(),
+            alias: None,
+        }
     }
 
     #[test]
@@ -804,8 +882,14 @@ mod tests {
         let emitter = SqlEmitter::new();
         let expr = RelExpr::Project {
             columns: vec![
-                ProjectionColumn { expr: col("o_orderkey"), alias: None },
-                ProjectionColumn { expr: col("o_totalprice"), alias: None },
+                ProjectionColumn {
+                    expr: col("o_orderkey"),
+                    alias: None,
+                },
+                ProjectionColumn {
+                    expr: col("o_totalprice"),
+                    alias: None,
+                },
             ],
             input: Box::new(scan("orders")),
         };

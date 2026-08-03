@@ -205,8 +205,14 @@ impl BitNetCostModel {
     /// Create a new model with zero weights (predicts bias-only until loaded).
     #[must_use]
     pub fn new_zeros() -> Self {
-        let w1_packed = PackedTernary { data: vec![0u8; F * H / 4], len: F * H };
-        let w2_packed = PackedTernary { data: vec![0u8; H * O / 4], len: H * O };
+        let w1_packed = PackedTernary {
+            data: vec![0u8; F * H / 4],
+            len: F * H,
+        };
+        let w2_packed = PackedTernary {
+            data: vec![0u8; H * O / 4],
+            len: H * O,
+        };
 
         Self {
             w1_fast: Box::new([[0.0; H]; F]),
@@ -238,14 +244,10 @@ impl BitNetCostModel {
         feature_inv_std: [f32; F],
         samples_trained: usize,
     ) -> Self {
-        let (w1_packed, alpha1) = quantize::absmean_ternary_pack(
-            w1.iter().flat_map(|row| row.iter().copied()),
-            F * H,
-        );
-        let (w2_packed, alpha2) = quantize::absmean_ternary_pack(
-            w2.iter().flat_map(|row| row.iter().copied()),
-            H * O,
-        );
+        let (w1_packed, alpha1) =
+            quantize::absmean_ternary_pack(w1.iter().flat_map(|row| row.iter().copied()), F * H);
+        let (w2_packed, alpha2) =
+            quantize::absmean_ternary_pack(w2.iter().flat_map(|row| row.iter().copied()), H * O);
 
         let w1_fast: Box<[[f32; H]; F]> = unpack_to_fh(&w1_packed, alpha1).into();
         let w2_fast: Box<[[f32; O]; H]> = unpack_to_ho(&w2_packed, alpha2).into();
@@ -274,9 +276,8 @@ impl BitNetCostModel {
     /// Returns `io::Error` if the file cannot be read or JSON is malformed.
     pub fn load_from_file(path: &str) -> Result<Self, std::io::Error> {
         let data = std::fs::read_to_string(path)?;
-        let mut model: Self = serde_json::from_str(&data).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+        let mut model: Self = serde_json::from_str(&data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         model.rebuild_fast_weights();
         Ok(model)
     }
@@ -287,9 +288,8 @@ impl BitNetCostModel {
     ///
     /// Returns `io::Error` if the file cannot be written.
     pub fn save_to_file(&self, path: &str) -> Result<(), std::io::Error> {
-        let data = serde_json::to_string_pretty(self).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+        let data = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, data)
     }
 
@@ -432,12 +432,7 @@ impl BitNetCostModel {
     /// at the right magnitude to noticeably move from the default
     /// initialization. Returns the squared error for diagnostic
     /// logging.
-    pub fn update_scalar_head(
-        &mut self,
-        features: &[f32; F],
-        target_cpu_ms: f32,
-        lr: f32,
-    ) -> f32 {
+    pub fn update_scalar_head(&mut self, features: &[f32; F], target_cpu_ms: f32, lr: f32) -> f32 {
         let out = self.predict_all(features);
         let mut pre_softplus = self.scalar_bias;
         for (h, &o) in self.scalar_head.iter().zip(out.iter()) {
@@ -520,7 +515,7 @@ impl BitNetCostModel {
         self.w1_packed.data.len()
             + self.w2_packed.data.len()
             + (H + O) * 4   // biases
-            + 4             // alpha1 (alpha2 included in model_size_bytes)
+            + 4 // alpha1 (alpha2 included in model_size_bytes)
     }
 
     /// Stable short identifier for this model snapshot.
@@ -574,7 +569,11 @@ fn unpack_to_ho(packed: &PackedTernary, alpha: f32) -> [[f32; O]; H] {
 
 #[inline]
 fn softplus(x: f32) -> f32 {
-    if x > 20.0 { x } else { (1.0 + x.exp()).ln() }
+    if x > 20.0 {
+        x
+    } else {
+        (1.0 + x.exp()).ln()
+    }
 }
 
 #[cfg(test)]
@@ -590,8 +589,7 @@ mod tests {
         // 12 QueryFeatures positions + 4 trailing zero-pads matching
         // OptimizationFeatures' density/fanout/equi/cross slots.
         [
-            4.0, 3.0, 5.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 10_000.0,
-            0.0, 0.0, 0.0, 0.0,
+            4.0, 3.0, 5.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 10_000.0, 0.0, 0.0, 0.0, 0.0,
         ]
     }
 
@@ -723,7 +721,11 @@ mod tests {
         let mut w2 = [[0.0f32; O]; H];
         for j in 0..F {
             for i in 0..H {
-                w1[j][i] = match (j + i) % 3 { 0 => 0.5, 1 => -0.3, _ => 0.01 };
+                w1[j][i] = match (j + i) % 3 {
+                    0 => 0.5,
+                    1 => -0.3,
+                    _ => 0.01,
+                };
             }
         }
         for i in 0..H {
@@ -752,8 +754,13 @@ mod tests {
     #[test]
     fn inference_is_deterministic() {
         let model = BitNetCostModel::from_f32_weights(
-            &[[0.3; H]; F], &[0.0; H], &[[0.2; O]; H], &[0.0; O],
-            [0.0; F], [1.0; F], 500,
+            &[[0.3; H]; F],
+            &[0.0; H],
+            &[[0.2; O]; H],
+            &[0.0; O],
+            [0.0; F],
+            [1.0; F],
+            500,
         );
         let f = sample_features();
         assert_eq!(model.predict_cpu_ms(&f), model.predict_cpu_ms(&f));
@@ -762,23 +769,34 @@ mod tests {
     #[test]
     fn predict_cpu_matches_predict_all_dim0() {
         let model = BitNetCostModel::from_f32_weights(
-            &[[0.25; H]; F], &[0.01; H], &[[0.15; O]; H], &[0.02; O],
-            [0.0; F], [1.0; F], 100,
+            &[[0.25; H]; F],
+            &[0.01; H],
+            &[[0.15; O]; H],
+            &[0.02; O],
+            [0.0; F],
+            [1.0; F],
+            100,
         );
         let f = sample_features();
         let cpu_fast = model.predict_cpu_ms(&f);
         let all = model.predict_all(&f);
         assert!(
             (cpu_fast - all[0]).abs() < 1e-4,
-            "mismatch: {cpu_fast} vs {}", all[0]
+            "mismatch: {cpu_fast} vs {}",
+            all[0]
         );
     }
 
     #[test]
     fn save_load_roundtrip() {
         let model = BitNetCostModel::from_f32_weights(
-            &[[0.5; H]; F], &[0.1; H], &[[0.3; O]; H], &[0.05; O],
-            [1.0; F], [2.0; F], 5000,
+            &[[0.5; H]; F],
+            &[0.1; H],
+            &[[0.3; O]; H],
+            &[0.05; O],
+            [1.0; F],
+            [2.0; F],
+            5000,
         );
         let path = std::env::temp_dir().join("test_bitnet_model.json");
         let path_str = path.to_str().unwrap_or("/tmp/test_bitnet.json");
@@ -794,8 +812,13 @@ mod tests {
     #[test]
     fn fit_normalization_changes_output() {
         let mut model = BitNetCostModel::from_f32_weights(
-            &[[0.4; H]; F], &[0.0; H], &[[0.2; O]; H], &[0.0; O],
-            [0.0; F], [1.0; F], 100,
+            &[[0.4; H]; F],
+            &[0.0; H],
+            &[[0.2; O]; H],
+            &[0.0; O],
+            [0.0; F],
+            [1.0; F],
+            100,
         );
         let f = sample_features();
         let before = model.predict_cpu_ms(&f);

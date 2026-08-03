@@ -1,8 +1,4 @@
-#![expect(
-    clippy::print_stdout,
-    clippy::unwrap_used,
-    reason = "example binary"
-)]
+#![expect(clippy::print_stdout, clippy::unwrap_used, reason = "example binary")]
 //! Profile where time is spent in JOB query optimization.
 //!
 //! Run with: `cargo run --example job_profile --package ra-engine --release`
@@ -116,9 +112,7 @@ fn main() {
         let max = times.iter().copied().fold(0.0_f64, f64::max);
         let avg = times.iter().sum::<f64>() / times.len() as f64;
 
-        println!(
-            "{name:<8} {tables:>6} {min:>10.0} {avg:>10.0} {max:>10.0} {path_name:>10}",
-        );
+        println!("{name:<8} {tables:>6} {min:>10.0} {avg:>10.0} {max:>10.0} {path_name:>10}");
     }
 
     // Micro-benchmark: just all_rules() creation

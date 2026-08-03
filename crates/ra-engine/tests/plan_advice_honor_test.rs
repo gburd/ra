@@ -17,7 +17,10 @@ use ra_core::expr::{BinOp, ColumnRef, Expr};
 use ra_engine::{Optimizer, OptimizerConfig};
 
 fn scan(name: &str) -> RelExpr {
-    RelExpr::Scan { table: name.into(), alias: None }
+    RelExpr::Scan {
+        table: name.into(),
+        alias: None,
+    }
 }
 
 fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
@@ -65,12 +68,7 @@ fn join_order_advice_disables_reordering() {
     // any advice, once with JOIN_ORDER pinning the order. Both
     // should succeed; the version with advice should demote the
     // join-reordering rules so reordering doesn't happen.
-    let q = eq_join(
-        eq_join(scan("a"), scan("b"), "a", "b"),
-        scan("c"),
-        "a",
-        "c",
-    );
+    let q = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
 
     let baseline = Optimizer::new()
         .optimize(&q)

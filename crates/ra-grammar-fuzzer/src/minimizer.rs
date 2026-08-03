@@ -108,7 +108,10 @@ impl TestMinimizer {
         })
     }
 
-    #[expect(clippy::unused_self, reason = "self kept for consistency with other methods")]
+    #[expect(
+        clippy::unused_self,
+        reason = "self kept for consistency with other methods"
+    )]
     fn still_fails(
         &self,
         expr: &RelExpr,
@@ -116,9 +119,7 @@ impl TestMinimizer {
         validator: &PropertyValidator,
     ) -> bool {
         let results = validator.validate(expr);
-        results
-            .iter()
-            .any(|r| r.property == property && !r.passed)
+        results.iter().any(|r| r.property == property && !r.passed)
     }
 
     /// Generate candidate reductions of an expression.
@@ -255,9 +256,7 @@ pub fn expr_size(expr: &RelExpr) -> usize {
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
-        | RelExpr::Except { left, right, .. } => {
-            1 + expr_size(left) + expr_size(right)
-        }
+        | RelExpr::Except { left, right, .. } => 1 + expr_size(left) + expr_size(right),
         RelExpr::CTE {
             body, definition, ..
         } => 1 + expr_size(body) + expr_size(definition),
@@ -290,10 +289,7 @@ mod tests {
         };
         let minimizer = TestMinimizer::new();
         let reductions = minimizer.generate_reductions(&expr);
-        assert!(
-            !reductions.is_empty(),
-            "filter should have reductions"
-        );
+        assert!(!reductions.is_empty(), "filter should have reductions");
         // First reduction should be the input (filter removed)
         assert!(
             matches!(reductions[0], RelExpr::Scan { .. }),
@@ -337,18 +333,9 @@ mod tests {
 
     #[test]
     fn minimize_returns_none_when_no_failure() {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::RuleSafety,
-        ]);
+        let validator = PropertyValidator::new(vec![OptimizerProperty::RuleSafety]);
         let minimizer = TestMinimizer::new();
-        let result = minimizer.minimize(
-            &scan("t"),
-            OptimizerProperty::RuleSafety,
-            &validator,
-        );
-        assert!(
-            result.is_none(),
-            "should return None when property passes"
-        );
+        let result = minimizer.minimize(&scan("t"), OptimizerProperty::RuleSafety, &validator);
+        assert!(result.is_none(), "should return None when property passes");
     }
 }

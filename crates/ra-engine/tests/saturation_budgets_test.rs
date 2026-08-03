@@ -1,5 +1,8 @@
 #![expect(clippy::print_stdout, reason = "test diagnostic output")]
-#![expect(clippy::expect_used, reason = "test code; expect-on-Result is the conventional way to surface failures")]
+#![expect(
+    clippy::expect_used,
+    reason = "test code; expect-on-Result is the conventional way to surface failures"
+)]
 //! Tests for cumulative saturation budgets (lesson (i) from the
 //! GEQO comparison; see `docs/research/geqo-vs-ra.md`).
 //!
@@ -60,8 +63,8 @@ fn cumulative_node_growth_budget_terminates_saturation() {
         use_adaptive_limits: false,
         max_node_growth: 50,
         max_rule_applications: 0, // disable application cap so we
-                                  // isolate node-growth as the
-                                  // proximate cause of termination
+        // isolate node-growth as the
+        // proximate cause of termination
         iter_limit: 30,
         ..OptimizerConfig::default()
     };
@@ -85,8 +88,8 @@ fn cumulative_application_budget_terminates_saturation() {
 
     let config = OptimizerConfig {
         use_adaptive_limits: false,
-        max_node_growth: 0,           // disable node-growth cap
-        max_rule_applications: 5,     // very aggressive cap
+        max_node_growth: 0,       // disable node-growth cap
+        max_rule_applications: 5, // very aggressive cap
         iter_limit: 30,
         ..OptimizerConfig::default()
     };

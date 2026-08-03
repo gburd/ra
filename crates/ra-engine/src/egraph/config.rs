@@ -91,7 +91,7 @@ pub struct OptimizerConfig {
     /// and proceed without advice; they don't fail the call.
     pub plan_advice: Option<String>,
     /// Whether to decorrelate subqueries (IN→SemiJoin, EXISTS→SemiJoin).
-    /// Set to false for PG extension (PG handles SubPlans natively).
+    /// Set to false for PG extension (PG handles `SubPlans` natively).
     /// Default: true (standalone/CLI decorrelation produces better analysis).
     pub decorrelate_subqueries: bool,
     /// Seed for any randomized planning heuristic (currently the large-join

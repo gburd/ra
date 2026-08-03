@@ -150,7 +150,10 @@ fn benchmark_simple_optimization(iterations: usize) -> anyhow::Result<f64> {
 
 /// Benchmark simple optimization using proxy when not in test mode.
 #[cfg(not(test))]
-#[expect(clippy::unnecessary_wraps, reason = "signature must match cfg(test) variant")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "signature must match cfg(test) variant"
+)]
 fn benchmark_simple_optimization(iterations: usize) -> anyhow::Result<f64> {
     Ok(benchmark_simple_optimization_proxy(iterations))
 }
@@ -264,7 +267,10 @@ fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
 
 /// Benchmark complex optimization using proxy when not in test mode.
 #[cfg(not(test))]
-#[expect(clippy::unnecessary_wraps, reason = "signature must match cfg(test) variant")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "signature must match cfg(test) variant"
+)]
 fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
     Ok(benchmark_complex_optimization_proxy(iterations))
 }

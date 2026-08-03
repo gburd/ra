@@ -116,8 +116,7 @@ fn detect_cpu_cores() -> u32 {
         let cores_per_socket: u32 = content
             .lines()
             .filter(|line| line.starts_with("cpu cores"))
-            .filter_map(|line| line.split(':').nth(1).and_then(|s| s.trim().parse().ok()))
-            .next()
+            .find_map(|line| line.split(':').nth(1).and_then(|s| s.trim().parse().ok()))
             .unwrap_or(1);
 
         let total = physical_ids.len() as u32 * cores_per_socket;
@@ -127,9 +126,7 @@ fn detect_cpu_cores() -> u32 {
     }
 
     // Fallback to logical CPUs
-    std::thread::available_parallelism()
-        .map(|n| n.get() as u32)
-        .unwrap_or(4)
+    std::thread::available_parallelism().map_or(4, |n| n.get() as u32)
 }
 
 #[cfg(target_os = "windows")]
@@ -291,11 +288,11 @@ fn detect_numa_nodes() -> u32 {
     // Count NUMA nodes in /sys/devices/system/node/
     if let Ok(entries) = fs::read_dir("/sys/devices/system/node") {
         let count = entries
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| {
                 e.file_name()
                     .to_str()
-                    .map_or(false, |s| s.starts_with("node"))
+                    .is_some_and(|s| s.starts_with("node"))
             })
             .count() as u32;
 

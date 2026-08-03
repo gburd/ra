@@ -15,9 +15,7 @@
 //! | `Filter(NOT EXISTS (...), R)` | `AntiJoin(corr, R, Q)` |
 //! | `Filter(x = (SELECT scalar), R)` | `Filter(x = Q.col, CrossJoin(R, Q))` |
 
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, ProjectionColumn, RelExpr,
-};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, ProjectionColumn, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, SubQueryType, UnaryOp};
 
 use crate::correlation_analysis;
@@ -297,8 +295,7 @@ fn try_decorrelate_predicate(predicate: &Expr, input: RelExpr) -> Option<RelExpr
         other => {
             if contains_subquery(other) {
                 let mut counter = 0usize;
-                let (new_pred, new_input) =
-                    replace_subquery_in_expr(other, input, &mut counter);
+                let (new_pred, new_input) = replace_subquery_in_expr(other, input, &mut counter);
                 Some(RelExpr::Filter {
                     predicate: new_pred,
                     input: Box::new(new_input),
@@ -485,9 +482,7 @@ fn and_exprs(a: Expr, b: Expr) -> Expr {
 
 fn build_in_condition(test_expr: Option<&Expr>, subquery: &RelExpr) -> Expr {
     let subquery_col = first_output_column(subquery);
-    let left = test_expr
-        .cloned()
-        .unwrap_or(Expr::Const(Const::Bool(true)));
+    let left = test_expr.cloned().unwrap_or(Expr::Const(Const::Bool(true)));
 
     Expr::BinOp {
         op: BinOp::Eq,
@@ -562,7 +557,7 @@ fn extract_correlation_predicate(query: &RelExpr) -> (RelExpr, Expr) {
             // Local predicates (single-table on the inner) must stay as filters.
             let inner_scope = crate::correlation_analysis::build_scope(input);
             let conjuncts = flatten_and(predicate);
-            let (corr_preds, _local_preds) =
+            let (corr_preds, local_preds) =
                 crate::correlation_analysis::classify_predicates(&conjuncts, &inner_scope);
 
             if corr_preds.is_empty() {
@@ -571,9 +566,8 @@ fn extract_correlation_predicate(query: &RelExpr) -> (RelExpr, Expr) {
             } else {
                 // Has correlation — extract correlation predicates into join cond,
                 // keep local predicates as a filter on the inner.
-                let corr_expr = and_together(&corr_preds)
-                    .unwrap_or(Expr::Const(Const::Bool(true)));
-                let local_expr = and_together(&_local_preds);
+                let corr_expr = and_together(&corr_preds).unwrap_or(Expr::Const(Const::Bool(true)));
+                let local_expr = and_together(&local_preds);
                 let inner = if let Some(local) = local_expr {
                     RelExpr::Filter {
                         predicate: local,
@@ -588,9 +582,7 @@ fn extract_correlation_predicate(query: &RelExpr) -> (RelExpr, Expr) {
         RelExpr::Project { input, .. } | RelExpr::Limit { input, .. } => {
             extract_correlation_predicate(input)
         }
-        _ => {
-            (query.clone(), Expr::Const(Const::Bool(true)))
-        }
+        _ => (query.clone(), Expr::Const(Const::Bool(true))),
     }
 }
 
@@ -696,6 +688,13 @@ pub fn tree_contains_subquery(rel: &RelExpr) -> bool {
 ///
 /// Returns `None` if the subquery is not correlated or doesn't match
 /// the supported pattern (falls back to `CrossJoin` in caller).
+#[expect(
+    dead_code,
+    reason = "staged correlated-scalar decorrelation; not yet wired into the \
+              decorrelation path. Enabling it is a correctness-sensitive \
+              feature change deferred until the correctness gate (steering \
+              doc §6 Gate 1 / §10.5)."
+)]
 fn try_decorrelate_correlated_scalar(
     op: BinOp,
     other_side: &Expr,
@@ -710,13 +709,9 @@ fn try_decorrelate_correlated_scalar(
             columns,
             input: next_box,
         } => match next_box.as_ref() {
-            RelExpr::Filter { predicate, input } => {
-                Some((columns, predicate, input.as_ref()))
-            }
+            RelExpr::Filter { predicate, input } => Some((columns, predicate, input.as_ref())),
             RelExpr::Aggregate { input: agg_in, .. } => match agg_in.as_ref() {
-                RelExpr::Filter { predicate, input } => {
-                    Some((columns, predicate, input.as_ref()))
-                }
+                RelExpr::Filter { predicate, input } => Some((columns, predicate, input.as_ref())),
                 _ => None,
             },
             _ => None,
@@ -772,8 +767,7 @@ fn try_decorrelate_correlated_scalar(
     // Replace aggregate function calls with column references, collecting
     // the AggregateExpr nodes for the Aggregate operator.
     let mut agg_counter = 0usize;
-    let (rewritten_expr, aggregates) =
-        replace_aggregates_in_expr(proj_expr, &mut agg_counter);
+    let (rewritten_expr, aggregates) = replace_aggregates_in_expr(proj_expr, &mut agg_counter);
 
     // Must have found at least one aggregate
     if aggregates.is_empty() {
@@ -801,8 +795,7 @@ fn try_decorrelate_correlated_scalar(
     };
 
     // Build join condition (AND together all correlation equalities)
-    let join_cond = and_together(&join_conditions)
-        .unwrap_or(Expr::Const(Const::Bool(true)));
+    let join_cond = and_together(&join_conditions).unwrap_or(Expr::Const(Const::Bool(true)));
 
     // Build: LeftJoin(input, agg_node, on join_cond)
     let left_join = RelExpr::Join {
@@ -855,10 +848,7 @@ fn and_together(preds: &[Expr]) -> Option<Expr> {
 /// the corresponding `AggregateExpr` entries.
 ///
 /// Returns the rewritten expression and the list of aggregates found.
-fn replace_aggregates_in_expr(
-    expr: &Expr,
-    counter: &mut usize,
-) -> (Expr, Vec<AggregateExpr>) {
+fn replace_aggregates_in_expr(expr: &Expr, counter: &mut usize) -> (Expr, Vec<AggregateExpr>) {
     let mut aggregates = Vec::new();
     let rewritten = rewrite_expr_aggregates(expr, counter, &mut aggregates);
     (rewritten, aggregates)
@@ -899,9 +889,7 @@ fn rewrite_expr_aggregates(
         },
         Expr::UnaryOp { op, operand } => Expr::UnaryOp {
             op: *op,
-            operand: Box::new(rewrite_expr_aggregates(
-                operand, counter, aggregates,
-            )),
+            operand: Box::new(rewrite_expr_aggregates(operand, counter, aggregates)),
         },
         Expr::Cast { expr, target_type } => Expr::Cast {
             expr: Box::new(rewrite_expr_aggregates(expr, counter, aggregates)),
@@ -943,11 +931,7 @@ fn parse_aggregate_function(name: &str) -> Option<AggregateFunction> {
     clippy::too_many_lines,
     reason = "expression-tree walk with subquery rewriting; per-variant logic is clearer inline"
 )]
-fn replace_subquery_in_expr(
-    expr: &Expr,
-    input: RelExpr,
-    counter: &mut usize,
-) -> (Expr, RelExpr) {
+fn replace_subquery_in_expr(expr: &Expr, input: RelExpr, counter: &mut usize) -> (Expr, RelExpr) {
     match expr {
         Expr::SubQuery {
             subquery_type: SubQueryType::Scalar,
@@ -1012,8 +996,7 @@ fn replace_subquery_in_expr(
 
             let condition = match subquery_type {
                 SubQueryType::Exists => {
-                    let (inner_q, corr_cond) =
-                        extract_correlation_predicate(&decorrelated_sq);
+                    let (inner_q, corr_cond) = extract_correlation_predicate(&decorrelated_sq);
                     let marked = add_existence_marker(&inner_q, &marker_col);
                     let join = RelExpr::Join {
                         join_type: JoinType::LeftOuter,
@@ -1027,9 +1010,7 @@ fn replace_subquery_in_expr(
                         when_clauses: vec![(
                             Expr::UnaryOp {
                                 op: UnaryOp::IsNotNull,
-                                operand: Box::new(Expr::Column(ColumnRef::new(
-                                    &marker_col,
-                                ))),
+                                operand: Box::new(Expr::Column(ColumnRef::new(&marker_col))),
                             },
                             Expr::Const(Const::Bool(true)),
                         )],
@@ -1037,9 +1018,7 @@ fn replace_subquery_in_expr(
                     };
                     return (case_expr, join);
                 }
-                SubQueryType::In => {
-                    build_in_condition(test_expr.as_deref(), &decorrelated_sq)
-                }
+                SubQueryType::In => build_in_condition(test_expr.as_deref(), &decorrelated_sq),
                 _ => Expr::Const(Const::Bool(true)),
             };
 
@@ -1067,8 +1046,7 @@ fn replace_subquery_in_expr(
         // Recurse into binary ops
         Expr::BinOp { op, left, right } => {
             if contains_subquery(left) {
-                let (new_left, new_input) =
-                    replace_subquery_in_expr(left, input, counter);
+                let (new_left, new_input) = replace_subquery_in_expr(left, input, counter);
                 let (new_right, final_input) = if contains_subquery(right) {
                     replace_subquery_in_expr(right, new_input, counter)
                 } else {
@@ -1083,8 +1061,7 @@ fn replace_subquery_in_expr(
                     final_input,
                 )
             } else if contains_subquery(right) {
-                let (new_right, new_input) =
-                    replace_subquery_in_expr(right, input, counter);
+                let (new_right, new_input) = replace_subquery_in_expr(right, input, counter);
                 (
                     Expr::BinOp {
                         op: *op,
@@ -1102,8 +1079,7 @@ fn replace_subquery_in_expr(
             let mut new_args = Vec::with_capacity(args.len());
             for arg in args {
                 if contains_subquery(arg) {
-                    let (new_arg, new_input) =
-                        replace_subquery_in_expr(arg, current, counter);
+                    let (new_arg, new_input) = replace_subquery_in_expr(arg, current, counter);
                     current = new_input;
                     new_args.push(new_arg);
                 } else {
@@ -1126,8 +1102,7 @@ fn replace_subquery_in_expr(
             let mut current = input;
             let new_operand = if let Some(op) = operand {
                 if contains_subquery(op) {
-                    let (new_op, new_input) =
-                        replace_subquery_in_expr(op, current, counter);
+                    let (new_op, new_input) = replace_subquery_in_expr(op, current, counter);
                     current = new_input;
                     Some(Box::new(new_op))
                 } else {
@@ -1153,8 +1128,7 @@ fn replace_subquery_in_expr(
             }
             let new_else = if let Some(e) = else_result {
                 if contains_subquery(e) {
-                    let (new_e, new_input) =
-                        replace_subquery_in_expr(e, current, counter);
+                    let (new_e, new_input) = replace_subquery_in_expr(e, current, counter);
                     current = new_input;
                     Some(Box::new(new_e))
                 } else {
@@ -1172,10 +1146,12 @@ fn replace_subquery_in_expr(
                 current,
             )
         }
-        Expr::Cast { expr: inner, target_type } => {
+        Expr::Cast {
+            expr: inner,
+            target_type,
+        } => {
             if contains_subquery(inner) {
-                let (new_inner, new_input) =
-                    replace_subquery_in_expr(inner, input, counter);
+                let (new_inner, new_input) = replace_subquery_in_expr(inner, input, counter);
                 (
                     Expr::Cast {
                         expr: Box::new(new_inner),
@@ -1189,8 +1165,7 @@ fn replace_subquery_in_expr(
         }
         Expr::UnaryOp { op, operand } => {
             if contains_subquery(operand) {
-                let (new_operand, new_input) =
-                    replace_subquery_in_expr(operand, input, counter);
+                let (new_operand, new_input) = replace_subquery_in_expr(operand, input, counter);
                 (
                     Expr::UnaryOp {
                         op: *op,
@@ -1222,9 +1197,7 @@ fn try_correlated_project_subquery(
             columns,
             input: filter_box,
         } => match filter_box.as_ref() {
-            RelExpr::Filter { predicate, input } => {
-                Some((columns, predicate, input.as_ref()))
-            }
+            RelExpr::Filter { predicate, input } => Some((columns, predicate, input.as_ref())),
             _ => None,
         },
         _ => None,
@@ -1269,8 +1242,7 @@ fn try_correlated_project_subquery(
     let proj_expr = &proj_columns[0].expr;
 
     let mut agg_counter = 0usize;
-    let (rewritten_expr, aggregates) =
-        replace_aggregates_in_expr(proj_expr, &mut agg_counter);
+    let (rewritten_expr, aggregates) = replace_aggregates_in_expr(proj_expr, &mut agg_counter);
 
     // If no aggregates found, still proceed — the expression might be a
     // simple column reference from a correlated subquery
@@ -1310,8 +1282,7 @@ fn try_correlated_project_subquery(
         }
     };
 
-    let join_cond = and_together(&join_conditions)
-        .unwrap_or(Expr::Const(Const::Bool(true)));
+    let join_cond = and_together(&join_conditions).unwrap_or(Expr::Const(Const::Bool(true)));
 
     let left_join = RelExpr::Join {
         join_type: JoinType::LeftOuter,
@@ -1423,9 +1394,7 @@ mod tests {
             } => {
                 // Condition should be s.id = t.id
                 match condition {
-                    Expr::BinOp {
-                        op: BinOp::Eq, ..
-                    } => {}
+                    Expr::BinOp { op: BinOp::Eq, .. } => {}
                     other => panic!("Expected equality condition, got: {other:?}"),
                 }
             }

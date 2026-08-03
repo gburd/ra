@@ -884,7 +884,7 @@ mod tests {
         let d = SkewDetector::default();
         let h = generate_zipf_histogram(100, 1_000_000, 1.0);
         let analysis = d.analyze("product_id", &h);
-        assert!(analysis.distinct_values == 100);
+        assert_eq!(analysis.distinct_values, 100);
         assert!(analysis.avg_frequency > 0.0);
     }
 

@@ -28,8 +28,8 @@ pub fn cmd_compare(
                 .map_or_else(|_| "unknown".to_owned(), |k| k.to_string());
             eprintln!("Running EXPLAIN on {} database...", kind.cyan());
         }
-        let mut connector =
-            ra_metadata::connect(url).with_context(|| format!("connecting to database: {}", ra_metadata::redact_url(url)))?;
+        let mut connector = ra_metadata::connect(url)
+            .with_context(|| format!("connecting to database: {}", ra_metadata::redact_url(url)))?;
         connector
             .explain_query(sql)
             .with_context(|| format!("running EXPLAIN on: {}", ra_metadata::redact_url(url)))?

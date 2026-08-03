@@ -8,11 +8,7 @@ fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
     let simd_sources = ["tokenize_simd.c"];
 
     // JIT sources mirror the canonical list in lime/src/meson.build.
-    let jit_sources = [
-        "jit_context.c",
-        "jit_codegen.c",
-        "jit_policy.c",
-    ];
+    let jit_sources = ["jit_context.c", "jit_codegen.c", "jit_policy.c"];
 
     // Core sources mirror the lib_sources list in lime/src/meson.build.
     let core_sources = [
@@ -69,8 +65,7 @@ fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
     // minimal stub that exports one symbol so ranlib doesn't warn about
     // an archive member with no symbols.
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
-    let stub_path =
-        std::path::PathBuf::from(&out_dir).join("jit_codegen_nojit.c");
+    let stub_path = std::path::PathBuf::from(&out_dir).join("jit_codegen_nojit.c");
     std::fs::write(
         &stub_path,
         "/* stub: real impl requires LLVM JIT */\n\
@@ -122,10 +117,7 @@ fn compile_c_sources(lime_src: &std::path::Path, lime_inc: &std::path::Path) {
         .chain(jit_sources.iter())
         .chain(core_sources.iter())
     {
-        println!(
-            "cargo:rerun-if-changed={}",
-            lime_src.join(source).display(),
-        );
+        println!("cargo:rerun-if-changed={}", lime_src.join(source).display(),);
     }
 
     // Track all header files in both include/ and src/ directories
@@ -230,8 +222,7 @@ fn generate_bindings(lime_inc: &std::path::Path, lime_src: &std::path::Path) {
 }
 
 fn main() {
-    let lime_root =
-        PathBuf::from(env::var("LIME_DIR").unwrap_or_else(|_| "lime".to_string()));
+    let lime_root = PathBuf::from(env::var("LIME_DIR").unwrap_or_else(|_| "lime".to_string()));
     let lime_src = lime_root.join("src");
     let lime_inc = lime_root.join("include");
 

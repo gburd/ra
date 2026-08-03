@@ -47,7 +47,7 @@ fn extract_locking_clause(sql: &str) -> (&str, Option<ra_core::algebra::LockingC
 }
 
 /// Desugar `IS [NOT] DISTINCT FROM` to function-call markers that
-/// post-parse transforms convert to proper BinOp variants.
+/// post-parse transforms convert to proper `BinOp` variants.
 ///   `a IS DISTINCT FROM b`     → `__is_distinct_from(a, b)`
 ///   `a IS NOT DISTINCT FROM b` → `__is_not_distinct_from(a, b)`
 fn desugar_distinct_from(sql: &str) -> String {
@@ -79,12 +79,8 @@ fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
 /// Convert a `ParseErrors` into a `SqlConversionError`.
 fn convert_parse_errors(errs: ParseErrors) -> SqlConversionError {
     match errs {
-        ParseErrors::Structured(se) => {
-            SqlConversionError::StructuredParseErrors(se)
-        }
-        ParseErrors::Strings(ss) => {
-            SqlConversionError::ParseError(ss.join("; "))
-        }
+        ParseErrors::Structured(se) => SqlConversionError::StructuredParseErrors(se),
+        ParseErrors::Strings(ss) => SqlConversionError::ParseError(ss.join("; ")),
     }
 }
 
@@ -155,11 +151,7 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
     }
 
     Err(last_err.map_or_else(
-        || {
-            SqlConversionError::InvalidSql(
-                "no SQL statement found".to_owned(),
-            )
-        },
+        || SqlConversionError::InvalidSql("no SQL statement found".to_owned()),
         convert_parse_errors,
     ))
 }
@@ -204,7 +196,8 @@ pub fn sql_to_parsed_query(sql: &str) -> Result<ParsedQuery, SqlConversionError>
         || SqlConversionError::InvalidSql("no SQL statement found".to_owned()),
         convert_parse_errors,
     ))
-}/// Parse a SQL string into a [`Statement`].
+}
+/// Parse a SQL string into a [`Statement`].
 ///
 /// Classifies the input as Query, DML, DDL, Utility, or Transaction
 /// and returns the appropriate variant. For Query and DML, the
@@ -227,12 +220,8 @@ pub fn parse_statement(sql: &str) -> Result<Statement, SqlConversionError> {
 
     match first_word {
         // Transaction control — no parsing needed.
-        "BEGIN" | "START" => Ok(Statement::Transaction(
-            ra_core::algebra::TxnStmt::Begin,
-        )),
-        "COMMIT" | "END" => Ok(Statement::Transaction(
-            ra_core::algebra::TxnStmt::Commit,
-        )),
+        "BEGIN" | "START" => Ok(Statement::Transaction(ra_core::algebra::TxnStmt::Begin)),
+        "COMMIT" | "END" => Ok(Statement::Transaction(ra_core::algebra::TxnStmt::Commit)),
         "ROLLBACK" | "ABORT" => {
             // Check for ROLLBACK TO SAVEPOINT
             if upper.contains("TO") {
@@ -241,9 +230,7 @@ pub fn parse_statement(sql: &str) -> Result<Statement, SqlConversionError> {
                     ra_core::algebra::TxnStmt::RollbackTo { name },
                 ))
             } else {
-                Ok(Statement::Transaction(
-                    ra_core::algebra::TxnStmt::Rollback,
-                ))
+                Ok(Statement::Transaction(ra_core::algebra::TxnStmt::Rollback))
             }
         }
         "SAVEPOINT" => {
@@ -268,11 +255,9 @@ pub fn parse_statement(sql: &str) -> Result<Statement, SqlConversionError> {
 
         // Utility statements.
         "EXPLAIN" | "COPY" | "VACUUM" | "ANALYZE" | "ANALYSE" | "SET" | "RESET" | "SHOW" => {
-            Ok(Statement::Utility(
-                ra_core::algebra::UtilityStmt::Other {
-                    sql: trimmed.to_owned(),
-                },
-            ))
+            Ok(Statement::Utility(ra_core::algebra::UtilityStmt::Other {
+                sql: trimmed.to_owned(),
+            }))
         }
 
         // DML — parse through Lime and wrap as DML.

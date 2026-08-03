@@ -32,8 +32,8 @@ pub struct BitNetTrainer {
     feature_inv_std: [f32; F],
 
     // Adam optimizer state
-    m_w1: [[f32; H]; F],  // first moment
-    v_w1: [[f32; H]; F],  // second moment
+    m_w1: [[f32; H]; F], // first moment
+    v_w1: [[f32; H]; F], // second moment
     m_b1: [f32; H],
     v_b1: [f32; H],
     m_w2: [[f32; O]; H],
@@ -199,6 +199,12 @@ impl BitNetTrainer {
     ///
     /// Returns the average MSE loss over the observed dimensions (0.0 if
     /// none are observed).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "single cohesive masked training step (forward + softplus + \
+                  masked backward + Adam update); splitting it would scatter \
+                  the gradient math across helpers with no readability gain."
+    )]
     pub fn train_step_masked(
         &mut self,
         features: &[f32; F],
@@ -297,24 +303,40 @@ impl BitNetTrainer {
         }
 
         adam_update(
-            self.w1.as_flattened_mut(), self.m_w1.as_flattened_mut(),
-            self.v_w1.as_flattened_mut(), g_w1.as_flattened(),
-            bc1, bc2, &cfg,
+            self.w1.as_flattened_mut(),
+            self.m_w1.as_flattened_mut(),
+            self.v_w1.as_flattened_mut(),
+            g_w1.as_flattened(),
+            bc1,
+            bc2,
+            &cfg,
         );
         adam_update(
-            &mut self.b1, &mut self.m_b1, &mut self.v_b1,
+            &mut self.b1,
+            &mut self.m_b1,
+            &mut self.v_b1,
             &d_b1.map(|g| g * clip_factor),
-            bc1, bc2, &cfg,
+            bc1,
+            bc2,
+            &cfg,
         );
         adam_update(
-            self.w2.as_flattened_mut(), self.m_w2.as_flattened_mut(),
-            self.v_w2.as_flattened_mut(), g_w2.as_flattened(),
-            bc1, bc2, &cfg,
+            self.w2.as_flattened_mut(),
+            self.m_w2.as_flattened_mut(),
+            self.v_w2.as_flattened_mut(),
+            g_w2.as_flattened(),
+            bc1,
+            bc2,
+            &cfg,
         );
         adam_update(
-            &mut self.b2, &mut self.m_b2, &mut self.v_b2,
+            &mut self.b2,
+            &mut self.m_b2,
+            &mut self.v_b2,
             &d_b2.map(|g| g * clip_factor),
-            bc1, bc2, &cfg,
+            bc1,
+            bc2,
+            &cfg,
         );
 
         self.total_loss += f64::from(loss);
@@ -339,10 +361,7 @@ impl BitNetTrainer {
     ///
     /// Each sample's `mask` controls which output dimensions contribute to
     /// the loss for that sample. Samples with no observed dims are skipped.
-    pub fn train_batch_masked(
-        &mut self,
-        batch: &[([f32; F], [f32; O], [bool; O])],
-    ) -> f32 {
+    pub fn train_batch_masked(&mut self, batch: &[([f32; F], [f32; O], [bool; O])]) -> f32 {
         if batch.is_empty() {
             return 0.0;
         }
@@ -354,7 +373,11 @@ impl BitNetTrainer {
                 counted += 1;
             }
         }
-        if counted == 0 { 0.0 } else { total / counted as f32 }
+        if counted == 0 {
+            0.0
+        } else {
+            total / counted as f32
+        }
     }
 
     /// Export the current latent weights as a quantized `BitNetCostModel`.
@@ -380,12 +403,7 @@ impl BitNetTrainer {
     /// Mirrors [`BitNetCostModel::update_scalar_head`] but on the
     /// trainer's mutable copy, so the next snapshot via [`Self::to_model`]
     /// carries the update.
-    pub fn update_scalar_head(
-        &mut self,
-        features: &[f32; F],
-        target_cpu_ms: f32,
-        lr: f32,
-    ) -> f32 {
+    pub fn update_scalar_head(&mut self, features: &[f32; F], target_cpu_ms: f32, lr: f32) -> f32 {
         // Build a temporary model snapshot to read the per-dim outputs
         // through the same softplus path inference uses, then apply
         // the SGD step to OUR scalar_head (not the snapshot's).
@@ -404,7 +422,11 @@ impl BitNetTrainer {
         for (h, &o) in self.scalar_head.iter().zip(out.iter()) {
             pre += h * o;
         }
-        let pred = if pre > 20.0 { pre } else { (1.0 + pre.exp()).ln() };
+        let pred = if pre > 20.0 {
+            pre
+        } else {
+            (1.0 + pre.exp()).ln()
+        };
         let err = pred - target_cpu_ms;
         let sigmoid = if pre >= 0.0 {
             1.0 / (1.0 + (-pre).exp())
@@ -489,13 +511,24 @@ impl BitNetTrainer {
         d_b2: &[f32; O],
     ) -> f32 {
         let mut sum_sq = 0.0f64;
-        for row in d_w1 { for &v in row { sum_sq += f64::from(v * v); } }
-        for &v in d_b1 { sum_sq += f64::from(v * v); }
-        for row in d_w2 { for &v in row { sum_sq += f64::from(v * v); } }
-        for &v in d_b2 { sum_sq += f64::from(v * v); }
+        for row in d_w1 {
+            for &v in row {
+                sum_sq += f64::from(v * v);
+            }
+        }
+        for &v in d_b1 {
+            sum_sq += f64::from(v * v);
+        }
+        for row in d_w2 {
+            for &v in row {
+                sum_sq += f64::from(v * v);
+            }
+        }
+        for &v in d_b2 {
+            sum_sq += f64::from(v * v);
+        }
         (sum_sq.sqrt()) as f32
     }
-
 }
 
 /// Adam optimizer step on flat slices (gradients already include weight decay + clipping).
@@ -524,7 +557,11 @@ fn adam_update(
 /// without overflow.
 #[inline]
 fn softplus(x: f32) -> f32 {
-    if x > 20.0 { x } else { (1.0 + x.exp()).ln() }
+    if x > 20.0 {
+        x
+    } else {
+        (1.0 + x.exp()).ln()
+    }
 }
 
 /// Apply softplus elementwise (training mirrors inference).
@@ -578,12 +615,18 @@ mod tests {
                     (i % 4) as f32,     // join_count
                     (i % 6) as f32,     // filter_count
                     (i % 2) as f32,     // aggregate_count
-                    0.0, 0.0, 0.0,
-                    (i % 3) as f32,     // order_by
-                    (i % 2) as f32,     // group_by
-                    0.0, 0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    (i % 3) as f32, // order_by
+                    (i % 2) as f32, // group_by
+                    0.0,
+                    0.0,
                     ((i + 1) * 100) as f32, // cardinality
-                    0.0, 0.0, 0.0, 0.0, // optimization-features padding
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0, // optimization-features padding
                 ];
                 let target = make_target(&features);
                 (features, target)
@@ -613,7 +656,9 @@ mod tests {
     fn exported_model_predicts() {
         let mut trainer = BitNetTrainer::new(TrainerConfig::default());
 
-        let features = [4.0, 3.0, 5.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 10_000.0, 0.0, 0.0, 0.0, 0.0];
+        let features = [
+            4.0, 3.0, 5.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 10_000.0, 0.0, 0.0, 0.0, 0.0,
+        ];
         let target = [1.5f32; O];
 
         // Train a few steps
@@ -665,7 +710,9 @@ mod tests {
         // to learn "predict 0 for this query." Pre-A1 would converge
         // y_pre → 0 and infer softplus(0) = ln(2) ≈ 0.69 — the canonical
         // training/inference mismatch we are fixing.
-        let features = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let features = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
         let target = [0.0f32; O];
 
         for _ in 0..3000 {
@@ -697,7 +744,9 @@ mod tests {
                 weight_decay: 0.0,
                 ..Default::default()
             });
-            let features = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            let features = [
+                1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            ];
             let mut full = [0.0f32; O];
             full[5] = 4.0;
             for _ in 0..3000 {
@@ -708,7 +757,9 @@ mod tests {
         let mut t_masked = pretrain();
         let mut t_zeroed = pretrain();
 
-        let features = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let features = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
         let pred_pre = t_masked.to_model().predict_all(&features)[5];
         assert!(pred_pre > 1.5, "pretrain should set dim 5; got {pred_pre}");
 

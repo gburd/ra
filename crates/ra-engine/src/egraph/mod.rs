@@ -474,7 +474,7 @@ mod tests {
         let (_, stats) = optimizer
             .optimize_incremental(&expr, &delta)
             .expect("should succeed");
-        assert!(stats.delta_count == 0);
+        assert_eq!(stats.delta_count, 0);
         assert!(!stats.used_full_reoptimization);
     }
 

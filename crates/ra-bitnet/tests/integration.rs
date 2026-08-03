@@ -39,10 +39,10 @@ fn synthetic_cost(features: &[f32; F]) -> [f32; O] {
     let io_ops = (tables * 100.0 + joins * 500.0).max(1.0);
 
     let mut target = [0.0f32; O];
-    target[0] = cpu.max(0.01);           // cpu_time_ms
-    target[1] = memory.max(0.01);        // memory_peak_mb
-    target[2] = memory * 0.7;            // memory_avg_mb
-    target[3] = io_ops;                  // io_storage_ops
+    target[0] = cpu.max(0.01); // cpu_time_ms
+    target[1] = memory.max(0.01); // memory_peak_mb
+    target[2] = memory * 0.7; // memory_avg_mb
+    target[3] = io_ops; // io_storage_ops
     target
 }
 
@@ -53,24 +53,26 @@ fn generate_training_data(n: usize) -> Vec<([f32; F], [f32; O])> {
 
     for _ in 0..n {
         // Pseudo-random features (deterministic for reproducibility)
-        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1442695040888963407);
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1442695040888963407);
         let mut r = |max: f32| -> f32 {
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             (seed >> 33) as f32 / (u32::MAX >> 1) as f32 * max
         };
 
         let features: [f32; F] = [
-            r(8.0).floor().max(1.0),  // table_count: 1-8
-            r(6.0).floor(),           // join_count: 0-6
-            r(10.0).floor(),          // filter_count: 0-10
-            r(3.0).floor(),           // aggregate_count: 0-3
-            r(2.0).floor(),           // subquery_count: 0-2
-            r(2.0).floor(),           // cte_count: 0-2
-            r(3.0).floor(),           // window_function_count: 0-3
-            r(3.0).floor(),           // order_by_count: 0-3
-            r(3.0).floor(),           // group_by_count: 0-3
-            (r(1.0) > 0.7) as u8 as f32, // distinct_flag
-            (r(1.0) > 0.5) as u8 as f32, // limit_present
+            r(8.0).floor().max(1.0),      // table_count: 1-8
+            r(6.0).floor(),               // join_count: 0-6
+            r(10.0).floor(),              // filter_count: 0-10
+            r(3.0).floor(),               // aggregate_count: 0-3
+            r(2.0).floor(),               // subquery_count: 0-2
+            r(2.0).floor(),               // cte_count: 0-2
+            r(3.0).floor(),               // window_function_count: 0-3
+            r(3.0).floor(),               // order_by_count: 0-3
+            r(3.0).floor(),               // group_by_count: 0-3
+            (r(1.0) > 0.7) as u8 as f32,  // distinct_flag
+            (r(1.0) > 0.5) as u8 as f32,  // limit_present
             (10.0f32).powf(r(5.0) + 1.0), // cardinality: 10 - 1M
             // OptimizationFeatures padding (density / fanout / equi / cross)
             0.0,
@@ -173,10 +175,16 @@ fn train_and_evaluate_pipeline() {
 
     // Print results for visibility
     eprintln!("\n=== BitNet Cost Model Evaluation ===");
-    eprintln!("Training: {} samples, {} epochs, {} steps",
-        train_data.len(), 40, trainer.steps());
-    eprintln!("Loss curve: {first_loss:.4} → {last_loss:.4} ({:.0}% reduction)",
-        (1.0 - last_loss / first_loss) * 100.0);
+    eprintln!(
+        "Training: {} samples, {} epochs, {} steps",
+        train_data.len(),
+        40,
+        trainer.steps()
+    );
+    eprintln!(
+        "Loss curve: {first_loss:.4} → {last_loss:.4} ({:.0}% reduction)",
+        (1.0 - last_loss / first_loss) * 100.0
+    );
     eprintln!("Eval MAPE:  {mape:.1}% (baseline: {baseline_mape:.1}%)");
     eprintln!("Rank corr:  {correlation:.3}");
     eprintln!("Model size: {} bytes (packed)", model.model_size_bytes());
@@ -265,7 +273,11 @@ fn rank_correlation(predictions: &[f32], actuals: &[f32]) -> f64 {
     }
 
     let denom = (var_p * var_a).sqrt();
-    if denom < 1e-10 { 0.0 } else { cov / denom }
+    if denom < 1e-10 {
+        0.0
+    } else {
+        cov / denom
+    }
 }
 
 fn ranks(values: &[f32]) -> Vec<f64> {

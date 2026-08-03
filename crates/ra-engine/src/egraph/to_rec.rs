@@ -372,7 +372,12 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let conflict_id = add_on_conflict(rec, on_conflict.as_ref())?;
             let returning_id = add_optional_projection(rec, returning.as_deref())?;
             let ids = vec![
-                tag_id, table_id, cols_id, source_id, conflict_id, returning_id,
+                tag_id,
+                table_id,
+                cols_id,
+                source_id,
+                conflict_id,
+                returning_id,
             ];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
@@ -390,7 +395,12 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let from_id = add_optional_rel(rec, from.as_deref())?;
             let returning_id = add_optional_projection(rec, returning.as_deref())?;
             let ids = vec![
-                tag_id, table_id, assigns_id, filter_id, from_id, returning_id,
+                tag_id,
+                table_id,
+                assigns_id,
+                filter_id,
+                from_id,
+                returning_id,
             ];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
@@ -405,9 +415,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let filter_id = add_optional_scalar(rec, filter.as_ref())?;
             let using_id = add_optional_rel(rec, using.as_deref())?;
             let returning_id = add_optional_projection(rec, returning.as_deref())?;
-            let ids = vec![
-                tag_id, table_id, filter_id, using_id, returning_id,
-            ];
+            let ids = vec![tag_id, table_id, filter_id, using_id, returning_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
         RelExpr::Merge {
@@ -427,9 +435,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let source_id = add_rel_expr(rec, source)?;
             let when_id = add_symbol(rec, &when_clauses.len().to_string());
             let returning_id = add_optional_projection(rec, returning.as_deref())?;
-            let ids = vec![
-                tag_id, target_id, on_id, source_id, when_id, returning_id,
-            ];
+            let ids = vec![tag_id, target_id, on_id, source_id, when_id, returning_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
         RelExpr::GraphTable {
@@ -471,6 +477,12 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
         Expr::BinOp { op, left, right } => {
             let left_id = add_scalar_expr(rec, left)?;
             let right_id = add_scalar_expr(rec, right)?;
+            #[expect(
+                clippy::match_same_arms,
+                reason = "IS [NOT] DISTINCT FROM deliberately share the Ne/Eq \
+                          e-graph encoding with Ne/Eq; NULL-safety is an \
+                          execution concern, not a plan-shape one."
+            )]
             let node = match op {
                 BinOp::Add => RelLang::Add([left_id, right_id]),
                 BinOp::Sub => RelLang::Sub([left_id, right_id]),
@@ -850,7 +862,10 @@ fn add_window_expr(rec: &mut RecExpr<RelLang>, wexpr: &WindowExpr) -> Result<Id,
     ])))
 }
 
-#[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other add_ helpers")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "consistent Result return with other add_ helpers"
+)]
 fn add_window_frame(
     rec: &mut RecExpr<RelLang>,
     frame: Option<&WindowFrame>,
@@ -917,9 +932,7 @@ fn add_on_conflict(
         OnConflict::DoSelect { target } => {
             let tag_id = add_symbol(rec, "do_select");
             let target_id = add_string_list(rec, target);
-            Ok(rec.add(RelLang::Func(
-                vec![tag_id, target_id].into_boxed_slice(),
-            )))
+            Ok(rec.add(RelLang::Func(vec![tag_id, target_id].into_boxed_slice())))
         }
     }
 }
@@ -932,28 +945,20 @@ fn add_assignment_list(
     for (col, expr) in assignments {
         let col_id = add_symbol(rec, col);
         let expr_id = add_scalar_expr(rec, expr)?;
-        let pair_id = rec.add(RelLang::Func(
-            vec![col_id, expr_id].into_boxed_slice(),
-        ));
+        let pair_id = rec.add(RelLang::Func(vec![col_id, expr_id].into_boxed_slice()));
         ids.push(pair_id);
     }
     Ok(rec.add(RelLang::List(ids.into_boxed_slice())))
 }
 
-fn add_optional_scalar(
-    rec: &mut RecExpr<RelLang>,
-    expr: Option<&Expr>,
-) -> Result<Id, EGraphError> {
+fn add_optional_scalar(rec: &mut RecExpr<RelLang>, expr: Option<&Expr>) -> Result<Id, EGraphError> {
     match expr {
         Some(e) => add_scalar_expr(rec, e),
         None => Ok(rec.add(RelLang::Nil)),
     }
 }
 
-fn add_optional_rel(
-    rec: &mut RecExpr<RelLang>,
-    rel: Option<&RelExpr>,
-) -> Result<Id, EGraphError> {
+fn add_optional_rel(rec: &mut RecExpr<RelLang>, rel: Option<&RelExpr>) -> Result<Id, EGraphError> {
     match rel {
         Some(r) => add_rel_expr(rec, r),
         None => Ok(rec.add(RelLang::Nil)),
@@ -984,8 +989,9 @@ mod tests {
                 Expr::BinOp {
                     op: BinOp::Gt,
                     left: Box::new(Expr::Column(ra_core::expr::ColumnRef {
-                    table: None, column: "x".to_owned()
-                })),
+                        table: None,
+                        column: "x".to_owned(),
+                    })),
                     right: Box::new(Expr::Const(Const::Int(0))),
                 },
                 Expr::Const(Const::Int(1)),

@@ -165,7 +165,10 @@ impl FederatedOptimizer {
     /// Check whether the entire query can be shipped to a remote
     /// database.
     #[must_use]
-    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
+    #[expect(
+        clippy::self_only_used_in_recursion,
+        reason = "method on optimizer struct"
+    )]
     pub fn can_ship_query(&self, plan: &RelExpr, capabilities: &QueryCapabilities) -> bool {
         match plan {
             RelExpr::Scan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => {
@@ -194,7 +197,9 @@ impl FederatedOptimizer {
             RelExpr::Window { input, .. } => {
                 capabilities.supports_window_pushdown && self.can_ship_query(input, capabilities)
             }
-            RelExpr::Distinct { input, .. } | RelExpr::DistinctOn { input, .. } => self.can_ship_query(input, capabilities),
+            RelExpr::Distinct { input, .. } | RelExpr::DistinctOn { input, .. } => {
+                self.can_ship_query(input, capabilities)
+            }
             RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }
             | RelExpr::Except { left, right, .. } => {
@@ -244,13 +249,17 @@ impl FederatedOptimizer {
             RelExpr::Project { input, .. }
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
-            | RelExpr::Distinct { input, .. } | RelExpr::DistinctOn { input, .. } => self.extract_pushable_filter(input, table_name),
+            | RelExpr::Distinct { input, .. }
+            | RelExpr::DistinctOn { input, .. } => self.extract_pushable_filter(input, table_name),
             _ => None,
         }
     }
 
     /// Check if a filter expression references a specific table.
-    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
+    #[expect(
+        clippy::self_only_used_in_recursion,
+        reason = "method on optimizer struct"
+    )]
     fn filter_references_table(&self, expr: &Expr, table_name: &str) -> bool {
         match expr {
             Expr::Column(col) => col.table.as_deref() == Some(table_name) || col.table.is_none(),
@@ -293,9 +302,9 @@ impl FederatedOptimizer {
             | Expr::PatternNext(inner, _)
             | Expr::PatternFirst(inner, _)
             | Expr::PatternLast(inner, _) => self.filter_references_table(inner, table_name),
-            Expr::PatternClassifier
-            | Expr::PatternMatchNumber
-            | Expr::FullTextMatch { .. } => false,
+            Expr::PatternClassifier | Expr::PatternMatchNumber | Expr::FullTextMatch { .. } => {
+                false
+            }
             Expr::ArraySlice { array, start, end } => {
                 self.filter_references_table(array, table_name)
                     || start
@@ -408,7 +417,10 @@ impl FederatedOptimizer {
     }
 
     /// Extract a scan node from a plan tree for a specific table.
-    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
+    #[expect(
+        clippy::self_only_used_in_recursion,
+        reason = "method on optimizer struct"
+    )]
     fn extract_scan(&self, plan: &RelExpr, table_name: &str) -> Option<RelExpr> {
         match plan {
             RelExpr::Scan { table, alias } => {
@@ -427,7 +439,8 @@ impl FederatedOptimizer {
             | RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
             | RelExpr::Window { input, .. }
-            | RelExpr::Distinct { input, .. } | RelExpr::DistinctOn { input, .. } => self.extract_scan(input, table_name),
+            | RelExpr::Distinct { input, .. }
+            | RelExpr::DistinctOn { input, .. } => self.extract_scan(input, table_name),
             RelExpr::Join { left, right, .. }
             | RelExpr::Union { left, right, .. }
             | RelExpr::Intersect { left, right, .. }
@@ -439,7 +452,10 @@ impl FederatedOptimizer {
     }
 
     /// Remove a specific filter from a plan tree.
-    #[expect(clippy::self_only_used_in_recursion, reason = "method on optimizer struct")]
+    #[expect(
+        clippy::self_only_used_in_recursion,
+        reason = "method on optimizer struct"
+    )]
     fn remove_filter(&self, plan: &RelExpr, target_pred: &Expr) -> Option<RelExpr> {
         match plan {
             RelExpr::Filter { predicate, input } => {

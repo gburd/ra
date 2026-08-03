@@ -191,9 +191,7 @@ fn compare_row_sets(ra_rows: &[Row], native_rows: &[Row], ordered: bool) -> Diff
                 expected_rows: native_strings.len(),
                 actual_rows: ra_strings.len(),
                 first_diff_row: Some(i),
-                details: format!(
-                    "row {i} differs:\n  Ra:     {ra_row}\n  Native: {native_row}"
-                ),
+                details: format!("row {i} differs:\n  Ra:     {ra_row}\n  Native: {native_row}"),
             };
         }
     }

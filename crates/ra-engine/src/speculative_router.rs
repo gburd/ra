@@ -246,7 +246,7 @@ impl OptimizationFeatures {
     }
 
     /// Update scale features with table statistics.
-    #[must_use] 
+    #[must_use]
     /// Estimate pages from `total_size` / 8192 (`PostgreSQL` page size).
     pub fn with_table_stats(
         mut self,
@@ -480,7 +480,9 @@ fn estimate_avg_selectivity(filter_count: u32, join_count: u32) -> f32 {
     // Geometric mean of per-predicate selectivities
     let total_predicates = filter_count + join_count;
     let per_predicate_selectivity = 0.1_f32; // equi-join heuristic
-    per_predicate_selectivity.powi(total_predicates.min(8) as i32).max(1e-6)
+    per_predicate_selectivity
+        .powi(total_predicates.min(8) as i32)
+        .max(1e-6)
 }
 
 /// Estimate log10(output rows) from structural features.
@@ -670,6 +672,9 @@ mod tests {
         let low = OptRoute::EGraphLow.rule_application_budget();
         let med = OptRoute::EGraphMedium.rule_application_budget();
         let hi = OptRoute::EGraphHigh.rule_application_budget();
-        assert!(low < med && med < hi, "budget should increase: {low}<{med}<{hi}");
+        assert!(
+            low < med && med < hi,
+            "budget should increase: {low}<{med}<{hi}"
+        );
     }
 }

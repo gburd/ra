@@ -107,7 +107,10 @@ impl UnnestExecutor {
     ///
     /// Currently uses positional index 0 as a fallback when
     /// column name resolution is not available.
-    #[expect(clippy::unused_self, reason = "will use self when schema info is available")]
+    #[expect(
+        clippy::unused_self,
+        reason = "will use self when schema info is available"
+    )]
     fn resolve_column_index(&self, input_rows: &[Row]) -> Result<usize, ExecutionError> {
         if input_rows.is_empty() {
             return Ok(0);

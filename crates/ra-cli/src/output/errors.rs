@@ -7,15 +7,9 @@ use ra_parser::StructuredParseError;
 
 /// Format SQL parsing errors in Rust compiler style
 /// with helpful pointers.
-pub fn format_sql_error(
-    err: &ra_parser::SqlConversionError,
-    sql: &str,
-) -> anyhow::Error {
+pub fn format_sql_error(err: &ra_parser::SqlConversionError, sql: &str) -> anyhow::Error {
     // Handle structured errors with precise position info.
-    if let ra_parser::SqlConversionError::StructuredParseErrors(
-        ref errors,
-    ) = err
-    {
+    if let ra_parser::SqlConversionError::StructuredParseErrors(ref errors) = err {
         return format_structured_errors(sql, errors);
     }
 
@@ -36,10 +30,7 @@ pub fn format_sql_error(
 
 /// Format structured parse errors with precise positions and
 /// expected-token hints.
-fn format_structured_errors(
-    sql: &str,
-    errors: &[StructuredParseError],
-) -> anyhow::Error {
+fn format_structured_errors(sql: &str, errors: &[StructuredParseError]) -> anyhow::Error {
     let lines: Vec<&str> = sql.lines().collect();
     let mut output = String::new();
 
@@ -50,18 +41,12 @@ fn format_structured_errors(
         .unwrap_or(0);
 
     for error in errors {
-        let (line_num, col_num) =
-            position_to_line_col(sql, error.position);
+        let (line_num, col_num) = position_to_line_col(sql, error.position);
         let line_idx = line_num.saturating_sub(1);
         let carets = error.token_length.max(1);
 
         // Header
-        let _ = writeln!(
-            output,
-            "{}: {}",
-            "error".red().bold(),
-            error.message.bold()
-        );
+        let _ = writeln!(output, "{}: {}", "error".red().bold(), error.message.bold());
 
         // Location
         let _ = writeln!(
@@ -76,8 +61,7 @@ fn format_structured_errors(
 
         if line_idx < lines.len() {
             let error_line = lines[line_idx];
-            let col_idx =
-                col_num.saturating_sub(1).min(error_line.len());
+            let col_idx = col_num.saturating_sub(1).min(error_line.len());
 
             // Context: up to 2 lines above
             let context_start = line_idx.saturating_sub(2);
@@ -133,11 +117,7 @@ fn format_structured_errors(
 
             // Expected tokens hint
             if !error.expected_tokens.is_empty() {
-                let _ = write!(
-                    output,
-                    "{}: ",
-                    "help".green().bold()
-                );
+                let _ = write!(output, "{}: ", "help".green().bold());
                 let _ = writeln!(
                     output,
                     "expected one of: {}",
@@ -146,11 +126,7 @@ fn format_structured_errors(
             }
 
             // Contextual help from heuristics (secondary)
-            output.push_str(&format_contextual_help(
-                &error.message,
-                error_line,
-                col_idx,
-            ));
+            output.push_str(&format_contextual_help(&error.message, error_line, col_idx));
         }
 
         output.push('\n');
@@ -178,16 +154,13 @@ fn extract_position(error_msg: &str) -> Option<usize> {
 }
 
 /// Extract line and column from sqlparser error message.
-fn extract_error_position(
-    error_msg: &str,
-) -> (Option<usize>, Option<usize>) {
+fn extract_error_position(error_msg: &str) -> (Option<usize>, Option<usize>) {
     let mut line = None;
     let mut col = None;
 
     if let Some(line_start) = error_msg.find("Line:") {
         if let Some(line_end) = error_msg[line_start..].find(',') {
-            if let Ok(num) = error_msg
-                [line_start + 5..line_start + line_end]
+            if let Ok(num) = error_msg[line_start + 5..line_start + line_end]
                 .trim()
                 .parse::<usize>()
             {
@@ -283,19 +256,25 @@ fn clean_annotation(error_msg: &str) -> String {
 /// Determine a short annotation to display next to the carets.
 fn make_caret_annotation(error_msg: &str, error_line: &str, col_idx: usize) -> String {
     // Check if this is a :: cast operator issue
-    if error_line.get(col_idx..).is_some_and(|s| s.starts_with("::")) {
-        return "the `::` type cast operator is not yet supported"
-            .to_string();
+    if error_line
+        .get(col_idx..)
+        .is_some_and(|s| s.starts_with("::"))
+    {
+        return "the `::` type cast operator is not yet supported".to_string();
     }
 
     // Check for -> / ->> JSON operators
-    if error_line.get(col_idx..).is_some_and(|s| s.starts_with("->>")) {
-        return "the `->>` JSON text extraction operator is not yet supported"
-            .to_string();
+    if error_line
+        .get(col_idx..)
+        .is_some_and(|s| s.starts_with("->>"))
+    {
+        return "the `->>` JSON text extraction operator is not yet supported".to_string();
     }
-    if error_line.get(col_idx..).is_some_and(|s| s.starts_with("->")) {
-        return "the `->` JSON extraction operator is not yet supported"
-            .to_string();
+    if error_line
+        .get(col_idx..)
+        .is_some_and(|s| s.starts_with("->"))
+    {
+        return "the `->` JSON extraction operator is not yet supported".to_string();
     }
 
     clean_annotation(error_msg)
@@ -304,15 +283,24 @@ fn make_caret_annotation(error_msg: &str, error_line: &str, col_idx: usize) -> S
 /// Determine the caret length based on the problematic token.
 fn caret_length(error_msg: &str, error_line: &str, col_idx: usize) -> usize {
     // For :: cast operator
-    if error_line.get(col_idx..).is_some_and(|s| s.starts_with("::")) {
+    if error_line
+        .get(col_idx..)
+        .is_some_and(|s| s.starts_with("::"))
+    {
         return 2;
     }
     // For ->> operator
-    if error_line.get(col_idx..).is_some_and(|s| s.starts_with("->>")) {
+    if error_line
+        .get(col_idx..)
+        .is_some_and(|s| s.starts_with("->>"))
+    {
         return 3;
     }
     // For -> operator
-    if error_line.get(col_idx..).is_some_and(|s| s.starts_with("->")) {
+    if error_line
+        .get(col_idx..)
+        .is_some_and(|s| s.starts_with("->"))
+    {
         return 2;
     }
 
@@ -329,37 +317,30 @@ fn caret_length(error_msg: &str, error_line: &str, col_idx: usize) -> usize {
 }
 
 /// Provide contextual help based on the specific error type.
-fn format_contextual_help(
-    error_msg: &str,
-    error_line: &str,
-    col_idx: usize,
-) -> String {
+fn format_contextual_help(error_msg: &str, error_line: &str, col_idx: usize) -> String {
     let mut help = String::new();
 
     // :: type cast operator
-    if error_line.get(col_idx..).is_some_and(|s| s.starts_with("::")) {
+    if error_line
+        .get(col_idx..)
+        .is_some_and(|s| s.starts_with("::"))
+    {
         let _ = write!(help, "{}: ", "help".green().bold());
         help.push_str("use CAST() instead\n");
         // Try to build a suggestion from the error line
         if let Some(suggestion) = suggest_cast_replacement(error_line, col_idx) {
-            let _ = writeln!(
-                help,
-                "   {} {}",
-                "|".blue(),
-                suggestion
-            );
+            let _ = writeln!(help, "   {} {}", "|".blue(), suggestion);
         } else {
-            let _ = writeln!(
-                help,
-                "   {} CAST(expression AS type)",
-                "|".blue()
-            );
+            let _ = writeln!(help, "   {} CAST(expression AS type)", "|".blue());
         }
         return help;
     }
 
     // -> / ->> JSON operators
-    if error_line.get(col_idx..).is_some_and(|s| s.starts_with("->>") || s.starts_with("->")) {
+    if error_line
+        .get(col_idx..)
+        .is_some_and(|s| s.starts_with("->>") || s.starts_with("->"))
+    {
         let _ = write!(help, "{}: ", "help".green().bold());
         help.push_str("JSON operators are not yet supported\n");
         let _ = writeln!(
@@ -384,9 +365,7 @@ fn format_contextual_help(
         return help;
     }
 
-    if error_msg.contains("expected: an expression")
-        && error_msg.contains("found: {")
-    {
+    if error_msg.contains("expected: an expression") && error_msg.contains("found: {") {
         let _ = write!(help, "{}: ", "help".green().bold());
         help.push_str("JSON literals must be quoted strings\n");
         let _ = writeln!(
@@ -403,18 +382,14 @@ fn format_contextual_help(
         );
     } else if error_line.contains("@=") {
         let _ = write!(help, "{}: ", "help".green().bold());
-        help.push_str(
-            "@= is not a standard PostgreSQL operator\n",
-        );
+        help.push_str("@= is not a standard PostgreSQL operator\n");
         let _ = writeln!(
             help,
             "   {} Use @> (contains) or @? (path exists) \
              instead",
             "|".blue()
         );
-    } else if error_msg.contains("found: @")
-        && !error_line.contains("@@")
-    {
+    } else if error_msg.contains("found: @") && !error_line.contains("@@") {
         let _ = write!(help, "{}: ", "help".green().bold());
         help.push_str("check PostgreSQL operator syntax\n");
         let _ = writeln!(
@@ -423,12 +398,7 @@ fn format_contextual_help(
             "|".blue()
         );
     } else if error_msg.contains("unterminated")
-        || error_line
-            .chars()
-            .filter(|&c| c == '\'')
-            .count()
-            % 2
-            != 0
+        || error_line.chars().filter(|&c| c == '\'').count() % 2 != 0
     {
         let _ = write!(help, "{}: ", "help".green().bold());
         help.push_str("check string quote matching\n");
@@ -531,8 +501,7 @@ fn format_error_with_location(
     }
 
     let error_line = lines[line_idx];
-    let col_idx =
-        col_num.saturating_sub(1).min(error_line.len());
+    let col_idx = col_num.saturating_sub(1).min(error_line.len());
 
     let annotation = make_caret_annotation(error_msg, error_line, col_idx);
     let carets = caret_length(error_msg, error_line, col_idx);
@@ -541,12 +510,7 @@ fn format_error_with_location(
 
     // Header: "error: <short description>"
     let short_desc = clean_annotation(error_msg);
-    let _ = writeln!(
-        output,
-        "{}: {}",
-        "error".red().bold(),
-        short_desc.bold()
-    );
+    let _ = writeln!(output, "{}: {}", "error".red().bold(), short_desc.bold());
 
     // Location: " --> query:LINE:COL"
     let _ = writeln!(
@@ -607,9 +571,7 @@ fn format_error_with_location(
     let _ = writeln!(output, "   {}", "|".blue().bold());
 
     // Contextual help
-    output.push_str(&format_contextual_help(
-        error_msg, error_line, col_idx,
-    ));
+    output.push_str(&format_contextual_help(error_msg, error_line, col_idx));
 
     if debug_level > 1 {
         anyhow::anyhow!("{output}")
@@ -623,17 +585,12 @@ fn format_error_with_location(
 /// This is the fallback when no position info is available. It
 /// tries to locate the error by searching for the problematic
 /// token in the SQL text before resorting to showing all lines.
-fn format_error_with_context(
-    sql: &str,
-    error_msg: &str,
-) -> anyhow::Error {
+fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
     // Try to find the error location by searching for the token
     if let Some(token) = extract_token(error_msg) {
         if let Some(byte_pos) = sql.find(token) {
             let (line, col) = position_to_line_col(sql, byte_pos);
-            return format_error_with_location(
-                sql, line, col, error_msg,
-            );
+            return format_error_with_location(sql, line, col, error_msg);
         }
     }
 
@@ -641,9 +598,7 @@ fn format_error_with_context(
     if error_msg.contains("unexpected character ':'") {
         if let Some(byte_pos) = sql.find("::") {
             let (line, col) = position_to_line_col(sql, byte_pos);
-            return format_error_with_location(
-                sql, line, col, error_msg,
-            );
+            return format_error_with_location(sql, line, col, error_msg);
         }
     }
 
@@ -652,17 +607,8 @@ fn format_error_with_context(
     let mut output = String::new();
 
     let short_desc = clean_annotation(error_msg);
-    let _ = writeln!(
-        output,
-        "{}: {}",
-        "error".red().bold(),
-        short_desc.bold()
-    );
-    let _ = writeln!(
-        output,
-        "  {} query",
-        "-->".blue().bold(),
-    );
+    let _ = writeln!(output, "{}: {}", "error".red().bold(), short_desc.bold());
+    let _ = writeln!(output, "  {} query", "-->".blue().bold(),);
     let _ = writeln!(output, "   {}", "|".blue().bold());
 
     // Show at most 10 lines: first 5 and last 5, with ellipsis
@@ -689,12 +635,7 @@ fn format_error_with_context(
                 line
             );
         }
-        let _ = writeln!(
-            output,
-            " {} {} ...",
-            "...".blue().bold(),
-            "|".blue().bold()
-        );
+        let _ = writeln!(output, " {} {} ...", "...".blue().bold(), "|".blue().bold());
         let start = lines.len() - tail;
         for (i, line) in lines.iter().skip(start).enumerate() {
             let _ = writeln!(
@@ -720,9 +661,7 @@ fn format_error_with_context(
 
     // Try to provide some help even without location
     let first_line = lines.first().copied().unwrap_or("");
-    output.push_str(&format_contextual_help(
-        error_msg, first_line, 0,
-    ));
+    output.push_str(&format_contextual_help(error_msg, first_line, 0));
 
     let debug_level = std::env::var("DEBUG_RA")
         .or_else(|_| std::env::var("RA_DEBUG"))

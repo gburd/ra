@@ -52,12 +52,7 @@ impl SingleReference {
 }
 
 impl Condition<RelLang, RelAnalysis> for SingleReference {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let name_id = subst[self.name_var];
         let body_id = subst[self.body_var];
 
@@ -68,11 +63,7 @@ impl Condition<RelLang, RelAnalysis> for SingleReference {
         // If the name appears in the body's table set exactly once,
         // inlining is safe. We approximate by checking the table set.
         if let Some(name_str) = name_data.tables.iter().next() {
-            let count = body_data
-                .tables
-                .iter()
-                .filter(|t| *t == name_str)
-                .count();
+            let count = body_data.tables.iter().filter(|t| *t == name_str).count();
             return count <= 1;
         }
         // Conservative: allow inlining if we can't determine reference count
@@ -98,12 +89,7 @@ impl ReferencesOnly {
 }
 
 impl Condition<RelLang, RelAnalysis> for ReferencesOnly {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let pred_id = subst[self.pred_var];
         let side_id = subst[self.side_var];
 
@@ -122,7 +108,10 @@ impl Condition<RelLang, RelAnalysis> for ReferencesOnly {
 }
 
 /// Condition: predicate references columns from BOTH join sides.
-#[expect(clippy::struct_field_names, reason = "parallel naming with ReferencesOnly")]
+#[expect(
+    clippy::struct_field_names,
+    reason = "parallel naming with ReferencesOnly"
+)]
 pub struct ReferencesBoth {
     pred_var: Var,
     left_var: Var,
@@ -141,12 +130,7 @@ impl ReferencesBoth {
 }
 
 impl Condition<RelLang, RelAnalysis> for ReferencesBoth {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let pred_id = subst[self.pred_var];
         let left_id = subst[self.left_var];
         let right_id = subst[self.right_var];
@@ -178,20 +162,16 @@ impl IsDeterministic {
 }
 
 impl Condition<RelLang, RelAnalysis> for IsDeterministic {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let expr_id = subst[self.expr_var];
         let data = &egraph[expr_id].data;
 
         // If the e-class data has no non-deterministic markers, it's deterministic.
         // Currently we check that it doesn't reference special "random"/"now" tables.
-        !data.tables.iter().any(|t| {
-            t.contains("random") || t.contains("now") || t.contains("current_timestamp")
-        })
+        !data
+            .tables
+            .iter()
+            .any(|t| t.contains("random") || t.contains("now") || t.contains("current_timestamp"))
     }
 }
 
@@ -211,12 +191,7 @@ impl IsConstant {
 }
 
 impl Condition<RelLang, RelAnalysis> for IsConstant {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let expr_id = subst[self.expr_var];
         let data = &egraph[expr_id].data;
 
@@ -267,12 +242,7 @@ impl<C> Condition<RelLang, RelAnalysis> for SafeCondition<C>
 where
     C: Condition<RelLang, RelAnalysis>,
 {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, eclass: Id, subst: &Subst) -> bool {
         // We use AssertUnwindSafe because Condition::check takes
         // &mut EGraph, which isn't UnwindSafe by default. Egg's
         // EGraph cannot be left in a publicly observable broken
@@ -281,9 +251,9 @@ where
         // canonical structure — so this assertion is sound. If a
         // future egg version changes that contract, this is the
         // right place to add a barrier.
-        let outcome = std::panic::catch_unwind(
-            std::panic::AssertUnwindSafe(|| self.inner.check(egraph, eclass, subst)),
-        );
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.inner.check(egraph, eclass, subst)
+        }));
         match outcome {
             Ok(b) => b,
             Err(payload) => {
@@ -324,11 +294,7 @@ pub fn references_only(pred: &str, side: &str) -> SafeCondition<ReferencesOnly> 
 /// BOTH sides of a join (i.e., it's a true cross-table join condition, not a
 /// single-table filter that should be pushed down).
 #[must_use]
-pub fn references_both(
-    pred: &str,
-    left: &str,
-    right: &str,
-) -> SafeCondition<ReferencesBoth> {
+pub fn references_both(pred: &str, left: &str, right: &str) -> SafeCondition<ReferencesBoth> {
     SafeCondition::new(ReferencesBoth::new(pred, left, right), "references_both")
 }
 
@@ -378,12 +344,7 @@ impl NotNullable {
 }
 
 impl Condition<RelLang, RelAnalysis> for NotNullable {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let id = subst[self.expr_var];
         // A constant (no table refs) cannot be NULL unless it IS NULL,
         // which we'd see as the `const-null` node. Look through the
@@ -393,9 +354,7 @@ impl Condition<RelLang, RelAnalysis> for NotNullable {
             // References tables ⇒ may be NULL; conservative.
             return false;
         }
-        class.nodes.iter().any(|n| {
-            !matches!(n, RelLang::ConstNull)
-        })
+        class.nodes.iter().any(|n| !matches!(n, RelLang::ConstNull))
     }
 }
 
@@ -423,12 +382,7 @@ impl NotZero {
 }
 
 impl Condition<RelLang, RelAnalysis> for NotZero {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let id = subst[self.expr_var];
         let class = &egraph[id];
         if !class.data.tables.is_empty() {
@@ -474,12 +428,7 @@ impl IsCanonicalScan {
 }
 
 impl Condition<RelLang, RelAnalysis> for IsCanonicalScan {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let id = subst[self.expr_var];
         let class = &egraph[id];
         class
@@ -513,12 +462,7 @@ impl IsUncorrelated {
 }
 
 impl Condition<RelLang, RelAnalysis> for IsUncorrelated {
-    fn check(
-        &self,
-        egraph: &mut EGraph<RelLang, RelAnalysis>,
-        _eclass: Id,
-        subst: &Subst,
-    ) -> bool {
+    fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let id = subst[self.expr_var];
         let data = &egraph[id].data;
         // Without a real correlation analysis, we approximate: a
@@ -536,7 +480,6 @@ pub fn is_uncorrelated(subq: &str) -> SafeCondition<IsUncorrelated> {
     SafeCondition::new(IsUncorrelated::new(subq), "is_uncorrelated")
 }
 
-
 // -- Phase 2 (RFC 0090) conditions ---------------------------------
 // Constructors that let the .rra `when:` field reference conditions whose
 // check logic lives in feature modules. Each delegates to the module's
@@ -551,7 +494,9 @@ pub struct XmlFunctionFilter {
 impl XmlFunctionFilter {
     #[must_use]
     pub fn new(pred: &str) -> Self {
-        Self { pred_var: parse_var(pred, "?pred") }
+        Self {
+            pred_var: parse_var(pred, "?pred"),
+        }
     }
 }
 
@@ -594,7 +539,10 @@ impl Condition<RelLang, RelAnalysis> for UngroupedCountStar {
 /// Returns a condition matching an ungrouped `COUNT(*)` aggregate.
 #[must_use]
 pub fn is_ungrouped_count_star(groups: &str, aggs: &str) -> SafeCondition<UngroupedCountStar> {
-    SafeCondition::new(UngroupedCountStar::new(groups, aggs), "is_ungrouped_count_star")
+    SafeCondition::new(
+        UngroupedCountStar::new(groups, aggs),
+        "is_ungrouped_count_star",
+    )
 }
 
 /// Condition: the e-class for `?var` contains no `const-bool` node (i.e. the
@@ -606,7 +554,9 @@ pub struct NotConstBool {
 impl NotConstBool {
     #[must_use]
     pub fn new(var: &str) -> Self {
-        Self { var: parse_var(var, "?pred") }
+        Self {
+            var: parse_var(var, "?pred"),
+        }
     }
 }
 
@@ -634,7 +584,9 @@ pub struct BsonOperatorFilter {
 impl BsonOperatorFilter {
     #[must_use]
     pub fn new(pred: &str) -> Self {
-        Self { pred_var: parse_var(pred, "?pred") }
+        Self {
+            pred_var: parse_var(pred, "?pred"),
+        }
     }
 }
 
@@ -659,7 +611,9 @@ pub struct JsonFieldPredicate {
 impl JsonFieldPredicate {
     #[must_use]
     pub fn new(pred: &str) -> Self {
-        Self { pred_var: parse_var(pred, "?pred") }
+        Self {
+            pred_var: parse_var(pred, "?pred"),
+        }
     }
 }
 
@@ -685,7 +639,9 @@ pub struct IsEquiJoin {
 impl IsEquiJoin {
     #[must_use]
     pub fn new(cond: &str) -> Self {
-        Self { cond_var: parse_var(cond, "?cond") }
+        Self {
+            cond_var: parse_var(cond, "?cond"),
+        }
     }
 }
 
@@ -731,7 +687,10 @@ pub struct ReferencesSubset {
 impl ReferencesSubset {
     #[must_use]
     pub fn new(pred: &str, cols: &str) -> Self {
-        Self { pred_var: parse_var(pred, "?pred"), cols_var: parse_var(cols, "?cols") }
+        Self {
+            pred_var: parse_var(pred, "?pred"),
+            cols_var: parse_var(cols, "?cols"),
+        }
     }
 }
 
@@ -760,7 +719,9 @@ pub struct HasIndexFor {
 impl HasIndexFor {
     #[must_use]
     pub fn new(table: &str) -> Self {
-        Self { table_var: parse_var(table, "?t") }
+        Self {
+            table_var: parse_var(table, "?t"),
+        }
     }
 }
 
@@ -800,7 +761,9 @@ pub struct IsInnerJoin {
 impl IsInnerJoin {
     #[must_use]
     pub fn new(type_sym: &str) -> Self {
-        Self { type_var: parse_var(type_sym, "?type") }
+        Self {
+            type_var: parse_var(type_sym, "?type"),
+        }
     }
 }
 

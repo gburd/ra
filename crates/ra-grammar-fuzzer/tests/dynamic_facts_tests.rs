@@ -55,9 +55,7 @@ fn properties_hold_across_scenarios() {
                                 return Err(TestCaseError::Fail(
                                     format!(
                                         "Property {} failed in scenario {:?}: {}",
-                                        result.property,
-                                        test_scenario,
-                                        result.details,
+                                        result.property, test_scenario, result.details,
                                     )
                                     .into(),
                                 ));
@@ -155,8 +153,7 @@ mod scenario_tests {
 
     #[test]
     fn memory_constrained_scenario_has_memory_limits() {
-        let facts =
-            DynamicFactsProvider::new(DatabaseScenario::MemoryConstrained);
+        let facts = DynamicFactsProvider::new(DatabaseScenario::MemoryConstrained);
         let hardware = facts.hardware_profile();
 
         assert_eq!(hardware.cpu_cores, 2);
@@ -165,16 +162,12 @@ mod scenario_tests {
 
         // Memory constrained should have explicit memory limit
         assert!(facts.memory_limit().is_some());
-        assert_eq!(
-            facts.memory_limit().unwrap(),
-            hardware.available_memory / 2
-        );
+        assert_eq!(facts.memory_limit().unwrap(), hardware.available_memory / 2);
     }
 
     #[test]
     fn high_performance_scenario_has_advanced_features() {
-        let facts =
-            DynamicFactsProvider::new(DatabaseScenario::HighPerformance);
+        let facts = DynamicFactsProvider::new(DatabaseScenario::HighPerformance);
         let hardware = facts.hardware_profile();
 
         assert_eq!(hardware.cpu_cores, 128);
@@ -204,8 +197,7 @@ mod scenario_tests {
 
     #[test]
     fn stale_stats_scenario_has_high_staleness() {
-        let mut facts =
-            DynamicFactsProvider::new(DatabaseScenario::StaleStats);
+        let mut facts = DynamicFactsProvider::new(DatabaseScenario::StaleStats);
 
         // Generate stats for a test table
         facts.generate_table_stats("users");
@@ -234,8 +226,7 @@ mod scenario_tests {
 
     #[test]
     fn skewed_data_scenario_generates_skewed_columns() {
-        let mut facts =
-            DynamicFactsProvider::new(DatabaseScenario::SkewedData);
+        let mut facts = DynamicFactsProvider::new(DatabaseScenario::SkewedData);
 
         // Generate column stats for a test column
         facts.generate_column_stats("users", "status");
@@ -274,8 +265,7 @@ mod scenario_tests {
             let stats = facts.get_table_stats("test_table").unwrap();
 
             assert!(
-                stats.row_count >= min_rows as f64
-                    && stats.row_count <= max_rows as f64,
+                stats.row_count >= min_rows as f64 && stats.row_count <= max_rows as f64,
                 "Scenario {:?} should generate row count between {} and {}, got {}",
                 scenario,
                 min_rows,

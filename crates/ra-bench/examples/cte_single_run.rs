@@ -11,12 +11,12 @@ use std::time::Instant;
 fn main() {
     // Get all CTE queries
     let all = all_queries();
-    let cte_queries: Vec<_> = all
-        .iter()
-        .filter(|e| e.category == "ctes")
-        .collect();
+    let cte_queries: Vec<_> = all.iter().filter(|e| e.category == "ctes").collect();
 
-    println!("Running {} CTE queries ONCE each (no cache warmup)...\n", cte_queries.len());
+    println!(
+        "Running {} CTE queries ONCE each (no cache warmup)...\n",
+        cte_queries.len()
+    );
 
     let mut total = 0.0;
     for entry in &cte_queries {

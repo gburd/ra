@@ -11,9 +11,9 @@ use anyhow::Result;
 // `Write` is needed for `stdout().flush()` inside the
 // live-comparison-gated `run_comparison`; gate the import the same
 // way so it isn't an unused import in the default build.
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "live-comparison")]
 use std::io::Write;
-use serde::{Deserialize, Serialize};
 
 /// Configuration for the comparison run.
 pub struct CompareConfig {
@@ -208,7 +208,8 @@ fn run_with_planner(
         };
 
         // EXPLAIN JSON output is an array with one element
-        let plan = json_val.as_array()
+        let plan = json_val
+            .as_array()
             .and_then(|arr| arr.first())
             .unwrap_or(&json_val);
 
@@ -280,8 +281,9 @@ fn verify_results(client: &mut postgres::Client, sql: &str) -> Option<bool> {
     // compares actual result *content* (the previous version only compared row
     // counts, which missed value differences and flagged order-only diffs).
     let body = head.trim_end().trim_end_matches(';');
-    let digest_sql =
-        format!("SELECT md5(coalesce(string_agg(t::text, ',' ORDER BY t::text), '')) FROM ({body}) t");
+    let digest_sql = format!(
+        "SELECT md5(coalesce(string_agg(t::text, ',' ORDER BY t::text), '')) FROM ({body}) t"
+    );
 
     // A query error on either path (e.g. Ra falling back / an unsupported
     // feature) is "not verifiable" (None), NOT a content mismatch — the prior
@@ -298,20 +300,17 @@ fn verify_results(client: &mut postgres::Client, sql: &str) -> Option<bool> {
 fn compute_summary(results: &[CompareResult]) -> CompareSummary {
     let total_queries = results.len();
     let ra_succeeded = results.iter().filter(|r| r.ra_metrics.is_some()).count();
-    let results_checked = results.iter().filter(|r| r.results_correct.is_some()).count();
+    let results_checked = results
+        .iter()
+        .filter(|r| r.results_correct.is_some())
+        .count();
     let results_correct = results
         .iter()
         .filter(|r| r.results_correct == Some(true))
         .count();
 
-    let mut plan_speedups: Vec<f64> = results
-        .iter()
-        .filter_map(|r| r.plan_speedup)
-        .collect();
-    let mut exec_speedups: Vec<f64> = results
-        .iter()
-        .filter_map(|r| r.exec_speedup)
-        .collect();
+    let mut plan_speedups: Vec<f64> = results.iter().filter_map(|r| r.plan_speedup).collect();
+    let mut exec_speedups: Vec<f64> = results.iter().filter_map(|r| r.exec_speedup).collect();
 
     plan_speedups.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     exec_speedups.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -349,15 +348,36 @@ pub fn print_summary(report: &CompareReport) {
     println!("╔══════════════════════════════════════════════╗");
     println!("║   Ra vs PostgreSQL Planner Comparison        ║");
     println!("╠══════════════════════════════════════════════╣");
-    println!("║ Total queries:          {:>6}               ║", s.total_queries);
-    println!("║ Ra planned successfully: {:>6}               ║", s.ra_succeeded);
+    println!(
+        "║ Total queries:          {:>6}               ║",
+        s.total_queries
+    );
+    println!(
+        "║ Ra planned successfully: {:>6}               ║",
+        s.ra_succeeded
+    );
     if s.results_checked > 0 {
-        println!("║ Results correct:   {:>6}/{:<6}             ║", s.results_correct, s.results_checked);
+        println!(
+            "║ Results correct:   {:>6}/{:<6}             ║",
+            s.results_correct, s.results_checked
+        );
     }
     println!("╠══════════════════════════════════════════════╣");
-    println!("║ Median planning speedup:  {:>6.2}x             ║", s.median_plan_speedup);
-    println!("║ Median execution speedup: {:>6.2}x             ║", s.median_exec_speedup);
-    println!("║ Ra exec faster:           {:>6}               ║", s.ra_exec_faster_count);
-    println!("║ PG exec faster:           {:>6}               ║", s.pg_exec_faster_count);
+    println!(
+        "║ Median planning speedup:  {:>6.2}x             ║",
+        s.median_plan_speedup
+    );
+    println!(
+        "║ Median execution speedup: {:>6.2}x             ║",
+        s.median_exec_speedup
+    );
+    println!(
+        "║ Ra exec faster:           {:>6}               ║",
+        s.ra_exec_faster_count
+    );
+    println!(
+        "║ PG exec faster:           {:>6}               ║",
+        s.pg_exec_faster_count
+    );
     println!("╚══════════════════════════════════════════════╝");
 }

@@ -107,9 +107,8 @@ pub fn run_query(
     let optimize_ms = t_opt.elapsed().as_secs_f64() * 1000.0;
 
     // --- Optional Postgres comparison ---
-    let (pg_explain_ms, structural_sim, cost_ratio) = run_pg_comparison(
-        sql, &optimized, &config.pg_connection,
-    );
+    let (pg_explain_ms, structural_sim, cost_ratio) =
+        run_pg_comparison(sql, &optimized, &config.pg_connection);
 
     let dims = QueryDimensions {
         parse_ms,
@@ -227,7 +226,8 @@ fn do_verify_results(
     // Skip verification for queries with non-deterministic output
     // that can't be made deterministic (e.g., queries with RANDOM())
     let lower = original_sql.to_lowercase();
-    if lower.contains("random()") || lower.contains("now()") || lower.contains("current_timestamp") {
+    if lower.contains("random()") || lower.contains("now()") || lower.contains("current_timestamp")
+    {
         return (None, None);
     }
 
@@ -276,20 +276,16 @@ fn do_verify_results(
 
 /// Execute a SQL query and return rows as sorted vectors of text columns.
 #[cfg(feature = "live-comparison")]
-fn execute_as_text(
-    client: &mut postgres::Client,
-    sql: &str,
-) -> Result<Vec<Vec<String>>, String> {
-    let rows = client
-        .query(sql, &[])
-        .map_err(|e| e.to_string())?;
+fn execute_as_text(client: &mut postgres::Client, sql: &str) -> Result<Vec<Vec<String>>, String> {
+    let rows = client.query(sql, &[]).map_err(|e| e.to_string())?;
 
     let mut result: Vec<Vec<String>> = Vec::with_capacity(rows.len());
     for row in &rows {
         let mut cols = Vec::with_capacity(row.len());
         for i in 0..row.len() {
             // Get each column as text representation
-            let val: Option<String> = row.try_get::<_, Option<String>>(i)
+            let val: Option<String> = row
+                .try_get::<_, Option<String>>(i)
                 .or_else(|_| {
                     // Try as i64
                     row.try_get::<_, Option<i64>>(i)
@@ -338,10 +334,7 @@ fn compare_result_sets(
             rows_a.len(),
             rows_b.len()
         )
-    } else if !rows_a.is_empty()
-        && !rows_b.is_empty()
-        && rows_a[0].len() != rows_b[0].len()
-    {
+    } else if !rows_a.is_empty() && !rows_b.is_empty() && rows_a[0].len() != rows_b[0].len() {
         format!(
             "Column count mismatch: original={}, optimized={}",
             rows_a[0].len(),
@@ -349,10 +342,7 @@ fn compare_result_sets(
         )
     } else {
         // Find first differing row
-        let first_diff = rows_a
-            .iter()
-            .zip(rows_b.iter())
-            .position(|(a, b)| a != b);
+        let first_diff = rows_a.iter().zip(rows_b.iter()).position(|(a, b)| a != b);
         match first_diff {
             Some(idx) => format!(
                 "Row {idx} differs: original={:?}, optimized={:?}",

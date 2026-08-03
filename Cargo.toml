@@ -25,14 +25,12 @@ members = [
     "crates/ra-sql-parser",
     # CLI layer (research & education)
     "crates/ra-cli",
-    "crates/ra-adapters",
     "crates/ra-metadata",
     # Experimental layer (research innovations)
     "crates/ra-ml",
     "crates/ra-cache-impl",
     "crates/ra-adaptive",
     "crates/ra-test-utils",
-    "crates/ra-quel-parser",
     "crates/ra-grammar-fuzzer",
     "crates/ra-bench",
     "crates/ra-sqltest",
@@ -65,7 +63,6 @@ exclude = [
 default = []
 # CLI layer: research & educational tooling
 cli = [
-    "dep:ra-adapters",
     "dep:ra-metadata",
 ]
 # Experimental layer: research innovations
@@ -74,7 +71,6 @@ experimental = [
     "dep:ra-cache-impl",
     "dep:ra-adaptive",
     "dep:ra-test-utils",
-    "dep:ra-quel-parser",
 ]
 # Build everything
 all = ["cli", "experimental"]
@@ -91,14 +87,12 @@ ra-stats = { workspace = true }
 ra-cache-api = { workspace = true }
 ra-bitnet = { workspace = true }
 # CLI layer (optional — ra-cli is a binary, build with: cargo build -p ra-cli)
-ra-adapters = { workspace = true, optional = true }
 ra-metadata = { workspace = true, optional = true }
 # Experimental layer (optional)
 ra-ml = { workspace = true, optional = true }
 ra-cache-impl = { workspace = true, optional = true }
 ra-adaptive = { workspace = true, optional = true }
 ra-test-utils = { workspace = true, optional = true }
-ra-quel-parser = { workspace = true, optional = true }
 
 [dev-dependencies]
 ra-test-utils = { workspace = true, features = ["timeline"] }
@@ -173,9 +167,7 @@ ra-stats = { package = "ra-stats-advanced", path = "crates/ra-stats-advanced" }
 ra-metadata = { path = "crates/ra-metadata" }
 ra-cache-api = { path = "crates/ra-cache-api" }
 ra-cache-impl = { path = "crates/ra-cache-impl" }
-ra-adapters = { path = "crates/ra-adapters" }
 ra-test-utils = { path = "crates/ra-test-utils" }
-ra-quel-parser = { path = "crates/ra-quel-parser" }
 ra-cli = { path = "crates/ra-cli" }
 ra-bitnet = { path = "crates/ra-bitnet" }
 ra-plan-advice = { path = "crates/ra-plan-advice" }

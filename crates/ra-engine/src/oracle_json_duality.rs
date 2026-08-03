@@ -456,9 +456,7 @@ pub fn predicate_target(
     for field in &view.fields {
         if field.json_path == field_path {
             return match &field.mapping {
-                DualityFieldMapping::Column { .. } => {
-                    PredicateTarget::RelationalColumn
-                }
+                DualityFieldMapping::Column { .. } => PredicateTarget::RelationalColumn,
                 DualityFieldMapping::Nested { .. } | DualityFieldMapping::Array { .. } => {
                     PredicateTarget::JsonPath
                 }
@@ -565,7 +563,11 @@ fn is_json_field_predicate(
 }
 
 /// Recursively check if an e-class contains JSON access patterns.
-pub(crate) fn contains_json_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
+pub(crate) fn contains_json_pattern(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    id: Id,
+    depth: u32,
+) -> bool {
     if depth == 0 {
         return false;
     }
@@ -589,9 +591,7 @@ pub(crate) fn contains_json_pattern(egraph: &egg::EGraph<RelLang, RelAnalysis>, 
             {
                 return true;
             }
-            RelLang::Not([inner])
-                if contains_json_pattern(egraph, *inner, depth - 1) =>
-            {
+            RelLang::Not([inner]) if contains_json_pattern(egraph, *inner, depth - 1) => {
                 return true;
             }
             _ => {}

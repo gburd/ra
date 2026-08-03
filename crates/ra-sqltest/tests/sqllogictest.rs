@@ -43,9 +43,7 @@ async fn run_all_tests() {
     for file in &files {
         let mut runner = Runner::new(|| async { Ok(RaDb::new()) });
 
-        let relative = file
-            .strip_prefix(&slt_dir)
-            .unwrap_or(file.as_path());
+        let relative = file.strip_prefix(&slt_dir).unwrap_or(file.as_path());
 
         match runner.run_file_async(file).await {
             Ok(()) => {

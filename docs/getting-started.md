@@ -1,6 +1,10 @@
 # Getting Started with RA
 
-This guide demonstrates RA's major features through practical examples. RA is a query optimizer that transforms SQL queries into optimal execution plans using 1,327+ transformation rules, equality saturation, and cost-based optimization.
+This guide demonstrates RA's major features through practical examples. RA is
+an experimental parser, planner, and optimizer for PostgreSQL (a research
+prototype) that transforms SQL queries into a relational algebra tree using its
+rule library (1,467 `.rra` rule sources; 293 currently active), equality
+saturation, and cost-based optimization.
 
 ## Installation
 
@@ -450,18 +454,15 @@ ra-cli check-rules --query "YOUR_QUERY"
 
 ### Plan Cache
 
-Ra caches optimized plans by query template, delivering 37x speedup
-for OLTP workloads with repeated query patterns:
-
-- Cold start: ~325 us per query (full optimization)
-- Cached lookup: ~0.46 us per query (706x faster)
-- Hit rate: 97.5% with 5 query templates
+Ra caches optimized plans by query template. No end-to-end speedup number
+is published yet; cache hit rate and cold/warm timings will be reported once
+measured with a committed harness against native PostgreSQL.
 
 ### Rule Complexity Prioritization
 
 Rules are sorted by cost-to-benefit ratio before each e-graph
 saturation iteration (RFC 0058). High-benefit, low-complexity rules
-run first, yielding 20-27% faster optimization on complex queries
+run first, aiming to reduce optimization work on complex queries
 without sacrificing plan quality.
 
 ### Streaming Statistics

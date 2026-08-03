@@ -4,7 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RA is a relational algebra query optimization system. It codifies 1,387 database transformation rules (from PostgreSQL, MySQL, DuckDB, SQLite, etc.) into literate `.rra` files, then uses equality saturation (egg e-graphs) and differential dataflow to explore and extract optimal query plans.
+RA is a relational algebra query optimization system. It codifies database
+transformation rules (from PostgreSQL, MySQL, DuckDB, SQLite, etc.) into literate
+`.rra` files, then uses equality saturation (egg e-graphs) and differential
+dataflow to explore and extract optimal query plans. The `rules/` tree holds
+1,467 `.rra` sources; 293 currently compile to active rewrite rules (regenerate:
+`cargo run --release -p ra-engine --example count_rules`).
+
+Non-core work (hardware/distributed/multi-model rule sources, the
+dialect/adapter/quel crates, the web visualizer) lives in the sibling repo
+[`ra-lab`](https://codeberg.org/gregburd/ra-lab), split out to keep this
+repository reviewable (steering doc §4).
 
 ## Build & Test Commands
 
@@ -78,10 +88,15 @@ The workspace is organized into three layers plus a compatibility shim, controll
 `lime-sys`, `ra-core`, `ra-parser`, `ra-compiler`, `ra-engine`, `ra-bitnet`, `ra-dialect`, `ra-hardware`, `ra-stats-advanced` (lib name `ra_stats`), `ra-cache-api`, `ra-sql-parser` (lib name `sqlparser`)
 
 **CLI (`--features cli`):**
-`ra-cli` (binary), `ra-adapters`, `ra-metadata`
+`ra-cli` (binary), `ra-metadata`
 
 **Experimental (`--features experimental`):**
-`ra-ml`, `ra-cache-impl`, `ra-adaptive`, `ra-test-utils`, `ra-quel-parser`, `ra-grammar-fuzzer`, `ra-bench`, `ra-sqltest`, `ra-difftest`, `ra-plan-advice`
+`ra-ml`, `ra-cache-impl`, `ra-adaptive`, `ra-test-utils`, `ra-grammar-fuzzer`, `ra-bench`, `ra-sqltest`, `ra-difftest`, `ra-plan-advice`
+
+> `ra-adapters` and `ra-quel-parser` moved to `ra-lab` (steering doc §4).
+> `ra-dialect`, `ra-ml`, and `ra-adaptive` remain for now (still wired into
+> `ra-cli`/`ra-engine`); they are slated for `ra-lab` once the cost-model
+> gate resolves and the `translate`/`ml`/`cache` CLI commands are unwound.
 
 **Compatibility shim (in workspace, not in default-members):**
 `ra-config` — re-exports `ra_core::config::*` for downstream consumers that still import from the original path.
@@ -115,7 +130,7 @@ Use `--features all` to build everything in the root facade.
 - `rule_advisor.rs` — 3-stage rule filtering (context → query-shape → learned ranking)
 - `lazy_rules.rs` — on-demand rule compilation by category
 
-**CLI:** `ra-cli` — command-line interface. Depends on `ra-adapters` (DuckDB, MySQL, Stoolap connectors) and `ra-metadata` (database metadata factory).
+**CLI:** `ra-cli` — command-line interface. Depends on `ra-metadata` (database metadata factory).
 
 ### Key Types (all in `ra-core`)
 
@@ -165,7 +180,7 @@ Use `anyhow`/`thiserror` for error handling; avoid `.unwrap()` and `.expect()` (
 ## Project Layout
 
 ```
-rules/           — 1,387 .rra rule files (logical/, physical/, hardware/, distributed/, multi-model/)
+rules/           — 1,467 .rra rule files (logical/, physical/); hardware/, distributed/, multi-model/ moved to ra-lab
 crates/          — Rust crates organized into core/cli/experimental layers (see above)
 tests/           — workspace-level integration tests
 benchmarks/      — JOB and TPC-H benchmark suites
@@ -314,3 +329,5 @@ it.
 
 The `.gitignore` "Repository hygiene" block is the enforcement; if you create a
 new kind of generated output, add its path there in the same change.
+
+See .agent-steering-domains.md for domain-specific steering (local).

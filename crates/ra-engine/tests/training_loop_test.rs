@@ -19,8 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use ra_core::statistics::Statistics;
 use ra_engine::training_coordinator::{
-    bootstrap_model, shared_coordinator_from_model,
-    SharedTrainingCoordinator, TrainingCoordinator,
+    bootstrap_model, shared_coordinator_from_model, SharedTrainingCoordinator, TrainingCoordinator,
 };
 use ra_engine::{Optimizer, OptimizerConfig, ResourceBudget};
 use ra_parser::sql_to_relexpr;
@@ -129,12 +128,7 @@ const TABLES: &[(&str, &[&str])] = &[
     ),
     (
         "partsupp",
-        &[
-            "ps_partkey",
-            "ps_suppkey",
-            "ps_availqty",
-            "ps_supplycost",
-        ],
+        &["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost"],
     ),
     ("nation", &["n_nationkey", "n_name", "n_regionkey"]),
     ("region", &["r_regionkey", "r_name"]),
@@ -229,11 +223,7 @@ fn gen_three_table_join(rng: &mut Rng) -> String {
         .iter()
         .enumerate()
         .filter(|(i, j2)| {
-            *i != j1_idx
-                && (j2.0 == j1.0
-                    || j2.0 == j1.2
-                    || j2.2 == j1.0
-                    || j2.2 == j1.2)
+            *i != j1_idx && (j2.0 == j1.0 || j2.0 == j1.2 || j2.2 == j1.0 || j2.2 == j1.2)
         })
         .collect();
 
@@ -251,12 +241,23 @@ fn gen_three_table_join(rng: &mut Rng) -> String {
         "SELECT {}.{}, {}.{}, {}.{} FROM {} \
          JOIN {} ON {}.{} = {}.{} \
          JOIN {} ON {}.{} = {}.{}",
-        j1.0, t1_cols[0],
-        j1.2, t2_cols[0],
-        j2.2, t3_cols[0],
         j1.0,
-        j1.2, j1.0, j1.1, j1.2, j1.3,
-        j2.2, j2.0, j2.1, j2.2, j2.3,
+        t1_cols[0],
+        j1.2,
+        t2_cols[0],
+        j2.2,
+        t3_cols[0],
+        j1.0,
+        j1.2,
+        j1.0,
+        j1.1,
+        j1.2,
+        j1.3,
+        j2.2,
+        j2.0,
+        j2.1,
+        j2.2,
+        j2.3,
     )
 }
 
@@ -405,12 +406,10 @@ fn generate_queries(count: usize) -> Vec<String> {
 // ============================================================================
 
 /// Create an optimizer with TPC-H table statistics and training enabled.
-fn create_training_optimizer(
-    coordinator: SharedTrainingCoordinator,
-) -> Optimizer {
+fn create_training_optimizer(coordinator: SharedTrainingCoordinator) -> Optimizer {
     let config = OptimizerConfig {
         use_adaptive_limits: true,
-        iter_limit: 10, // Keep iterations low for speed
+        iter_limit: 10,     // Keep iterations low for speed
         node_limit: 10_000, // Limit e-graph size
         time_limit_secs: 2,
         max_optimization_time_ms: 2000,
@@ -643,9 +642,8 @@ fn create_measurement_optimizer() -> Optimizer {
         max_optimization_time_ms: 5000,
         ..OptimizerConfig::default()
     };
-    let mut opt = Optimizer::with_config(config).with_resource_budget(
-        ResourceBudget::unlimited().with_iteration_limit(20),
-    );
+    let mut opt = Optimizer::with_config(config)
+        .with_resource_budget(ResourceBudget::unlimited().with_iteration_limit(20));
 
     // Add TPC-H table statistics for realistic cost estimation
     let tpch_stats: &[(&str, f64, u64, u64)] = &[

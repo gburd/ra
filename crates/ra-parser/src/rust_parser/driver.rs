@@ -40,8 +40,12 @@ pub fn parse_sql(sql: &str) -> Result<RelExpr, ParseErrors> {
             .as_ref()
             .and_then(|c| c.to_str().ok())
             .unwrap_or("");
-        let value =
-            Value::from_token(text, tok.value.int_val, tok.value.float_val, tok.value.location);
+        let value = Value::from_token(
+            text,
+            tok.value.int_val,
+            tok.value.float_val,
+            tok.value.location,
+        );
         let code = u16::try_from(tok.code).unwrap_or(0);
         if let Err(e) = parser.push(code, value) {
             record_parse_error(&mut parser.user, &e, Some(tok), sql);
@@ -72,7 +76,10 @@ fn record_parse_error(
     sql: &str,
 ) {
     match err {
-        ParseError::SyntaxError { token, state: pstate } => {
+        ParseError::SyntaxError {
+            token,
+            state: pstate,
+        } => {
             state.push_structured_error(build_syntax_error(*token, *pstate, tok, sql));
         }
         other => {

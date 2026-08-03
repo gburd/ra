@@ -16,13 +16,14 @@
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::{IndexStats, Statistics};
-use ra_engine::plan_advice_physical::{
-    JoinInnerStrategy, ScanStrategy,
-};
+use ra_engine::plan_advice_physical::{JoinInnerStrategy, ScanStrategy};
 use ra_engine::{Optimizer, OptimizerConfig};
 
 fn scan(name: &str) -> RelExpr {
-    RelExpr::Scan { table: name.into(), alias: None }
+    RelExpr::Scan {
+        table: name.into(),
+        alias: None,
+    }
 }
 
 fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
@@ -90,9 +91,7 @@ fn supplied_advice_overrides_cost_driven_default() {
         plan_advice: Some("MERGE_JOIN_PLAIN(b)".into()),
         ..OptimizerConfig::default()
     };
-    let result = Optimizer::with_config(config)
-        .optimize_bounded(&q)
-        .unwrap();
+    let result = Optimizer::with_config(config).optimize_bounded(&q).unwrap();
     assert_eq!(
         result.physical_choices.join_for("b"),
         Some(&JoinInnerStrategy::MergeJoinPlain),
@@ -143,9 +142,9 @@ fn cost_driven_scan_picks_index_for_indexed_column_filter() {
         Some(ScanStrategy::Index { name, .. }) => {
             assert_eq!(name, "t_id_idx");
         }
-        other => panic!(
-            "medium table with index on filtered column should prefer Index; got {other:?}",
-        ),
+        other => {
+            panic!("medium table with index on filtered column should prefer Index; got {other:?}")
+        }
     }
 }
 
@@ -248,18 +247,14 @@ fn cost_driven_scan_breaks_ties_with_primary_key() {
     let mut opt = Optimizer::new();
     let mut stats = medium_table_stats();
 
-    let mut pk = ra_core::statistics::IndexStats::new(
-        vec!["id".into()],
-        ra_core::facts::IndexType::BTree,
-    );
+    let mut pk =
+        ra_core::statistics::IndexStats::new(vec!["id".into()], ra_core::facts::IndexType::BTree);
     pk.is_primary = true;
     pk.is_unique = true;
     stats.indexes.insert("t_pkey".into(), pk);
 
-    let secondary = ra_core::statistics::IndexStats::new(
-        vec!["id".into()],
-        ra_core::facts::IndexType::BTree,
-    );
+    let secondary =
+        ra_core::statistics::IndexStats::new(vec!["id".into()], ra_core::facts::IndexType::BTree);
     stats.indexes.insert("t_id_dup".into(), secondary);
 
     opt.add_table_stats("t", stats);
@@ -291,11 +286,7 @@ fn supplied_index_advice_wins_over_cost_driven_seq() {
     }
 }
 
-fn add_btree_index_with_ndv(
-    stats: &mut Statistics,
-    name: &str,
-    columns: Vec<&str>,
-) {
+fn add_btree_index_with_ndv(stats: &mut Statistics, name: &str, columns: Vec<&str>) {
     let columns: Vec<String> = columns.into_iter().map(String::from).collect();
     let idx = IndexStats::new(columns, ra_core::facts::IndexType::BTree);
     stats.indexes.insert(name.to_string(), idx);
@@ -355,10 +346,7 @@ fn cost_driven_scan_uniqueness_beats_selectivity() {
     let mut opt = Optimizer::new();
     let mut stats = medium_table_stats();
 
-    let mut unique_idx = IndexStats::new(
-        vec!["id".into()],
-        ra_core::facts::IndexType::BTree,
-    );
+    let mut unique_idx = IndexStats::new(vec!["id".into()], ra_core::facts::IndexType::BTree);
     unique_idx.is_unique = true;
     stats.indexes.insert("t_unique".into(), unique_idx);
 
@@ -417,7 +405,12 @@ fn cost_driven_scan_skips_gin_index_for_equality_predicate() {
     let q = filter_eq(scan("t"), "t", "id", 42);
     let mut opt = Optimizer::new();
     let mut stats = medium_table_stats();
-    add_index_typed(&mut stats, "t_gin", vec!["id"], ra_core::facts::IndexType::Gin);
+    add_index_typed(
+        &mut stats,
+        "t_gin",
+        vec!["id"],
+        ra_core::facts::IndexType::Gin,
+    );
     opt.add_table_stats("t", stats);
 
     let result = opt.optimize_bounded(&q).unwrap();

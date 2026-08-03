@@ -444,7 +444,7 @@ fn test_stitch_at_join() {
 
     // The stitched plan should replace the left child with
     // materialized input.
-    assert!(result.stitch_points_applied == 1);
+    assert_eq!(result.stitch_points_applied, 1);
     assert!(result.stitch_overhead > 0.0);
 
     if let RelExpr::Join { left, right, .. } = &result.plan {
@@ -478,7 +478,7 @@ fn test_stitch_at_aggregate() {
         },
     );
 
-    assert!(result.stitch_points_applied == 1);
+    assert_eq!(result.stitch_points_applied, 1);
     if let RelExpr::Aggregate { input, .. } = &result.plan {
         if let RelExpr::Scan { table, .. } = input.as_ref() {
             assert_eq!(table, "partial_results");

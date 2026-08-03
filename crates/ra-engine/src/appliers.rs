@@ -58,8 +58,10 @@ impl Applier<RelLang, RelAnalysis> for FoldArith {
         _searcher_ast: Option<&PatternAst<RelLang>>,
         _rule_name: Symbol,
     ) -> Vec<Id> {
-        let (Some(a), Some(b)) = (read_int(egraph, subst[self.a]), read_int(egraph, subst[self.b]))
-        else {
+        let (Some(a), Some(b)) = (
+            read_int(egraph, subst[self.a]),
+            read_int(egraph, subst[self.b]),
+        ) else {
             return Vec::new();
         };
         let folded = match self.op {
@@ -85,17 +87,29 @@ impl Applier<RelLang, RelAnalysis> for FoldArith {
 /// Applier folding `(add (const-int ?a) (const-int ?b))` → `(const-int a+b)`.
 #[must_use]
 pub fn fold_add(a: &str, b: &str) -> FoldArith {
-    FoldArith { op: ArithOp::Add, a: parse_var(a), b: parse_var(b) }
+    FoldArith {
+        op: ArithOp::Add,
+        a: parse_var(a),
+        b: parse_var(b),
+    }
 }
 
 /// Applier folding `(sub (const-int ?a) (const-int ?b))` → `(const-int a-b)`.
 #[must_use]
 pub fn fold_sub(a: &str, b: &str) -> FoldArith {
-    FoldArith { op: ArithOp::Sub, a: parse_var(a), b: parse_var(b) }
+    FoldArith {
+        op: ArithOp::Sub,
+        a: parse_var(a),
+        b: parse_var(b),
+    }
 }
 
 /// Applier folding `(mul (const-int ?a) (const-int ?b))` → `(const-int a*b)`.
 #[must_use]
 pub fn fold_mul(a: &str, b: &str) -> FoldArith {
-    FoldArith { op: ArithOp::Mul, a: parse_var(a), b: parse_var(b) }
+    FoldArith {
+        op: ArithOp::Mul,
+        a: parse_var(a),
+        b: parse_var(b),
+    }
 }

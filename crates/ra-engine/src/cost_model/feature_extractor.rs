@@ -40,7 +40,7 @@ pub struct StructuralCounts {
 ///
 /// This walks the entire expression tree and counts structural elements
 /// like joins, aggregates, filters, etc.
-#[must_use] 
+#[must_use]
 pub fn extract_features(expr: &RelExpr) -> QueryFeatures {
     let mut extractor = FeatureExtractor::new();
     extractor.visit(expr);
@@ -83,7 +83,10 @@ pub fn extract_features_with_stats(
                 .get(name.as_str())
                 .or_else(|| {
                     let lower = name.to_lowercase();
-                    table_stats.iter().find(|(k, _)| k.to_lowercase() == lower).map(|(_, v)| v)
+                    table_stats
+                        .iter()
+                        .find(|(k, _)| k.to_lowercase() == lower)
+                        .map(|(_, v)| v)
                 })
                 .map(|s| s.row_count)
         })
@@ -124,7 +127,9 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::BitmapIndexScan { table, .. }
         | RelExpr::IndexOnlyScan { table, .. }
         | RelExpr::ParallelScan { table, .. }
-        | RelExpr::MvScan { view_name: table, .. } => {
+        | RelExpr::MvScan {
+            view_name: table, ..
+        } => {
             out.push(table.to_lowercase());
         }
         RelExpr::Filter { input, .. }
@@ -148,11 +153,18 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
             collect_table_names_inner(left, out);
             collect_table_names_inner(right, out);
         }
-        RelExpr::CTE { definition, body, .. } => {
+        RelExpr::CTE {
+            definition, body, ..
+        } => {
             collect_table_names_inner(definition, out);
             collect_table_names_inner(body, out);
         }
-        RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
             collect_table_names_inner(base_case, out);
             collect_table_names_inner(recursive_case, out);
             collect_table_names_inner(body, out);
@@ -167,9 +179,7 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_table_names_inner(inp, out);
             }
         }
-        RelExpr::Values { .. }
-        | RelExpr::MultiUnnest { .. }
-        | RelExpr::RowPattern { .. } => {}
+        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } | RelExpr::RowPattern { .. } => {}
         RelExpr::Insert { table, source, .. } => {
             out.push(table.to_lowercase());
             collect_table_names_inner(source, out);
@@ -226,7 +236,7 @@ impl Default for FeatureExtractor {
 }
 
 impl FeatureExtractor {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             table_count: 0,
@@ -260,7 +270,9 @@ impl FeatureExtractor {
                 self.table_count += 1;
             }
 
-            RelExpr::Filter { input, predicate, .. } => {
+            RelExpr::Filter {
+                input, predicate, ..
+            } => {
                 // Count the number of filter predicates
                 self.filter_count += Self::count_predicates(predicate);
                 self.visit(input);
@@ -407,8 +419,7 @@ impl FeatureExtractor {
                 self.visit(input);
             }
 
-            RelExpr::IndexOnlyScan { .. }
-            | RelExpr::BitmapIndexScan { .. } => {
+            RelExpr::IndexOnlyScan { .. } | RelExpr::BitmapIndexScan { .. } => {
                 self.table_count += 1;
             }
 
@@ -463,13 +474,30 @@ impl FeatureExtractor {
             Expr::Function { name, args } => {
                 // Check if this is an aggregate function
                 let aggregate_functions = [
-                    "count", "sum", "avg", "min", "max", "array_agg", "string_agg",
-                    "count_distinct", "stddev", "variance", "covar_pop", "covar_samp",
-                    "corr", "regr_slope", "regr_intercept", "percentile_cont", "percentile_disc"
+                    "count",
+                    "sum",
+                    "avg",
+                    "min",
+                    "max",
+                    "array_agg",
+                    "string_agg",
+                    "count_distinct",
+                    "stddev",
+                    "variance",
+                    "covar_pop",
+                    "covar_samp",
+                    "corr",
+                    "regr_slope",
+                    "regr_intercept",
+                    "percentile_cont",
+                    "percentile_disc",
                 ];
 
                 let mut count = 0;
-                if aggregate_functions.iter().any(|&func| name.eq_ignore_ascii_case(func)) {
+                if aggregate_functions
+                    .iter()
+                    .any(|&func| name.eq_ignore_ascii_case(func))
+                {
                     count += 1;
                 }
 
@@ -482,9 +510,7 @@ impl FeatureExtractor {
             Expr::BinOp { left, right, .. } => {
                 Self::count_aggregates_in_expr(left) + Self::count_aggregates_in_expr(right)
             }
-            Expr::UnaryOp { operand, .. } => {
-                Self::count_aggregates_in_expr(operand)
-            }
+            Expr::UnaryOp { operand, .. } => Self::count_aggregates_in_expr(operand),
             Expr::Case { .. } => {
                 // For simplicity, don't traverse Case expressions
                 // Most CASE expressions won't contain aggregates in typical queries
@@ -499,10 +525,7 @@ impl FeatureExtractor {
     fn count_predicates(expr: &Expr) -> u32 {
         match expr {
             Expr::BinOp { op, left, right } => {
-                if matches!(
-                    op,
-                    ra_core::expr::BinOp::And | ra_core::expr::BinOp::Or
-                ) {
+                if matches!(op, ra_core::expr::BinOp::And | ra_core::expr::BinOp::Or) {
                     // AND/OR combine multiple predicates
                     Self::count_predicates(left) + Self::count_predicates(right)
                 } else {
@@ -622,10 +645,7 @@ impl FeatureExtractor {
 
     /// Check if condition is trivially true (cross join).
     fn is_trivial_condition(expr: &Expr) -> bool {
-        matches!(
-            expr,
-            Expr::Const(ra_core::expr::Const::Bool(true))
-        )
+        matches!(expr, Expr::Const(ra_core::expr::Const::Bool(true)))
     }
 
     /// Check if condition contains at least one equi-join predicate
@@ -644,16 +664,13 @@ impl FeatureExtractor {
                 op: BinOp::And,
                 left,
                 right,
-            } => {
-                Self::is_equi_join_condition(left)
-                    || Self::is_equi_join_condition(right)
-            }
+            } => Self::is_equi_join_condition(left) || Self::is_equi_join_condition(right),
             _ => false,
         }
     }
 
     /// Return the raw structural counts for use by the speculative router.
-    #[must_use] 
+    #[must_use]
     pub fn structural_counts(&self) -> StructuralCounts {
         StructuralCounts {
             table_count: self.table_count,

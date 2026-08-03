@@ -1,4 +1,8 @@
-#![expect(clippy::print_stdout, clippy::expect_used, reason = "test uses stdout for diagnostic output")]
+#![expect(
+    clippy::print_stdout,
+    clippy::expect_used,
+    reason = "test uses stdout for diagnostic output"
+)]
 //! Platform calibration test.
 //!
 //! Run with: `cargo test --test calibrate calibrate_platform -- --ignored --nocapture`

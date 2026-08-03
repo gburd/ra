@@ -63,10 +63,16 @@ pub struct OrderingKey {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub enum Partitioning {
     /// Data is hash-partitioned on the listed columns.
-    Hash { columns: Vec<String>, buckets: usize },
+    Hash {
+        columns: Vec<String>,
+        buckets: usize,
+    },
     /// Data is range-partitioned on a single column with the
     /// supplied boundary values (string-encoded for portability).
-    Range { column: String, boundaries: Vec<String> },
+    Range {
+        column: String,
+        boundaries: Vec<String>,
+    },
     /// Data is round-robin partitioned across N nodes.
     RoundRobin { nodes: usize },
     /// Data is on a single node (or single partition).
@@ -178,9 +184,7 @@ fn compute_ordering(expr: &RelExpr) -> Vec<OrderingKey> {
                 })
             })
             .collect(),
-        RelExpr::Filter { input, .. } | RelExpr::Limit { input, .. } => {
-            compute_ordering(input)
-        }
+        RelExpr::Filter { input, .. } | RelExpr::Limit { input, .. } => compute_ordering(input),
         RelExpr::Project { input, columns } => {
             // Conservative: keep only ordering columns that the
             // projection actually emits. If the projection is
@@ -189,17 +193,11 @@ fn compute_ordering(expr: &RelExpr) -> Vec<OrderingKey> {
             if is_wildcard_projection(columns) {
                 return child;
             }
-            let projected: std::collections::HashSet<String> = columns
-                .iter()
-                .filter_map(projected_column_name)
-                .collect();
+            let projected: std::collections::HashSet<String> =
+                columns.iter().filter_map(projected_column_name).collect();
             child
                 .into_iter()
-                .take_while(|k| {
-                    projected
-                        .iter()
-                        .any(|c| c.eq_ignore_ascii_case(&k.column))
-                })
+                .take_while(|k| projected.iter().any(|c| c.eq_ignore_ascii_case(&k.column)))
                 .collect()
         }
         // No ordering claim for all other variants. Future
@@ -252,9 +250,7 @@ fn is_prefix(claimed: &[OrderingKey], wanted: &[OrderingKey]) -> bool {
         return false;
     }
     claimed.iter().zip(wanted.iter()).all(|(a, b)| {
-        a.column.eq_ignore_ascii_case(&b.column)
-            && a.direction == b.direction
-            && a.nulls == b.nulls
+        a.column.eq_ignore_ascii_case(&b.column) && a.direction == b.direction && a.nulls == b.nulls
     })
 }
 

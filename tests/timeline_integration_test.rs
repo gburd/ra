@@ -54,8 +54,7 @@ fn all_timelines_parse() {
 /// Test index-addition timeline expectations.
 #[test]
 fn test_index_addition_timeline() {
-    let config = load_timeline("index-addition")
-        .expect("Failed to load index-addition timeline");
+    let config = load_timeline("index-addition").expect("Failed to load index-addition timeline");
 
     assert_eq!(config.snapshots.len(), 3, "Expected 3 snapshots");
     assert_eq!(config.expectations.len(), 3, "Expected 3 expectations");
@@ -82,10 +81,9 @@ fn test_index_addition_timeline() {
         .contains(&"index-scan-selection".to_string()));
 
     // Verify cost reduction expectation
-    if let (Some([min0, max0]), Some([min1, max1])) = (
-        exp0.expected_cost_range,
-        exp1.expected_cost_range,
-    ) {
+    if let (Some([min0, max0]), Some([min1, max1])) =
+        (exp0.expected_cost_range, exp1.expected_cost_range)
+    {
         let avg0 = (min0 + max0) / 2.0;
         let avg1 = (min1 + max1) / 2.0;
         assert!(
@@ -100,8 +98,7 @@ fn test_index_addition_timeline() {
 /// Test growth-replan timeline expectations.
 #[test]
 fn test_growth_replan_timeline() {
-    let config =
-        load_timeline("growth-replan").expect("Failed to load growth-replan timeline");
+    let config = load_timeline("growth-replan").expect("Failed to load growth-replan timeline");
 
     assert_eq!(config.snapshots.len(), 3, "Expected 3 snapshots");
 
@@ -216,8 +213,7 @@ fn test_schema_evolution_timeline() {
 /// Test staleness-drift timeline expectations.
 #[test]
 fn test_staleness_drift_timeline() {
-    let config =
-        load_timeline("staleness-drift").expect("Failed to load staleness-drift timeline");
+    let config = load_timeline("staleness-drift").expect("Failed to load staleness-drift timeline");
 
     assert_eq!(config.snapshots.len(), 4, "Expected 4 snapshots");
 
@@ -229,8 +225,14 @@ fn test_staleness_drift_timeline() {
         .collect();
 
     assert_eq!(tolerances.len(), 4, "Expected 4 tolerance values");
-    assert!(tolerances[0] < tolerances[2], "Fresh stats should have tighter tolerance than stale");
-    assert!(tolerances[2] > tolerances[3], "Re-analyzed should restore tight tolerance");
+    assert!(
+        tolerances[0] < tolerances[2],
+        "Fresh stats should have tighter tolerance than stale"
+    );
+    assert!(
+        tolerances[2] > tolerances[3],
+        "Re-analyzed should restore tight tolerance"
+    );
 
     // Snapshots 0 and 3 should have fresh stats (low tolerance)
     // Snapshot 2 should have stale stats (high tolerance)
@@ -294,9 +296,18 @@ fn test_tpch_q1_evolution_timeline() {
     );
 
     let query = config.metadata.query.as_ref().unwrap();
-    assert!(query.contains("l_returnflag"), "Query should contain TPC-H Q1 columns");
-    assert!(query.contains("l_linestatus"), "Query should contain TPC-H Q1 columns");
-    assert!(query.contains("SUM(l_quantity)"), "Query should contain TPC-H Q1 aggregates");
+    assert!(
+        query.contains("l_returnflag"),
+        "Query should contain TPC-H Q1 columns"
+    );
+    assert!(
+        query.contains("l_linestatus"),
+        "Query should contain TPC-H Q1 columns"
+    );
+    assert!(
+        query.contains("SUM(l_quantity)"),
+        "Query should contain TPC-H Q1 aggregates"
+    );
 
     // Verify scale factor progression in labels
     assert!(config.snapshots[0].label.contains("SF=0.1"));
@@ -408,7 +419,10 @@ fn test_rules_checking() {
     assert_rules_applied(&rules_applied, &vec!["filter-pushdown".to_string()]);
     assert_rules_applied(
         &rules_applied,
-        &vec!["filter-pushdown".to_string(), "index-scan-selection".to_string()],
+        &vec![
+            "filter-pushdown".to_string(),
+            "index-scan-selection".to_string(),
+        ],
     );
 
     assert_rules_not_applied(

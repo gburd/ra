@@ -1,7 +1,4 @@
-#![expect(
-    clippy::expect_used,
-    reason = "test code"
-)]
+#![expect(clippy::expect_used, reason = "test code")]
 //! Integration tests for scope-based correlation analysis.
 //!
 //! Verifies that the decorrelation pass works correctly with non-TPC-H
@@ -99,7 +96,7 @@ fn correlated_exists_non_standard_names() {
 ///
 /// NOT IN cannot be decorrelated to a plain anti-join due to SQL NULL
 /// semantics — the standalone `decorrelate()` correctly declines.  The
-/// optimizer handles this via the plan builder (SubPlan) or via the
+/// optimizer handles this via the plan builder (`SubPlan`) or via the
 /// NOT-IN-to-anti-join rewrite which adds the required IS NOT NULL guard.
 #[test]
 fn correlated_not_in_arbitrary_names() {

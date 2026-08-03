@@ -506,7 +506,10 @@ mod tests {
                         when_clauses[0].action,
                         ra_core::algebra::MergeAction::Update { .. }
                     )
-                    && matches!(when_clauses[0].kind, ra_core::algebra::MergeMatchKind::Matched)
+                    && matches!(
+                        when_clauses[0].kind,
+                        ra_core::algebra::MergeMatchKind::Matched
+                    )
                     && matches!(
                         when_clauses[1].action,
                         ra_core::algebra::MergeAction::Insert { .. }
@@ -602,10 +605,7 @@ mod tests {
                     }
                     e.children().into_iter().find_map(find_graph_table)
                 }
-                let Some(RelExpr::GraphTable {
-                    pattern, alias, ..
-                }) = find_graph_table(r)
-                else {
+                let Some(RelExpr::GraphTable { pattern, alias, .. }) = find_graph_table(r) else {
                     return false;
                 };
                 pattern.len() == 5
@@ -632,7 +632,8 @@ mod tests {
     #[test]
     fn parse_insert_returning() {
         assert_parses_as(
-            "INSERT INTO t(a) VALUES (1) RETURNING a",            |r| matches!(r, RelExpr::Insert { returning: Some(cols), .. } if !cols.is_empty()),
+            "INSERT INTO t(a) VALUES (1) RETURNING a",
+            |r| matches!(r, RelExpr::Insert { returning: Some(cols), .. } if !cols.is_empty()),
             "Insert RETURNING",
         );
     }

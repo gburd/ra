@@ -13,8 +13,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{
-    Advice, AdviceItem, AdviceTag, AdviceTarget, AdviceTargetKind,
-    RelationIdentifier,
+    Advice, AdviceItem, AdviceTag, AdviceTarget, AdviceTargetKind, RelationIdentifier,
 };
 
 /// Owned lookup index built from a parsed [`Advice`].
@@ -242,14 +241,18 @@ fn target_contains_identifier(target: &AdviceTarget, id: &RelationIdentifier) ->
             .identifier
             .as_ref()
             .is_some_and(|stored| identifier_matches(stored, id)),
-        AdviceTargetKind::OrderedList | AdviceTargetKind::UnorderedList => {
-            target.children.iter().any(|c| target_contains_identifier(c, id))
-        }
+        AdviceTargetKind::OrderedList | AdviceTargetKind::UnorderedList => target
+            .children
+            .iter()
+            .any(|c| target_contains_identifier(c, id)),
     }
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code; unwrap is the conventional shorthand for surfacing failures in tests")]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test code; unwrap is the conventional shorthand for surfacing failures in tests"
+)]
 mod tests {
     use super::*;
     use crate::parse_advice;

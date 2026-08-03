@@ -45,10 +45,8 @@ jobs:
             --test link_validation \
             -- test_documentation_links \
             --nocapture
-        continue-on-error: true
 
       - name: Summary
         if: always()
         run: |
-          echo "✓ Link validation completed. Check logs for any broken links."
-          echo "Note: Broken links generate warnings but do not fail the build."
+          echo "Link validation completed."

@@ -25,35 +25,35 @@ pub struct PgsMask(pub u64);
 
 impl PgsMask {
     // -- Scan strategies -------------------------------------------
-    pub const SEQ_SCAN:           u64 = 0x0000_0001;
-    pub const INDEX_SCAN:         u64 = 0x0000_0002;
-    pub const INDEX_ONLY_SCAN:    u64 = 0x0000_0004;
-    pub const BITMAP_SCAN:        u64 = 0x0000_0008;
-    pub const TID_SCAN:           u64 = 0x0000_0010;
+    pub const SEQ_SCAN: u64 = 0x0000_0001;
+    pub const INDEX_SCAN: u64 = 0x0000_0002;
+    pub const INDEX_ONLY_SCAN: u64 = 0x0000_0004;
+    pub const BITMAP_SCAN: u64 = 0x0000_0008;
+    pub const TID_SCAN: u64 = 0x0000_0010;
 
     // -- Foreign / push-down --------------------------------------
-    pub const FOREIGN_JOIN:       u64 = 0x0000_0020;
+    pub const FOREIGN_JOIN: u64 = 0x0000_0020;
 
     // -- Join strategies ------------------------------------------
-    pub const MERGE_JOIN_PLAIN:        u64 = 0x0000_0040;
-    pub const MERGE_JOIN_MATERIALIZE:  u64 = 0x0000_0080;
-    pub const NESTLOOP_PLAIN:          u64 = 0x0000_0100;
-    pub const NESTLOOP_MATERIALIZE:    u64 = 0x0000_0200;
-    pub const NESTLOOP_MEMOIZE:        u64 = 0x0000_0400;
-    pub const HASH_JOIN:               u64 = 0x0000_0800;
+    pub const MERGE_JOIN_PLAIN: u64 = 0x0000_0040;
+    pub const MERGE_JOIN_MATERIALIZE: u64 = 0x0000_0080;
+    pub const NESTLOOP_PLAIN: u64 = 0x0000_0100;
+    pub const NESTLOOP_MATERIALIZE: u64 = 0x0000_0200;
+    pub const NESTLOOP_MEMOIZE: u64 = 0x0000_0400;
+    pub const HASH_JOIN: u64 = 0x0000_0800;
 
     // -- Append / merge-append ------------------------------------
-    pub const APPEND:                  u64 = 0x0000_1000;
-    pub const MERGE_APPEND:            u64 = 0x0000_2000;
+    pub const APPEND: u64 = 0x0000_1000;
+    pub const MERGE_APPEND: u64 = 0x0000_2000;
 
     // -- Parallel -------------------------------------------------
-    pub const GATHER:                  u64 = 0x0000_4000;
-    pub const GATHER_MERGE:            u64 = 0x0000_8000;
+    pub const GATHER: u64 = 0x0000_4000;
+    pub const GATHER_MERGE: u64 = 0x0000_8000;
 
     // -- Consider* (planner-stage opt-ins) ------------------------
-    pub const CONSIDER_INDEXONLY:        u64 = 0x0001_0000;
-    pub const CONSIDER_PARTITIONWISE:    u64 = 0x0002_0000;
-    pub const CONSIDER_NONPARTIAL:       u64 = 0x0004_0000;
+    pub const CONSIDER_INDEXONLY: u64 = 0x0001_0000;
+    pub const CONSIDER_PARTITIONWISE: u64 = 0x0002_0000;
+    pub const CONSIDER_NONPARTIAL: u64 = 0x0004_0000;
 
     // -- Convenience compound masks (mirrored from pathnodes.h) ---
     pub const SCAN_ANY: u64 = Self::SEQ_SCAN
@@ -62,17 +62,13 @@ impl PgsMask {
         | Self::BITMAP_SCAN
         | Self::TID_SCAN;
 
-    pub const MERGEJOIN_ANY: u64 =
-        Self::MERGE_JOIN_PLAIN | Self::MERGE_JOIN_MATERIALIZE;
+    pub const MERGEJOIN_ANY: u64 = Self::MERGE_JOIN_PLAIN | Self::MERGE_JOIN_MATERIALIZE;
 
-    pub const NESTLOOP_ANY: u64 = Self::NESTLOOP_PLAIN
-        | Self::NESTLOOP_MATERIALIZE
-        | Self::NESTLOOP_MEMOIZE;
+    pub const NESTLOOP_ANY: u64 =
+        Self::NESTLOOP_PLAIN | Self::NESTLOOP_MATERIALIZE | Self::NESTLOOP_MEMOIZE;
 
-    pub const JOIN_ANY: u64 = Self::FOREIGN_JOIN
-        | Self::MERGEJOIN_ANY
-        | Self::NESTLOOP_ANY
-        | Self::HASH_JOIN;
+    pub const JOIN_ANY: u64 =
+        Self::FOREIGN_JOIN | Self::MERGEJOIN_ANY | Self::NESTLOOP_ANY | Self::HASH_JOIN;
 
     /// Initial value: every strategy is permitted.
     #[must_use]
@@ -145,7 +141,10 @@ mod tests {
             ("PGS_GATHER", PgsMask::GATHER),
             ("PGS_GATHER_MERGE", PgsMask::GATHER_MERGE),
             ("PGS_CONSIDER_INDEXONLY", PgsMask::CONSIDER_INDEXONLY),
-            ("PGS_CONSIDER_PARTITIONWISE", PgsMask::CONSIDER_PARTITIONWISE),
+            (
+                "PGS_CONSIDER_PARTITIONWISE",
+                PgsMask::CONSIDER_PARTITIONWISE,
+            ),
             ("PGS_CONSIDER_NONPARTIAL", PgsMask::CONSIDER_NONPARTIAL),
         ];
         // Each successive PGS_* bit is at the next bit position

@@ -887,8 +887,7 @@ impl<'a> Parser<'a> {
                             return Ok(Expr::QualifiedWildcard(ObjectName(id_parts)));
                         }
                         _ => {
-                            return self
-                                .expected("an identifier or a '*' after '.'", next_token);
+                            return self.expected("an identifier or a '*' after '.'", next_token);
                         }
                     }
                 }
@@ -3343,7 +3342,7 @@ impl<'a> Parser<'a> {
         if self.parse_keyword(expected) {
             Ok(())
         } else {
-            self.expected(format!("{:?}", &expected).as_str(), self.peek_token())
+            self.expected(format!("{:?}", expected).as_str(), self.peek_token())
         }
     }
 

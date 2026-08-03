@@ -13,12 +13,12 @@ fn main() {
 
     // Get all CTE queries
     let all = all_queries();
-    let cte_queries: Vec<_> = all
-        .iter()
-        .filter(|e| e.category == "ctes")
-        .collect();
+    let cte_queries: Vec<_> = all.iter().filter(|e| e.category == "ctes").collect();
 
-    println!("Running {} CTE queries 30 times each to measure variance...\n", cte_queries.len());
+    println!(
+        "Running {} CTE queries 30 times each to measure variance...\n",
+        cte_queries.len()
+    );
 
     for entry in &cte_queries {
         let plan = sql_to_relexpr(entry.sql).expect("parse failed");
@@ -38,8 +38,10 @@ fn main() {
         let max = times[times.len() - 1] as f64 / 1000.0;
 
         println!("Query: {:.60}...", entry.sql);
-        println!("  Avg: {:.2}ms, Median: {:.2}ms, P95: {:.2}ms, Min: {:.2}ms, Max: {:.2}ms",
-                 avg, median, p95, min, max);
+        println!(
+            "  Avg: {:.2}ms, Median: {:.2}ms, P95: {:.2}ms, Min: {:.2}ms, Max: {:.2}ms",
+            avg, median, p95, min, max
+        );
         println!();
     }
 }

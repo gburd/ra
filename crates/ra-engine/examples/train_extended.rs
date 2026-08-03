@@ -91,37 +91,66 @@ const TPCH_TABLES: &[(&str, &[&str])] = &[
     (
         "lineitem",
         &[
-            "l_orderkey", "l_partkey", "l_suppkey", "l_linenumber",
-            "l_quantity", "l_extendedprice", "l_discount", "l_tax",
-            "l_returnflag", "l_linestatus", "l_shipdate",
+            "l_orderkey",
+            "l_partkey",
+            "l_suppkey",
+            "l_linenumber",
+            "l_quantity",
+            "l_extendedprice",
+            "l_discount",
+            "l_tax",
+            "l_returnflag",
+            "l_linestatus",
+            "l_shipdate",
         ],
     ),
     (
         "orders",
         &[
-            "o_orderkey", "o_custkey", "o_orderstatus", "o_totalprice",
-            "o_orderdate", "o_orderpriority", "o_clerk", "o_shippriority",
+            "o_orderkey",
+            "o_custkey",
+            "o_orderstatus",
+            "o_totalprice",
+            "o_orderdate",
+            "o_orderpriority",
+            "o_clerk",
+            "o_shippriority",
         ],
     ),
     (
         "customer",
         &[
-            "c_custkey", "c_name", "c_address", "c_nationkey",
-            "c_phone", "c_acctbal", "c_mktsegment",
+            "c_custkey",
+            "c_name",
+            "c_address",
+            "c_nationkey",
+            "c_phone",
+            "c_acctbal",
+            "c_mktsegment",
         ],
     ),
     (
         "supplier",
         &[
-            "s_suppkey", "s_name", "s_address", "s_nationkey",
-            "s_phone", "s_acctbal",
+            "s_suppkey",
+            "s_name",
+            "s_address",
+            "s_nationkey",
+            "s_phone",
+            "s_acctbal",
         ],
     ),
     (
         "part",
         &[
-            "p_partkey", "p_name", "p_mfgr", "p_brand",
-            "p_type", "p_size", "p_container", "p_retailprice",
+            "p_partkey",
+            "p_name",
+            "p_mfgr",
+            "p_brand",
+            "p_type",
+            "p_size",
+            "p_container",
+            "p_retailprice",
         ],
     ),
     (
@@ -136,40 +165,56 @@ const ECOM_TABLES: &[(&str, &[&str])] = &[
     (
         "users",
         &[
-            "user_id", "username", "email", "created_at",
-            "country_id", "status",
+            "user_id",
+            "username",
+            "email",
+            "created_at",
+            "country_id",
+            "status",
         ],
     ),
     (
         "products",
         &[
-            "product_id", "name", "category_id", "price",
-            "stock_qty", "created_at",
+            "product_id",
+            "name",
+            "category_id",
+            "price",
+            "stock_qty",
+            "created_at",
         ],
     ),
-    (
-        "categories",
-        &["category_id", "category_name", "parent_id"],
-    ),
+    ("categories", &["category_id", "category_name", "parent_id"]),
     (
         "inventory",
         &[
-            "inventory_id", "product_id", "warehouse_id",
-            "quantity", "last_updated",
+            "inventory_id",
+            "product_id",
+            "warehouse_id",
+            "quantity",
+            "last_updated",
         ],
     ),
     (
         "payments",
         &[
-            "payment_id", "order_id", "user_id", "amount",
-            "payment_method", "payment_date",
+            "payment_id",
+            "order_id",
+            "user_id",
+            "amount",
+            "payment_method",
+            "payment_date",
         ],
     ),
     (
         "shipments",
         &[
-            "shipment_id", "order_id", "carrier", "tracking_no",
-            "shipped_date", "delivered_date",
+            "shipment_id",
+            "order_id",
+            "carrier",
+            "tracking_no",
+            "shipped_date",
+            "delivered_date",
         ],
     ),
 ];
@@ -197,17 +242,30 @@ const ECOM_JOIN_KEYS: &[(&str, &str, &str, &str)] = &[
 
 const COMP_OPS: &[&str] = &["=", ">", "<", ">=", "<=", "<>"];
 const STRING_LITS: &[&str] = &[
-    "'BUILDING'", "'AUTOMOBILE'", "'HOUSEHOLD'", "'MACHINERY'",
-    "'FURNITURE'", "'R'", "'F'", "'O'", "'P'", "'URGENT'",
-    "'HIGH'", "'MEDIUM'", "'LOW'",
+    "'BUILDING'",
+    "'AUTOMOBILE'",
+    "'HOUSEHOLD'",
+    "'MACHINERY'",
+    "'FURNITURE'",
+    "'R'",
+    "'F'",
+    "'O'",
+    "'P'",
+    "'URGENT'",
+    "'HIGH'",
+    "'MEDIUM'",
+    "'LOW'",
 ];
 const NUM_LITS: &[&str] = &[
-    "0", "1", "5", "10", "20", "50", "100", "500",
-    "1000", "5000", "10000", "50000",
+    "0", "1", "5", "10", "20", "50", "100", "500", "1000", "5000", "10000", "50000",
 ];
 const DATE_LITS: &[&str] = &[
-    "'1993-01-01'", "'1994-06-15'", "'1995-03-15'", "'1996-01-01'",
-    "'1997-07-01'", "'1998-12-31'",
+    "'1993-01-01'",
+    "'1994-06-15'",
+    "'1995-03-15'",
+    "'1996-01-01'",
+    "'1997-07-01'",
+    "'1998-12-31'",
 ];
 const AGG_FUNCS: &[&str] = &["COUNT", "SUM", "AVG", "MIN", "MAX"];
 
@@ -252,7 +310,10 @@ fn gen_simple_select(rng: &mut Rng) -> String {
     format!(
         "SELECT {} FROM {} WHERE {} {} {}",
         select_cols.join(", "),
-        table, col, op, lit
+        table,
+        col,
+        op,
+        lit
     )
 }
 
@@ -299,7 +360,8 @@ fn gen_simple_equi_join(rng: &mut Rng, max_tables: usize) -> String {
         if used_tables.contains(&jk.0) {
             used_tables.push(jk.2);
             join_clauses.push(format!(
-                "JOIN {} ON {}.{} = {}.{}", jk.2, jk.0, jk.1, jk.2, jk.3
+                "JOIN {} ON {}.{} = {}.{}",
+                jk.2, jk.0, jk.1, jk.2, jk.3
             ));
             if let Some((_, cols)) = tables.iter().find(|(n, _)| *n == jk.2) {
                 select_cols.push(format!("{}.{}", jk.2, cols[0]));
@@ -307,7 +369,8 @@ fn gen_simple_equi_join(rng: &mut Rng, max_tables: usize) -> String {
         } else {
             used_tables.push(jk.0);
             join_clauses.push(format!(
-                "JOIN {} ON {}.{} = {}.{}", jk.0, jk.0, jk.1, jk.2, jk.3
+                "JOIN {} ON {}.{} = {}.{}",
+                jk.0, jk.0, jk.1, jk.2, jk.3
             ));
             if let Some((_, cols)) = tables.iter().find(|(n, _)| *n == jk.0) {
                 select_cols.push(format!("{}.{}", jk.0, cols[0]));
@@ -365,16 +428,25 @@ fn gen_aggregate_join(rng: &mut Rng) -> String {
         format!(
             "SELECT {}.{}, COUNT(*) AS cnt FROM {} JOIN {} ON {}.{} = {}.{} \
              GROUP BY {}.{} HAVING COUNT(*) > {}",
-            jk.2, group_col, jk.0, jk.2, jk.0, jk.1, jk.2, jk.3,
-            jk.2, group_col, having_val
+            jk.2, group_col, jk.0, jk.2, jk.0, jk.1, jk.2, jk.3, jk.2, group_col, having_val
         )
     } else {
         format!(
             "SELECT {}.{}, {}({}.{}) AS agg_val FROM {} JOIN {} ON {}.{} = {}.{} \
              GROUP BY {}.{}",
-            jk.2, group_col, agg_func, jk.0, agg_col,
-            jk.0, jk.2, jk.0, jk.1, jk.2, jk.3,
-            jk.2, group_col
+            jk.2,
+            group_col,
+            agg_func,
+            jk.0,
+            agg_col,
+            jk.0,
+            jk.2,
+            jk.0,
+            jk.1,
+            jk.2,
+            jk.3,
+            jk.2,
+            group_col
         )
     }
 }
@@ -389,9 +461,7 @@ fn gen_left_join(rng: &mut Rng) -> String {
     format!(
         "SELECT {}.{}, {}.{} FROM {} LEFT JOIN {} ON {}.{} = {}.{} \
          WHERE {}.{} IS NULL",
-        jk.0, lt.1[0], jk.2, rt.1[0],
-        jk.0, jk.2, jk.0, jk.1, jk.2, jk.3,
-        jk.2, rt.1[0]
+        jk.0, lt.1[0], jk.2, rt.1[0], jk.0, jk.2, jk.0, jk.1, jk.2, jk.3, jk.2, rt.1[0]
     )
 }
 
@@ -406,7 +476,11 @@ fn gen_between_query(rng: &mut Rng) -> String {
 
     format!(
         "SELECT {} FROM {} WHERE {} BETWEEN {} AND {}",
-        select_cols.join(", "), table, col, low, high
+        select_cols.join(", "),
+        table,
+        col,
+        low,
+        high
     )
 }
 
@@ -415,13 +489,13 @@ fn gen_in_list_query(rng: &mut Rng) -> String {
     let (table, cols) = tables[rng.next_usize(tables.len())];
     let col = rng.choose(cols);
     let count = rng.next_range(2, 5);
-    let vals: Vec<&str> = (0..count)
-        .map(|_| *rng.choose(STRING_LITS))
-        .collect();
+    let vals: Vec<&str> = (0..count).map(|_| *rng.choose(STRING_LITS)).collect();
 
     format!(
         "SELECT * FROM {} WHERE {} IN ({})",
-        table, col, vals.join(", ")
+        table,
+        col,
+        vals.join(", ")
     )
 }
 
@@ -464,9 +538,7 @@ fn gen_multi_table_aggregate(rng: &mut Rng) -> String {
     if *agg_func == "COUNT" {
         format!("SELECT {group_col}, COUNT(*) {from_part} GROUP BY {group_col}")
     } else {
-        format!(
-            "SELECT {group_col}, {agg_func}({agg_col}) {from_part} GROUP BY {group_col}"
-        )
+        format!("SELECT {group_col}, {agg_func}({agg_col}) {from_part} GROUP BY {group_col}")
     }
 }
 
@@ -525,7 +597,8 @@ fn gen_nested_cte(rng: &mut Rng) -> String {
         "WITH cte1 AS (SELECT {col1} FROM {t1} WHERE {col1} > {}), \
          cte2 AS (SELECT {col2} FROM {t2} WHERE {col2} < {}) \
          SELECT * FROM cte1, cte2",
-        rng.choose(NUM_LITS), rng.choose(NUM_LITS)
+        rng.choose(NUM_LITS),
+        rng.choose(NUM_LITS)
     )
 }
 
@@ -561,9 +634,20 @@ fn gen_window_with_join(rng: &mut Rng) -> String {
         "SELECT {}.{}, {}.{}, \
          ROW_NUMBER() OVER (PARTITION BY {}.{} ORDER BY {}.{}) AS rn \
          FROM {} JOIN {} ON {}.{} = {}.{}",
-        jk.0, lt.1[0], jk.2, rt.1[0],
-        jk.2, part_col, jk.0, ord_col,
-        jk.0, jk.2, jk.0, jk.1, jk.2, jk.3
+        jk.0,
+        lt.1[0],
+        jk.2,
+        rt.1[0],
+        jk.2,
+        part_col,
+        jk.0,
+        ord_col,
+        jk.0,
+        jk.2,
+        jk.0,
+        jk.1,
+        jk.2,
+        jk.3
     )
 }
 
@@ -595,7 +679,8 @@ fn gen_complex_multi_join(rng: &mut Rng, min_tables: usize) -> String {
     used_tables.push(first.0);
     used_tables.push(first.2);
     join_clauses.push(format!(
-        "JOIN {} ON {}.{} = {}.{}", first.2, first.0, first.1, first.2, first.3
+        "JOIN {} ON {}.{} = {}.{}",
+        first.2, first.0, first.1, first.2, first.3
     ));
 
     for _ in 2..target {
@@ -615,12 +700,14 @@ fn gen_complex_multi_join(rng: &mut Rng, min_tables: usize) -> String {
         if used_tables.contains(&jk.0) {
             used_tables.push(jk.2);
             join_clauses.push(format!(
-                "JOIN {} ON {}.{} = {}.{}", jk.2, jk.0, jk.1, jk.2, jk.3
+                "JOIN {} ON {}.{} = {}.{}",
+                jk.2, jk.0, jk.1, jk.2, jk.3
             ));
         } else {
             used_tables.push(jk.0);
             join_clauses.push(format!(
-                "JOIN {} ON {}.{} = {}.{}", jk.0, jk.0, jk.1, jk.2, jk.3
+                "JOIN {} ON {}.{} = {}.{}",
+                jk.0, jk.0, jk.1, jk.2, jk.3
             ));
         }
     }
@@ -666,7 +753,11 @@ fn gen_short_range_scan(rng: &mut Rng) -> String {
 
     format!(
         "SELECT * FROM {} WHERE {} > {} ORDER BY {} LIMIT {}",
-        table, col, rng.choose(NUM_LITS), col, limit
+        table,
+        col,
+        rng.choose(NUM_LITS),
+        col,
+        limit
     )
 }
 
@@ -677,8 +768,7 @@ fn gen_index_join_lookup(rng: &mut Rng) -> String {
 
     format!(
         "SELECT * FROM {} JOIN {} ON {}.{} = {}.{} WHERE {}.{} = {}",
-        jk.0, jk.2, jk.0, jk.1, jk.2, jk.3,
-        jk.0, jk.1, id_val
+        jk.0, jk.2, jk.0, jk.1, jk.2, jk.3, jk.0, jk.1, id_val
     )
 }
 
@@ -688,7 +778,11 @@ fn gen_offset_pagination(rng: &mut Rng) -> String {
     let col = rng.choose(cols);
     let limit = rng.next_range(10, 50);
     let offset = rng.next_range(0, 500);
-    let dir = if rng.next_usize(2) == 0 { "ASC" } else { "DESC" };
+    let dir = if rng.next_usize(2) == 0 {
+        "ASC"
+    } else {
+        "DESC"
+    };
 
     format!(
         "SELECT * FROM {} ORDER BY {} {} LIMIT {} OFFSET {}",
@@ -703,7 +797,10 @@ fn gen_count_star(rng: &mut Rng) -> String {
     let op = rng.choose(COMP_OPS);
     let lit = rng.choose(NUM_LITS);
 
-    format!("SELECT COUNT(*) FROM {} WHERE {} {} {}", table, col, op, lit)
+    format!(
+        "SELECT COUNT(*) FROM {} WHERE {} {} {}",
+        table, col, op, lit
+    )
 }
 
 fn gen_exists_check(rng: &mut Rng) -> String {
@@ -746,7 +843,11 @@ fn gen_round5_query(rng: &mut Rng) -> String {
 
 fn gen_star_schema_query(rng: &mut Rng) -> String {
     // Star schema: fact table (lineitem/orders) with multiple dimension joins
-    let fact = if rng.next_usize(2) == 0 { "lineitem" } else { "orders" };
+    let fact = if rng.next_usize(2) == 0 {
+        "lineitem"
+    } else {
+        "orders"
+    };
     let agg_func = rng.choose(AGG_FUNCS);
 
     if fact == "lineitem" {
@@ -770,7 +871,8 @@ fn gen_star_schema_query(rng: &mut Rng) -> String {
             format!(
                 "SELECT supplier.s_name, {}(lineitem.l_extendedprice) \
                  FROM lineitem {} GROUP BY supplier.s_name",
-                agg_func, join_parts.join(" ")
+                agg_func,
+                join_parts.join(" ")
             )
         }
     } else {
@@ -908,10 +1010,7 @@ fn expected_route(features: &OptimizationFeatures) -> OptRoute {
         return OptRoute::LeftDeep;
     }
 
-    if features.table_count <= 3.0
-        && features.subquery_count < 1.0
-        && features.window_count < 1.0
-    {
+    if features.table_count <= 3.0 && features.subquery_count < 1.0 && features.window_count < 1.0 {
         return OptRoute::EGraphLow;
     }
 
@@ -1046,16 +1145,30 @@ fn run_training_round(
 
     // Save checkpoint
     let checkpoint_path = format!("models/cost_model.round{}.json", round);
-    coordinator.lock().unwrap().save_model(&checkpoint_path).unwrap();
+    coordinator
+        .lock()
+        .unwrap()
+        .save_model(&checkpoint_path)
+        .unwrap();
 
     // Print round results
-    println!("  Queries:     {} generated, {} parsed, {} optimized", QUERIES_PER_ROUND, parse_ok, opt_ok);
+    println!(
+        "  Queries:     {} generated, {} parsed, {} optimized",
+        QUERIES_PER_ROUND, parse_ok, opt_ok
+    );
     println!("  Parse fail:  {} | Opt fail:  {}", parse_fail, opt_fail);
     println!("  Duration:    {}ms", duration_ms);
-    println!("  Training:    {} traces, {} steps, loss={:.6}", stats.total_traces, stats.total_train_steps, stats.avg_loss);
+    println!(
+        "  Training:    {} traces, {} steps, loss={:.6}",
+        stats.total_traces, stats.total_train_steps, stats.avg_loss
+    );
     println!("  Samples:     {}", stats.model_samples_trained);
-    println!("  Eval:        {}/{} correct ({:.1}% accuracy)",
-        eval.correct_predictions, eval.predictions_made, eval_accuracy * 100.0);
+    println!(
+        "  Eval:        {}/{} correct ({:.1}% accuracy)",
+        eval.correct_predictions,
+        eval.predictions_made,
+        eval_accuracy * 100.0
+    );
     println!("  Checkpoint:  {}", checkpoint_path);
 
     RoundStats {
@@ -1118,7 +1231,9 @@ fn main() {
     round_stats.push(run_training_round(
         1,
         "Simple (1-4 tables, equi-joins)",
-        &coordinator, &opt, &mut rng,
+        &coordinator,
+        &opt,
+        &mut rng,
         gen_round1_query,
     ));
 
@@ -1126,7 +1241,9 @@ fn main() {
     round_stats.push(run_training_round(
         2,
         "Medium (3-8 tables, mixed join types)",
-        &coordinator, &opt, &mut rng,
+        &coordinator,
+        &opt,
+        &mut rng,
         gen_round2_query,
     ));
 
@@ -1134,7 +1251,9 @@ fn main() {
     round_stats.push(run_training_round(
         3,
         "Complex (5-12 tables, subqueries, CTEs, windows)",
-        &coordinator, &opt, &mut rng,
+        &coordinator,
+        &opt,
+        &mut rng,
         gen_round3_query,
     ));
 
@@ -1142,7 +1261,9 @@ fn main() {
     round_stats.push(run_training_round(
         4,
         "OLTP (point lookups, short transactions)",
-        &coordinator, &opt, &mut rng,
+        &coordinator,
+        &opt,
+        &mut rng,
         gen_round4_query,
     ));
 
@@ -1150,14 +1271,20 @@ fn main() {
     round_stats.push(run_training_round(
         5,
         "Mixed replay (all patterns consolidated)",
-        &coordinator, &opt, &mut rng,
+        &coordinator,
+        &opt,
+        &mut rng,
         gen_round5_query,
     ));
 
     // Save final model
     println!();
     println!("Saving final model to {}...", FINAL_MODEL_PATH);
-    coordinator.lock().unwrap().save_model(FINAL_MODEL_PATH).unwrap();
+    coordinator
+        .lock()
+        .unwrap()
+        .save_model(FINAL_MODEL_PATH)
+        .unwrap();
 
     // Print comprehensive summary
     let total_duration = total_start.elapsed();
@@ -1172,31 +1299,70 @@ fn main() {
     for rs in &round_stats {
         println!(
             "║    {}   │ {:5} │ {:5} │ {:.6} │  {:5.1}%  │ {:8}     ║",
-            rs.round, rs.parse_ok, rs.opt_ok, rs.avg_loss,
-            rs.eval_accuracy * 100.0, rs.duration_ms
+            rs.round,
+            rs.parse_ok,
+            rs.opt_ok,
+            rs.avg_loss,
+            rs.eval_accuracy * 100.0,
+            rs.duration_ms
         );
     }
     println!("╠══════════════════════════════════════════════════════════════╣");
     println!("║  Totals:                                                    ║");
-    println!("║    Queries generated:  {:6}                                ║",
-        round_stats.iter().map(|r| r.queries_generated).sum::<usize>());
-    println!("║    Queries parsed:     {:6}                                ║",
-        round_stats.iter().map(|r| r.parse_ok).sum::<usize>());
-    println!("║    Queries optimized:  {:6}                                ║",
-        round_stats.iter().map(|r| r.opt_ok).sum::<usize>());
-    println!("║    Total traces:       {:6}                                ║", final_stats.total_traces);
-    println!("║    Total train steps:  {:6}                                ║", final_stats.total_train_steps);
-    println!("║    Final avg loss:     {:.6}                              ║", final_stats.avg_loss);
-    println!("║    Samples trained:    {:6}                                ║", final_stats.model_samples_trained);
-    println!("║    Bootstrap samples:  {:6}                                ║", bootstrap_count);
-    println!("║    Total duration:     {:.2}s                              ║", total_duration.as_secs_f64());
-    println!("║    Final model:        {}              ║", FINAL_MODEL_PATH);
+    println!(
+        "║    Queries generated:  {:6}                                ║",
+        round_stats
+            .iter()
+            .map(|r| r.queries_generated)
+            .sum::<usize>()
+    );
+    println!(
+        "║    Queries parsed:     {:6}                                ║",
+        round_stats.iter().map(|r| r.parse_ok).sum::<usize>()
+    );
+    println!(
+        "║    Queries optimized:  {:6}                                ║",
+        round_stats.iter().map(|r| r.opt_ok).sum::<usize>()
+    );
+    println!(
+        "║    Total traces:       {:6}                                ║",
+        final_stats.total_traces
+    );
+    println!(
+        "║    Total train steps:  {:6}                                ║",
+        final_stats.total_train_steps
+    );
+    println!(
+        "║    Final avg loss:     {:.6}                              ║",
+        final_stats.avg_loss
+    );
+    println!(
+        "║    Samples trained:    {:6}                                ║",
+        final_stats.model_samples_trained
+    );
+    println!(
+        "║    Bootstrap samples:  {:6}                                ║",
+        bootstrap_count
+    );
+    println!(
+        "║    Total duration:     {:.2}s                              ║",
+        total_duration.as_secs_f64()
+    );
+    println!(
+        "║    Final model:        {}              ║",
+        FINAL_MODEL_PATH
+    );
     println!("╠══════════════════════════════════════════════════════════════╣");
     println!("║  Accuracy progression:                                      ║");
     for rs in &round_stats {
         let bar_len = (rs.eval_accuracy * 30.0) as usize;
         let bar: String = "█".repeat(bar_len) + &"░".repeat(30 - bar_len);
-        println!("║    Round {}: {} {:5.1}%      ║", rs.round, bar, rs.eval_accuracy * 100.0);
+        println!(
+            "║    Round {}: {} {:5.1}%      ║",
+            rs.round,
+            bar,
+            rs.eval_accuracy * 100.0
+        );
     }
     println!("╚══════════════════════════════════════════════════════════════╝");
 }

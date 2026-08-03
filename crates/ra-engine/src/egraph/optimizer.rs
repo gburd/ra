@@ -9,10 +9,9 @@ use ra_stats::delta::DeltaSet;
 
 use crate::analysis::RelAnalysis;
 use crate::continuation_gate::{ContinuationDecision, ContinuationGate};
-use crate::cost_model::BitNetCostModel;
 use crate::cost_model::feedback::OptimizationTrace;
+use crate::cost_model::BitNetCostModel;
 use crate::extract::{extract_best, extract_best_bitnet};
-use crate::training_coordinator::SharedTrainingCoordinator;
 use crate::genetic_fingerprint::QueryFingerprint;
 use crate::plan_cache::{PlanCache, PlanCacheConfig, PlanCacheStats};
 use crate::resource_budget::{
@@ -21,6 +20,7 @@ use crate::resource_budget::{
 use crate::rewrite::all_rules;
 use crate::speculative_router::{OptRoute, OptimizationFeatures, SpeculativeRouter};
 use crate::state::FingerprintReader;
+use crate::training_coordinator::SharedTrainingCoordinator;
 
 use super::config::OptimizerConfig;
 use super::errors::EGraphError;
@@ -151,9 +151,7 @@ impl SaturationBudgets {
         if config.use_adaptive_limits
             && matches!(
                 route,
-                OptRoute::EGraphLow
-                    | OptRoute::EGraphMedium
-                    | OptRoute::EGraphHigh
+                OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh
             )
         {
             Self {
@@ -175,8 +173,7 @@ impl SaturationBudgets {
 /// normalization applies, so callers avoid a needless clone on the hot path.
 fn normalize_input(expr: &RelExpr, decorrelate: bool) -> Option<RelExpr> {
     let has_grouping_sets = crate::grouping_sets::tree_contains_grouping_sets(expr);
-    let has_subquery = decorrelate
-        && crate::subquery_decorrelation::tree_contains_subquery(expr);
+    let has_subquery = decorrelate && crate::subquery_decorrelation::tree_contains_subquery(expr);
     if !has_grouping_sets && !has_subquery {
         return None;
     }
@@ -195,7 +192,10 @@ impl Optimizer {
     /// True if the tree contains a `DistinctOn` node anywhere.
     fn tree_contains_distinct_on(expr: &RelExpr) -> bool {
         matches!(expr, RelExpr::DistinctOn { .. })
-            || expr.children().iter().any(|c| Self::tree_contains_distinct_on(c))
+            || expr
+                .children()
+                .iter()
+                .any(|c| Self::tree_contains_distinct_on(c))
     }
 
     /// Optimize a tree containing `DistinctOn` without converting the
@@ -268,23 +268,40 @@ impl Optimizer {
                 keys: keys.clone(),
                 input: Box::new(self.optimize_around_subqueries(input)?),
             }),
-            RelExpr::Limit { count, offset, input } => Ok(RelExpr::Limit {
+            RelExpr::Limit {
+                count,
+                offset,
+                input,
+            } => Ok(RelExpr::Limit {
                 count: *count,
                 offset: *offset,
                 input: Box::new(self.optimize_around_subqueries(input)?),
             }),
-            RelExpr::Aggregate { group_by, aggregates, input } => Ok(RelExpr::Aggregate {
+            RelExpr::Aggregate {
+                group_by,
+                aggregates,
+                input,
+            } => Ok(RelExpr::Aggregate {
                 group_by: group_by.clone(),
                 aggregates: aggregates.clone(),
                 input: Box::new(self.optimize_around_subqueries(input)?),
             }),
-            RelExpr::Join { join_type, condition, left, right } => Ok(RelExpr::Join {
+            RelExpr::Join {
+                join_type,
+                condition,
+                left,
+                right,
+            } => Ok(RelExpr::Join {
                 join_type: *join_type,
                 condition: condition.clone(),
                 left: Box::new(self.optimize_around_subqueries(left)?),
                 right: Box::new(self.optimize_around_subqueries(right)?),
             }),
-            RelExpr::CTE { name, definition, body } => Ok(RelExpr::CTE {
+            RelExpr::CTE {
+                name,
+                definition,
+                body,
+            } => Ok(RelExpr::CTE {
                 name: name.clone(),
                 definition: Box::new(self.optimize_around_subqueries(definition)?),
                 body: Box::new(self.optimize_around_subqueries(body)?),
@@ -472,11 +489,12 @@ impl Optimizer {
         // groups by consulting the annotated rule listing. This
         // lookup happens once per query, so the cost of building
         // the annotated list is amortized.
-        let redundant_names: std::collections::HashSet<String> = crate::rewrite::all_rules_annotated()
-            .into_iter()
-            .filter(|g| redundant_groups.contains(&g.label))
-            .flat_map(|g| g.rules.into_iter().map(|r| r.name.to_string()))
-            .collect();
+        let redundant_names: std::collections::HashSet<String> =
+            crate::rewrite::all_rules_annotated()
+                .into_iter()
+                .filter(|g| redundant_groups.contains(&g.label))
+                .flat_map(|g| g.rules.into_iter().map(|r| r.name.to_string()))
+                .collect();
 
         if redundant_names.is_empty() {
             return rules;
@@ -533,11 +551,12 @@ impl Optimizer {
         if demoted.is_empty() {
             return rules;
         }
-        let demoted_names: std::collections::HashSet<String> = crate::rewrite::all_rules_annotated()
-            .into_iter()
-            .filter(|g| demoted.contains(g.label))
-            .flat_map(|g| g.rules.into_iter().map(|r| r.name.to_string()))
-            .collect();
+        let demoted_names: std::collections::HashSet<String> =
+            crate::rewrite::all_rules_annotated()
+                .into_iter()
+                .filter(|g| demoted.contains(g.label))
+                .flat_map(|g| g.rules.into_iter().map(|r| r.name.to_string()))
+                .collect();
         if demoted_names.is_empty() {
             return rules;
         }
@@ -586,9 +605,8 @@ impl Optimizer {
         let n_failed = feedback
             .iter()
             .filter(|fb| {
-                fb.flags.contains(
-                    ra_plan_advice::feedback::FeedbackFlags::FAILED,
-                )
+                fb.flags
+                    .contains(ra_plan_advice::feedback::FeedbackFlags::FAILED)
             })
             .count();
         if n_failed == 0 {
@@ -727,11 +745,9 @@ impl Optimizer {
             crate::QueryFingerprint::from_rel_expr(expr),
             self.cost_model.as_ref().map(|m| m.snapshot_id()),
             None, // stats_version: requires monotonic counter in
-                  // ra-stats; populate once that lands.
+            // ra-stats; populate once that lands.
             crate::PlanProvenance::hash_hardware_profile(hardware),
-            crate::PlanProvenance::hash_rule_names(
-                rules.iter().map(|r| r.name.as_str()),
-            ),
+            crate::PlanProvenance::hash_rule_names(rules.iter().map(|r| r.name.as_str())),
             route,
             termination_reason,
         )
@@ -829,16 +845,15 @@ impl Optimizer {
 
     /// Enable online training with a new coordinator.
     pub fn enable_training(&mut self) {
-        self.training_coordinator =
-            Some(crate::training_coordinator::shared_coordinator());
+        self.training_coordinator = Some(crate::training_coordinator::shared_coordinator());
     }
 
     /// Get training statistics (if training is enabled).
     #[must_use]
     pub fn training_stats(&self) -> Option<crate::training_coordinator::TrainingStats> {
-        self.training_coordinator.as_ref().and_then(|c| {
-            c.lock().ok().map(|coord| coord.stats())
-        })
+        self.training_coordinator
+            .as_ref()
+            .and_then(|c| c.lock().ok().map(|coord| coord.stats()))
     }
 
     /// Get a reference to the training coordinator handle.
@@ -861,7 +876,10 @@ impl Optimizer {
             .unwrap_or_else(|_| "models/cost_model.bitnet.json".to_string());
         let path = Path::new(&path);
         if !path.exists() {
-            tracing::debug!("No cost model at {}, using traditional costing", path.display());
+            tracing::debug!(
+                "No cost model at {}, using traditional costing",
+                path.display()
+            );
             return Ok(());
         }
         let model = BitNetCostModel::load_from_file(
@@ -896,7 +914,15 @@ impl Optimizer {
                 .keys()
                 .map(|k| (k.clone(), ra_stats::accuracy::Staleness::Fresh))
                 .collect();
-            extract_best_bitnet(egraph, root, table_stats, &staleness_map, hardware, model, &fingerprint)
+            extract_best_bitnet(
+                egraph,
+                root,
+                table_stats,
+                &staleness_map,
+                hardware,
+                model,
+                &fingerprint,
+            )
         } else {
             // Traditional path: tune costs to live conditions when a monitor
             // fingerprint is wired into this optimizer, else neutral.
@@ -911,7 +937,14 @@ impl Optimizer {
                     }
                 },
             );
-            extract_best(egraph, root, table_stats, hardware, live, self.page_size_bytes)
+            extract_best(
+                egraph,
+                root,
+                table_stats,
+                hardware,
+                live,
+                self.page_size_bytes,
+            )
         }
     }
 
@@ -921,14 +954,17 @@ impl Optimizer {
     fn is_trivial_query(expr: &RelExpr) -> bool {
         match expr {
             RelExpr::Scan { .. } | RelExpr::Values { .. } => true,
-            RelExpr::Filter { input, predicate, .. } => {
+            RelExpr::Filter {
+                input, predicate, ..
+            } => {
                 !crate::subquery_decorrelation::contains_subquery(predicate)
                     && Self::is_trivial_query(input)
             }
             RelExpr::Project { input, columns, .. } => {
-                !columns.iter().any(|c| {
-                    crate::subquery_decorrelation::contains_subquery(&c.expr)
-                }) && Self::is_trivial_query(input)
+                !columns
+                    .iter()
+                    .any(|c| crate::subquery_decorrelation::contains_subquery(&c.expr))
+                    && Self::is_trivial_query(input)
             }
             RelExpr::Sort { input, .. }
             | RelExpr::Limit { input, .. }
@@ -946,7 +982,9 @@ impl Optimizer {
         if matches!(expr, RelExpr::GraphTable { .. }) {
             return true;
         }
-        expr.children().iter().any(|c| Self::contains_graph_table(c))
+        expr.children()
+            .iter()
+            .any(|c| Self::contains_graph_table(c))
     }
 
     /// True if the tree contains a recursive CTE. Its recursive term scans the
@@ -958,17 +996,17 @@ impl Optimizer {
         if matches!(expr, RelExpr::RecursiveCTE { .. }) {
             return true;
         }
-        expr.children().iter().any(|c| Self::contains_recursive_cte(c))
+        expr.children()
+            .iter()
+            .any(|c| Self::contains_recursive_cte(c))
     }
 
     /// Optimize DML sub-relations without putting the DML envelope
     /// through equality saturation.
     ///
     /// Returns `Some(optimized)` for DML statements, `None` for queries.
-    fn try_optimize_dml(
-        &self,
-        expr: &RelExpr,
-    ) -> Result<Option<RelExpr>, EGraphError> {        match expr {
+    fn try_optimize_dml(&self, expr: &RelExpr) -> Result<Option<RelExpr>, EGraphError> {
+        match expr {
             RelExpr::Insert {
                 table,
                 columns,
@@ -1071,7 +1109,10 @@ impl Optimizer {
     ///
     /// Returns an error if the expression cannot be converted to
     /// the e-graph representation or if extraction fails.
-    #[expect(clippy::too_many_lines, reason = "main optimizer entry point with many fast paths")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "main optimizer entry point with many fast paths"
+    )]
     pub fn optimize(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
         use std::time::Instant;
         use tracing::{debug, info};
@@ -1096,7 +1137,9 @@ impl Optimizer {
                 if let Some(hit) = cache.lookup(&fp) {
                     info!(
                         "Plan cache hit ({:?}, similarity={:.2}) in {:?}",
-                        hit.match_type, hit.similarity, total_start.elapsed()
+                        hit.match_type,
+                        hit.similarity,
+                        total_start.elapsed()
                     );
                     return Ok(hit.plan);
                 }
@@ -1163,8 +1206,8 @@ impl Optimizer {
         // 3. Speculative routing → determines rule budget and iteration limits.
         // ALL queries go through the e-graph; the route controls which rules
         // load and how many iterations run (Skip = 0 iterations = identity).
-        let opt_features = OptimizationFeatures::from_expr(expr)
-            .with_table_stats(&self.table_stats);
+        let opt_features =
+            OptimizationFeatures::from_expr(expr).with_table_stats(&self.table_stats);
 
         let route_prediction = if let Some(ref router) = self.speculative_router {
             router.predict(&opt_features)
@@ -1195,14 +1238,22 @@ impl Optimizer {
 
         // 6. Run e-graph saturation
         let sat = self.run_egraph_saturation(
-            expr, &opt_features, &route_prediction, iter_limit, timeout_ms, table_count,
+            expr,
+            &opt_features,
+            &route_prediction,
+            iter_limit,
+            timeout_ms,
+            table_count,
         )?;
 
         // 7. Extract result
         let extract_start = Instant::now();
         let hardware = self.hardware_profile();
         let extracted = self.extract_with_hybrid_fallback(
-            &sat.egraph, sat.root, sat.stats_cache.as_map(), &hardware,
+            &sat.egraph,
+            sat.root,
+            sat.stats_cache.as_map(),
+            &hardware,
         )?;
         debug!("extract_best: {:?}", extract_start.elapsed());
 
@@ -1214,13 +1265,19 @@ impl Optimizer {
 
         info!(
             "Total optimization: {:?} (egraph={:?}, extract={:?})",
-            total_start.elapsed(), sat.runner_elapsed, extract_start.elapsed()
+            total_start.elapsed(),
+            sat.runner_elapsed,
+            extract_start.elapsed()
         );
 
         // 9. Training feedback
         self.record_egraph_training_trace(
-            expr, sat.actual_iterations, sat.termination_reason,
-            sat.egraph_nodes, sat.runner_elapsed, sat.continuation_gate.as_ref(),
+            expr,
+            sat.actual_iterations,
+            sat.termination_reason,
+            sat.egraph_nodes,
+            sat.runner_elapsed,
+            sat.continuation_gate.as_ref(),
         );
 
         // 10. Cache + return
@@ -1243,9 +1300,7 @@ impl Optimizer {
         if table_count < self.config.large_join_threshold {
             return Ok(None);
         }
-        if let crate::large_join::LargeJoinStrategy::EGraph =
-            &self.config.large_join_strategy
-        {
+        if let crate::large_join::LargeJoinStrategy::EGraph = &self.config.large_join_strategy {
             return Ok(None);
         }
 
@@ -1270,9 +1325,7 @@ impl Optimizer {
             Ok(r) => r,
             Err(e) => {
                 use tracing::info;
-                info!(
-                    "Large-join optimizer unavailable ({e}), falling back to e-graph"
-                );
+                info!("Large-join optimizer unavailable ({e}), falling back to e-graph");
                 return Ok(None);
             }
         };
@@ -1303,11 +1356,10 @@ impl Optimizer {
             }
         };
 
-        let iter_limit =
-            match self.resource_budget.as_ref().and_then(|b| b.max_iterations) {
-                Some(budget_cap) => base_iter_limit.min(budget_cap),
-                None => base_iter_limit,
-            };
+        let iter_limit = match self.resource_budget.as_ref().and_then(|b| b.max_iterations) {
+            Some(budget_cap) => base_iter_limit.min(budget_cap),
+            None => base_iter_limit,
+        };
 
         let timeout_ms = match route_prediction.route {
             OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh
@@ -1340,8 +1392,7 @@ impl Optimizer {
         use std::time::Instant;
         use tracing::debug;
 
-        let stats_cache =
-            crate::stats_cache::StatsCache::from_arc(Arc::clone(&self.table_stats));
+        let stats_cache = crate::stats_cache::StatsCache::from_arc(Arc::clone(&self.table_stats));
 
         // Pre-optimization: decorrelate subqueries
         let decorrelated;
@@ -1360,14 +1411,9 @@ impl Optimizer {
         // of the decorrelated expression.
         let (effective_iter_limit, effective_table_count) = {
             let post_table_count =
-                crate::large_join::LargeJoinOptimizer::count_tables(
-                    effective_expr,
-                );
-            let table_based_limit =
-                default_iter_limit_for_tables(post_table_count);
-            if !std::ptr::eq(effective_expr, expr)
-                && table_based_limit < iter_limit
-            {
+                crate::large_join::LargeJoinOptimizer::count_tables(effective_expr);
+            let table_based_limit = default_iter_limit_for_tables(post_table_count);
+            if !std::ptr::eq(effective_expr, expr) && table_based_limit < iter_limit {
                 debug!(
                     "Post-decorrelation budget adjustment: \
                      tables {}->{}, iters {}->{}",
@@ -1394,27 +1440,25 @@ impl Optimizer {
         let initial_nodes = egraph.total_size();
 
         let mut continuation_gate = match route_prediction.route {
-            OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => {
-                Some(ContinuationGate::new(
-                    opt_features.clone(),
-                    self.cost_model.clone(),
-                ))
-            }
+            OptRoute::EGraphLow | OptRoute::EGraphMedium | OptRoute::EGraphHigh => Some(
+                ContinuationGate::new(opt_features.clone(), self.cost_model.clone()),
+            ),
             _ => None,
         };
 
-        let (actual_iterations, termination_reason, egraph) =
-            self.run_saturation_loop(
-                egraph, root, &rules, effective_iter_limit, timeout,
-                runner_start, convergence_behavior,
-                effective_table_count, effective_expr,
-                &mut continuation_gate,
-                SaturationBudgets::from_config(
-                    &self.config,
-                    route_prediction.route,
-                    initial_nodes,
-                ),
-            );
+        let (actual_iterations, termination_reason, egraph) = self.run_saturation_loop(
+            egraph,
+            root,
+            &rules,
+            effective_iter_limit,
+            timeout,
+            runner_start,
+            convergence_behavior,
+            effective_table_count,
+            effective_expr,
+            &mut continuation_gate,
+            SaturationBudgets::from_config(&self.config, route_prediction.route, initial_nodes),
+        );
 
         let runner_elapsed = runner_start.elapsed();
         let egraph_nodes = egraph.total_size();
@@ -1448,9 +1492,7 @@ impl Optimizer {
         continuation_gate: &mut Option<ContinuationGate>,
         budgets: SaturationBudgets,
     ) -> (usize, &'static str, EGraph<RelLang, RelAnalysis>) {
-        let mut ctx = self.build_loop_context(
-            expr, continuation_gate, convergence_behavior,
-        );
+        let mut ctx = self.build_loop_context(expr, continuation_gate, convergence_behavior);
 
         let mut termination_reason: &'static str = "iteration_limit";
         let mut actual_iterations = 0;
@@ -1490,16 +1532,14 @@ impl Optimizer {
             // the e-class table — egg's egraph::clone() is cheap
             // because the underlying union-find shares storage.
             let pre_iteration_egraph = egraph.clone();
-            let runner_result = std::panic::catch_unwind(
-                std::panic::AssertUnwindSafe(|| {
-                    Runner::<RelLang, RelAnalysis>::default()
-                        .with_egraph(egraph)
-                        .with_node_limit(self.config.node_limit)
-                        .with_iter_limit(1)
-                        .with_time_limit(safety_timeout.saturating_sub(runner_start.elapsed()))
-                        .run(rules)
-                }),
-            );
+            let runner_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                Runner::<RelLang, RelAnalysis>::default()
+                    .with_egraph(egraph)
+                    .with_node_limit(self.config.node_limit)
+                    .with_iter_limit(1)
+                    .with_time_limit(safety_timeout.saturating_sub(runner_start.elapsed()))
+                    .run(rules)
+            }));
             let runner = match runner_result {
                 Ok(r) => r,
                 Err(payload) => {
@@ -1541,9 +1581,7 @@ impl Optimizer {
             // A 0 budget disables the check, used by tests that want
             // unbounded saturation.
             let node_growth = egraph.total_size().saturating_sub(initial_nodes);
-            if budgets.max_node_growth > 0
-                && node_growth >= budgets.max_node_growth
-            {
+            if budgets.max_node_growth > 0 && node_growth >= budgets.max_node_growth {
                 tracing::debug!(
                     "Saturation budget exhausted: node_growth={} >= cap={}",
                     node_growth,
@@ -1565,9 +1603,16 @@ impl Optimizer {
             }
 
             if let Some(reason) = self.check_iteration_termination(
-                &mut ctx, &egraph, root, iteration, actual_iterations,
-                prev_classes, continuation_gate, convergence_behavior,
-                table_count, stop_reason.as_ref(),
+                &mut ctx,
+                &egraph,
+                root,
+                iteration,
+                actual_iterations,
+                prev_classes,
+                continuation_gate,
+                convergence_behavior,
+                table_count,
+                stop_reason.as_ref(),
             ) {
                 termination_reason = reason;
                 break;
@@ -1575,8 +1620,12 @@ impl Optimizer {
         }
 
         Self::log_saturation_stats(
-            &ctx, runner_start, actual_iterations,
-            egraph.total_size(), egraph.number_of_classes(), termination_reason,
+            &ctx,
+            runner_start,
+            actual_iterations,
+            egraph.total_size(),
+            egraph.number_of_classes(),
+            termination_reason,
         );
 
         (actual_iterations, termination_reason, egraph)
@@ -1678,12 +1727,13 @@ impl Optimizer {
         } else {
             curr_classes
         };
-        ctx.convergence_detector.record(crate::convergence::IterationMetrics {
-            iteration,
-            unions,
-            total_nodes: egraph.total_size(),
-            total_classes: curr_classes,
-        });
+        ctx.convergence_detector
+            .record(crate::convergence::IterationMetrics {
+                iteration,
+                unions,
+                total_nodes: egraph.total_size(),
+                total_classes: curr_classes,
+            });
 
         // Cardinality-aware cost signal: use the same cost model as final
         // extraction (IntegratedCostFn) when statistics are available, so the
@@ -1708,7 +1758,10 @@ impl Optimizer {
                     staleness,
                     id_row_counts,
                 );
-                egg::Extractor::new(egraph, cost_fn).find_best(root).0.total_cost
+                egg::Extractor::new(egraph, cost_fn)
+                    .find_best(root)
+                    .0
+                    .total_cost
             }
         });
 
@@ -1725,14 +1778,15 @@ impl Optimizer {
             }
         }
 
-        if let Some(reason) = Self::check_cost_trackers(
-            ctx, current_cost, root, iteration,
-        ) {
+        if let Some(reason) = Self::check_cost_trackers(ctx, current_cost, root, iteration) {
             return Some(reason);
         }
 
         if let Some(reason) = Self::check_continuation(
-            continuation_gate, current_cost, iteration, egraph.total_size(),
+            continuation_gate,
+            current_cost,
+            iteration,
+            egraph.total_size(),
         ) {
             return Some(reason);
         }
@@ -1742,7 +1796,8 @@ impl Optimizer {
         {
             debug!(
                 "Early termination: converged at iteration {} (stats: {:?})",
-                iteration, ctx.convergence_detector.stats()
+                iteration,
+                ctx.convergence_detector.stats()
             );
             return Some("converged");
         }
@@ -1799,7 +1854,9 @@ impl Optimizer {
                     debug!(
                         "Beam search: pruned {} plans at iteration {} \
                          (kept top {})",
-                        pruned, iteration, tracker.stats().plans_kept
+                        pruned,
+                        iteration,
+                        tracker.stats().plans_kept
                     );
                 }
             }
@@ -1880,8 +1937,11 @@ impl Optimizer {
         info!(
             "E-graph saturation: {:?} ({} iterations, {} nodes, {} classes, \
              reason: {})",
-            runner_start.elapsed(), actual_iterations, egraph_nodes,
-            egraph_classes, termination_reason
+            runner_start.elapsed(),
+            actual_iterations,
+            egraph_nodes,
+            egraph_classes,
+            termination_reason
         );
     }
 
@@ -1906,7 +1966,11 @@ impl Optimizer {
         let final_improvement_pct = if cost_history.len() >= 2 {
             let first = cost_history[0];
             let last = cost_history[cost_history.len() - 1];
-            if first > 0.0 { ((first - last) / first) * 100.0 } else { 0.0 }
+            if first > 0.0 {
+                ((first - last) / first) * 100.0
+            } else {
+                0.0
+            }
         } else {
             0.0
         };
@@ -1917,9 +1981,7 @@ impl Optimizer {
             cost_per_iteration: cost_history.clone(),
             termination_reason: termination_reason.to_string(),
             final_improvement_pct,
-            optimal_stop_point: OptimizationTrace::compute_optimal_stop(
-                &cost_history,
-            ),
+            optimal_stop_point: OptimizationTrace::compute_optimal_stop(&cost_history),
             egraph_nodes_final: egraph_nodes,
             optimization_time_ms: runner_elapsed.as_secs_f64() * 1000.0,
         };
@@ -1963,7 +2025,6 @@ impl Optimizer {
             }
         }
     }
-
 
     /// Optimize using pre-condition-filtered rules based on available system facts.
     ///
@@ -2023,7 +2084,8 @@ impl Optimizer {
 
         let root = runner.roots[0];
         let hardware = self.hardware_profile();
-        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &*self.table_stats, &hardware)?;
+        let result =
+            self.extract_with_hybrid_fallback(&runner.egraph, root, &*self.table_stats, &hardware)?;
         Ok((result, runner.egraph))
     }
 
@@ -2041,7 +2103,10 @@ impl Optimizer {
     /// Returns an error if expression conversion fails, or if the
     /// overflow strategy is [`OverflowStrategy::Fail`] and the budget
     /// is exceeded before any plan is extracted.
-    #[expect(clippy::too_many_lines, reason = "bounded optimization with convergence control")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "bounded optimization with convergence control"
+    )]
     pub fn optimize_bounded(&self, expr: &RelExpr) -> Result<OptimizationResult, EGraphError> {
         use tracing::debug;
 
@@ -2117,8 +2182,7 @@ impl Optimizer {
         let rules = self.load_rules(effective_expr);
 
         // Table count for Adaptive convergence decisions
-        let table_count =
-            crate::large_join::LargeJoinOptimizer::count_tables(effective_expr);
+        let table_count = crate::large_join::LargeJoinOptimizer::count_tables(effective_expr);
 
         // Adaptive iteration limit — the same lever optimize() uses.
         // Without this, optimize_bounded ran the raw config.iter_limit
@@ -2130,17 +2194,15 @@ impl Optimizer {
         // router caps trivial/low-difficulty queries at ~3 iterations
         // (and compute_egraph_limits further honors any explicit
         // budget.max_iterations), matching optimize()'s behaviour.
-        let opt_features = crate::speculative_router::OptimizationFeatures::from_expr(
-            effective_expr,
-        )
-        .with_table_stats(&self.table_stats);
+        let opt_features =
+            crate::speculative_router::OptimizationFeatures::from_expr(effective_expr)
+                .with_table_stats(&self.table_stats);
         let route_prediction = if let Some(ref router) = self.speculative_router {
             router.predict(&opt_features)
         } else {
             crate::speculative_router::SpeculativeRouter::heuristic_fallback(&opt_features)
         };
-        let (iter_limit, _timeout_ms) =
-            self.compute_egraph_limits(&route_prediction, table_count);
+        let (iter_limit, _timeout_ms) = self.compute_egraph_limits(&route_prediction, table_count);
         // Run at least one loop pass so the ResourceTracker can
         // enforce the budget (e.g. max_iterations=0 with the Fail
         // overflow strategy must return an error, not silently skip
@@ -2163,7 +2225,9 @@ impl Optimizer {
         );
 
         // Extract initial plan (the original, unoptimized)
-        if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware) {
+        if let Ok(plan) =
+            self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware)
+        {
             best_plan = Some(plan);
             best_cost = estimate_plan_cost(&egraph, root, &hardware);
         }
@@ -2187,9 +2251,7 @@ impl Optimizer {
             // left, so total wall-clock is bounded by `max_time` plus
             // at most one short iteration.
             let iter_time_limit = match tracker.remaining_time() {
-                Some(remaining) => {
-                    remaining.min(std::time::Duration::from_secs(time_limit_secs))
-                }
+                Some(remaining) => remaining.min(std::time::Duration::from_secs(time_limit_secs)),
                 None => std::time::Duration::from_secs(time_limit_secs),
             };
 
@@ -2224,7 +2286,9 @@ impl Optimizer {
             });
 
             // Try to extract the best plan from the current e-graph
-            if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware) {
+            if let Ok(plan) =
+                self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware)
+            {
                 let cost = estimate_plan_cost(&egraph, root, &hardware);
                 if cost < best_cost {
                     best_cost = cost;
@@ -2252,15 +2316,16 @@ impl Optimizer {
                     );
                     break;
                 }
-                ConvergenceBehavior::Adaptive if iterations_done >= 2
-                    && is_simple_query(table_count) => {
-                        debug!(
-                            "Adaptive convergence: simple query, \
+                ConvergenceBehavior::Adaptive
+                    if iterations_done >= 2 && is_simple_query(table_count) =>
+                {
+                    debug!(
+                        "Adaptive convergence: simple query, \
                              stopping after {} iterations",
-                            iterations_done,
-                        );
-                        break;
-                    }
+                        iterations_done,
+                    );
+                    break;
+                }
                 _ => {}
             }
 
@@ -2363,7 +2428,10 @@ impl Optimizer {
     /// Returns an error if expression conversion fails, or if the
     /// overflow strategy is `OverflowStrategy::Fail` and the budget
     /// is exceeded before any plan is extracted.
-    #[expect(clippy::too_many_lines, reason = "optimization pipeline with verbose tracing")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "optimization pipeline with verbose tracing"
+    )]
     pub fn optimize_with_tracking_verbose(
         &self,
         expr: &RelExpr,
@@ -2382,18 +2450,15 @@ impl Optimizer {
         // config.iter_limit. Honors budget.max_iterations via
         // compute_egraph_limits; clamped to >= 1 so the tracker can
         // still enforce the budget on the first pass.
-        let table_count =
-            crate::large_join::LargeJoinOptimizer::count_tables(expr);
-        let opt_features =
-            crate::speculative_router::OptimizationFeatures::from_expr(expr)
-                .with_table_stats(&self.table_stats);
+        let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
+        let opt_features = crate::speculative_router::OptimizationFeatures::from_expr(expr)
+            .with_table_stats(&self.table_stats);
         let route_prediction = if let Some(ref router) = self.speculative_router {
             router.predict(&opt_features)
         } else {
             crate::speculative_router::SpeculativeRouter::heuristic_fallback(&opt_features)
         };
-        let (iter_limit, _timeout_ms) =
-            self.compute_egraph_limits(&route_prediction, table_count);
+        let (iter_limit, _timeout_ms) = self.compute_egraph_limits(&route_prediction, table_count);
         let iter_limit = iter_limit.max(1);
         let node_limit = self.config.node_limit;
 
@@ -2405,7 +2470,9 @@ impl Optimizer {
         let initial_cost = estimate_plan_cost(&egraph, root, &hardware);
 
         // Extract initial plan (the original, unoptimized)
-        if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware) {
+        if let Ok(plan) =
+            self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware)
+        {
             best_plan = Some(plan);
             best_cost = initial_cost;
         }
@@ -2443,7 +2510,8 @@ impl Optimizer {
 
                 // Extract plan before if verbose mode
                 let plan_before = if verbose {
-                    self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware).ok()
+                    self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware)
+                        .ok()
                 } else {
                     None
                 };
@@ -2472,7 +2540,12 @@ impl Optimizer {
                     };
 
                     // Try to extract better plan
-                    if let Ok(plan) = self.extract_with_hybrid_fallback(&egraph, root, &*self.table_stats, &hardware) {
+                    if let Ok(plan) = self.extract_with_hybrid_fallback(
+                        &egraph,
+                        root,
+                        &*self.table_stats,
+                        &hardware,
+                    ) {
                         if cost_after < best_cost {
                             best_cost = cost_after;
                             best_plan = Some(plan.clone());
@@ -2616,7 +2689,8 @@ impl Optimizer {
             .run(&rules);
 
         let root = runner.roots[0];
-        let result = self.extract_with_hybrid_fallback(&runner.egraph, root, &*self.table_stats, &hardware)?;
+        let result =
+            self.extract_with_hybrid_fallback(&runner.egraph, root, &*self.table_stats, &hardware)?;
 
         let elapsed = start.elapsed();
         let nodes_in_egraph = runner.egraph.total_number_of_nodes();
@@ -2798,8 +2872,8 @@ mod determinism_tests {
     /// Planning must be deterministic: optimizing the same query repeatedly
     /// (with a fixed model — none is loaded here) must yield an identical plan.
     /// This is the foundation for reproducible tests; the extension freezes the
-    /// BitNet model via `ra_planner.online_learning=off` so the model can't
-    /// evolve between runs. Covers both the LEFT_DEEP route (inner equi-join
+    /// `BitNet` model via `ra_planner.online_learning=off` so the model can't
+    /// evolve between runs. Covers both the `LEFT_DEEP` route (inner equi-join
     /// chains) and the e-graph route (outer joins, set ops). The e-graph route
     /// is deterministic because (a) egg 0.11 uses a deterministic hasher and
     /// scheduler, and (b) saturation terminates on deterministic conditions
@@ -2819,7 +2893,9 @@ mod determinism_tests {
             "SELECT a FROM t UNION SELECT b FROM u",
         ];
         for sql in queries {
-            let Ok(expr) = ra_parser::sql_to_relexpr(sql) else { continue };
+            let Ok(expr) = ra_parser::sql_to_relexpr(sql) else {
+                continue;
+            };
             let baseline = {
                 let opt = Optimizer::new();
                 format!("{:?}", opt.optimize(&expr).expect("optimize"))

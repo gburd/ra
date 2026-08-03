@@ -21,10 +21,7 @@ fn sample_features() -> [f32; 16] {
         0.0,      // limit_present
         10_000.0, // max_join_cardinality
         // OptimizationFeatures padding
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        0.0, 0.0, 0.0, 0.0,
     ]
 }
 
@@ -87,5 +84,10 @@ fn bench_predict_scalar(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_predict_cpu_ms, bench_predict_all, bench_predict_scalar);
+criterion_group!(
+    benches,
+    bench_predict_cpu_ms,
+    bench_predict_all,
+    bench_predict_scalar
+);
 criterion_main!(benches);

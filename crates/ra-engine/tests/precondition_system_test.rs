@@ -1,8 +1,4 @@
-#![expect(
-    clippy::unwrap_used,
-    clippy::approx_constant,
-    reason = "test code"
-)]
+#![expect(clippy::unwrap_used, clippy::approx_constant, reason = "test code")]
 //! Comprehensive tests for the formal pre-condition system.
 //!
 //! Tests `PreCondition` types, `FactsProvider` implementations,

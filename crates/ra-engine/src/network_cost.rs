@@ -810,7 +810,7 @@ mod tests {
         let model = simple_model();
         let est = model.transfer_cost("orders", NodeId(1), 0, 100);
         // Zero rows = only latency
-        assert!(est.bytes_transferred == 0);
+        assert_eq!(est.bytes_transferred, 0);
     }
 
     #[test]

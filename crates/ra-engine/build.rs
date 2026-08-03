@@ -292,7 +292,9 @@ fn extract_structured_rewrites(body: &str, id: &str) -> Vec<String> {
             continue;
         }
         // Ignore code fences / comments / blanks inside the section.
-        let line_no_comment = trimmed.split_once('#').map_or(trimmed, |(c, _)| c.trim_end());
+        let line_no_comment = trimmed
+            .split_once('#')
+            .map_or(trimmed, |(c, _)| c.trim_end());
         if let Some(v) = line_no_comment.strip_prefix("lhs:") {
             lhs = Some(v.trim().to_string());
         } else if let Some(v) = line_no_comment.strip_prefix("rhs:") {
@@ -326,16 +328,19 @@ fn extract_structured_rewrites(body: &str, id: &str) -> Vec<String> {
     match (lhs, rhs, apply) {
         // Computed RHS via a named applier (apply: takes precedence over rhs:).
         (Some(l), _, Some(a)) if !l.is_empty() && !a.is_empty() => {
-            vec![format!("rewrite!(\"{id}\";\n    \"{l}\" => {{ {a} }}{cond}\n)")]
+            vec![format!(
+                "rewrite!(\"{id}\";\n    \"{l}\" => {{ {a} }}{cond}\n)"
+            )]
         }
         // Static pattern RHS.
         (Some(l), Some(r), None) if !l.is_empty() && !r.is_empty() => {
-            vec![format!("rewrite!(\"{id}\";\n    \"{l}\" =>\n    \"{r}\"{cond}\n)")]
+            vec![format!(
+                "rewrite!(\"{id}\";\n    \"{l}\" =>\n    \"{r}\"{cond}\n)"
+            )]
         }
         _ => Vec::new(),
     }
 }
-
 
 /// Extract condition function names from code blocks.
 /// Looks for patterns like `if some_function("?var", "?var2")`
@@ -433,9 +438,7 @@ fn extract_condition_names(rewrite_str: &str) -> Option<Vec<String>> {
                 conditions.push(prev);
             }
             current = Some(rest.to_owned());
-        } else if !trimmed.is_empty()
-            && (trimmed.starts_with("&&") || trimmed.starts_with("||"))
-        {
+        } else if !trimmed.is_empty() && (trimmed.starts_with("&&") || trimmed.starts_with("||")) {
             if let Some(c) = current.as_mut() {
                 c.push(' ');
                 c.push_str(trimmed);
@@ -479,7 +482,10 @@ fn has_condition_or_applier(rewrite_str: &str) -> bool {
         // Compound `if` expression that egg can't parse → block.
         return true;
     };
-    if names.iter().any(|n| !KNOWN_CONDITIONS.contains(&n.as_str())) {
+    if names
+        .iter()
+        .any(|n| !KNOWN_CONDITIONS.contains(&n.as_str()))
+    {
         return true;
     }
 
@@ -491,11 +497,7 @@ fn has_condition_or_applier(rewrite_str: &str) -> bool {
         // Pattern: starts with `{` then whitespace then an uppercase letter
         if trimmed.starts_with('{') {
             let inner = trimmed[1..].trim();
-            if inner
-                .chars()
-                .next()
-                .is_some_and(char::is_uppercase)
-            {
+            if inner.chars().next().is_some_and(char::is_uppercase) {
                 return true;
             }
         }
@@ -504,11 +506,7 @@ fn has_condition_or_applier(rewrite_str: &str) -> bool {
             let lt = line.trim();
             if lt.starts_with('{') {
                 let inner = lt[1..].trim();
-                if inner
-                    .chars()
-                    .next()
-                    .is_some_and(char::is_uppercase)
-                {
+                if inner.chars().next().is_some_and(char::is_uppercase) {
                     return true;
                 }
             }
@@ -533,66 +531,131 @@ enum ExtractedRule {
 /// From egraph/lang.rs `define_language`! macro.
 const RELLANG_OPERATORS: &[(&str, Option<usize>)] = &[
     // Relational operators
-    ("scan", Some(1)), ("scan-alias", Some(2)), ("filter", Some(2)),
-    ("project", Some(2)), ("join", Some(4)), ("aggregate", Some(3)),
+    ("scan", Some(1)),
+    ("scan-alias", Some(2)),
+    ("filter", Some(2)),
+    ("project", Some(2)),
+    ("join", Some(4)),
+    ("aggregate", Some(3)),
     // Physical join variants (RFC 0090 Phase 3)
-    ("hash-join", Some(4)), ("merge-join", Some(4)), ("nest-loop", Some(4)),
+    ("hash-join", Some(4)),
+    ("merge-join", Some(4)),
+    ("nest-loop", Some(4)),
     ("index-nest-loop", Some(4)),
     ("index-scan-choice", Some(2)),
-    ("sort", Some(2)), ("incremental-sort", Some(3)), ("limit", Some(3)),
-    ("union", Some(3)), ("intersect", Some(3)), ("except", Some(3)),
-    ("recursive-cte", Some(4)), ("cte", Some(3)), ("window", Some(2)),
-    ("distinct-rel", Some(1)), ("values", None), ("values-row", None),
+    ("sort", Some(2)),
+    ("incremental-sort", Some(3)),
+    ("limit", Some(3)),
+    ("union", Some(3)),
+    ("intersect", Some(3)),
+    ("except", Some(3)),
+    ("recursive-cte", Some(4)),
+    ("cte", Some(3)),
+    ("window", Some(2)),
+    ("distinct-rel", Some(1)),
+    ("values", None),
+    ("values-row", None),
     // Metadata shortcut
-    ("metadata-lookup", Some(2)), ("row-count", Some(0)),
+    ("metadata-lookup", Some(2)),
+    ("row-count", Some(0)),
     // Index operators
-    ("index-scan", Some(2)), ("index-only-scan", Some(4)), ("mv-scan", Some(4)),
+    ("index-scan", Some(2)),
+    ("index-only-scan", Some(4)),
+    ("mv-scan", Some(4)),
     // Bitmap operators
-    ("bitmap-index-scan", Some(3)), ("bitmap-and", None), ("bitmap-or", None),
+    ("bitmap-index-scan", Some(3)),
+    ("bitmap-and", None),
+    ("bitmap-or", None),
     ("bitmap-heap-scan", Some(3)),
     // Window function expression
-    ("window-expr", Some(6)), ("window-fn", Some(1)), ("window-frame", Some(3)),
-    ("frame-rows", Some(0)), ("frame-range", Some(0)), ("frame-groups", Some(0)),
-    ("frame-unbounded-preceding", Some(0)), ("frame-preceding", Some(1)),
-    ("frame-current-row", Some(0)), ("frame-following", Some(1)),
+    ("window-expr", Some(6)),
+    ("window-fn", Some(1)),
+    ("window-frame", Some(3)),
+    ("frame-rows", Some(0)),
+    ("frame-range", Some(0)),
+    ("frame-groups", Some(0)),
+    ("frame-unbounded-preceding", Some(0)),
+    ("frame-preceding", Some(1)),
+    ("frame-current-row", Some(0)),
+    ("frame-following", Some(1)),
     ("frame-unbounded-following", Some(0)),
     // Join types
-    ("inner", Some(0)), ("left-outer", Some(0)), ("right-outer", Some(0)),
-    ("full-outer", Some(0)), ("cross", Some(0)), ("semi", Some(0)), ("anti", Some(0)),
+    ("inner", Some(0)),
+    ("left-outer", Some(0)),
+    ("right-outer", Some(0)),
+    ("full-outer", Some(0)),
+    ("cross", Some(0)),
+    ("semi", Some(0)),
+    ("anti", Some(0)),
     // Boolean flags
-    ("true", Some(0)), ("false", Some(0)),
+    ("true", Some(0)),
+    ("false", Some(0)),
     // Scalar expressions
-    ("col", Some(1)), ("qcol", Some(2)), ("const-null", Some(0)),
-    ("const-bool", Some(1)), ("const-int", Some(1)), ("const-float", Some(1)),
+    ("col", Some(1)),
+    ("qcol", Some(2)),
+    ("const-null", Some(0)),
+    ("const-bool", Some(1)),
+    ("const-int", Some(1)),
+    ("const-float", Some(1)),
     ("const-str", Some(1)),
     // Binary operators
-    ("add", Some(2)), ("sub", Some(2)), ("mul", Some(2)), ("div", Some(2)),
-    ("mod", Some(2)), ("eq", Some(2)), ("ne", Some(2)), ("lt", Some(2)),
-    ("le", Some(2)), ("gt", Some(2)), ("ge", Some(2)), ("and", Some(2)),
-    ("or", Some(2)), ("concat", Some(2)), ("json-access", Some(2)),
+    ("add", Some(2)),
+    ("sub", Some(2)),
+    ("mul", Some(2)),
+    ("div", Some(2)),
+    ("mod", Some(2)),
+    ("eq", Some(2)),
+    ("ne", Some(2)),
+    ("lt", Some(2)),
+    ("le", Some(2)),
+    ("gt", Some(2)),
+    ("ge", Some(2)),
+    ("and", Some(2)),
+    ("or", Some(2)),
+    ("concat", Some(2)),
+    ("json-access", Some(2)),
     // Unary operators
-    ("not", Some(1)), ("is-null", Some(1)), ("is-not-null", Some(1)), ("neg", Some(1)),
+    ("not", Some(1)),
+    ("is-null", Some(1)),
+    ("is-not-null", Some(1)),
+    ("neg", Some(1)),
     // Function call
     ("func", None),
     // Aggregate functions
-    ("count", Some(1)), ("sum", Some(1)), ("avg", Some(1)),
-    ("min", Some(1)), ("max", Some(1)),
+    ("count", Some(1)),
+    ("sum", Some(1)),
+    ("avg", Some(1)),
+    ("min", Some(1)),
+    ("max", Some(1)),
     // Lists
-    ("list", None), ("nil", Some(0)),
+    ("list", None),
+    ("nil", Some(0)),
     // Projection column
-    ("proj-col", Some(1)), ("proj-alias", Some(2)),
+    ("proj-col", Some(1)),
+    ("proj-alias", Some(2)),
     // Sort keys
-    ("sort-key", Some(3)), ("asc", Some(0)), ("desc", Some(0)),
-    ("nulls-first", Some(0)), ("nulls-last", Some(0)),
+    ("sort-key", Some(3)),
+    ("asc", Some(0)),
+    ("desc", Some(0)),
+    ("nulls-first", Some(0)),
+    ("nulls-last", Some(0)),
     // Aggregate expression
-    ("agg-expr", Some(3)), ("distinct", Some(0)), ("all", Some(0)),
+    ("agg-expr", Some(3)),
+    ("distinct", Some(0)),
+    ("all", Some(0)),
     // Vector search operators
-    ("vector-distance", Some(3)), ("vector-knn", Some(4)), ("vector-range-scan", Some(5)),
+    ("vector-distance", Some(3)),
+    ("vector-knn", Some(4)),
+    ("vector-range-scan", Some(5)),
     // Full-text search operators
-    ("fts-match", Some(4)), ("fts-rank", Some(3)), ("fts-index-scan", Some(3)),
-    ("fts-ranked-scan", Some(5)), ("fts-skip-list-and", Some(3)),
+    ("fts-match", Some(4)),
+    ("fts-rank", Some(3)),
+    ("fts-index-scan", Some(3)),
+    ("fts-ranked-scan", Some(5)),
+    ("fts-skip-list-and", Some(3)),
     // Hybrid search operators
-    ("hybrid-score", Some(5)), ("hybrid-scan", Some(6)),
+    ("hybrid-score", Some(5)),
+    ("hybrid-scan", Some(6)),
     // Type casting
     ("cast", Some(2)),
 ];
@@ -739,9 +802,7 @@ fn is_malformed_rule_pair(code: &str) -> bool {
     }
 
     // Pathology 2: LHS == RHS modulo whitespace.
-    let norm = |s: &str| {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    };
+    let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     if norm(lhs) == norm(rhs) {
         println!(
             "cargo:warning=rejecting no-op rule (LHS==RHS): \"{}\"",
@@ -795,9 +856,7 @@ fn collect_metavars(s: &str) -> std::collections::HashSet<String> {
         if chars[i] == '?' {
             i += 1;
             let start = i;
-            while i < chars.len()
-                && (chars[i].is_alphanumeric() || chars[i] == '_')
-            {
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
                 i += 1;
             }
             if start < i {
@@ -914,10 +973,7 @@ fn normalize_rewrite_code(block: &str) -> Vec<ExtractedRule> {
                 if contains_unknown_operators(&normalized) {
                     rewrites.push(ExtractedRule::Commented(format!(
                         "// TODO: contains operators not in RelLang\n        // {}",
-                        normalized
-                            .lines()
-                            .collect::<Vec<_>>()
-                            .join("\n        // ")
+                        normalized.lines().collect::<Vec<_>>().join("\n        // ")
                     )));
                 } else if normalized.contains("<=>") {
                     // Bidirectional rewrite — produces Vec<Rewrite>
@@ -939,9 +995,7 @@ fn normalize_rewrite_code(block: &str) -> Vec<ExtractedRule> {
 /// Category key derived from the .rra category field.
 /// e.g. "logical/predicate-pushdown" -> "`logical_predicate_pushdown`"
 fn category_to_fn_name(category: &str) -> String {
-    category
-        .replace(['/', '-', ' '], "_")
-        .to_lowercase()
+    category.replace(['/', '-', ' '], "_").to_lowercase()
 }
 
 /// Generate the complete Rust module from all parsed rules.
@@ -990,22 +1044,15 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
                 for rw in &rewrites {
                     match rw {
                         ExtractedRule::Single(code) => {
-                            single_rules.push(format!(
-                                "        {rule_comment}\n        {code},"
-                            ));
+                            single_rules.push(format!("        {rule_comment}\n        {code},"));
                             total_rules += 1;
                         }
                         ExtractedRule::Bidirectional(code) => {
-                            bidir_rules_for_cat.push((
-                                code.clone(),
-                                rule.id.clone(),
-                            ));
+                            bidir_rules_for_cat.push((code.clone(), rule.id.clone()));
                             total_rules += 2;
                         }
                         ExtractedRule::Commented(code) => {
-                            comments.push(format!(
-                                "        {rule_comment}\n        {code}"
-                            ));
+                            comments.push(format!("        {rule_comment}\n        {code}"));
                             conditional_rules += 1;
                         }
                     }
@@ -1013,13 +1060,8 @@ fn generate_rules_module(rules: &[RuleInfo]) -> String {
             }
         }
 
-        output.push_str(&format!(
-            "/// Generated rules for category: {category}\n"
-        ));
-        output.push_str(&format!(
-            "/// Source: {} .rra files\n",
-            cat_rules.len()
-        ));
+        output.push_str(&format!("/// Generated rules for category: {category}\n"));
+        output.push_str(&format!("/// Source: {} .rra files\n", cat_rules.len()));
         output.push_str("#[allow(unused, clippy::too_many_lines)]\n");
         output.push_str(&format!(
             "pub(crate) fn {fn_name}() -> Vec<Rewrite<RelLang, RelAnalysis>> {{\n"
@@ -1157,7 +1199,9 @@ fn generate_cost_registry(dir: &Path) -> String {
 }
 
 fn collect_cost_models(dir: &Path, out: &mut Vec<(String, String, String)>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {

@@ -308,7 +308,8 @@ impl FeedbackCollector {
     /// for batch processing by downstream learners.
     pub fn record(&mut self, feedback: ExecutionFeedback) {
         // Update MAPE immediately
-        self.mape_tracker.record(feedback.predicted_cost, feedback.actual_time_ms);
+        self.mape_tracker
+            .record(feedback.predicted_cost, feedback.actual_time_ms);
         self.total_processed += 1;
 
         // Buffer for batch processing

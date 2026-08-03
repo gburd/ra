@@ -1461,7 +1461,7 @@ impl fmt::Display for Expr {
             Expr::IntroducedString { introducer, value } => write!(f, "{introducer} {value}"),
             Expr::TypedString { data_type, value } => {
                 write!(f, "{data_type}")?;
-                write!(f, " '{}'", &value::escape_single_quote_string(value))
+                write!(f, " '{}'", value::escape_single_quote_string(value))
             }
             Expr::Function(fun) => write!(f, "{fun}"),
             Expr::Case {

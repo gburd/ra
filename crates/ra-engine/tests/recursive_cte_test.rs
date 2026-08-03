@@ -1,8 +1,4 @@
-#![expect(
-    clippy::panic,
-    clippy::approx_constant,
-    reason = "test code"
-)]
+#![expect(clippy::panic, clippy::approx_constant, reason = "test code")]
 //! Comprehensive tests for recursive CTE support across ra-engine.
 //!
 //! Covers: e-graph round-trip, pattern matching, memo table hashing,

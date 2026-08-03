@@ -580,8 +580,18 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
         | RelExpr::BitmapHeapScan { .. }
         | RelExpr::ParallelScan { .. }
         | RelExpr::MvScan { .. } => true,
-        RelExpr::Join { join_type, left, right, .. }
-        | RelExpr::ParallelHashJoin { join_type, left, right, .. } => {
+        RelExpr::Join {
+            join_type,
+            left,
+            right,
+            ..
+        }
+        | RelExpr::ParallelHashJoin {
+            join_type,
+            left,
+            right,
+            ..
+        } => {
             // Left-deep construction rebuilds every join as Inner, so it is
             // only valid for Inner/Cross joins. Outer/semi/anti joins must
             // go through the e-graph, which preserves their semantics.

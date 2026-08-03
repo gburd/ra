@@ -1415,11 +1415,9 @@ impl IntegratedCostFn {
     /// I/O, load for CPU). `LiveConditions::NEUTRAL` is a no-op.
     #[must_use]
     pub fn with_live_conditions(mut self, live: LiveConditions) -> Self {
-        self.calibration = self.calibration.with_live_conditions(
-            live.hit_rate,
-            live.io_saturation,
-            live.cpu_load,
-        );
+        self.calibration =
+            self.calibration
+                .with_live_conditions(live.hit_rate, live.io_saturation, live.cpu_load);
         self
     }
 
@@ -1559,7 +1557,10 @@ impl PartialOrd for PlanCost {
 impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
     type Cost = PlanCost;
 
-    #[expect(clippy::too_many_lines, reason = "cost function has inherent complexity")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "cost function has inherent complexity"
+    )]
     fn cost<C>(&mut self, enode: &crate::egraph::RelLang, mut costs: C) -> Self::Cost
     where
         C: FnMut(egg::Id) -> Self::Cost,
@@ -1593,14 +1594,24 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let rows = self.row_count_for_id(*table_id);
                 let total = costs(*table_id).total_cost
                     + operator_cost("scan", &self.op_cost_ctx(0.0, 0.0, rows));
-                PlanCost { total_cost: total, est_rows: rows, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: rows,
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
                 let rows = self.row_count_for_id(*table_id);
                 let total = costs(*table_id).total_cost
                     + costs(*alias_id).total_cost
                     + operator_cost("scan", &self.op_cost_ctx(0.0, 0.0, rows));
-                PlanCost { total_cost: total, est_rows: rows, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: rows,
+                    nodes,
+                    shape_hash,
+                }
             }
             // A Filter reduces its subtree's cardinality by the predicate
             // selectivity — this is what makes a Join over a *filtered* input
@@ -1618,7 +1629,10 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let unit = operator_cost("filter", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
                 PlanCost {
                     total_cost: ci.total_cost + pred + unit,
-                    est_rows: (ci.est_rows * sel).max(1.0), nodes, shape_hash }
+                    est_rows: (ci.est_rows * sel).max(1.0),
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::Project([cols_id, input_id]) => {
                 let ci = costs(*input_id);
@@ -1626,7 +1640,10 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let unit = operator_cost("project", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
                 PlanCost {
                     total_cost: ci.total_cost + cols + unit,
-                    est_rows: ci.est_rows, nodes, shape_hash }
+                    est_rows: ci.est_rows,
+                    nodes,
+                    shape_hash,
+                }
             }
             // Logical join: the inputs' (post-filter) cardinalities drive the
             // cost via the rule-provided `join` model, which now scales with the
@@ -1642,7 +1659,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                     + cr.total_cost
                     + cond
                     + operator_cost("join", &self.op_cost_ctx(cl.est_rows, cr.est_rows, out));
-                PlanCost { total_cost: total, est_rows: out, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: out,
+                    nodes,
+                    shape_hash,
+                }
             }
             // Physical join methods (RFC 0090 Phase 3). The rule cost models now
             // receive the children's estimated row counts (real cardinality — a
@@ -1659,7 +1681,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                         "hash-join",
                         &self.op_cost_ctx(cl.est_rows.max(1.0), cr.est_rows.max(1.0), out),
                     );
-                PlanCost { total_cost: total, est_rows: out, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: out,
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::MergeJoinOp([_, cond_id, l, r]) => {
                 let cl = costs(*l);
@@ -1673,7 +1700,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                         "merge-join",
                         &self.op_cost_ctx(cl.est_rows.max(1.0), cr.est_rows.max(1.0), out),
                     );
-                PlanCost { total_cost: total, est_rows: out, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: out,
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::NestLoopOp([_, cond_id, l, r]) => {
                 let cl = costs(*l);
@@ -1687,7 +1719,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                         "nest-loop",
                         &self.op_cost_ctx(cl.est_rows.max(1.0), cr.est_rows.max(1.0), out),
                     );
-                PlanCost { total_cost: total, est_rows: out, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: out,
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::IndexNestLoopOp([_, cond_id, l, _r]) => {
                 let cl = costs(*l);
@@ -1698,7 +1735,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                         "index-nest-loop",
                         &self.op_cost_ctx(cl.est_rows.max(1.0), 0.0, 0.0),
                     );
-                PlanCost { total_cost: total, est_rows: cl.est_rows, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: cl.est_rows,
+                    nodes,
+                    shape_hash,
+                }
             }
             // RFC 0091 Option B: index-scan choice. Cost from the table's row
             // count + predicate selectivity; output = selected rows.
@@ -1709,7 +1751,10 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 ctx.selectivity = sel;
                 PlanCost {
                     total_cost: operator_cost("index-scan", &ctx),
-                    est_rows: (rows * sel).max(1.0), nodes, shape_hash }
+                    est_rows: (rows * sel).max(1.0),
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::Aggregate([group_id, aggs_id, input_id]) => {
                 let ci = costs(*input_id);
@@ -1719,7 +1764,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                     + operator_cost("aggregate", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
                 // Grouped output is far smaller than the input; a 10% group
                 // ratio is a neutral default until per-column NDV is threaded.
-                PlanCost { total_cost: total, est_rows: (ci.est_rows * 0.1).max(1.0), nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: (ci.est_rows * 0.1).max(1.0),
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::Sort([keys_id, input_id]) => {
                 let ci = costs(*input_id);
@@ -1727,7 +1777,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let total = ci.total_cost
                     + keys
                     + operator_cost("sort", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
-                PlanCost { total_cost: total, est_rows: ci.est_rows, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: ci.est_rows,
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::IncrementalSort([keys_id, _presorted_id, input_id]) => {
                 let ci = costs(*input_id);
@@ -1735,7 +1790,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let total = ci.total_cost
                     + keys
                     + operator_cost("incremental-sort", &self.op_cost_ctx(0.0, 0.0, ci.est_rows));
-                PlanCost { total_cost: total, est_rows: ci.est_rows, nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: ci.est_rows,
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::Limit([n_id, _off_id, child_id]) => {
                 // Startup-biased: LIMIT only needs a prefix, so it pays ~30% of
@@ -1744,7 +1804,10 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let n_cost = costs(*n_id).total_cost;
                 PlanCost {
                     total_cost: 0.5 + n_cost + ci.total_cost * 0.3,
-                    est_rows: ci.est_rows, nodes, shape_hash }
+                    est_rows: ci.est_rows,
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => {
                 // Output cardinality ~ sum of input cardinalities (an upper
@@ -1756,7 +1819,12 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                     total += pc.total_cost;
                     rows += pc.est_rows;
                 }
-                PlanCost { total_cost: total, est_rows: rows.max(1.0), nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: rows.max(1.0),
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::RecursiveCTE(_) => {
                 let mut total = 1000.0 * self.calibration.tuple_cost();
@@ -1766,23 +1834,37 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                     total += pc.total_cost;
                     rows += pc.est_rows;
                 }
-                PlanCost { total_cost: total, est_rows: rows.max(1.0), nodes, shape_hash }
+                PlanCost {
+                    total_cost: total,
+                    est_rows: rows.max(1.0),
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::BitmapIndexScan(_) => {
-                let children: f64 =
-                    enode.children().iter().map(|c| costs(*c).total_cost).sum();
+                let children: f64 = enode.children().iter().map(|c| costs(*c).total_cost).sum();
                 PlanCost {
                     total_cost: 120.0 * self.calibration.rand_page_cost() + children,
-                    est_rows: (self.avg_row_count * DEFAULT_SELECTIVITY).max(1.0), nodes, shape_hash }
+                    est_rows: (self.avg_row_count * DEFAULT_SELECTIVITY).max(1.0),
+                    nodes,
+                    shape_hash,
+                }
             }
             RelLang::BitmapHeapScan(_) => {
-                let children: f64 =
-                    enode.children().iter().map(|c| costs(*c).total_cost).sum();
+                let children: f64 = enode.children().iter().map(|c| costs(*c).total_cost).sum();
                 PlanCost {
                     total_cost: 50.0 * self.calibration.seq_page_cost() + children,
-                    est_rows: (self.avg_row_count * DEFAULT_SELECTIVITY).max(1.0), nodes, shape_hash }
+                    est_rows: (self.avg_row_count * DEFAULT_SELECTIVITY).max(1.0),
+                    nodes,
+                    shape_hash,
+                }
             }
-            RelLang::MetadataLookup(_) => PlanCost { total_cost: 1.0, est_rows: 1.0, nodes, shape_hash },
+            RelLang::MetadataLookup(_) => PlanCost {
+                total_cost: 1.0,
+                est_rows: 1.0,
+                nodes,
+                shape_hash,
+            },
             RelLang::IndexOnlyScan([table_id, _, cols_id, pred_id]) => {
                 // Index-only scan: B-tree descent + leaf page reads.
                 let child_cost = costs(*table_id).total_cost;
@@ -1795,17 +1877,27 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let startup_cost = btree_depth * self.calibration.rand_page_cost();
                 let index_pages = (pages * 0.1).max(1.0);
                 let leaf_cost = index_pages * self.calibration.seq_page_cost() * 0.3;
-                let small_table_penalty =
-                    if row_count < Self::SMALL_TABLE_THRESHOLD { 2.0 } else { 1.0 };
+                let small_table_penalty = if row_count < Self::SMALL_TABLE_THRESHOLD {
+                    2.0
+                } else {
+                    1.0
+                };
                 let total = (startup_cost + leaf_cost) * small_table_penalty;
                 PlanCost {
                     total_cost: child_cost + col_cost + pred_cost + total,
-                    est_rows: (row_count * 0.1).max(1.0), nodes, shape_hash }
+                    est_rows: (row_count * 0.1).max(1.0),
+                    nodes,
+                    shape_hash,
+                }
             }
             _ => {
-                let children: f64 =
-                    enode.children().iter().map(|c| costs(*c).total_cost).sum();
-                PlanCost { total_cost: 0.1 + children, est_rows: 1.0, nodes, shape_hash }
+                let children: f64 = enode.children().iter().map(|c| costs(*c).total_cost).sum();
+                PlanCost {
+                    total_cost: 0.1 + children,
+                    est_rows: 1.0,
+                    nodes,
+                    shape_hash,
+                }
             }
         }
     }
@@ -1830,12 +1922,12 @@ mod tests {
                 tuple_cost: tc,
                 seq_page_cost: 1.0,
                 rand_page_cost: 4.0,
-            row_count: 0.0,
-            simd_width_bits: 256,
-            cpu_cores: 8,
-            page_size: 8192.0,
-            avg_row_size: 100.0,
-            selectivity: 0.1,
+                row_count: 0.0,
+                simd_width_bits: 256,
+                cpu_cores: 8,
+                page_size: 8192.0,
+                avg_row_size: 100.0,
+                selectivity: 0.1,
             };
             let rule = rule_operator_cost("hash-join", &ctx)
                 .expect("hash-join cost model must be registered from the rule file");
@@ -1874,12 +1966,12 @@ mod tests {
                 tuple_cost: tc,
                 seq_page_cost: 1.0,
                 rand_page_cost: 4.0,
-            row_count: 0.0,
-            simd_width_bits: 256,
-            cpu_cores: 8,
-            page_size: 8192.0,
-            avg_row_size: 100.0,
-            selectivity: 0.1,
+                row_count: 0.0,
+                simd_width_bits: 256,
+                cpu_cores: 8,
+                page_size: 8192.0,
+                avg_row_size: 100.0,
+                selectivity: 0.1,
             };
             let merge = rule_operator_cost("merge-join", &ctx)
                 .expect("merge-join cost model must be registered from the rule file");
@@ -1954,9 +2046,10 @@ mod tests {
                 avg_row_size: 100.0,
                 selectivity: 0.1,
             };
-            for (op, mult) in [("aggregate", 200.0)] {
-                let rule = rule_operator_cost(op, &ctx)
-                    .expect("aggregate cost model must be registered");
+            {
+                let (op, mult) = ("aggregate", 200.0);
+                let rule =
+                    rule_operator_cost(op, &ctx).expect("aggregate cost model must be registered");
                 let builtin = mult * tc;
                 assert!(
                     (rule - builtin).abs() < 1e-12,
@@ -1965,9 +2058,13 @@ mod tests {
             }
             // The logical `join` cost is cardinality-aware: linear in the
             // input row counts passed as left_cost/right_cost.
-            let join_ctx = OperatorCostCtx { left_cost: 100.0, right_cost: 200.0, ..ctx };
-            let join_rule = rule_operator_cost("join", &join_ctx)
-                .expect("join cost model must be registered");
+            let join_ctx = OperatorCostCtx {
+                left_cost: 100.0,
+                right_cost: 200.0,
+                ..ctx
+            };
+            let join_rule =
+                rule_operator_cost("join", &join_ctx).expect("join cost model must be registered");
             assert!(
                 (join_rule - (100.0 + 200.0) * tc).abs() < 1e-12,
                 "rule-sourced join cost {join_rule} != (left+right)*tuple {}",
@@ -2008,7 +2105,7 @@ mod tests {
     }
 
     /// RFC 0091 P2 golden test: the scan cost sourced from its `.rra` block
-    /// equals the built-in pages * seq_page_cost formula (shared by scan and
+    /// equals the built-in pages * `seq_page_cost` formula (shared by scan and
     /// scan-alias).
     #[test]
     fn scan_rule_cost_matches_builtin() {
@@ -2088,7 +2185,11 @@ mod tests {
         let hw = HardwareProfile::cpu_only();
         let neutral = IntegratedCostFn::new(hw.clone(), HashMap::new(), HashMap::new());
         let cached = IntegratedCostFn::new(hw.clone(), HashMap::new(), HashMap::new())
-            .with_live_conditions(LiveConditions { hit_rate: 0.95, io_saturation: 0.0, cpu_load: 0.0 });
+            .with_live_conditions(LiveConditions {
+                hit_rate: 0.95,
+                io_saturation: 0.0,
+                cpu_load: 0.0,
+            });
         let cl = 100_000.0;
         let neutral_inl = operator_cost("index-nest-loop", &neutral.op_cost_ctx(cl, 0.0, 0.0));
         let cached_inl = operator_cost("index-nest-loop", &cached.op_cost_ctx(cl, 0.0, 0.0));
@@ -2098,8 +2199,13 @@ mod tests {
              cached {cached_inl} !< neutral {neutral_inl}"
         );
 
-        let busy = IntegratedCostFn::new(hw, HashMap::new(), HashMap::new())
-            .with_live_conditions(LiveConditions { hit_rate: 0.0, io_saturation: 0.0, cpu_load: 1.0 });
+        let busy = IntegratedCostFn::new(hw, HashMap::new(), HashMap::new()).with_live_conditions(
+            LiveConditions {
+                hit_rate: 0.0,
+                io_saturation: 0.0,
+                cpu_load: 1.0,
+            },
+        );
         assert!(
             busy.flat_op_cost("aggregate") > neutral.flat_op_cost("aggregate"),
             "high CPU load should raise the rule-sourced aggregate cost"
@@ -2107,7 +2213,7 @@ mod tests {
     }
 
     /// RFC 0091 Option B — simulation across host storage + table situations.
-    /// The local box is NVMe (random ≈ sequential), so an empirical seq↔index
+    /// The local box is `NVMe` (random ≈ sequential), so an empirical seq↔index
     /// flip is not observable; this *simulates* hosts with a real random penalty
     /// (NVMe/SATA/HDD `random_io_ratio`) via the B0 `with_live_conditions`
     /// transform and asserts the scan-method economics across the regime matrix.
@@ -2128,7 +2234,10 @@ mod tests {
                 avg_row_size: 100.0,
                 selectivity: sel,
             };
-            (operator_cost("scan", &ctx), operator_cost("index-scan", &ctx))
+            (
+                operator_cost("scan", &ctx),
+                operator_cost("index-scan", &ctx),
+            )
         };
         let rows = 1_000_000.0;
         for &gap in &[1.2_f64, 8.0, 100.0] {
@@ -2167,9 +2276,15 @@ mod tests {
         let cold = hdd.with_live_conditions(0.0, 0.0, 0.0);
         for cal in [&warm, &cold] {
             let (s_hi, i_hi) = costs(cal.seq_page_cost(), cal.rand_page_cost(), rows, 1e-5);
-            assert!(i_hi < s_hi, "very selective predicate should pick the index");
+            assert!(
+                i_hi < s_hi,
+                "very selective predicate should pick the index"
+            );
             let (s_lo, i_lo) = costs(cal.seq_page_cost(), cal.rand_page_cost(), rows, 0.5);
-            assert!(i_lo > s_lo, "non-selective predicate should pick the sequential scan");
+            assert!(
+                i_lo > s_lo,
+                "non-selective predicate should pick the sequential scan"
+            );
         }
     }
 
@@ -2228,11 +2343,22 @@ mod tests {
         let ids = [Id::from(0), Id::from(1), Id::from(2), Id::from(3)];
         let c = |id: Id| {
             let v = if usize::from(id) >= 2 { 200.0 } else { 1.0 };
-            PlanCost { total_cost: v, est_rows: v, nodes: 1, shape_hash: 0 }
+            PlanCost {
+                total_cost: v,
+                est_rows: v,
+                nodes: 1,
+                shape_hash: 0,
+            }
         };
-        let mut neutral = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
-        let mut cached = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new())
-            .with_live_conditions(LiveConditions { hit_rate: 0.99, io_saturation: 0.0, cpu_load: 0.0 });
+        let mut neutral =
+            IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
+        let mut cached =
+            IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new())
+                .with_live_conditions(LiveConditions {
+                    hit_rate: 0.99,
+                    io_saturation: 0.0,
+                    cpu_load: 0.0,
+                });
         let hash_neutral = neutral.cost(&RelLang::HashJoinOp(ids), c).total_cost;
         let hash_cached = cached.cost(&RelLang::HashJoinOp(ids), c).total_cost;
         let nest_neutral = neutral.cost(&RelLang::NestLoopOp(ids), c).total_cost;
@@ -2258,27 +2384,69 @@ mod tests {
     fn physical_join_costs_order_by_method() {
         use crate::egraph::RelLang;
         use egg::{CostFunction, Id};
-        let mut cfn = IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
+        let mut cfn =
+            IntegratedCostFn::new(HardwareProfile::cpu_only(), HashMap::new(), HashMap::new());
         // join children: [jt, cond, left, right] = ids 0,1,2,3
         let ids = [Id::from(0), Id::from(1), Id::from(2), Id::from(3)];
         // child-cost closures: large vs tiny inputs (left=id2, right=id3).
         // est_rows now drives join sizing.
-        let big = |id: Id| { let v = if usize::from(id) >= 2 { 10_000.0 } else { 1.0 }; PlanCost { total_cost: v, est_rows: v, nodes: 1, shape_hash: 0 } };
-        let tiny = |id: Id| { let v = if usize::from(id) >= 2 { 5.0 } else { 1.0 }; PlanCost { total_cost: v, est_rows: v, nodes: 1, shape_hash: 0 } };
+        let big = |id: Id| {
+            let v = if usize::from(id) >= 2 { 10_000.0 } else { 1.0 };
+            PlanCost {
+                total_cost: v,
+                est_rows: v,
+                nodes: 1,
+                shape_hash: 0,
+            }
+        };
+        let tiny = |id: Id| {
+            let v = if usize::from(id) >= 2 { 5.0 } else { 1.0 };
+            PlanCost {
+                total_cost: v,
+                est_rows: v,
+                nodes: 1,
+                shape_hash: 0,
+            }
+        };
         // small outer (left), large inner (right) — the index-NLJ sweet spot
-        let small_outer = |id: Id| { let v = if usize::from(id) == 2 { 3.0 } else if usize::from(id) == 3 { 10_000.0 } else { 1.0 }; PlanCost { total_cost: v, est_rows: v, nodes: 1, shape_hash: 0 } };
+        let small_outer = |id: Id| {
+            let v = if usize::from(id) == 2 {
+                3.0
+            } else if usize::from(id) == 3 {
+                10_000.0
+            } else {
+                1.0
+            };
+            PlanCost {
+                total_cost: v,
+                est_rows: v,
+                nodes: 1,
+                shape_hash: 0,
+            }
+        };
 
         let hash_big = cfn.cost(&RelLang::HashJoinOp(ids), big).total_cost;
         let nl_big = cfn.cost(&RelLang::NestLoopOp(ids), big).total_cost;
-        assert!(nl_big > hash_big, "nest-loop {nl_big} should exceed hash {hash_big} on large inputs");
+        assert!(
+            nl_big > hash_big,
+            "nest-loop {nl_big} should exceed hash {hash_big} on large inputs"
+        );
 
         let hash_tiny = cfn.cost(&RelLang::HashJoinOp(ids), tiny).total_cost;
         let nl_tiny = cfn.cost(&RelLang::NestLoopOp(ids), tiny).total_cost;
-        assert!(nl_tiny <= hash_tiny, "nest-loop {nl_tiny} should be competitive on tiny inputs vs hash {hash_tiny}");
+        assert!(
+            nl_tiny <= hash_tiny,
+            "nest-loop {nl_tiny} should be competitive on tiny inputs vs hash {hash_tiny}"
+        );
 
         let hash_so = cfn.cost(&RelLang::HashJoinOp(ids), small_outer).total_cost;
-        let inl_so = cfn.cost(&RelLang::IndexNestLoopOp(ids), small_outer).total_cost;
-        assert!(inl_so < hash_so, "index-nest-loop {inl_so} should beat hash {hash_so} for a small driving side");
+        let inl_so = cfn
+            .cost(&RelLang::IndexNestLoopOp(ids), small_outer)
+            .total_cost;
+        assert!(
+            inl_so < hash_so,
+            "index-nest-loop {inl_so} should beat hash {hash_so} for a small driving side"
+        );
     }
     use ra_hardware::HardwareProfile;
     use ra_stats::accuracy::{StatisticsSource, StatisticsState};

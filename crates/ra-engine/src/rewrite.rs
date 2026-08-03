@@ -15,9 +15,9 @@
 //! - **DuckDB-inspired rules**: from `DuckDB` optimizer source
 //! - **SQLite-inspired rules**: from `SQLite` query planner source
 
-use egg::Rewrite;
 #[cfg(test)]
 use egg::rewrite;
+use egg::Rewrite;
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
@@ -36,6 +36,7 @@ mod generated {
     use egg::{rewrite, Rewrite};
 
     use crate::analysis::RelAnalysis;
+    use crate::appliers::{fold_add, fold_mul, fold_sub};
     #[expect(
         unused_imports,
         reason = "the set of conditions actually referenced by the .rra-derived rules \
@@ -43,14 +44,12 @@ mod generated {
                   the build robust against future activations"
     )]
     use crate::conditions::{
-        is_bson_operator_filter, is_canonical_scan, is_constant, is_deterministic, is_equi_join,
-        has_index_for, is_inner_join,
-        is_json_field_predicate, is_not_const_bool, is_ungrouped_count_star, is_uncorrelated,
-        is_xml_function_filter, not_nullable,
-        not_zero, pred_references_only, predicate_references_only, references_only,
-        references_subset, single_reference,
+        has_index_for, is_bson_operator_filter, is_canonical_scan, is_constant, is_deterministic,
+        is_equi_join, is_inner_join, is_json_field_predicate, is_not_const_bool, is_uncorrelated,
+        is_ungrouped_count_star, is_xml_function_filter, not_nullable, not_zero,
+        pred_references_only, predicate_references_only, references_only, references_subset,
+        single_reference,
     };
-    use crate::appliers::{fold_add, fold_mul, fold_sub};
     use crate::egraph::RelLang;
 
     include!(concat!(env!("OUT_DIR"), "/generated_rules.rs"));
@@ -62,51 +61,41 @@ pub(crate) use generated::all_generated_rules;
 // `generated_predicate_pushdown_matches_hand_coded` identity test).
 pub(crate) use generated::generated_logical_predicate_pushdown_core_rules;
 pub(crate) use generated::{
-    generated_logical_aggregate_optimization_core_rules,
-    generated_logical_cte_inlining_core_rules,
+    generated_logical_aggregate_optimization_core_rules, generated_logical_cte_inlining_core_rules,
     generated_logical_expression_simplification_core_rules,
-    generated_logical_join_elimination_core_rules,
-    generated_logical_join_reordering_core_rules,
+    generated_logical_join_elimination_core_rules, generated_logical_join_reordering_core_rules,
     generated_logical_limit_sort_optimization_core_rules,
-    generated_logical_projection_pushdown_core_rules,
-    generated_logical_set_operation_core_rules,
+    generated_logical_projection_pushdown_core_rules, generated_logical_set_operation_core_rules,
     generated_logical_subquery_optimization_core_rules,
 };
 // Phase 1b second wave: remaining pure-pattern categories.
-pub(crate) use generated::{
-    generated_database_specific_duckdb_core_rules,
-    generated_database_specific_sqlite_core_rules,
-    generated_logical_column_pruning_core_rules,
-    generated_logical_functional_dependencies_core_rules,
-    generated_logical_join_transformation_core_rules,
-    generated_logical_null_simplification_core_rules,
-    generated_logical_redundant_join_core_rules,
-    generated_logical_semi_join_core_rules,
-    generated_physical_covering_index_core_rules,
-    generated_physical_min_max_index_core_rules,
-    generated_physical_parquet_pushdown_core_rules,
-    generated_physical_runtime_filter_core_rules,
-};
-pub(crate) use generated::{
-    generated_logical_cast_optimization_core_rules,
-    generated_physical_hybrid_search_core_rules,
-};
-pub(crate) use generated::{
-    generated_logical_consensus_core_rules,
-    generated_physical_fts_core_rules,
-    generated_physical_vector_core_rules,
-};
-pub(crate) use generated::{
-    generated_logical_count_metadata_core_rules,
-    generated_logical_xml_core_rules,
-};
-pub(crate) use generated::generated_physical_index_selection_core_rules;
 pub(crate) use generated::generated_logical_constant_folding_core_rules;
+pub(crate) use generated::generated_physical_index_selection_core_rules;
 pub(crate) use generated::generated_physical_join_lowering_core_rules;
 pub(crate) use generated::generated_physical_scan_lowering_core_rules;
 pub(crate) use generated::{
     generated_database_specific_documentdb_core_rules,
     generated_database_specific_oracle_json_duality_core_rules,
+};
+pub(crate) use generated::{
+    generated_database_specific_duckdb_core_rules, generated_database_specific_sqlite_core_rules,
+    generated_logical_column_pruning_core_rules,
+    generated_logical_functional_dependencies_core_rules,
+    generated_logical_join_transformation_core_rules,
+    generated_logical_null_simplification_core_rules, generated_logical_redundant_join_core_rules,
+    generated_logical_semi_join_core_rules, generated_physical_covering_index_core_rules,
+    generated_physical_min_max_index_core_rules, generated_physical_parquet_pushdown_core_rules,
+    generated_physical_runtime_filter_core_rules,
+};
+pub(crate) use generated::{
+    generated_logical_cast_optimization_core_rules, generated_physical_hybrid_search_core_rules,
+};
+pub(crate) use generated::{
+    generated_logical_consensus_core_rules, generated_physical_fts_core_rules,
+    generated_physical_vector_core_rules,
+};
+pub(crate) use generated::{
+    generated_logical_count_metadata_core_rules, generated_logical_xml_core_rules,
 };
 #[cfg(test)]
 #[expect(unused_imports, reason = "test-only re-export")]
@@ -244,8 +233,7 @@ fn build_all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             .map_or_else(|| format!("dyn:{}", r.name), ToString::to_string);
         format!("{lhs}=>{rhs}")
     };
-    let mut seen: std::collections::HashSet<String> =
-        rules.iter().map(&transform_sig).collect();
+    let mut seen: std::collections::HashSet<String> = rules.iter().map(&transform_sig).collect();
     let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(all_generated_rules));
     if let Ok(gen_rules) = generated {
         for rule in gen_rules {
@@ -321,10 +309,15 @@ pub fn all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
     // get a cheap clone of the cached, output-identical set.
     static ANNOTATED_CACHE: std::sync::OnceLock<Vec<AnnotatedRuleGroup>> =
         std::sync::OnceLock::new();
-    ANNOTATED_CACHE.get_or_init(build_all_rules_annotated).clone()
+    ANNOTATED_CACHE
+        .get_or_init(build_all_rules_annotated)
+        .clone()
 }
 
-#[expect(clippy::too_many_lines, reason = "annotated rule collection for all optimization phases")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "annotated rule collection for all optimization phases"
+)]
 fn build_all_rules_annotated() -> Vec<AnnotatedRuleGroup> {
     vec![
         // -- Universal baseline rules --
@@ -1249,9 +1242,7 @@ mod tests {
         // Drop no-op rules (LHS==RHS) from the oracle: build.rs rejects them, so
         // they can never appear in the generated set, and a rewrite-to-self is
         // dead weight (egg never derives anything new from it).
-        let is_noop = |(_, p): &(String, String)| {
-            p.split_once(" => ").is_some_and(|(l, r)| l == r)
-        };
+        let is_noop = |(_, p): &(String, String)| p.split_once(" => ").is_some_and(|(l, r)| l == r);
         hand.retain(|e| !is_noop(e));
         generated.retain(|e| !is_noop(e));
         hand.sort();
@@ -1362,7 +1353,10 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::too_many_lines, reason = "flat list of per-category identity assertions")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "flat list of per-category identity assertions"
+    )]
     fn generated_second_wave_matches_hand_coded() {
         assert_rules_identical(
             "null-simplification",
@@ -1487,8 +1481,7 @@ mod tests {
             ("(mul (const-int 6) (const-int 7))", "(const-int 42)"),
         ];
         for (start_s, goal_s) in cases {
-            let start: egg::RecExpr<RelLang> =
-                start_s.parse().expect("valid start expr");
+            let start: egg::RecExpr<RelLang> = start_s.parse().expect("valid start expr");
             let runner = Runner::default()
                 .with_expr(&start)
                 .with_iter_limit(5)
@@ -1520,8 +1513,67 @@ mod tests {
     #[test]
     fn inner_join_pushdown_extraction_is_sound() {
         use egg::Runner;
+        // Soundness helpers: collect tables/aliases under a subtree, and check
+        // each Filter's predicate references only qualifiers present in its input.
+        fn tables(e: &RelExpr, out: &mut std::collections::HashSet<String>) {
+            match e {
+                RelExpr::Scan { table, alias } => {
+                    out.insert(table.to_lowercase());
+                    if let Some(a) = alias {
+                        out.insert(a.to_lowercase());
+                    }
+                }
+                RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
+                    tables(input, out);
+                }
+                RelExpr::Join { left, right, .. } => {
+                    tables(left, out);
+                    tables(right, out);
+                }
+                _ => {}
+            }
+        }
+        fn quals(e: &Expr, out: &mut std::collections::HashSet<String>) {
+            match e {
+                Expr::Column(c) => {
+                    if let Some(t) = &c.table {
+                        out.insert(t.to_lowercase());
+                    }
+                }
+                Expr::BinOp { left, right, .. } => {
+                    quals(left, out);
+                    quals(right, out);
+                }
+                Expr::UnaryOp { operand, .. } => quals(operand, out),
+                _ => {}
+            }
+        }
+        fn check(e: &RelExpr, bad: &mut Vec<String>) {
+            if let RelExpr::Filter { predicate, input } = e {
+                let mut avail = std::collections::HashSet::new();
+                tables(input, &mut avail);
+                let mut used = std::collections::HashSet::new();
+                quals(predicate, &mut used);
+                if !used.is_subset(&avail) {
+                    bad.push(format!(
+                        "UNSOUND: pred quals {used:?} not in input tables {avail:?}"
+                    ));
+                }
+            }
+            match e {
+                RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => check(input, bad),
+                RelExpr::Join { left, right, .. } => {
+                    check(left, bad);
+                    check(right, bad);
+                }
+                _ => {}
+            }
+        }
         let qcol = |t: &str, c: &str| {
-            Expr::Column(ColumnRef { table: Some(t.to_string()), column: c.to_string() })
+            Expr::Column(ColumnRef {
+                table: Some(t.to_string()),
+                column: c.to_string(),
+            })
         };
         let join = RelExpr::Join {
             join_type: JoinType::Inner,
@@ -1530,8 +1582,14 @@ mod tests {
                 left: Box::new(qcol("o", "o_custkey")),
                 right: Box::new(qcol("c", "c_custkey")),
             },
-            left: Box::new(RelExpr::Scan { table: "orders".into(), alias: Some("o".into()) }),
-            right: Box::new(RelExpr::Scan { table: "customer".into(), alias: Some("c".into()) }),
+            left: Box::new(RelExpr::Scan {
+                table: "orders".into(),
+                alias: Some("o".into()),
+            }),
+            right: Box::new(RelExpr::Scan {
+                table: "customer".into(),
+                alias: Some("c".into()),
+            }),
         };
         let expr = RelExpr::Filter {
             predicate: Expr::BinOp {
@@ -1565,46 +1623,12 @@ mod tests {
             None,
         )
         .expect("extract");
-        // Soundness: collect the tables/aliases under a subtree, and check each
-        // Filter's predicate references only qualifiers present in its input.
-        fn tables(e: &RelExpr, out: &mut std::collections::HashSet<String>) {
-            match e {
-                RelExpr::Scan { table, alias } => {
-                    out.insert(table.to_lowercase());
-                    if let Some(a) = alias { out.insert(a.to_lowercase()); }
-                }
-                RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => tables(input, out),
-                RelExpr::Join { left, right, .. } => { tables(left, out); tables(right, out); }
-                _ => {}
-            }
-        }
-        fn quals(e: &Expr, out: &mut std::collections::HashSet<String>) {
-            match e {
-                Expr::Column(c) => { if let Some(t) = &c.table { out.insert(t.to_lowercase()); } }
-                Expr::BinOp { left, right, .. } => { quals(left, out); quals(right, out); }
-                Expr::UnaryOp { operand, .. } => quals(operand, out),
-                _ => {}
-            }
-        }
-        fn check(e: &RelExpr, bad: &mut Vec<String>) {
-            if let RelExpr::Filter { predicate, input } = e {
-                let mut avail = std::collections::HashSet::new();
-                tables(input, &mut avail);
-                let mut used = std::collections::HashSet::new();
-                quals(predicate, &mut used);
-                if !used.is_subset(&avail) {
-                    bad.push(format!("UNSOUND: pred quals {used:?} not in input tables {avail:?}"));
-                }
-            }
-            match e {
-                RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => check(input, bad),
-                RelExpr::Join { left, right, .. } => { check(left, bad); check(right, bad); }
-                _ => {}
-            }
-        }
         let mut bad = Vec::new();
         check(&best, &mut bad);
-        assert!(bad.is_empty(), "unsound pushdown extracted: {bad:?}\nplan: {best:?}");
+        assert!(
+            bad.is_empty(),
+            "unsound pushdown extracted: {bad:?}\nplan: {best:?}"
+        );
     }
 
     #[test]

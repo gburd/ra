@@ -170,7 +170,10 @@ impl LargeJoinOptimizer {
     }
 
     /// Create a join between two expressions.
-    #[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other methods")]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "consistent Result return with other methods"
+    )]
     #[expect(clippy::unused_self, reason = "method for API consistency")]
     fn create_join(
         &self,
@@ -191,7 +194,10 @@ impl LargeJoinOptimizer {
     }
 
     /// Simulated annealing: start with greedy solution, perturb and anneal.
-    #[expect(clippy::needless_pass_by_value, reason = "joins are consumed and mutated internally")]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "joins are consumed and mutated internally"
+    )]
     fn simulated_annealing(&self, joins: Vec<JoinNode>) -> Result<RelExpr> {
         if joins.is_empty() {
             return Err(anyhow!("No tables to join"));
@@ -316,8 +322,7 @@ impl LargeJoinOptimizer {
 
             RelExpr::BitmapHeapScan { bitmap, .. } => Self::count_tables(bitmap),
 
-            RelExpr::Join { left, right, .. }
-            | RelExpr::ParallelHashJoin { left, right, .. } => {
+            RelExpr::Join { left, right, .. } | RelExpr::ParallelHashJoin { left, right, .. } => {
                 Self::count_tables(left) + Self::count_tables(right)
             }
 
@@ -349,9 +354,7 @@ impl LargeJoinOptimizer {
             RelExpr::Insert { source, .. } | RelExpr::Merge { source, .. } => {
                 1 + Self::count_tables(source)
             }
-            RelExpr::Update { from, .. } => {
-                1 + from.as_ref().map_or(0, |f| Self::count_tables(f))
-            }
+            RelExpr::Update { from, .. } => 1 + from.as_ref().map_or(0, |f| Self::count_tables(f)),
             RelExpr::Delete { using, .. } => {
                 1 + using.as_ref().map_or(0, |u| Self::count_tables(u))
             }
@@ -375,12 +378,7 @@ impl LargeJoinOptimizer {
                     condition: None,
                 });
             }
-            RelExpr::Join {
-                left,
-                right,
-                condition: _,
-                ..
-            } => {
+            RelExpr::Join { left, right, .. } => {
                 // Extract tables from both sides
                 Self::extract_joins_recursive(left, joins);
                 Self::extract_joins_recursive(right, joins);

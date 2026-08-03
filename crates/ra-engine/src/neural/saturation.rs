@@ -44,11 +44,7 @@ impl RuleStallingTracker {
 
     /// Create with custom thresholds.
     #[must_use]
-    pub fn with_config(
-        num_groups: usize,
-        stall_threshold: u32,
-        demoted_cadence: u32,
-    ) -> Self {
+    pub fn with_config(num_groups: usize, stall_threshold: u32, demoted_cadence: u32) -> Self {
         Self {
             stall_counts: vec![0; num_groups],
             num_groups,

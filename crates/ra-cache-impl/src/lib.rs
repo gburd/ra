@@ -18,11 +18,11 @@ mod eviction;
 mod validity;
 
 // Re-export all API types for convenience.
+pub use ra_cache_api::CacheMetrics;
 pub use ra_cache_api::{
     CacheConfig, CacheError, CachedPlan, DriftDimension, DriftReport, DriftStatus, EvictionPolicy,
     PlanCacheApi, PlanDrift, QueryKey, TableDrift,
 };
-pub use ra_cache_api::CacheMetrics;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

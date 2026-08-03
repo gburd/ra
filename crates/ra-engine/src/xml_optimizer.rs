@@ -513,11 +513,8 @@ pub fn parse_xpath(input: &str) -> Option<XPathExpr> {
     }
 
     for segment in segments {
-        if let Some(step) = parse_step(segment) {
-            steps.push(step);
-        } else {
-            return None;
-        }
+        let step = parse_step(segment)?;
+        steps.push(step);
     }
 
     if steps.is_empty() {
@@ -1209,7 +1206,11 @@ fn is_xml_function_filter(
 }
 
 /// Recursively check if an e-class contains XML function patterns.
-pub(crate) fn contains_xml_function(egraph: &egg::EGraph<RelLang, RelAnalysis>, id: Id, depth: u32) -> bool {
+pub(crate) fn contains_xml_function(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    id: Id,
+    depth: u32,
+) -> bool {
     if depth == 0 {
         return false;
     }
@@ -1244,9 +1245,7 @@ pub(crate) fn contains_xml_function(egraph: &egg::EGraph<RelLang, RelAnalysis>, 
             {
                 return true;
             }
-            RelLang::Not([inner])
-            | RelLang::IsNull([inner])
-            | RelLang::IsNotNull([inner])
+            RelLang::Not([inner]) | RelLang::IsNull([inner]) | RelLang::IsNotNull([inner])
                 if contains_xml_function(egraph, *inner, depth - 1) =>
             {
                 return true;

@@ -218,7 +218,10 @@ impl StatisticalAnalyzer {
         let pg_clean = self.remove_outliers(&comparison.postgres_times_ms);
 
         let ra_outliers = comparison.ra_times_ms.len().saturating_sub(ra_clean.len());
-        let pg_outliers = comparison.postgres_times_ms.len().saturating_sub(pg_clean.len());
+        let pg_outliers = comparison
+            .postgres_times_ms
+            .len()
+            .saturating_sub(pg_clean.len());
 
         let n = ra_clean.len().min(pg_clean.len());
         if n < self.config.min_samples {
@@ -344,7 +347,10 @@ impl StatisticalAnalyzer {
     ) -> Result<TTestResult, AnalysisError> {
         let n = differences.len();
         if n < 2 {
-            return Err(AnalysisError::InsufficientSamples { required: 2, actual: n });
+            return Err(AnalysisError::InsufficientSamples {
+                required: 2,
+                actual: n,
+            });
         }
         let mean_diff = mean(differences);
         let sd = std_dev(differences);
@@ -405,9 +411,16 @@ impl StatisticalAnalyzer {
         let var_b = variance(b);
         let pooled_var = ((n_a - 1.0) * var_a + (n_b - 1.0) * var_b) / (n_a + n_b - 2.0);
         let pooled_std = pooled_var.sqrt();
-        let d = if pooled_std == 0.0 { 0.0 } else { (mean_a - mean_b) / pooled_std };
+        let d = if pooled_std == 0.0 {
+            0.0
+        } else {
+            (mean_a - mean_b) / pooled_std
+        };
         let magnitude = classify_effect(d);
-        EffectSize { cohens_d: d, magnitude }
+        EffectSize {
+            cohens_d: d,
+            magnitude,
+        }
     }
 }
 
@@ -429,13 +442,23 @@ pub fn confidence_interval_for_mean(data: &[f64], confidence_level: f64) -> Conf
     let n = data.len();
     let m = mean(data);
     if n < 2 {
-        return ConfidenceInterval { mean: m, lower: m, upper: m, confidence_level };
+        return ConfidenceInterval {
+            mean: m,
+            lower: m,
+            upper: m,
+            confidence_level,
+        };
     }
     let se = std_dev(data) / (n as f64).sqrt();
     let alpha_half = (1.0 - confidence_level) / 2.0;
     let t_crit = t_critical_value(alpha_half, n - 1);
     let margin = t_crit * se;
-    ConfidenceInterval { mean: m, lower: m - margin, upper: m + margin, confidence_level }
+    ConfidenceInterval {
+        mean: m,
+        lower: m - margin,
+        upper: m + margin,
+        confidence_level,
+    }
 }
 
 /// Coefficient of variation (σ / μ). Returns 0.0 when the mean is zero.
@@ -541,8 +564,7 @@ fn lgamma(x: f64) -> f64 {
     // Stirling's series: ln Γ(x) ≈ (x−½)ln x − x + ½ ln(2π) + 1/(12x) − 1/(360x³) + …
     let inv = 1.0 / x;
     let inv2 = inv * inv;
-    (x - 0.5) * x.ln()
-        - x
+    (x - 0.5) * x.ln() - x
         + 0.5 * (2.0 * std::f64::consts::PI).ln()
         + inv * (1.0 / 12.0 - inv2 * (1.0 / 360.0 - inv2 / 1260.0))
 }
@@ -599,7 +621,11 @@ fn beta_continued_fraction(x: f64, a: f64, b: f64) -> f64 {
         };
         c = {
             let v = 1.0 + aa / c;
-            if v.abs() < FPMIN { FPMIN } else { v }
+            if v.abs() < FPMIN {
+                FPMIN
+            } else {
+                v
+            }
         };
         h *= d * c;
 
@@ -611,7 +637,11 @@ fn beta_continued_fraction(x: f64, a: f64, b: f64) -> f64 {
         };
         c = {
             let v = 1.0 + aa / c;
-            if v.abs() < FPMIN { FPMIN } else { v }
+            if v.abs() < FPMIN {
+                FPMIN
+            } else {
+                v
+            }
         };
         let del = d * c;
         h *= del;
@@ -661,7 +691,11 @@ mod tests {
         assert!(lgamma(2.0).abs() < 1e-8, "lgamma(2)={}", lgamma(2.0));
         // Γ(0.5) = √π → lgamma(0.5) ≈ 0.5724
         let expected = (std::f64::consts::PI.sqrt()).ln();
-        assert!((lgamma(0.5) - expected).abs() < 1e-7, "lgamma(0.5)={}", lgamma(0.5));
+        assert!(
+            (lgamma(0.5) - expected).abs() < 1e-7,
+            "lgamma(0.5)={}",
+            lgamma(0.5)
+        );
     }
 
     #[test]
@@ -723,7 +757,10 @@ mod tests {
             postgres_times_ms: vec![12.0; 5],
         };
         let result = analyzer.analyze_comparison(&comp, 1);
-        assert!(matches!(result, Err(AnalysisError::InsufficientSamples { .. })));
+        assert!(matches!(
+            result,
+            Err(AnalysisError::InsufficientSamples { .. })
+        ));
     }
 
     #[test]
@@ -741,7 +778,10 @@ mod tests {
             postgres_times_ms: pg_times,
         };
         let result = analyzer.analyze_comparison(&comp, 1).unwrap();
-        assert!(result.improvement_pct > 0.0, "expected positive improvement");
+        assert!(
+            result.improvement_pct > 0.0,
+            "expected positive improvement"
+        );
     }
 
     #[test]

@@ -177,7 +177,14 @@ fn main() {
         let classes = egraph.number_of_classes();
 
         let extract_start = Instant::now();
-        let _result = extract_best(&egraph, root, stats_cache.as_map(), &hardware, ra_engine::LiveConditions::NEUTRAL, None);
+        let _result = extract_best(
+            &egraph,
+            root,
+            stats_cache.as_map(),
+            &hardware,
+            ra_engine::LiveConditions::NEUTRAL,
+            None,
+        );
         let extract_us = extract_start.elapsed().as_micros();
 
         let total_us = parse_us + rec_us + egraph_us + extract_us;

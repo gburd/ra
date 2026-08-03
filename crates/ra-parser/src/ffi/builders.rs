@@ -538,10 +538,7 @@ pub unsafe fn ra_except(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `rows_list` must be a valid tagged pointer or null.
-pub unsafe fn ra_values(
-    state: *mut RaParseState,
-    rows_list: *mut RaNode,
-) -> *mut RaNode {
+pub unsafe fn ra_values(state: *mut RaParseState, rows_list: *mut RaNode) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1573,10 +1570,7 @@ pub unsafe fn ra_const_float(state: *mut RaParseState, value: f64) -> *mut RaNod
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `value` must be null or a valid NUL-terminated C string.
-pub unsafe fn ra_const_str(
-    state: *mut RaParseState,
-    value: *const c_char,
-) -> *mut RaNode {
+pub unsafe fn ra_const_str(state: *mut RaParseState, value: *const c_char) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1949,10 +1943,7 @@ pub unsafe fn ra_array_index(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `array_expr` must be a valid tagged expression pointer or null.
-pub unsafe fn ra_unnest(
-    state: *mut RaParseState,
-    array_expr: *mut RaNode,
-) -> *mut RaNode {
+pub unsafe fn ra_unnest(state: *mut RaParseState, array_expr: *mut RaNode) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -1968,10 +1959,7 @@ pub unsafe fn ra_unnest(
 /// # Safety
 /// - `state` must be null or a valid `*mut RaParseState`.
 /// - `array_expr` must be a valid tagged expression pointer or null.
-pub unsafe fn ra_unnest_ord(
-    state: *mut RaParseState,
-    array_expr: *mut RaNode,
-) -> *mut RaNode {
+pub unsafe fn ra_unnest_ord(state: *mut RaParseState, array_expr: *mut RaNode) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
     };
@@ -2337,7 +2325,9 @@ pub unsafe fn ra_list_prepend(
     if st.list_prepend(list_idx, item_idx) {
         list
     } else {
-        st.push_error(format!("ra_list_prepend: list index {list_idx} out of bounds"));
+        st.push_error(format!(
+            "ra_list_prepend: list index {list_idx} out of bounds"
+        ));
         std::ptr::null_mut()
     }
 }

@@ -134,8 +134,14 @@ impl PreConditionEvaluator {
     }
 
     /// Evaluate a predicate condition
-    #[expect(clippy::unused_self, reason = "will use self when predicate functions are registered")]
-    #[expect(clippy::unnecessary_wraps, reason = "will return Err when unknown predicates are errors")]
+    #[expect(
+        clippy::unused_self,
+        reason = "will use self when predicate functions are registered"
+    )]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "will return Err when unknown predicates are errors"
+    )]
     fn evaluate_predicate(&self, condition: &str) -> Result<bool, EvaluationError> {
         // For now, all predicates pass. In a full implementation, this
         // would call registered predicate functions and may return Err
@@ -166,7 +172,10 @@ impl PreConditionEvaluator {
     }
 
     /// Look up a fact value from the facts provider
-    #[expect(clippy::too_many_lines, reason = "fact lookup with many condition patterns")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "fact lookup with many condition patterns"
+    )]
     fn lookup_fact(
         &self,
         fact_type: &str,
@@ -347,7 +356,10 @@ impl PreConditionEvaluator {
     }
 
     /// Evaluate a capability requirement
-    #[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other evaluate methods")]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "consistent Result return with other evaluate methods"
+    )]
     fn evaluate_capability(&self, database: &str, feature: &str) -> Result<bool, EvaluationError> {
         if database == "current" || database == self.facts.database_name() {
             Ok(self.facts.supports_feature(feature))

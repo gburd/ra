@@ -30,9 +30,9 @@ fn main() {
                     table: Some("users".to_string()),
                     column: "status".to_string(),
                 })),
-                right: Box::new(ra_core::expr::Expr::Const(
-                    ra_core::expr::Const::String("active".to_string()),
-                )),
+                right: Box::new(ra_core::expr::Expr::Const(ra_core::expr::Const::String(
+                    "active".to_string(),
+                ))),
             },
             input: Box::new(RelExpr::Scan {
                 table: "users".to_string(),

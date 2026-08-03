@@ -7,12 +7,12 @@
 // The workspace lint denies print_stdout; this binary intentionally uses it.
 #![allow(clippy::print_stdout)]
 
-mod compare;
-mod report;
-mod runner;
 pub mod benchmark_harness;
+mod compare;
 pub mod job_benchmark;
+mod report;
 pub mod report_generator;
+mod runner;
 pub mod statistical_analysis;
 pub mod tproc_c;
 pub mod training_collector;
@@ -23,10 +23,10 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use ra_engine::Optimizer;
-use ra_grammar_fuzzer::{corpus, generator::SqlGenerator};
 use ra_grammar_fuzzer::generator::GeneratorConfig;
 use ra_grammar_fuzzer::scoring::ScoringWeights;
 use ra_grammar_fuzzer::sql_emitter::SqlEmitter;
+use ra_grammar_fuzzer::{corpus, generator::SqlGenerator};
 use runner::RunnerConfig;
 
 use crate::report::BenchReport;
@@ -316,7 +316,10 @@ fn run_bench(args: BenchArgs) -> Result<()> {
     }
 
     if !args.quiet {
-        println!("\r  {total}/{total} done in {:.1}s", t_total.elapsed().as_secs_f64());
+        println!(
+            "\r  {total}/{total} done in {:.1}s",
+            t_total.elapsed().as_secs_f64()
+        );
     }
 
     let report = BenchReport::from_results(&results);
@@ -332,7 +335,11 @@ fn run_bench(args: BenchArgs) -> Result<()> {
     if let Some(ref path) = args.failures {
         write_failures(path, &failures)?;
         if !args.quiet {
-            println!("Failures ({}) written to {}", failures.len(), path.display());
+            println!(
+                "Failures ({}) written to {}",
+                failures.len(),
+                path.display()
+            );
         }
     } else if !failures.is_empty() && !args.quiet {
         println!("{} queries failed to parse.", failures.len());
@@ -500,8 +507,10 @@ fn run_collect_training(args: CollectTrainingArgs) -> Result<()> {
     }
 
     println!("Total queries: {}", queries_with_features.len());
-    println!("Expected samples: {} (queries × configs × sizes)",
-        queries_with_features.len() * configs.len() * sizes.len());
+    println!(
+        "Expected samples: {} (queries × configs × sizes)",
+        queries_with_features.len() * configs.len() * sizes.len()
+    );
 
     // Collect training samples
     let mut collector = TrainingCollector::new();
@@ -526,11 +535,13 @@ fn run_collect_training(_args: CollectTrainingArgs) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn run_train(args: TrainArgs) -> Result<()> {
-    use ra_engine::cost_model::{BitNetTrainer, TrainerConfig};
     use crate::training_collector::TrainingCollector;
+    use ra_engine::cost_model::{BitNetTrainer, TrainerConfig};
 
     println!("Loading training data from: {}", args.input.display());
-    let input_str = args.input.to_str()
+    let input_str = args
+        .input
+        .to_str()
         .ok_or_else(|| anyhow::anyhow!("input path is not valid UTF-8"))?;
     let samples = TrainingCollector::load_from_file(input_str)?;
     if samples.is_empty() {
@@ -541,7 +552,11 @@ fn run_train(args: TrainArgs) -> Result<()> {
     // Train/eval split
     let split = (samples.len() as f64 * (1.0 - args.eval_split)) as usize;
     let (train_samples, eval_samples) = samples.split_at(split.min(samples.len()));
-    println!("Train: {} | Eval: {}", train_samples.len(), eval_samples.len());
+    println!(
+        "Train: {} | Eval: {}",
+        train_samples.len(),
+        eval_samples.len()
+    );
 
     // Initialize trainer (QAT with STE — trains directly in ternary space)
     let mut trainer = BitNetTrainer::new(TrainerConfig {
@@ -569,7 +584,11 @@ fn run_train(args: TrainArgs) -> Result<()> {
         })
         .collect();
 
-    println!("\nTraining ({} epochs, {} samples):", args.epochs, train_pairs.len());
+    println!(
+        "\nTraining ({} epochs, {} samples):",
+        args.epochs,
+        train_pairs.len()
+    );
     println!("{:>6}  {:>12}", "Epoch", "Avg Loss");
     println!("{:>6}  {:>12}", "-----", "--------");
 
@@ -687,13 +706,21 @@ fn run_benchmark_oltp(args: BenchmarkOltpArgs) -> Result<()> {
     }
 
     let report = harness.analyze("tproc_c");
-    let successful = report.query_timings.iter().filter(|t| t.ra_success_count > 0).count();
+    let successful = report
+        .query_timings
+        .iter()
+        .filter(|t| t.ra_success_count > 0)
+        .count();
     println!(
         "\nResults: {}/{} queries optimized",
-        successful, queries.len()
+        successful,
+        queries.len()
     );
 
-    let out = args.output.to_str().unwrap_or("oltp_benchmark_results.json");
+    let out = args
+        .output
+        .to_str()
+        .unwrap_or("oltp_benchmark_results.json");
     crate::benchmark_harness::BenchmarkHarness::save_report(&report, out)?;
     println!("Results written to: {out}");
 
@@ -750,11 +777,16 @@ fn run_benchmark_job(args: BenchmarkJobArgs) -> Result<()> {
     use crate::job_benchmark::job_queries;
 
     let queries = job_queries();
-    let filtered: Vec<_> = queries.iter()
+    let filtered: Vec<_> = queries
+        .iter()
         .filter(|q| q.table_count <= args.max_tables)
         .collect();
 
-    println!("JOB Benchmark: {} queries (max {} tables)", filtered.len(), args.max_tables);
+    println!(
+        "JOB Benchmark: {} queries (max {} tables)",
+        filtered.len(),
+        args.max_tables
+    );
 
     let config = WorkloadConfig {
         ra_repetitions: args.repetitions,
@@ -764,8 +796,13 @@ fn run_benchmark_job(args: BenchmarkJobArgs) -> Result<()> {
 
     let mut harness = BenchmarkHarness::new(config);
     for (i, q) in filtered.iter().enumerate() {
-        print!("  [{:2}/{:2}] {} ({} tables) ... ",
-            i + 1, filtered.len(), q.id, q.table_count);
+        print!(
+            "  [{:2}/{:2}] {} ({} tables) ... ",
+            i + 1,
+            filtered.len(),
+            q.id,
+            q.table_count
+        );
         let timing = harness.add_query(
             &format!("JOB_{}", q.id),
             q.sql,
@@ -782,10 +819,15 @@ fn run_benchmark_job(args: BenchmarkJobArgs) -> Result<()> {
     }
 
     let report = harness.analyze("job_benchmark");
-    let successful = report.query_timings.iter().filter(|t| t.ra_success_count > 0).count();
+    let successful = report
+        .query_timings
+        .iter()
+        .filter(|t| t.ra_success_count > 0)
+        .count();
     println!(
         "\nResults: {}/{} queries optimized successfully",
-        successful, filtered.len()
+        successful,
+        filtered.len()
     );
 
     let out = args.output.to_str().unwrap_or("job_benchmark_results.json");
@@ -820,10 +862,7 @@ fn parse_weights(json: Option<&str>) -> Result<ScoringWeights> {
     })
 }
 
-fn write_failures(
-    path: &std::path::Path,
-    failures: &[(String, String, String)],
-) -> Result<()> {
+fn write_failures(path: &std::path::Path, failures: &[(String, String, String)]) -> Result<()> {
     let mut f = std::fs::File::create(path)?;
     for (category, sql, err) in failures {
         writeln!(f, "-- [{category}] {err}")?;

@@ -133,9 +133,7 @@ fn mcv_example() {
 
     let selectivity_rare = estimate_predicate_selectivity(&predicate_rare, &stats);
     println!("\nPredicate: status = 'Deleted' (not in MCV)");
-    println!(
-        "Estimated selectivity: {selectivity_rare:.4} (1/NDV fallback)",
-    );
+    println!("Estimated selectivity: {selectivity_rare:.4} (1/NDV fallback)");
     println!(
         "Improvement over MCV: {:.1}x more accurate for common values",
         0.001 / selectivity_active

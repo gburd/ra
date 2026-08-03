@@ -521,7 +521,10 @@ impl Drop for BackgroundReoptimizer {
 
 /// The background worker loop. Runs up to `max_reoptimizations`
 /// rounds, sending any improved plan back through `tx`.
-#[expect(clippy::needless_pass_by_value, reason = "thread-spawned function needs owned values")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "thread-spawned function needs owned values"
+)]
 fn background_worker(
     plan: RelExpr,
     stats: HashMap<String, Statistics>,

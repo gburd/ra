@@ -122,7 +122,8 @@ fn test_greedy_join_order_empty() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
+    let optimizer =
+        LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
 
     let result = optimizer.optimize(vec![]);
     assert!(result.is_err());
@@ -133,7 +134,8 @@ fn test_greedy_join_order_single_table() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
+    let optimizer =
+        LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
 
     let joins = vec![JoinNode {
         table: "users".to_string(),
@@ -150,7 +152,8 @@ fn test_greedy_join_order_two_tables() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
+    let optimizer =
+        LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
 
     let joins = vec![
         JoinNode {
@@ -186,7 +189,8 @@ fn test_greedy_join_order_multiple_tables() {
     let cost_model = Arc::new(MockCostModel);
     let stats_provider = Arc::new(MockStatsProvider::new());
 
-    let optimizer = LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
+    let optimizer =
+        LargeJoinOptimizer::new(LargeJoinStrategy::Greedy, cost_model, stats_provider, 42);
 
     let joins = vec![
         JoinNode {
@@ -356,7 +360,10 @@ fn test_large_join_20_tables() {
     assert!(matches!(result, RelExpr::Join { .. }));
 
     // Simulated annealing should complete in under 30 seconds for 20 tables
-    assert!(sa_time.as_secs() < 30, "Simulated annealing took {sa_time:?}");
+    assert!(
+        sa_time.as_secs() < 30,
+        "Simulated annealing took {sa_time:?}"
+    );
 }
 
 #[test]

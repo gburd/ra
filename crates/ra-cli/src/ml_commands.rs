@@ -283,7 +283,10 @@ pub async fn handle_ml_command(cmd: MlCommands) -> Result<()> {
     }
 }
 
-#[expect(clippy::unused_async, reason = "matches async interface of other ML commands")]
+#[expect(
+    clippy::unused_async,
+    reason = "matches async interface of other ML commands"
+)]
 async fn train_model(
     _dataset: PathBuf,
     _output: Option<PathBuf>,

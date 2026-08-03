@@ -111,7 +111,11 @@ fn extract_key_constraints(predicate: &Expr, key: &str) -> Vec<KeyConstraint> {
 
 fn walk_constraints(predicate: &Expr, key: &str, out: &mut Vec<KeyConstraint>) {
     match predicate {
-        Expr::BinOp { op: BinOp::And, left, right } => {
+        Expr::BinOp {
+            op: BinOp::And,
+            left,
+            right,
+        } => {
             walk_constraints(left, key, out);
             walk_constraints(right, key, out);
         }
@@ -124,7 +128,10 @@ fn walk_constraints(predicate: &Expr, key: &str, out: &mut Vec<KeyConstraint>) {
             // Accept `key OP const` and the flipped `const OP key`.
             if let (Expr::Column(c), Expr::Const(v)) = (left.as_ref(), right.as_ref()) {
                 if c.column.eq_ignore_ascii_case(key) {
-                    out.push(KeyConstraint { op: *op, value: v.clone() });
+                    out.push(KeyConstraint {
+                        op: *op,
+                        value: v.clone(),
+                    });
                 }
             } else if let (Expr::Const(v), Expr::Column(c)) = (left.as_ref(), right.as_ref()) {
                 if c.column.eq_ignore_ascii_case(key) {
@@ -157,12 +164,8 @@ fn flip_op(op: BinOp) -> BinOp {
 /// hash partition, etc.).
 fn constraint_allows_partition(constraint: &KeyConstraint, bounds: &PartitionBounds) -> bool {
     match bounds {
-        PartitionBounds::Range { min, max } => {
-            range_allows(constraint, min.as_ref(), max.as_ref())
-        }
-        PartitionBounds::List { values } => {
-            list_allows(constraint, values)
-        }
+        PartitionBounds::Range { min, max } => range_allows(constraint, min.as_ref(), max.as_ref()),
+        PartitionBounds::List { values } => list_allows(constraint, values),
         // Hash partitioning can't be statically pruned by a
         // comparison (would need to evaluate the hash). Keep.
         PartitionBounds::Hash { .. } => true,
@@ -178,9 +181,7 @@ fn range_allows(c: &KeyConstraint, min: Option<&Const>, max: Option<&Const>) -> 
     let max_f = max.and_then(const_as_f64);
     match c.op {
         // key = v : v must be in [min, max)
-        BinOp::Eq => {
-            min_f.is_none_or(|m| v >= m) && max_f.is_none_or(|m| v < m)
-        }
+        BinOp::Eq => min_f.is_none_or(|m| v >= m) && max_f.is_none_or(|m| v < m),
         // key < v : partition overlaps if min < v
         BinOp::Lt => min_f.is_none_or(|m| m < v),
         // key <= v : partition overlaps if min <= v
@@ -338,8 +339,14 @@ mod tests {
             table: "t".into(),
             partition_key: "id".into(),
             partitions: vec![
-                PartitionBounds::Hash { modulus: 4, remainder: 0 },
-                PartitionBounds::Hash { modulus: 4, remainder: 1 },
+                PartitionBounds::Hash {
+                    modulus: 4,
+                    remainder: 0,
+                },
+                PartitionBounds::Hash {
+                    modulus: 4,
+                    remainder: 1,
+                },
             ],
         };
         let pred = col_cmp(BinOp::Eq, "id", 7);
@@ -353,8 +360,8 @@ mod tests {
             table: "t".into(),
             partition_key: "k".into(),
             partitions: vec![
-                range(None, Some(0)),    // (-inf, 0)
-                range(Some(0), None),    // [0, +inf)
+                range(None, Some(0)), // (-inf, 0)
+                range(Some(0), None), // [0, +inf)
             ],
         };
         // k = -5 → only the first (unbounded-below) partition

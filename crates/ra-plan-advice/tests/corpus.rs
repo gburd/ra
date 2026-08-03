@@ -1,4 +1,7 @@
-#![expect(clippy::unwrap_used, reason = "test code; unwrap is the conventional shorthand for surfacing failures in tests")]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test code; unwrap is the conventional shorthand for surfacing failures in tests"
+)]
 //! Parse the full corpus of advice strings from PG's regression
 //! tests at `~/src/postgres/contrib/pg_plan_advice/sql/*.sql`.
 //!
@@ -22,7 +25,6 @@ const KNOWN_INVALID: &[&str] = &[
     "/*",
     r#"JOIN_ORDER("fOO") /* oops"#,
     "/*/* stuff */*/",
-
     // Tag-arity / tag-shape errors.
     "JOIN_ORDER()",
     "GATHER(((x)))",
@@ -34,7 +36,6 @@ const KNOWN_INVALID: &[&str] = &[
     r#"SEQ_SCAN("a""#,
     "SEQ_SCAN(#",
     "SEQUENTIAL_SCAN(x)",
-
     // FOREIGN_JOIN requires multiple targets in each sublist.
     "FOREIGN_JOIN(a)",
     "FOREIGN_JOIN((a))",
@@ -61,9 +62,7 @@ fn every_corpus_line_matches_pg() {
         match (result.is_ok(), pg_says_invalid) {
             (true, false) => accepted += 1,
             (false, true) => rejected += 1,
-            (true, true) => surprises.push(format!(
-                "expected reject, got accept: {line:?}",
-            )),
+            (true, true) => surprises.push(format!("expected reject, got accept: {line:?}",)),
             (false, false) => surprises.push(format!(
                 "expected accept, got reject {:?}: {:?}",
                 result.unwrap_err().message,
@@ -78,10 +77,6 @@ fn every_corpus_line_matches_pg() {
         surprises.len(),
         surprises.join("\n"),
     );
-    assert_eq!(
-        total,
-        accepted + rejected,
-        "every line must be classified",
-    );
+    assert_eq!(total, accepted + rejected, "every line must be classified",);
     assert!(total > 100, "corpus should have ~119 entries, got {total}");
 }

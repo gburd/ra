@@ -6,10 +6,18 @@
 //! ABI (`*mut RaParseState`, NUL/len strings, `*mut RaNode`). Behavior is
 //! identical to the C path because the underlying builder is the same.
 #![allow(
-    clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction,
-    clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments,
-    clippy::needless_pass_by_value, clippy::cast_possible_truncation,
-    clippy::cast_sign_loss, clippy::must_use_candidate, missing_docs, unused
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::restriction,
+    clippy::not_unsafe_ptr_arg_deref,
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::must_use_candidate,
+    missing_docs,
+    unused
 )]
 
 use std::ffi::CString;
@@ -34,9 +42,21 @@ pub fn ra_scan_alias(st: *mut RaParseState, table: &str, alias: &str) -> Value {
 }
 
 #[must_use]
-pub fn ra_filter_agg(st: *mut RaParseState, func_name: &str, args_list: Value, filter_cond: Value) -> Value {
+pub fn ra_filter_agg(
+    st: *mut RaParseState,
+    func_name: &str,
+    args_list: Value,
+    filter_cond: Value,
+) -> Value {
     let func_name_c = CString::new(func_name).unwrap_or_default();
-    let handle = unsafe { ffi::ra_filter_agg(st, func_name_c.as_ptr(), args_list.handle(), filter_cond.handle()) };
+    let handle = unsafe {
+        ffi::ra_filter_agg(
+            st,
+            func_name_c.as_ptr(),
+            args_list.handle(),
+            filter_cond.handle(),
+        )
+    };
     Value::from_node(handle)
 }
 
@@ -60,8 +80,22 @@ pub fn ra_alias_target(st: *mut RaParseState, expr_node: Value, alias: &str) -> 
 }
 
 #[must_use]
-pub fn ra_join(st: *mut RaParseState, join_type: i64, left: Value, right: Value, condition: Value) -> Value {
-    let handle = unsafe { ffi::ra_join(st, join_type as u32, left.handle(), right.handle(), condition.handle()) };
+pub fn ra_join(
+    st: *mut RaParseState,
+    join_type: i64,
+    left: Value,
+    right: Value,
+    condition: Value,
+) -> Value {
+    let handle = unsafe {
+        ffi::ra_join(
+            st,
+            join_type as u32,
+            left.handle(),
+            right.handle(),
+            condition.handle(),
+        )
+    };
     Value::from_node(handle)
 }
 
@@ -108,14 +142,44 @@ pub fn ra_values(st: *mut RaParseState, rows_list: Value) -> Value {
 }
 
 #[must_use]
-pub fn ra_recursive_cte(st: *mut RaParseState, name: &str, name_len: usize, base: Value, recursive: Value, body: Value) -> Value {
-    let handle = unsafe { ffi::ra_recursive_cte(st, name.as_ptr().cast::<c_char>(), name_len, base.handle(), recursive.handle(), body.handle()) };
+pub fn ra_recursive_cte(
+    st: *mut RaParseState,
+    name: &str,
+    name_len: usize,
+    base: Value,
+    recursive: Value,
+    body: Value,
+) -> Value {
+    let handle = unsafe {
+        ffi::ra_recursive_cte(
+            st,
+            name.as_ptr().cast::<c_char>(),
+            name_len,
+            base.handle(),
+            recursive.handle(),
+            body.handle(),
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_recursive_cte_auto(st: *mut RaParseState, name: &str, name_len: usize, cte_body: Value, query_body: Value) -> Value {
-    let handle = unsafe { ffi::ra_recursive_cte_auto(st, name.as_ptr().cast::<c_char>(), name_len, cte_body.handle(), query_body.handle()) };
+pub fn ra_recursive_cte_auto(
+    st: *mut RaParseState,
+    name: &str,
+    name_len: usize,
+    cte_body: Value,
+    query_body: Value,
+) -> Value {
+    let handle = unsafe {
+        ffi::ra_recursive_cte_auto(
+            st,
+            name.as_ptr().cast::<c_char>(),
+            name_len,
+            cte_body.handle(),
+            query_body.handle(),
+        )
+    };
     Value::from_node(handle)
 }
 
@@ -133,7 +197,9 @@ pub fn ra_unnest_ord(st: *mut RaParseState, array_expr: Value) -> Value {
 
 #[must_use]
 pub fn ra_table_function(st: *mut RaParseState, name: &str, name_len: usize, args: Value) -> Value {
-    let handle = unsafe { ffi::ra_table_function(st, name.as_ptr().cast::<c_char>(), name_len, args.handle()) };
+    let handle = unsafe {
+        ffi::ra_table_function(st, name.as_ptr().cast::<c_char>(), name_len, args.handle())
+    };
     Value::from_node(handle)
 }
 
@@ -145,9 +211,25 @@ pub fn ra_window_marker(st: *mut RaParseState, name: &str, args: Value) -> Value
 }
 
 #[must_use]
-pub fn ra_window_marker_full(st: *mut RaParseState, name: &str, args: Value, partition_list: Value, order_list: Value, has_frame: i64) -> Value {
+pub fn ra_window_marker_full(
+    st: *mut RaParseState,
+    name: &str,
+    args: Value,
+    partition_list: Value,
+    order_list: Value,
+    has_frame: i64,
+) -> Value {
     let name_c = CString::new(name).unwrap_or_default();
-    let handle = unsafe { ffi::ra_window_marker_full(st, name_c.as_ptr(), args.handle(), partition_list.handle(), order_list.handle(), has_frame as i32) };
+    let handle = unsafe {
+        ffi::ra_window_marker_full(
+            st,
+            name_c.as_ptr(),
+            args.handle(),
+            partition_list.handle(),
+            order_list.handle(),
+            has_frame as i32,
+        )
+    };
     Value::from_node(handle)
 }
 
@@ -177,30 +259,92 @@ pub fn ra_distinct_on(st: *mut RaParseState, input: Value, on: Value) -> Value {
 }
 
 #[must_use]
-pub fn ra_insert(st: *mut RaParseState, table: &str, columns: Value, source: Value, on_conflict: Value, returning: Value) -> Value {
+pub fn ra_insert(
+    st: *mut RaParseState,
+    table: &str,
+    columns: Value,
+    source: Value,
+    on_conflict: Value,
+    returning: Value,
+) -> Value {
     let table_c = CString::new(table).unwrap_or_default();
-    let handle = unsafe { ffi::ra_insert(st, table_c.as_ptr(), columns.handle(), source.handle(), on_conflict.handle(), returning.handle()) };
+    let handle = unsafe {
+        ffi::ra_insert(
+            st,
+            table_c.as_ptr(),
+            columns.handle(),
+            source.handle(),
+            on_conflict.handle(),
+            returning.handle(),
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_update(st: *mut RaParseState, table: &str, assignments: Value, filter: Value, from: Value, returning: Value) -> Value {
+pub fn ra_update(
+    st: *mut RaParseState,
+    table: &str,
+    assignments: Value,
+    filter: Value,
+    from: Value,
+    returning: Value,
+) -> Value {
     let table_c = CString::new(table).unwrap_or_default();
-    let handle = unsafe { ffi::ra_update(st, table_c.as_ptr(), assignments.handle(), filter.handle(), from.handle(), returning.handle()) };
+    let handle = unsafe {
+        ffi::ra_update(
+            st,
+            table_c.as_ptr(),
+            assignments.handle(),
+            filter.handle(),
+            from.handle(),
+            returning.handle(),
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_delete(st: *mut RaParseState, table: &str, filter: Value, using_clause: Value, returning: Value) -> Value {
+pub fn ra_delete(
+    st: *mut RaParseState,
+    table: &str,
+    filter: Value,
+    using_clause: Value,
+    returning: Value,
+) -> Value {
     let table_c = CString::new(table).unwrap_or_default();
-    let handle = unsafe { ffi::ra_delete(st, table_c.as_ptr(), filter.handle(), using_clause.handle(), returning.handle()) };
+    let handle = unsafe {
+        ffi::ra_delete(
+            st,
+            table_c.as_ptr(),
+            filter.handle(),
+            using_clause.handle(),
+            returning.handle(),
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_merge(st: *mut RaParseState, target: &str, source: Value, on: Value, when_clauses: Value, returning: Value) -> Value {
+pub fn ra_merge(
+    st: *mut RaParseState,
+    target: &str,
+    source: Value,
+    on: Value,
+    when_clauses: Value,
+    returning: Value,
+) -> Value {
     let target_c = CString::new(target).unwrap_or_default();
-    let handle = unsafe { ffi::ra_merge(st, target_c.as_ptr(), source.handle(), on.handle(), when_clauses.handle(), returning.handle()) };
+    let handle = unsafe {
+        ffi::ra_merge(
+            st,
+            target_c.as_ptr(),
+            source.handle(),
+            on.handle(),
+            when_clauses.handle(),
+            returning.handle(),
+        )
+    };
     Value::from_node(handle)
 }
 
@@ -211,8 +355,14 @@ pub fn ra_merge_kind_by(ident: &str) -> i32 {
 }
 
 #[must_use]
-pub fn ra_merge_when_update(st: *mut RaParseState, kind: i32, cond: Value, assignments: Value) -> Value {
-    let handle = unsafe { ffi::ra_merge_when_update(st, kind, cond.handle(), assignments.handle()) };
+pub fn ra_merge_when_update(
+    st: *mut RaParseState,
+    kind: i32,
+    cond: Value,
+    assignments: Value,
+) -> Value {
+    let handle =
+        unsafe { ffi::ra_merge_when_update(st, kind, cond.handle(), assignments.handle()) };
     Value::from_node(handle)
 }
 
@@ -229,32 +379,76 @@ pub fn ra_merge_when_nothing(st: *mut RaParseState, kind: i32, cond: Value) -> V
 }
 
 #[must_use]
-pub fn ra_merge_when_insert(st: *mut RaParseState, kind: i32, cond: Value, columns: Value, values: Value) -> Value {
-    let handle = unsafe { ffi::ra_merge_when_insert(st, kind, cond.handle(), columns.handle(), values.handle()) };
+pub fn ra_merge_when_insert(
+    st: *mut RaParseState,
+    kind: i32,
+    cond: Value,
+    columns: Value,
+    values: Value,
+) -> Value {
+    let handle = unsafe {
+        ffi::ra_merge_when_insert(st, kind, cond.handle(), columns.handle(), values.handle())
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_graph_vertex(st: *mut RaParseState, variable: Option<&str>, label: Option<&str>) -> Value {
+pub fn ra_graph_vertex(
+    st: *mut RaParseState,
+    variable: Option<&str>,
+    label: Option<&str>,
+) -> Value {
     let variable_c = variable.map(|s| CString::new(s).unwrap_or_default());
     let label_c = label.map(|s| CString::new(s).unwrap_or_default());
-    let handle = unsafe { ffi::ra_graph_vertex(st, variable_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()), label_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr())) };
+    let handle = unsafe {
+        ffi::ra_graph_vertex(
+            st,
+            variable_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            label_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_graph_edge(st: *mut RaParseState, variable: Option<&str>, label: Option<&str>, direction: i32) -> Value {
+pub fn ra_graph_edge(
+    st: *mut RaParseState,
+    variable: Option<&str>,
+    label: Option<&str>,
+    direction: i32,
+) -> Value {
     let variable_c = variable.map(|s| CString::new(s).unwrap_or_default());
     let label_c = label.map(|s| CString::new(s).unwrap_or_default());
-    let handle = unsafe { ffi::ra_graph_edge(st, variable_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()), label_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()), direction) };
+    let handle = unsafe {
+        ffi::ra_graph_edge(
+            st,
+            variable_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            label_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            direction,
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_graph_table(st: *mut RaParseState, graph: Option<&str>, pattern: Value, columns: Value, alias: Option<&str>) -> Value {
+pub fn ra_graph_table(
+    st: *mut RaParseState,
+    graph: Option<&str>,
+    pattern: Value,
+    columns: Value,
+    alias: Option<&str>,
+) -> Value {
     let graph_c = graph.map(|s| CString::new(s).unwrap_or_default());
     let alias_c = alias.map(|s| CString::new(s).unwrap_or_default());
-    let handle = unsafe { ffi::ra_graph_table(st, graph_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()), pattern.handle(), columns.handle(), alias_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr())) };
+    let handle = unsafe {
+        ffi::ra_graph_table(
+            st,
+            graph_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            pattern.handle(),
+            columns.handle(),
+            alias_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+        )
+    };
     Value::from_node(handle)
 }
 
@@ -265,8 +459,13 @@ pub fn ra_on_conflict_nothing(st: *mut RaParseState) -> Value {
 }
 
 #[must_use]
-pub fn ra_on_conflict_update(st: *mut RaParseState, target_cols: Value, assignments: Value) -> Value {
-    let handle = unsafe { ffi::ra_on_conflict_update(st, target_cols.handle(), assignments.handle()) };
+pub fn ra_on_conflict_update(
+    st: *mut RaParseState,
+    target_cols: Value,
+    assignments: Value,
+) -> Value {
+    let handle =
+        unsafe { ffi::ra_on_conflict_update(st, target_cols.handle(), assignments.handle()) };
     Value::from_node(handle)
 }
 
@@ -349,18 +548,31 @@ pub fn ra_unary_op(st: *mut RaParseState, op_code: u32, operand: Value) -> Value
 
 #[must_use]
 pub fn ra_case(st: *mut RaParseState, operand: Value, when_list: Value, else_expr: Value) -> Value {
-    let handle = unsafe { ffi::ra_case(st, operand.handle(), when_list.handle(), else_expr.handle()) };
+    let handle =
+        unsafe { ffi::ra_case(st, operand.handle(), when_list.handle(), else_expr.handle()) };
     Value::from_node(handle)
 }
 
 #[must_use]
 pub fn ra_cast(st: *mut RaParseState, expr: Value, type_str: &str, type_len: usize) -> Value {
-    let handle = unsafe { ffi::ra_cast(st, expr.handle(), type_str.as_ptr().cast::<c_char>(), type_len) };
+    let handle = unsafe {
+        ffi::ra_cast(
+            st,
+            expr.handle(),
+            type_str.as_ptr().cast::<c_char>(),
+            type_len,
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_subquery(st: *mut RaParseState, type_code: u32, rel_node: Value, test_expr: Value) -> Value {
+pub fn ra_subquery(
+    st: *mut RaParseState,
+    type_code: u32,
+    rel_node: Value,
+    test_expr: Value,
+) -> Value {
     let handle = unsafe { ffi::ra_subquery(st, type_code, rel_node.handle(), test_expr.handle()) };
     Value::from_node(handle)
 }
@@ -393,20 +605,66 @@ pub fn ra_array_index(st: *mut RaParseState, array_expr: Value, index_expr: Valu
 }
 
 #[must_use]
-pub fn ra_field_access(st: *mut RaParseState, expr: Value, field_name: &str, field_len: usize) -> Value {
-    let handle = unsafe { ffi::ra_field_access(st, expr.handle(), field_name.as_ptr().cast::<c_char>(), field_len) };
+pub fn ra_field_access(
+    st: *mut RaParseState,
+    expr: Value,
+    field_name: &str,
+    field_len: usize,
+) -> Value {
+    let handle = unsafe {
+        ffi::ra_field_access(
+            st,
+            expr.handle(),
+            field_name.as_ptr().cast::<c_char>(),
+            field_len,
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_agg_expr(st: *mut RaParseState, func_code: u32, arg: Value, distinct: u32, alias: &str, alias_len: usize) -> Value {
-    let handle = unsafe { ffi::ra_agg_expr(st, func_code, arg.handle(), distinct, alias.as_ptr().cast::<c_char>(), alias_len) };
+pub fn ra_agg_expr(
+    st: *mut RaParseState,
+    func_code: u32,
+    arg: Value,
+    distinct: u32,
+    alias: &str,
+    alias_len: usize,
+) -> Value {
+    let handle = unsafe {
+        ffi::ra_agg_expr(
+            st,
+            func_code,
+            arg.handle(),
+            distinct,
+            alias.as_ptr().cast::<c_char>(),
+            alias_len,
+        )
+    };
     Value::from_node(handle)
 }
 
 #[must_use]
-pub fn ra_window_expr(st: *mut RaParseState, func_code: u32, arg: Value, partition_list: Value, order_list: Value, alias: &str, alias_len: usize) -> Value {
-    let handle = unsafe { ffi::ra_window_expr(st, func_code, arg.handle(), partition_list.handle(), order_list.handle(), alias.as_ptr().cast::<c_char>(), alias_len) };
+pub fn ra_window_expr(
+    st: *mut RaParseState,
+    func_code: u32,
+    arg: Value,
+    partition_list: Value,
+    order_list: Value,
+    alias: &str,
+    alias_len: usize,
+) -> Value {
+    let handle = unsafe {
+        ffi::ra_window_expr(
+            st,
+            func_code,
+            arg.handle(),
+            partition_list.handle(),
+            order_list.handle(),
+            alias.as_ptr().cast::<c_char>(),
+            alias_len,
+        )
+    };
     Value::from_node(handle)
 }
 
@@ -430,6 +688,7 @@ pub fn ra_list_prepend(st: *mut RaParseState, list: Value, item: Value) -> Value
 
 #[must_use]
 pub fn ra_sort_key(st: *mut RaParseState, expr: Value, ascending: i64, nulls_first: i64) -> Value {
-    let handle = unsafe { ffi::ra_sort_key(st, expr.handle(), ascending as u32, nulls_first as u32) };
+    let handle =
+        unsafe { ffi::ra_sort_key(st, expr.handle(), ascending as u32, nulls_first as u32) };
     Value::from_node(handle)
 }

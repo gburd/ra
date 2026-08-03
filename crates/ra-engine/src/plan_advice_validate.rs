@@ -137,7 +137,11 @@ fn classify_item(
         // the plan's full order (in which case it matches), but
         // never the other way around.
         let n = supplied_order.len();
-        let plan_prefix: Vec<&str> = plan_order.iter().take(n).map(std::string::String::as_str).collect();
+        let plan_prefix: Vec<&str> = plan_order
+            .iter()
+            .take(n)
+            .map(std::string::String::as_str)
+            .collect();
         if plan_prefix != supplied_order {
             flags = flags.with(FeedbackFlags::FAILED);
         }
@@ -232,11 +236,7 @@ fn collect_target_identifiers(targets: &[AdviceTarget]) -> Vec<String> {
     out
 }
 
-fn walk_target(
-    target: &AdviceTarget,
-    out: &mut Vec<String>,
-    seen: &mut HashSet<String>,
-) {
+fn walk_target(target: &AdviceTarget, out: &mut Vec<String>, seen: &mut HashSet<String>) {
     match target.kind {
         AdviceTargetKind::Identifier => {
             if let Some(id) = &target.identifier {
@@ -298,7 +298,10 @@ mod tests {
     use ra_plan_advice::parse_advice;
 
     fn scan(name: &str) -> RelExpr {
-        RelExpr::Scan { table: name.into(), alias: None }
+        RelExpr::Scan {
+            table: name.into(),
+            alias: None,
+        }
     }
 
     fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
@@ -352,12 +355,7 @@ mod tests {
     #[test]
     fn join_order_failed_when_plan_order_differs() {
         // Plan: ((a JOIN b) JOIN c) — outer-deep order [a, b, c]
-        let plan = eq_join(
-            eq_join(scan("a"), scan("b"), "a", "b"),
-            scan("c"),
-            "a",
-            "c",
-        );
+        let plan = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
         let advice = parse_advice("JOIN_ORDER(c b a)").unwrap();
         let fb = validate_advice(&advice, &plan);
         // All three identifiers exist in plan: full match.
@@ -368,12 +366,7 @@ mod tests {
 
     #[test]
     fn join_order_matched_when_plan_order_agrees() {
-        let plan = eq_join(
-            eq_join(scan("a"), scan("b"), "a", "b"),
-            scan("c"),
-            "a",
-            "c",
-        );
+        let plan = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
         let advice = parse_advice("JOIN_ORDER(a b c)").unwrap();
         let fb = validate_advice(&advice, &plan);
         assert!(fb[0].flags.contains(FeedbackFlags::MATCH_FULL));

@@ -328,9 +328,9 @@ fn read_diskstats() -> HashMap<String, RawDiskStats> {
 
             // Skip partitions (devices ending in numbers for non-nvme, or nvme0n1p1 style)
             let is_partition = if device.starts_with("nvme") {
-                device.contains('p') && device.chars().last().map_or(false, |c| c.is_ascii_digit())
+                device.contains('p') && device.chars().last().is_some_and(|c| c.is_ascii_digit())
             } else {
-                device.chars().last().map_or(false, |c| c.is_ascii_digit())
+                device.chars().last().is_some_and(|c| c.is_ascii_digit())
             };
 
             if is_partition {

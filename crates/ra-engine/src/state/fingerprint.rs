@@ -11,8 +11,8 @@
 //! - Update: ~50ns (Arc swap)
 //! - Size: 56 bytes (fits in one cache line)
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::Arc;
 
 /// Capability bit flags for loaded `PostgreSQL` extensions and features.
 ///
@@ -170,12 +170,10 @@ impl SystemFingerprint {
     #[must_use]
     pub fn compute_blend_alpha(&self) -> f32 {
         // Base confidence from training data volume (sigmoid saturation)
-        let data_conf =
-            1.0 - (-(self.model_samples_trained as f32 / 2000.0)).exp();
+        let data_conf = 1.0 - (-(self.model_samples_trained as f32 / 2000.0)).exp();
 
         // Reduce confidence when system state is unusual
-        let state_stability =
-            1.0 - self.io_saturation.max(self.memory_pressure);
+        let state_stability = 1.0 - self.io_saturation.max(self.memory_pressure);
 
         // Reduce confidence when statistics are stale
         let stats_quality = 1.0 - self.avg_staleness;
@@ -194,8 +192,7 @@ impl SystemFingerprint {
     pub fn compressed_context(&self) -> [f32; 4] {
         [
             // Resource pressure: combined CPU/IO/memory
-            (self.cpu_load_fraction + self.io_saturation + self.memory_pressure)
-                / 3.0,
+            (self.cpu_load_fraction + self.io_saturation + self.memory_pressure) / 3.0,
             // Statistics quality
             self.stats_coverage * (1.0 - self.avg_staleness),
             // Workload type (0 = OLAP, 1 = OLTP)
@@ -356,8 +353,8 @@ mod tests {
         let fp = SystemFingerprint::default();
         assert!(fp.cpu_load_fraction >= 0.0);
         assert!(fp.shared_buffers_hit_rate > 0.0);
-        assert!(fp.stats_coverage == 1.0);
-        assert!(fp.model_recent_mape == 1.0); // untrained
+        assert_eq!(fp.stats_coverage, 1.0);
+        assert_eq!(fp.model_recent_mape, 1.0); // untrained
     }
 
     #[test]
@@ -381,7 +378,10 @@ mod tests {
         fp.model_samples_trained = 5000;
         fp.model_recent_mape = 0.1;
         let alpha = fp.compute_blend_alpha();
-        assert!(alpha > 0.5, "alpha={alpha} should be > 0.5 with 5000 samples");
+        assert!(
+            alpha > 0.5,
+            "alpha={alpha} should be > 0.5 with 5000 samples"
+        );
         assert!(alpha <= 0.9, "alpha={alpha} must never exceed 0.9");
     }
 

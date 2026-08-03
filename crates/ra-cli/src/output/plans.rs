@@ -577,8 +577,7 @@ fn print_plan_with_changes_inline(
     while bi < before_lines.len() || ai < after_lines.len() {
         let in_lcs_before =
             li < lcs.len() && bi < before_lines.len() && before_lines[bi] == lcs[li];
-        let in_lcs_after =
-            li < lcs.len() && ai < after_lines.len() && after_lines[ai] == lcs[li];
+        let in_lcs_after = li < lcs.len() && ai < after_lines.len() && after_lines[ai] == lcs[li];
 
         if in_lcs_before && in_lcs_after {
             // Unchanged context line.

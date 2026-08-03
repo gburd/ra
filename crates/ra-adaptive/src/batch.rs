@@ -565,7 +565,11 @@ impl BatchExecutor {
                         // Blend: 70% old + 30% corrected
                         let corrected = table_rows * correction;
                         let blended = table_rows * 0.7 + corrected * 0.3;
-                        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "legacy allow")]
+                        #[expect(
+                            clippy::cast_possible_truncation,
+                            clippy::cast_sign_loss,
+                            reason = "legacy allow"
+                        )]
                         let new_rows = blended.max(1.0) as u64;
                         updated.table.row_count = new_rows;
                         // Record the modification for staleness

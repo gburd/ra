@@ -232,19 +232,13 @@ impl FastPathDecision {
     /// Whether the selected fast path is a simple aggregation.
     #[must_use]
     pub fn is_simple_aggregation(&self) -> bool {
-        matches!(
-            self.kind,
-            Some(FastPathKind::SimpleAggregation { .. })
-        )
+        matches!(self.kind, Some(FastPathKind::SimpleAggregation { .. }))
     }
 
     /// Whether the selected fast path is a materialized view match.
     #[must_use]
     pub fn is_mv_match(&self) -> bool {
-        matches!(
-            self.kind,
-            Some(FastPathKind::MaterializedView { .. })
-        )
+        matches!(self.kind, Some(FastPathKind::MaterializedView { .. }))
     }
 }
 
@@ -338,9 +332,7 @@ impl FastPathSelector {
         FastPathDecision::none()
     }
 
-    fn check_simple_aggregation(
-        expr: &RelExpr,
-    ) -> Option<FastPathDecision> {
+    fn check_simple_aggregation(expr: &RelExpr) -> Option<FastPathDecision> {
         let (group_by, aggregates, input) = match expr {
             RelExpr::Aggregate {
                 group_by,
@@ -415,23 +407,12 @@ impl FastPathSelector {
         None
     }
 
-    fn check_index_only(
-        expr: &RelExpr,
-    ) -> Option<FastPathDecision> {
+    fn check_index_only(expr: &RelExpr) -> Option<FastPathDecision> {
         match expr {
-            RelExpr::Project {
-                input, columns, ..
-            } => match input.as_ref() {
-                RelExpr::Filter {
-                    input: inner, ..
-                } => {
-                    if let RelExpr::Scan { table, .. } =
-                        inner.as_ref()
-                    {
-                        if columns
-                            .iter()
-                            .all(|c| matches!(c.expr, Expr::Column(_)))
-                        {
+            RelExpr::Project { input, columns, .. } => match input.as_ref() {
+                RelExpr::Filter { input: inner, .. } => {
+                    if let RelExpr::Scan { table, .. } = inner.as_ref() {
+                        if columns.iter().all(|c| matches!(c.expr, Expr::Column(_))) {
                             return Some(FastPathDecision::found(
                                 FastPathKind::IndexOnly {
                                     table: table.clone(),
@@ -448,10 +429,7 @@ impl FastPathSelector {
         }
     }
 
-    fn check_left_deep(
-        &self,
-        expr: &RelExpr,
-    ) -> Option<FastPathDecision> {
+    fn check_left_deep(&self, expr: &RelExpr) -> Option<FastPathDecision> {
         let table_count = count_tables(expr);
         let max = self.preferences.left_deep_max_tables;
 
@@ -477,10 +455,7 @@ impl FastPathSelector {
         ))
     }
 
-    fn check_mv_match(
-        &self,
-        expr: &RelExpr,
-    ) -> Option<FastPathDecision> {
+    fn check_mv_match(&self, expr: &RelExpr) -> Option<FastPathDecision> {
         let catalog = self.mv_catalog.as_ref()?;
         let mv_match = catalog.best_match(expr)?;
 
@@ -516,9 +491,7 @@ fn is_single_column_expr(expr: &Expr) -> bool {
 fn count_tables(expr: &RelExpr) -> usize {
     match expr {
         RelExpr::Scan { .. } => 1,
-        RelExpr::Join { left, right, .. } => {
-            count_tables(left) + count_tables(right)
-        }
+        RelExpr::Join { left, right, .. } => count_tables(left) + count_tables(right),
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
@@ -534,8 +507,7 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
     match expr {
         RelExpr::Scan { .. } => true,
         RelExpr::Join { left, right, .. } => {
-            is_left_deep_eligible(left)
-                && is_left_deep_eligible(right)
+            is_left_deep_eligible(left) && is_left_deep_eligible(right)
         }
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
@@ -543,9 +515,7 @@ fn is_left_deep_eligible(expr: &RelExpr) -> bool {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::Distinct { input } => {
-            is_left_deep_eligible(input)
-        }
+        | RelExpr::Distinct { input } => is_left_deep_eligible(input),
         _ => false,
     }
 }
@@ -566,12 +536,13 @@ pub fn can_use_fast_path(expr: &RelExpr) -> bool {
 // ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[expect(clippy::panic, reason = "test assertions use panic! for negative checks")]
+#[expect(
+    clippy::panic,
+    reason = "test assertions use panic! for negative checks"
+)]
 mod tests {
     use super::*;
-    use ra_core::algebra::{
-        AggregateExpr, AggregateFunction, JoinType, ProjectionColumn,
-    };
+    use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, ProjectionColumn};
     use ra_core::expr::{BinOp, ColumnRef, Const};
 
     fn scan(name: &str) -> RelExpr {
@@ -616,10 +587,7 @@ mod tests {
         }
     }
 
-    fn count_grouped_query(
-        table: &str,
-        group_col: &str,
-    ) -> RelExpr {
+    fn count_grouped_query(table: &str, group_col: &str) -> RelExpr {
         RelExpr::Aggregate {
             group_by: vec![Expr::Column(ColumnRef::new(group_col))],
             aggregates: vec![AggregateExpr {
@@ -647,9 +615,7 @@ mod tests {
             input: Box::new(RelExpr::Filter {
                 predicate: Expr::BinOp {
                     op: BinOp::Eq,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("id"),
-                    )),
+                    left: Box::new(Expr::Column(ColumnRef::new("id"))),
                     right: Box::new(Expr::Const(Const::Int(42))),
                 },
                 input: Box::new(scan(table)),
@@ -720,9 +686,7 @@ mod tests {
             input: Box::new(RelExpr::Filter {
                 predicate: Expr::BinOp {
                     op: BinOp::Gt,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("age"),
-                    )),
+                    left: Box::new(Expr::Column(ColumnRef::new("age"))),
                     right: Box::new(Expr::Const(Const::Int(18))),
                 },
                 input: Box::new(scan("users")),
@@ -734,9 +698,7 @@ mod tests {
             function: SimpleAggFunction::CountStar,
         }) = &d.kind
         {
-            panic!(
-                "should not detect filtered COUNT(*) as CountStar"
-            );
+            panic!("should not detect filtered COUNT(*) as CountStar");
         }
     }
 
@@ -755,8 +717,7 @@ mod tests {
     #[test]
     fn count_grouped_detected() {
         let selector = FastPathSelector::with_defaults();
-        let d = selector
-            .evaluate(&count_grouped_query("orders", "status"));
+        let d = selector.evaluate(&count_grouped_query("orders", "status"));
         assert!(d.has_fast_path());
         assert!(d.is_simple_aggregation());
     }
@@ -783,9 +744,7 @@ mod tests {
             columns: vec![ProjectionColumn {
                 expr: Expr::BinOp {
                     op: BinOp::Add,
-                    left: Box::new(Expr::Column(
-                        ColumnRef::new("a"),
-                    )),
+                    left: Box::new(Expr::Column(ColumnRef::new("a"))),
                     right: Box::new(Expr::Const(Const::Int(1))),
                 },
                 alias: Some("a_plus_1".to_string()),
@@ -863,8 +822,7 @@ mod tests {
 
     #[test]
     fn left_deep_single_table_rejected() {
-        let d = FastPathSelector::with_defaults()
-            .evaluate(&scan("a"));
+        let d = FastPathSelector::with_defaults().evaluate(&scan("a"));
         assert!(!d.is_left_deep());
     }
 
@@ -874,8 +832,7 @@ mod tests {
         for name in ["c", "d", "e"] {
             expr = join(expr, scan(name));
         }
-        let selector =
-            FastPathSelector::new(FastPathPreferences::olap());
+        let selector = FastPathSelector::new(FastPathPreferences::olap());
         let d = selector.evaluate(&expr);
         assert!(!d.is_left_deep());
     }
@@ -906,8 +863,7 @@ mod tests {
             is_incremental: false,
         });
 
-        let selector = FastPathSelector::with_defaults()
-            .with_mv_catalog(catalog);
+        let selector = FastPathSelector::with_defaults().with_mv_catalog(catalog);
         let d = selector.evaluate(&query);
         assert!(d.has_fast_path());
         assert!(d.is_mv_match());
@@ -921,8 +877,7 @@ mod tests {
 
     #[test]
     fn no_mv_match_without_catalog() {
-        let d = FastPathSelector::with_defaults()
-            .evaluate(&sum_query("t", "c"));
+        let d = FastPathSelector::with_defaults().evaluate(&sum_query("t", "c"));
         assert!(!d.is_mv_match());
     }
 
@@ -930,24 +885,13 @@ mod tests {
 
     #[test]
     fn disabled_preferences_reject_everything() {
-        let selector =
-            FastPathSelector::new(FastPathPreferences::disabled());
+        let selector = FastPathSelector::new(FastPathPreferences::disabled());
 
-        assert!(
-            !selector
-                .evaluate(&count_star_query("t"))
-                .has_fast_path()
-        );
-        assert!(
-            !selector
-                .evaluate(&project_filter_scan("t"))
-                .has_fast_path()
-        );
-        assert!(
-            !selector
-                .evaluate(&join(scan("a"), scan("b")))
-                .has_fast_path()
-        );
+        assert!(!selector.evaluate(&count_star_query("t")).has_fast_path());
+        assert!(!selector.evaluate(&project_filter_scan("t")).has_fast_path());
+        assert!(!selector
+            .evaluate(&join(scan("a"), scan("b")))
+            .has_fast_path());
     }
 
     // ---- FastPathDecision ----
@@ -961,10 +905,7 @@ mod tests {
 
     #[test]
     fn found_decision() {
-        let d = FastPathDecision::found(
-            FastPathKind::LeftDeep { table_count: 3 },
-            0.9,
-        );
+        let d = FastPathDecision::found(FastPathKind::LeftDeep { table_count: 3 }, 0.9);
         assert!(d.has_fast_path());
         assert!(d.is_left_deep());
     }
@@ -990,8 +931,7 @@ mod tests {
 
     #[test]
     fn aggregation_detected_before_left_deep() {
-        let d = FastPathSelector::with_defaults()
-            .evaluate(&count_star_query("orders"));
+        let d = FastPathSelector::with_defaults().evaluate(&count_star_query("orders"));
         assert!(d.is_simple_aggregation());
     }
 
@@ -999,12 +939,10 @@ mod tests {
 
     #[test]
     fn high_min_confidence_rejects_lower() {
-        let selector = FastPathSelector::new(
-            FastPathPreferences {
-                min_confidence: 0.99,
-                ..FastPathPreferences::default()
-            },
-        );
+        let selector = FastPathSelector::new(FastPathPreferences {
+            min_confidence: 0.99,
+            ..FastPathPreferences::default()
+        });
         let d = selector.evaluate(&sum_query("t", "c"));
         assert!(!d.has_fast_path());
     }

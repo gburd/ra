@@ -438,7 +438,10 @@ fn evaluate_feature_flag(flag: &str, _facts: &dyn FactsProvider) -> bool {
     let env_var = format!("RA_FEATURE_{}", flag.to_uppercase());
     if let Ok(value) = std::env::var(&env_var) {
         let enabled = value.to_lowercase() == "true";
-        debug!("Feature flag check: {} = {} (from {})", flag, enabled, env_var);
+        debug!(
+            "Feature flag check: {} = {} (from {})",
+            flag, enabled, env_var
+        );
         enabled
     } else {
         // Default: all features enabled unless explicitly disabled

@@ -54,7 +54,10 @@ impl TableFunctionExecutor {
     ///
     /// Produces integer rows from `start` to `stop` inclusive,
     /// incrementing by `step` (default 1).
-    #[expect(clippy::similar_names, reason = "stop and step are standard generate_series parameters")]
+    #[expect(
+        clippy::similar_names,
+        reason = "stop and step are standard generate_series parameters"
+    )]
     fn execute_generate_series(&self) -> Result<Vec<Row>, ExecutionError> {
         const MAX_ROWS: usize = 1_000_000;
 

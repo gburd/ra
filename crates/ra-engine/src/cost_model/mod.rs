@@ -15,16 +15,16 @@
 //! The model is trained via execution feedback: observed query costs are
 //! fed back to a `BitNetTrainer` which updates latent weights using STE.
 
-mod tokenizer;
-pub mod feedback;
 pub mod feature_extractor;
+pub mod feedback;
+mod tokenizer;
 
-pub use tokenizer::{Tokenizer, TimeBudget};
 pub use feature_extractor::{
     extract_features, extract_features_with_stats, FeatureExtractor, StructuralCounts,
 };
 pub use feedback::{ExecutionFeedback, FeedbackCollector, MapeTracker, OptimizationTrace};
 pub use ra_bitnet::{BitNetCostModel, BitNetTrainer, TrainerConfig};
+pub use tokenizer::{TimeBudget, Tokenizer};
 
 /// Query structural features for neural cost prediction.
 ///
@@ -47,7 +47,7 @@ pub struct QueryFeatures {
 
 impl QueryFeatures {
     /// Convert to fixed-size array for model input.
-    #[must_use] 
+    #[must_use]
     /// Convert to a 12-element `Vec<f32>` for callers that only need
     /// the structural counts (e.g. the `NeuralRuleSelector`, which
     /// concatenates query features with system-fingerprint dimensions).

@@ -105,14 +105,14 @@ impl NodeCostWeights {
     fn from_model(model: &BitNetCostModel) -> Self {
         Self {
             weights: [
-                1.5,   // operator type (most important signal)
-                0.3,   // child cost sum
-                0.2,   // estimated rows (log scale)
-                -0.1,  // selectivity
-                0.05,  // resource pressure
-                -0.1,  // stats quality (better stats = lower uncertainty)
-                0.0,   // workload type
-                0.0,   // model confidence
+                1.5,  // operator type (most important signal)
+                0.3,  // child cost sum
+                0.2,  // estimated rows (log scale)
+                -0.1, // selectivity
+                0.05, // resource pressure
+                -0.1, // stats quality (better stats = lower uncertainty)
+                0.0,  // workload type
+                0.0,  // model confidence
             ],
             bias: if model.samples_trained > 0 { 0.1 } else { 0.0 },
         }
@@ -267,9 +267,9 @@ fn classify_operator(enode: &RelLang) -> OperatorType {
         RelLang::Sort(_) | RelLang::IncrementalSort(_) => OperatorType::Sort,
         RelLang::Limit(_) => OperatorType::Limit,
         RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => OperatorType::SetOp,
-        RelLang::IndexOnlyScan(_)
-        | RelLang::BitmapIndexScan(_)
-        | RelLang::BitmapHeapScan(_) => OperatorType::Index,
+        RelLang::IndexOnlyScan(_) | RelLang::BitmapIndexScan(_) | RelLang::BitmapHeapScan(_) => {
+            OperatorType::Index
+        }
         _ => OperatorType::Other,
     }
 }
@@ -280,10 +280,10 @@ fn classify_operator(enode: &RelLang) -> OperatorType {
 fn estimate_rows_for_op(enode: &RelLang) -> f32 {
     let log_rows = match enode {
         RelLang::Scan(_) | RelLang::ScanAlias(_) => 4.0, // ~10K rows typical
-        RelLang::Join(_) => 4.5,                           // ~30K join result
-        RelLang::Aggregate(_) => 2.0,                      // ~100 groups
-        RelLang::Limit(_) => 1.5,                          // ~30 rows
-        _ => 3.0,                                          // default ~1K (including Filter)
+        RelLang::Join(_) => 4.5,                         // ~30K join result
+        RelLang::Aggregate(_) => 2.0,                    // ~100 groups
+        RelLang::Limit(_) => 1.5,                        // ~30 rows
+        _ => 3.0,                                        // default ~1K (including Filter)
     };
     log_rows / 7.0 // Normalize: log10(10M) ≈ 7
 }
@@ -292,10 +292,10 @@ fn estimate_rows_for_op(enode: &RelLang) -> f32 {
 #[inline]
 fn selectivity_for_op(enode: &RelLang) -> f32 {
     match enode {
-        RelLang::Filter(_) => 0.3,    // Typical filter passes 30%
-        RelLang::Join(_) => 0.1,      // Join selectivity typically low
-        RelLang::Limit(_) => 0.01,    // Limit is very selective
-        _ => 1.0,                      // Non-filter: passes everything
+        RelLang::Filter(_) => 0.3, // Typical filter passes 30%
+        RelLang::Join(_) => 0.1,   // Join selectivity typically low
+        RelLang::Limit(_) => 0.01, // Limit is very selective
+        _ => 1.0,                  // Non-filter: passes everything
     }
 }
 

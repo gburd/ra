@@ -90,9 +90,7 @@ impl JoinGraphShape {
         let has_unique_spanning = component_count == 1
             && vertex_count > 0
             && edge_count == vertex_count.saturating_sub(1);
-        let all_orderings_forced = has_lateral
-            || vertex_count <= 2
-            || has_unique_spanning;
+        let all_orderings_forced = has_lateral || vertex_count <= 2 || has_unique_spanning;
         Self {
             vertex_count,
             edge_count,
@@ -146,9 +144,7 @@ fn count_components(graph: &JoinGraph) -> usize {
                 continue;
             }
             for other in &tables {
-                if !visited.contains(other.as_str())
-                    && graph.can_join(&t, other)
-                {
+                if !visited.contains(other.as_str()) && graph.can_join(&t, other) {
                     stack.push((*other).clone());
                 }
             }
@@ -192,8 +188,9 @@ fn max_clique_size(graph: &JoinGraph) -> usize {
 /// which matches `ra-parser`'s `sql_to_relexpr` lowering.
 fn contains_lateral(expr: &RelExpr) -> bool {
     match expr {
-        RelExpr::Unnest { input: Some(_), .. }
-        | RelExpr::TableFunction { input: Some(_), .. } => true,
+        RelExpr::Unnest { input: Some(_), .. } | RelExpr::TableFunction { input: Some(_), .. } => {
+            true
+        }
         // Anything with children: recurse via the `children`
         // helper. RelExpr has many variants (BitmapAnd, IndexScan,
         // RowPattern, parallel variants, DML, ...); we fall back
@@ -281,11 +278,7 @@ mod tests {
             scan("c"),
             eq(col("a", "id"), col("c", "id")),
         );
-        let triangle = join(
-            chain,
-            scan("c"),
-            eq(col("b", "id"), col("c", "id")),
-        );
+        let triangle = join(chain, scan("c"), eq(col("b", "id"), col("c", "id")));
         let shape = JoinGraphShape::from_expr(&triangle);
         assert_eq!(shape.vertex_count, 3, "shape: {shape:?}");
         // 3-clique → enumeration is meaningful.
@@ -306,11 +299,7 @@ mod tests {
             scan("c"),
             eq(col("a", "id"), col("c", "id")),
         );
-        let triangle = join(
-            chain,
-            scan("c"),
-            eq(col("b", "id"), col("c", "id")),
-        );
+        let triangle = join(chain, scan("c"), eq(col("b", "id"), col("c", "id")));
         let shape = JoinGraphShape::from_expr(&triangle);
         assert!(!shape.all_orderings_forced);
         let advice: &[&str] = shape.redundant_rule_groups();

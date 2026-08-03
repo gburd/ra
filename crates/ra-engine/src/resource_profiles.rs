@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use crate::resource_budget::{
-    ConvergenceBehavior, FastPathPreferences, OverflowStrategy,
-    ResourceBudget, RuleSelectionBehavior,
+    ConvergenceBehavior, FastPathPreferences, OverflowStrategy, ResourceBudget,
+    RuleSelectionBehavior,
 };
 
 impl ResourceBudget {
@@ -90,7 +90,6 @@ impl ResourceBudget {
         }
     }
 
-
     /// Select an appropriate profile based on a named workload.
     ///
     /// Returns `None` if the name is unrecognized. This is useful
@@ -100,14 +99,10 @@ impl ResourceBudget {
     pub fn from_profile_name(name: &str) -> Option<Self> {
         match name {
             "interactive" => Some(Self::interactive()),
-            "interactive_plus" | "interactive-plus" => {
-                Some(Self::interactive_plus())
-            }
+            "interactive_plus" | "interactive-plus" => Some(Self::interactive_plus()),
             "standard" => Some(Self::standard()),
             "batch" => Some(Self::batch()),
-            "memory_constrained" | "memory-constrained" => {
-                Some(Self::memory_constrained())
-            }
+            "memory_constrained" | "memory-constrained" => Some(Self::memory_constrained()),
             "oltp" => Some(Self::oltp()),
             "olap" => Some(Self::olap()),
             "research" => Some(Self::research()),

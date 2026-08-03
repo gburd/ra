@@ -120,12 +120,7 @@ const TABLES: &[(&str, &[&str])] = &[
     ),
     (
         "partsupp",
-        &[
-            "ps_partkey",
-            "ps_suppkey",
-            "ps_availqty",
-            "ps_supplycost",
-        ],
+        &["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost"],
     ),
     ("nation", &["n_nationkey", "n_name", "n_regionkey"]),
     ("region", &["r_regionkey", "r_name"]),
@@ -200,9 +195,7 @@ fn gen_two_table_join(rng: &mut Rng) -> String {
     let lcol = rng.choose(left_table.1);
     let rcol = rng.choose(right_table.1);
 
-    format!(
-        "SELECT {lt}.{lcol}, {rt}.{rcol} FROM {lt} JOIN {rt} ON {lt}.{lc} = {rt}.{rc}"
-    )
+    format!("SELECT {lt}.{lcol}, {rt}.{rcol} FROM {lt} JOIN {rt} ON {lt}.{lc} = {rt}.{rc}")
 }
 
 fn gen_three_table_join(rng: &mut Rng) -> String {
@@ -213,11 +206,7 @@ fn gen_three_table_join(rng: &mut Rng) -> String {
         .iter()
         .enumerate()
         .filter(|(i, j2)| {
-            *i != j1_idx
-                && (j2.0 == j1.0
-                    || j2.0 == j1.2
-                    || j2.2 == j1.0
-                    || j2.2 == j1.2)
+            *i != j1_idx && (j2.0 == j1.0 || j2.0 == j1.2 || j2.2 == j1.0 || j2.2 == j1.2)
         })
         .collect();
 
@@ -235,12 +224,23 @@ fn gen_three_table_join(rng: &mut Rng) -> String {
         "SELECT {}.{}, {}.{}, {}.{} FROM {} \
          JOIN {} ON {}.{} = {}.{} \
          JOIN {} ON {}.{} = {}.{}",
-        j1.0, t1_cols[0],
-        j1.2, t2_cols[0],
-        j2.2, t3_cols[0],
         j1.0,
-        j1.2, j1.0, j1.1, j1.2, j1.3,
-        j2.2, j2.0, j2.1, j2.2, j2.3,
+        t1_cols[0],
+        j1.2,
+        t2_cols[0],
+        j2.2,
+        t3_cols[0],
+        j1.0,
+        j1.2,
+        j1.0,
+        j1.1,
+        j1.2,
+        j1.3,
+        j2.2,
+        j2.0,
+        j2.1,
+        j2.2,
+        j2.3,
     )
 }
 
@@ -251,13 +251,9 @@ fn gen_aggregate(rng: &mut Rng) -> String {
     let agg_func = rng.choose(AGG_FUNCS);
 
     if *agg_func == "COUNT" {
-        format!(
-            "SELECT {group_col}, COUNT(*) FROM {table} GROUP BY {group_col}"
-        )
+        format!("SELECT {group_col}, COUNT(*) FROM {table} GROUP BY {group_col}")
     } else {
-        format!(
-            "SELECT {group_col}, {agg_func}({agg_col}) FROM {table} GROUP BY {group_col}"
-        )
+        format!("SELECT {group_col}, {agg_func}({agg_col}) FROM {table} GROUP BY {group_col}")
     }
 }
 
@@ -271,9 +267,7 @@ fn gen_ordered_limit(rng: &mut Rng) -> String {
     };
     let limit = 1 + rng.next_usize(100);
 
-    format!(
-        "SELECT * FROM {table} ORDER BY {order_col} {dir} LIMIT {limit}"
-    )
+    format!("SELECT * FROM {table} ORDER BY {order_col} {dir} LIMIT {limit}")
 }
 
 fn gen_subquery(rng: &mut Rng) -> String {
@@ -286,9 +280,7 @@ fn gen_subquery(rng: &mut Rng) -> String {
              (SELECT 1 FROM {rt} WHERE {lt}.{lc} = {rt}.{rc})"
         )
     } else {
-        format!(
-            "SELECT * FROM {lt} WHERE {lc} IN (SELECT {rc} FROM {rt})"
-        )
+        format!("SELECT * FROM {lt} WHERE {lc} IN (SELECT {rc} FROM {rt})")
     }
 }
 
@@ -482,11 +474,7 @@ fn main() {
     println!("  Train steps:     {}", stats.total_train_steps);
     println!("  Avg loss:        {:.6}", stats.avg_loss);
     println!("  Samples trained: {}", stats.model_samples_trained);
-    println!(
-        "  Queries:         {QUERY_COUNT} generated, {parse_ok} parsed, {opt_ok} optimized"
-    );
-    println!(
-        "  Bootstrap:       {bootstrap_count} samples"
-    );
+    println!("  Queries:         {QUERY_COUNT} generated, {parse_ok} parsed, {opt_ok} optimized");
+    println!("  Bootstrap:       {bootstrap_count} samples");
     println!("=========================");
 }
