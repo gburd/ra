@@ -3,5 +3,12 @@
 
 # TPC-H self-join SQL in the fuzzer corpus — "s2.s_nationkey" trips the
 # high-entropy generic-api-key heuristic. It is a SQL column reference, not
-# a secret.
+# a secret. (Two line numbers: pre- and post-rustfmt positions.)
 crates/ra-grammar-fuzzer/src/corpus.rs:generic-api-key:402
+crates/ra-grammar-fuzzer/src/corpus.rs:generic-api-key:262
+
+# Hash-index rule docs — the hash/index example strings trip the generic
+# high-entropy heuristic. SQL/rule content, not secrets.
+docs/public/rules/physical/index-selection/hash-index-for-equality.rra:generic-api-key:83
+docs/rules/physical/hash-index-for-equality.md:generic-api-key:84
+rules/physical/index-selection/hash-index-for-equality.rra:generic-api-key:70
