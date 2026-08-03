@@ -1,0 +1,321 @@
+# TPC-H Q1 lineitem statistics evolution
+#
+# Demonstrates how statistics for the lineitem table evolve during a
+# realistic workload: initial load, batch inserts, stale statistics
+# causing estimation errors, ANALYZE refresh, and improved estimates.
+
+[metadata]
+name = "tpch-q1-evolution"
+description = "TPC-H Q1 lineitem statistics evolution over batch inserts and ANALYZE"
+database = "postgresql"
+schema = "TPC-H"
+scale_factor = 1.0
+duration_seconds = 7200
+
+# -- Snapshot 0: Initial load (SF=1) --
+[[snapshots]]
+time_offset = 0
+label = "initial load"
+
+[[snapshots.tables]]
+name = "lineitem"
+row_count = 6001215
+page_count = 80016
+avg_row_size = 127.0
+table_size_bytes = 762_154_305
+
+[[snapshots.tables.columns]]
+name = "l_orderkey"
+ndv = 1500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+
+[[snapshots.tables.columns]]
+name = "l_quantity"
+ndv = 50
+null_fraction = 0.0
+avg_width = 8.0
+min_value = "1"
+max_value = "50"
+
+[[snapshots.tables.columns]]
+name = "l_shipdate"
+ndv = 2526
+null_fraction = 0.0
+avg_width = 4.0
+min_value = "1992-01-02"
+max_value = "1998-12-01"
+
+[[snapshots.tables.columns]]
+name = "l_returnflag"
+ndv = 3
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "l_linestatus"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 1: After 500K batch insert, stats stale --
+[[snapshots]]
+time_offset = 1800
+label = "after batch insert - stale stats"
+
+[[snapshots.tables]]
+name = "lineitem"
+row_count = 6501215
+page_count = 86680
+avg_row_size = 127.0
+table_size_bytes = 825_654_305
+
+[[snapshots.tables.columns]]
+name = "l_orderkey"
+ndv = 1625000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.82
+
+[[snapshots.tables.columns]]
+name = "l_quantity"
+ndv = 50
+null_fraction = 0.0
+avg_width = 8.0
+min_value = "1"
+max_value = "50"
+
+[[snapshots.tables.columns]]
+name = "l_shipdate"
+ndv = 2526
+null_fraction = 0.0
+avg_width = 4.0
+min_value = "1992-01-02"
+max_value = "1998-12-01"
+
+[[snapshots.tables.columns]]
+name = "l_returnflag"
+ndv = 3
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "l_linestatus"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 2: After ANALYZE, fresh stats --
+[[snapshots]]
+time_offset = 3600
+label = "post-ANALYZE refresh"
+
+[[snapshots.tables]]
+name = "lineitem"
+row_count = 6501215
+page_count = 86680
+avg_row_size = 127.0
+table_size_bytes = 825_654_305
+
+[[snapshots.tables.columns]]
+name = "l_orderkey"
+ndv = 1625304
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.82
+
+[[snapshots.tables.columns]]
+name = "l_quantity"
+ndv = 50
+null_fraction = 0.0
+avg_width = 8.0
+min_value = "1"
+max_value = "50"
+
+[[snapshots.tables.columns]]
+name = "l_shipdate"
+ndv = 2556
+null_fraction = 0.0
+avg_width = 4.0
+min_value = "1992-01-02"
+max_value = "1999-03-15"
+
+[[snapshots.tables.columns]]
+name = "l_returnflag"
+ndv = 3
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "l_linestatus"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 3: Second batch insert --
+[[snapshots]]
+time_offset = 5400
+label = "second batch insert"
+
+[[snapshots.tables]]
+name = "lineitem"
+row_count = 7001215
+page_count = 93350
+avg_row_size = 127.0
+table_size_bytes = 889_154_305
+
+[[snapshots.tables.columns]]
+name = "l_orderkey"
+ndv = 1750000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.75
+
+[[snapshots.tables.columns]]
+name = "l_quantity"
+ndv = 50
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "l_shipdate"
+ndv = 2600
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "l_returnflag"
+ndv = 3
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "l_linestatus"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 4: Post second ANALYZE --
+[[snapshots]]
+time_offset = 7200
+label = "second ANALYZE"
+
+[[snapshots.tables]]
+name = "lineitem"
+row_count = 7001215
+page_count = 93350
+avg_row_size = 127.0
+table_size_bytes = 889_154_305
+
+[[snapshots.tables.columns]]
+name = "l_orderkey"
+ndv = 1750304
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.75
+
+[[snapshots.tables.columns]]
+name = "l_quantity"
+ndv = 50
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "l_shipdate"
+ndv = 2610
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "l_returnflag"
+ndv = 3
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "l_linestatus"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Events --
+
+[[events]]
+time_offset = 900
+kind = "insert"
+table = "lineitem"
+row_count = 500000
+description = "Batch load of new orders (SF +0.08)"
+
+[[events]]
+time_offset = 2700
+kind = "analyze"
+table = "lineitem"
+description = "Auto-ANALYZE triggered by modification count"
+
+[[events]]
+time_offset = 3600
+kind = "reoptimize"
+table = "lineitem"
+description = "Q1 plan refreshed after ANALYZE"
+
+[[events]]
+time_offset = 4500
+kind = "insert"
+table = "lineitem"
+row_count = 500000
+description = "Second batch load"
+
+[[events]]
+time_offset = 6300
+kind = "analyze"
+table = "lineitem"
+description = "Manual ANALYZE"
+
+# -- Execution feedback --
+
+[[feedback]]
+time_offset = 300
+query = "SELECT l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice) FROM lineitem WHERE l_shipdate <= date '1998-09-02' GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus"
+operator = "SeqScan on lineitem"
+estimated_rows = 5916591.0
+actual_rows = 5916591.0
+estimated_cost = 160043.0
+actual_time_ms = 1850.0
+
+[[feedback]]
+time_offset = 2100
+query = "SELECT l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice) FROM lineitem WHERE l_shipdate <= date '1998-09-02' GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus"
+operator = "SeqScan on lineitem"
+estimated_rows = 5916591.0
+actual_rows = 6408591.0
+estimated_cost = 160043.0
+actual_time_ms = 2350.0
+
+[[feedback]]
+time_offset = 3600
+query = "SELECT l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice) FROM lineitem WHERE l_shipdate <= date '1998-09-02' GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus"
+operator = "SeqScan on lineitem"
+estimated_rows = 6408000.0
+actual_rows = 6408591.0
+estimated_cost = 173336.0
+actual_time_ms = 2380.0
+
+[[feedback]]
+time_offset = 5400
+query = "SELECT l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice) FROM lineitem WHERE l_shipdate <= date '1998-09-02' GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus"
+operator = "SeqScan on lineitem"
+estimated_rows = 6408000.0
+actual_rows = 6900000.0
+estimated_cost = 173336.0
+actual_time_ms = 2650.0
+
+[[feedback]]
+time_offset = 7200
+query = "SELECT l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice) FROM lineitem WHERE l_shipdate <= date '1998-09-02' GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus"
+operator = "SeqScan on lineitem"
+estimated_rows = 6900200.0
+actual_rows = 6900000.0
+estimated_cost = 186670.0
+actual_time_ms = 2640.0

@@ -1,0 +1,472 @@
+# ANALYZE triggered by feedback loop
+#
+# Demonstrates a feedback-driven statistics refresh cycle where
+# execution feedback (bad Q-error) triggers ANALYZE, which updates
+# statistics and improves subsequent estimates. Shows the adaptive
+# optimization loop in action.
+
+[metadata]
+name = "analyze-feedback-loop"
+description = "Feedback-driven ANALYZE cycle improving estimation accuracy"
+database = "postgresql"
+schema = "warehouse"
+duration_seconds = 1800
+
+# -- Snapshot 0: Initial (somewhat stale) statistics --
+[[snapshots]]
+time_offset = 0
+label = "initial - moderately stale"
+
+[[snapshots.tables]]
+name = "inventory"
+row_count = 2000000
+page_count = 20000
+avg_row_size = 80.0
+table_size_bytes = 160_000_000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "warehouse_id"
+ndv = 50
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+min_value = "0"
+max_value = "9999"
+
+[[snapshots.tables.columns]]
+name = "last_updated"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "shipments"
+row_count = 500000
+page_count = 5000
+avg_row_size = 72.0
+table_size_bytes = 36_000_000
+
+[[snapshots.tables.columns]]
+name = "shipment_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 80000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 200
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "ship_date"
+ndv = 365
+null_fraction = 0.0
+avg_width = 4.0
+
+# -- Snapshot 1: Bad feedback detected, triggering ANALYZE --
+[[snapshots]]
+time_offset = 300
+label = "feedback detected stale stats"
+
+[[snapshots.tables]]
+name = "inventory"
+row_count = 2200000
+page_count = 22000
+avg_row_size = 80.0
+table_size_bytes = 176_000_000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 110000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "warehouse_id"
+ndv = 55
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "last_updated"
+ndv = 550000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "shipments"
+row_count = 600000
+page_count = 6000
+avg_row_size = 72.0
+table_size_bytes = 43_200_000
+
+[[snapshots.tables.columns]]
+name = "shipment_id"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 90000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 200
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "ship_date"
+ndv = 395
+null_fraction = 0.0
+avg_width = 4.0
+
+# -- Snapshot 2: After first ANALYZE (triggered by feedback) --
+[[snapshots]]
+time_offset = 600
+label = "post first feedback-triggered ANALYZE"
+
+[[snapshots.tables]]
+name = "inventory"
+row_count = 2200000
+page_count = 22000
+avg_row_size = 80.0
+table_size_bytes = 176_000_000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 109800
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "warehouse_id"
+ndv = 55
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 1050
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "last_updated"
+ndv = 548000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "shipments"
+row_count = 600000
+page_count = 6000
+avg_row_size = 72.0
+table_size_bytes = 43_200_000
+
+[[snapshots.tables.columns]]
+name = "shipment_id"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 89500
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 198
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "ship_date"
+ndv = 393
+null_fraction = 0.0
+avg_width = 4.0
+
+# -- Snapshot 3: More data, another feedback cycle --
+[[snapshots]]
+time_offset = 1200
+label = "second growth phase"
+
+[[snapshots.tables]]
+name = "inventory"
+row_count = 2400000
+page_count = 24000
+avg_row_size = 80.0
+table_size_bytes = 192_000_000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 120000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "warehouse_id"
+ndv = 55
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 1100
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "last_updated"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "shipments"
+row_count = 700000
+page_count = 7000
+avg_row_size = 72.0
+table_size_bytes = 50_400_000
+
+[[snapshots.tables.columns]]
+name = "shipment_id"
+ndv = 700000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 210
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "ship_date"
+ndv = 425
+null_fraction = 0.0
+avg_width = 4.0
+
+# -- Snapshot 4: Post second ANALYZE, stable --
+[[snapshots]]
+time_offset = 1800
+label = "stable after second feedback ANALYZE"
+
+[[snapshots.tables]]
+name = "inventory"
+row_count = 2400000
+page_count = 24000
+avg_row_size = 80.0
+table_size_bytes = 192_000_000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 119800
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "warehouse_id"
+ndv = 55
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 1098
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "last_updated"
+ndv = 598000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "shipments"
+row_count = 700000
+page_count = 7000
+avg_row_size = 72.0
+table_size_bytes = 50_400_000
+
+[[snapshots.tables.columns]]
+name = "shipment_id"
+ndv = 700000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 99800
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "quantity"
+ndv = 208
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "ship_date"
+ndv = 423
+null_fraction = 0.0
+avg_width = 4.0
+
+# -- Events --
+
+[[events]]
+time_offset = 100
+kind = "insert"
+table = "inventory"
+row_count = 200000
+description = "New inventory batch"
+
+[[events]]
+time_offset = 100
+kind = "insert"
+table = "shipments"
+row_count = 100000
+description = "Shipment records"
+
+[[events]]
+time_offset = 400
+kind = "analyze"
+table = "inventory"
+description = "ANALYZE triggered by Q-error > 2.0 feedback"
+
+[[events]]
+time_offset = 400
+kind = "analyze"
+table = "shipments"
+description = "ANALYZE triggered by Q-error > 2.0 feedback"
+
+[[events]]
+time_offset = 600
+kind = "reoptimize"
+table = "inventory"
+description = "Join plan refreshed after ANALYZE"
+
+[[events]]
+time_offset = 900
+kind = "insert"
+table = "inventory"
+row_count = 200000
+description = "Second inventory batch"
+
+[[events]]
+time_offset = 900
+kind = "insert"
+table = "shipments"
+row_count = 100000
+description = "More shipment records"
+
+[[events]]
+time_offset = 1400
+kind = "analyze"
+table = "inventory"
+description = "Second feedback-triggered ANALYZE"
+
+[[events]]
+time_offset = 1400
+kind = "analyze"
+table = "shipments"
+description = "Second feedback-triggered ANALYZE"
+
+[[events]]
+time_offset = 1800
+kind = "reoptimize"
+table = "inventory"
+description = "Final plan refresh"
+
+# -- Feedback loop: bad estimates -> ANALYZE -> improved estimates --
+
+[[feedback]]
+time_offset = 200
+query = "SELECT i.item_id, sum(s.quantity) FROM inventory i JOIN shipments s ON i.item_id = s.item_id WHERE i.warehouse_id = 12 GROUP BY i.item_id"
+operator = "HashJoin (inventory x shipments)"
+estimated_rows = 40000.0
+actual_rows = 52000.0
+estimated_cost = 30000.0
+actual_time_ms = 450.0
+
+[[feedback]]
+time_offset = 300
+query = "SELECT i.item_id, sum(s.quantity) FROM inventory i JOIN shipments s ON i.item_id = s.item_id WHERE i.warehouse_id = 12 GROUP BY i.item_id"
+operator = "HashJoin (inventory x shipments)"
+estimated_rows = 40000.0
+actual_rows = 58000.0
+estimated_cost = 30000.0
+actual_time_ms = 520.0
+
+[[feedback]]
+time_offset = 600
+query = "SELECT i.item_id, sum(s.quantity) FROM inventory i JOIN shipments s ON i.item_id = s.item_id WHERE i.warehouse_id = 12 GROUP BY i.item_id"
+operator = "HashJoin (inventory x shipments)"
+estimated_rows = 56000.0
+actual_rows = 58000.0
+estimated_cost = 35000.0
+actual_time_ms = 480.0
+
+[[feedback]]
+time_offset = 1000
+query = "SELECT i.item_id, sum(s.quantity) FROM inventory i JOIN shipments s ON i.item_id = s.item_id WHERE i.warehouse_id = 12 GROUP BY i.item_id"
+operator = "HashJoin (inventory x shipments)"
+estimated_rows = 56000.0
+actual_rows = 68000.0
+estimated_cost = 35000.0
+actual_time_ms = 580.0
+
+[[feedback]]
+time_offset = 1200
+query = "SELECT i.item_id, sum(s.quantity) FROM inventory i JOIN shipments s ON i.item_id = s.item_id WHERE i.warehouse_id = 12 GROUP BY i.item_id"
+operator = "HashJoin (inventory x shipments)"
+estimated_rows = 56000.0
+actual_rows = 72000.0
+estimated_cost = 35000.0
+actual_time_ms = 610.0
+
+[[feedback]]
+time_offset = 1800
+query = "SELECT i.item_id, sum(s.quantity) FROM inventory i JOIN shipments s ON i.item_id = s.item_id WHERE i.warehouse_id = 12 GROUP BY i.item_id"
+operator = "HashJoin (inventory x shipments)"
+estimated_rows = 71000.0
+actual_rows = 72000.0
+estimated_cost = 42000.0
+actual_time_ms = 590.0

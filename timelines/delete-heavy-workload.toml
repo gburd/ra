@@ -1,0 +1,366 @@
+# Delete-heavy workload with dead tuple accumulation
+#
+# Models a workload where frequent deletes create dead tuples that
+# affect statistics accuracy and query performance. Shows the
+# interaction between DELETE, VACUUM, ANALYZE, and optimizer behavior.
+
+[metadata]
+name = "delete-heavy-workload"
+description = "Delete-heavy workload with dead tuple accumulation and vacuum cycles"
+database = "postgresql"
+schema = "messaging"
+duration_seconds = 3600
+
+# -- Snapshot 0: Full table, no dead tuples --
+[[snapshots]]
+time_offset = 0
+label = "clean state"
+
+[[snapshots.tables]]
+name = "messages"
+row_count = 5000000
+page_count = 50000
+avg_row_size = 80.0
+table_size_bytes = 400_000_000
+
+[[snapshots.tables.columns]]
+name = "message_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "sender_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "recipient_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 4500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "is_read"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "body"
+ndv = 4900000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables]]
+name = "users"
+row_count = 100000
+page_count = 1000
+avg_row_size = 80.0
+table_size_bytes = 8_000_000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "username"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 16.0
+
+# -- Snapshot 1: After mass delete of old messages --
+[[snapshots]]
+time_offset = 600
+label = "post mass delete - dead tuples"
+
+[[snapshots.tables]]
+name = "messages"
+row_count = 3500000
+page_count = 50000
+avg_row_size = 80.0
+table_size_bytes = 400_000_000
+
+[[snapshots.tables.columns]]
+name = "message_id"
+ndv = 3500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.70
+
+[[snapshots.tables.columns]]
+name = "sender_id"
+ndv = 95000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "recipient_id"
+ndv = 95000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 3200000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.70
+
+[[snapshots.tables.columns]]
+name = "is_read"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "body"
+ndv = 3400000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables]]
+name = "users"
+row_count = 100000
+page_count = 1000
+avg_row_size = 80.0
+table_size_bytes = 8_000_000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "username"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 16.0
+
+# -- Snapshot 2: Post VACUUM, reclaimed space --
+[[snapshots]]
+time_offset = 1800
+label = "post VACUUM - space reclaimed"
+
+[[snapshots.tables]]
+name = "messages"
+row_count = 3500000
+page_count = 35000
+avg_row_size = 80.0
+table_size_bytes = 280_000_000
+
+[[snapshots.tables.columns]]
+name = "message_id"
+ndv = 3500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.85
+
+[[snapshots.tables.columns]]
+name = "sender_id"
+ndv = 95000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "recipient_id"
+ndv = 95000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 3200000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.92
+
+[[snapshots.tables.columns]]
+name = "is_read"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "body"
+ndv = 3400000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables]]
+name = "users"
+row_count = 100000
+page_count = 1000
+avg_row_size = 80.0
+table_size_bytes = 8_000_000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "username"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 16.0
+
+# -- Snapshot 3: Fresh inserts on top of reclaimed space --
+[[snapshots]]
+time_offset = 3600
+label = "new inserts post-vacuum"
+
+[[snapshots.tables]]
+name = "messages"
+row_count = 4000000
+page_count = 40000
+avg_row_size = 80.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "message_id"
+ndv = 4000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.88
+
+[[snapshots.tables.columns]]
+name = "sender_id"
+ndv = 98000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "recipient_id"
+ndv = 98000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 3700000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.90
+
+[[snapshots.tables.columns]]
+name = "is_read"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+[[snapshots.tables.columns]]
+name = "body"
+ndv = 3900000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables]]
+name = "users"
+row_count = 100000
+page_count = 1000
+avg_row_size = 80.0
+table_size_bytes = 8_000_000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "username"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 16.0
+
+# -- Events --
+
+[[events]]
+time_offset = 300
+kind = "delete"
+table = "messages"
+row_count = 1500000
+description = "Purge messages older than 90 days"
+
+[[events]]
+time_offset = 700
+kind = "analyze"
+table = "messages"
+description = "ANALYZE after mass delete"
+
+[[events]]
+time_offset = 1200
+kind = "vacuum"
+table = "messages"
+description = "VACUUM FULL reclaims dead tuple space"
+
+[[events]]
+time_offset = 1800
+kind = "analyze"
+table = "messages"
+description = "Post-VACUUM ANALYZE"
+
+[[events]]
+time_offset = 2400
+kind = "insert"
+table = "messages"
+row_count = 500000
+description = "New messages flowing in"
+
+[[events]]
+time_offset = 3300
+kind = "analyze"
+table = "messages"
+description = "Regular ANALYZE cycle"
+
+# -- Feedback showing dead tuple impact on scans --
+
+[[feedback]]
+time_offset = 100
+query = "SELECT u.username, count(*) FROM messages m JOIN users u ON m.sender_id = u.user_id WHERE m.is_read = false GROUP BY u.username ORDER BY count(*) DESC LIMIT 10"
+operator = "SeqScan on messages"
+estimated_rows = 2500000.0
+actual_rows = 2500000.0
+estimated_cost = 100000.0
+actual_time_ms = 1800.0
+
+[[feedback]]
+time_offset = 600
+query = "SELECT u.username, count(*) FROM messages m JOIN users u ON m.sender_id = u.user_id WHERE m.is_read = false GROUP BY u.username ORDER BY count(*) DESC LIMIT 10"
+operator = "SeqScan on messages"
+estimated_rows = 2500000.0
+actual_rows = 1750000.0
+estimated_cost = 100000.0
+actual_time_ms = 2200.0
+
+[[feedback]]
+time_offset = 1800
+query = "SELECT u.username, count(*) FROM messages m JOIN users u ON m.sender_id = u.user_id WHERE m.is_read = false GROUP BY u.username ORDER BY count(*) DESC LIMIT 10"
+operator = "SeqScan on messages"
+estimated_rows = 1750000.0
+actual_rows = 1750000.0
+estimated_cost = 70000.0
+actual_time_ms = 1200.0
+
+[[feedback]]
+time_offset = 3600
+query = "SELECT u.username, count(*) FROM messages m JOIN users u ON m.sender_id = u.user_id WHERE m.is_read = false GROUP BY u.username ORDER BY count(*) DESC LIMIT 10"
+operator = "SeqScan on messages"
+estimated_rows = 1750000.0
+actual_rows = 2000000.0
+estimated_cost = 70000.0
+actual_time_ms = 1400.0

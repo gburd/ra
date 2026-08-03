@@ -1,0 +1,501 @@
+# Index vs sequential scan crossover
+#
+# Demonstrates the crossover point between index scan and sequential
+# scan as table size grows. With high selectivity the optimizer
+# prefers an index scan; as more data arrives and selectivity drops,
+# it switches to sequential scan. After ANALYZE, estimates recover.
+
+[metadata]
+name = "index-vs-seqscan"
+description = "Index scan to sequential scan crossover as selectivity decreases"
+database = "postgresql"
+schema = "monitoring"
+scale_factor = 1.0
+duration_seconds = 7200
+
+# -- Snapshot 0: Small table, high selectivity --
+[[snapshots]]
+time_offset = 0
+label = "initial"
+
+[[snapshots.tables]]
+name = "http_requests"
+row_count = 500_000
+page_count = 6_000
+avg_row_size = 96.0
+table_size_bytes = 48_000_000
+
+[[snapshots.tables.columns]]
+name = "request_id"
+ndv = 500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "status_code"
+ndv = 30
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "response_time_ms"
+ndv = 5_000
+null_fraction = 0.0
+avg_width = 8.0
+min_value = "1"
+max_value = "30000"
+
+[[snapshots.tables.columns]]
+name = "endpoint"
+ndv = 200
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+# -- Snapshot 1: Moderate growth --
+[[snapshots]]
+time_offset = 900
+label = "moderate growth"
+
+[[snapshots.tables]]
+name = "http_requests"
+row_count = 1_500_000
+page_count = 18_000
+avg_row_size = 96.0
+table_size_bytes = 144_000_000
+
+[[snapshots.tables.columns]]
+name = "request_id"
+ndv = 1_500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+
+[[snapshots.tables.columns]]
+name = "status_code"
+ndv = 30
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "response_time_ms"
+ndv = 10_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "endpoint"
+ndv = 200
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 1_500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.96
+
+# -- Snapshot 2: Approaching crossover --
+[[snapshots]]
+time_offset = 1800
+label = "approaching crossover"
+
+[[snapshots.tables]]
+name = "http_requests"
+row_count = 3_000_000
+page_count = 36_000
+avg_row_size = 96.0
+table_size_bytes = 288_000_000
+
+[[snapshots.tables.columns]]
+name = "request_id"
+ndv = 3_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "status_code"
+ndv = 35
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "response_time_ms"
+ndv = 15_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "endpoint"
+ndv = 250
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 3_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.93
+
+# -- Snapshot 3: At crossover, stale stats --
+[[snapshots]]
+time_offset = 2700
+label = "crossover point - stale stats"
+
+[[snapshots.tables]]
+name = "http_requests"
+row_count = 4_000_000
+page_count = 48_000
+avg_row_size = 96.0
+table_size_bytes = 384_000_000
+
+[[snapshots.tables.columns]]
+name = "request_id"
+ndv = 4_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.92
+
+[[snapshots.tables.columns]]
+name = "status_code"
+ndv = 40
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "response_time_ms"
+ndv = 18_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "endpoint"
+ndv = 300
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 4_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.88
+
+# -- Snapshot 4: Past crossover, large table --
+[[snapshots]]
+time_offset = 3600
+label = "past crossover"
+
+[[snapshots.tables]]
+name = "http_requests"
+row_count = 5_000_000
+page_count = 60_000
+avg_row_size = 96.0
+table_size_bytes = 480_000_000
+
+[[snapshots.tables.columns]]
+name = "request_id"
+ndv = 5_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.90
+
+[[snapshots.tables.columns]]
+name = "status_code"
+ndv = 45
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "response_time_ms"
+ndv = 20_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "endpoint"
+ndv = 350
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 5_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.85
+
+# -- Snapshot 5: Post ANALYZE --
+[[snapshots]]
+time_offset = 4500
+label = "post-ANALYZE"
+
+[[snapshots.tables]]
+name = "http_requests"
+row_count = 5_500_000
+page_count = 66_000
+avg_row_size = 96.0
+table_size_bytes = 528_000_000
+
+[[snapshots.tables.columns]]
+name = "request_id"
+ndv = 5_500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.88
+
+[[snapshots.tables.columns]]
+name = "status_code"
+ndv = 45
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "response_time_ms"
+ndv = 22_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "endpoint"
+ndv = 380
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 5_500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.86
+
+# -- Snapshot 6: Continued growth --
+[[snapshots]]
+time_offset = 5400
+label = "continued growth"
+
+[[snapshots.tables]]
+name = "http_requests"
+row_count = 6_500_000
+page_count = 78_000
+avg_row_size = 96.0
+table_size_bytes = 624_000_000
+
+[[snapshots.tables.columns]]
+name = "request_id"
+ndv = 6_500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.86
+
+[[snapshots.tables.columns]]
+name = "status_code"
+ndv = 48
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "response_time_ms"
+ndv = 25_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "endpoint"
+ndv = 400
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 6_500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.83
+
+# -- Snapshot 7: Final, stable sequential scan --
+[[snapshots]]
+time_offset = 7200
+label = "stable seqscan"
+
+[[snapshots.tables]]
+name = "http_requests"
+row_count = 8_000_000
+page_count = 96_000
+avg_row_size = 96.0
+table_size_bytes = 768_000_000
+
+[[snapshots.tables.columns]]
+name = "request_id"
+ndv = 8_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.82
+
+[[snapshots.tables.columns]]
+name = "status_code"
+ndv = 50
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "response_time_ms"
+ndv = 28_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "endpoint"
+ndv = 420
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "created_at"
+ndv = 8_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.80
+
+# -- Events --
+
+[[events]]
+time_offset = 300
+kind = "insert"
+table = "http_requests"
+row_count = 500_000
+description = "Batch ingest from log pipeline"
+
+[[events]]
+time_offset = 900
+kind = "insert"
+table = "http_requests"
+row_count = 1_000_000
+description = "High traffic period ingest"
+
+[[events]]
+time_offset = 1800
+kind = "insert"
+table = "http_requests"
+row_count = 1_500_000
+description = "Peak traffic batch"
+
+[[events]]
+time_offset = 2700
+kind = "insert"
+table = "http_requests"
+row_count = 1_000_000
+description = "Continued ingest, stats now stale"
+
+[[events]]
+time_offset = 3300
+kind = "reoptimize"
+table = "http_requests"
+description = "Plan switch: index scan to seq scan for broad queries"
+
+[[events]]
+time_offset = 4200
+kind = "analyze"
+table = "http_requests"
+description = "Auto-ANALYZE triggered"
+
+[[events]]
+time_offset = 4500
+kind = "reoptimize"
+table = "http_requests"
+description = "Replan with fresh statistics"
+
+[[events]]
+time_offset = 5400
+kind = "insert"
+table = "http_requests"
+row_count = 1_000_000
+description = "Evening traffic batch"
+
+[[events]]
+time_offset = 6300
+kind = "insert"
+table = "http_requests"
+row_count = 1_500_000
+description = "Overnight batch ingest"
+
+[[events]]
+time_offset = 6600
+kind = "analyze"
+table = "http_requests"
+description = "Scheduled ANALYZE"
+
+# -- Execution feedback --
+
+[[feedback]]
+time_offset = 200
+query = "SELECT endpoint, avg(response_time_ms) FROM http_requests WHERE status_code = 500 AND created_at > now() - interval '1 hour' GROUP BY endpoint"
+operator = "IndexScan on http_requests_created_at_idx"
+estimated_rows = 250.0
+actual_rows = 250.0
+estimated_cost = 120.0
+actual_time_ms = 8.0
+
+[[feedback]]
+time_offset = 1200
+query = "SELECT endpoint, avg(response_time_ms) FROM http_requests WHERE status_code = 500 AND created_at > now() - interval '1 hour' GROUP BY endpoint"
+operator = "IndexScan on http_requests_created_at_idx"
+estimated_rows = 250.0
+actual_rows = 800.0
+estimated_cost = 120.0
+actual_time_ms = 25.0
+
+[[feedback]]
+time_offset = 2400
+query = "SELECT endpoint, avg(response_time_ms) FROM http_requests WHERE status_code >= 400 GROUP BY endpoint ORDER BY avg(response_time_ms) DESC"
+operator = "IndexScan on http_requests_status_idx"
+estimated_rows = 50_000.0
+actual_rows = 300_000.0
+estimated_cost = 5_000.0
+actual_time_ms = 1800.0
+
+[[feedback]]
+time_offset = 3600
+query = "SELECT endpoint, avg(response_time_ms) FROM http_requests WHERE status_code >= 400 GROUP BY endpoint ORDER BY avg(response_time_ms) DESC"
+operator = "SeqScan on http_requests"
+estimated_rows = 300_000.0
+actual_rows = 450_000.0
+estimated_cost = 85_000.0
+actual_time_ms = 3200.0
+
+[[feedback]]
+time_offset = 4500
+query = "SELECT endpoint, avg(response_time_ms) FROM http_requests WHERE status_code >= 400 GROUP BY endpoint ORDER BY avg(response_time_ms) DESC"
+operator = "SeqScan on http_requests"
+estimated_rows = 500_000.0
+actual_rows = 500_000.0
+estimated_cost = 95_000.0
+actual_time_ms = 3500.0
+
+[[feedback]]
+time_offset = 5400
+query = "SELECT endpoint, avg(response_time_ms) FROM http_requests WHERE status_code = 500 AND created_at > now() - interval '1 hour' GROUP BY endpoint"
+operator = "IndexScan on http_requests_created_at_idx"
+estimated_rows = 1_200.0
+actual_rows = 1_200.0
+estimated_cost = 500.0
+actual_time_ms = 35.0
+
+[[feedback]]
+time_offset = 7200
+query = "SELECT endpoint, avg(response_time_ms) FROM http_requests WHERE status_code >= 400 GROUP BY endpoint ORDER BY avg(response_time_ms) DESC"
+operator = "SeqScan on http_requests"
+estimated_rows = 720_000.0
+actual_rows = 720_000.0
+estimated_cost = 135_000.0
+actual_time_ms = 4800.0

@@ -1,0 +1,264 @@
+# Streaming inserts workload
+#
+# Models a streaming ingest scenario where rows are continuously
+# appended to an events table. Statistics grow stale rapidly and
+# the optimizer must cope with outdated cardinality estimates.
+
+[metadata]
+name = "streaming-inserts"
+description = "Continuous streaming insert workload with growing table"
+database = "duckdb"
+schema = "events"
+duration_seconds = 600
+
+# -- Snapshot 0: Start of window --
+[[snapshots]]
+time_offset = 0
+label = "window start"
+
+[[snapshots.tables]]
+name = "events"
+row_count = 1000000
+page_count = 12500
+avg_row_size = 64.0
+table_size_bytes = 64_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 1000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 25
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 50000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "timestamp"
+ndv = 1000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "payload"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 24.0
+
+# -- Snapshot 1: After 2 minutes of inserts --
+[[snapshots]]
+time_offset = 120
+label = "2 min - 200K new rows"
+
+[[snapshots.tables]]
+name = "events"
+row_count = 1200000
+page_count = 15000
+avg_row_size = 64.0
+table_size_bytes = 76_800_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 1200000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 25
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 55000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "timestamp"
+ndv = 1200000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "payload"
+ndv = 960000
+null_fraction = 0.05
+avg_width = 24.0
+
+# -- Snapshot 2: 5 minutes --
+[[snapshots]]
+time_offset = 300
+label = "5 min - 500K new rows"
+
+[[snapshots.tables]]
+name = "events"
+row_count = 1500000
+page_count = 18750
+avg_row_size = 64.0
+table_size_bytes = 96_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 1500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 25
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 62000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "timestamp"
+ndv = 1500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "payload"
+ndv = 1200000
+null_fraction = 0.05
+avg_width = 24.0
+
+# -- Snapshot 3: 10 minutes --
+[[snapshots]]
+time_offset = 600
+label = "10 min - 1M new rows"
+
+[[snapshots.tables]]
+name = "events"
+row_count = 2000000
+page_count = 25000
+avg_row_size = 64.0
+table_size_bytes = 128_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 2000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 25
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 72000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "timestamp"
+ndv = 2000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "payload"
+ndv = 1600000
+null_fraction = 0.05
+avg_width = 24.0
+
+# -- Events --
+
+[[events]]
+time_offset = 0
+kind = "insert"
+table = "events"
+row_count = 1667
+description = "Streaming insert batch (1667 rows/sec)"
+
+[[events]]
+time_offset = 120
+kind = "insert"
+table = "events"
+row_count = 200000
+description = "Accumulated inserts over 2 minutes"
+
+[[events]]
+time_offset = 180
+kind = "analyze"
+table = "events"
+description = "Sketch-based incremental statistics update"
+
+[[events]]
+time_offset = 300
+kind = "insert"
+table = "events"
+row_count = 300000
+description = "Accumulated inserts (2-5 min)"
+
+[[events]]
+time_offset = 420
+kind = "analyze"
+table = "events"
+description = "Second incremental statistics update"
+
+[[events]]
+time_offset = 600
+kind = "insert"
+table = "events"
+row_count = 500000
+description = "Accumulated inserts (5-10 min)"
+
+# -- Feedback showing increasing staleness --
+
+[[feedback]]
+time_offset = 60
+query = "SELECT event_type, count(*) FROM events WHERE timestamp > :cutoff GROUP BY event_type"
+operator = "HashAggregate"
+estimated_rows = 25.0
+actual_rows = 25.0
+
+[[feedback]]
+time_offset = 180
+query = "SELECT event_type, count(*) FROM events WHERE timestamp > :cutoff GROUP BY event_type"
+operator = "SeqScan on events"
+estimated_rows = 1000000.0
+actual_rows = 1200000.0
+
+[[feedback]]
+time_offset = 360
+query = "SELECT user_id, count(*) FROM events WHERE event_type = 'purchase' GROUP BY user_id HAVING count(*) > 5"
+operator = "SeqScan on events"
+estimated_rows = 1000000.0
+actual_rows = 1500000.0
+estimated_cost = 25000.0
+actual_time_ms = 380.0
+
+[[feedback]]
+time_offset = 600
+query = "SELECT user_id, count(*) FROM events WHERE event_type = 'purchase' GROUP BY user_id HAVING count(*) > 5"
+operator = "SeqScan on events"
+estimated_rows = 1500000.0
+actual_rows = 2000000.0
+estimated_cost = 37500.0
+actual_time_ms = 520.0

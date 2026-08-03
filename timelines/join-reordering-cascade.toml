@@ -1,0 +1,1371 @@
+# Join reordering cascade
+#
+# Demonstrates how join order changes as table sizes evolve.
+# A 5-table star-schema join reorders as the promotions
+# dimension table explodes during a flash sale and then
+# contracts after cleanup, triggering cascading replans.
+
+[metadata]
+name = "join-reordering-cascade"
+description = "Join order changes driven by promotions lifecycle in a star schema"
+database = "postgresql"
+schema = "retail_star"
+scale_factor = 1.0
+duration_seconds = 9000
+
+# -- Snapshot 0: Baseline star schema --
+[[snapshots]]
+time_offset = 0
+label = "baseline"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 10_000_000
+page_count = 120_000
+avg_row_size = 96.0
+table_size_bytes = 960_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 10_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 50
+null_fraction = 0.8
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 50
+page_count = 1
+avg_row_size = 200.0
+table_size_bytes = 10_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 50
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 20
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 1: Promotions starting to grow --
+[[snapshots]]
+time_offset = 900
+label = "promo growth begins"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 10_200_000
+page_count = 122_400
+avg_row_size = 96.0
+table_size_bytes = 979_200_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 10_200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5_000
+null_fraction = 0.5
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 10_000
+page_count = 25
+avg_row_size = 200.0
+table_size_bytes = 2_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 10_000
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 50
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 2: Flash sale ramp-up --
+[[snapshots]]
+time_offset = 1800
+label = "flash sale ramp-up"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 10_500_000
+page_count = 126_000
+avg_row_size = 96.0
+table_size_bytes = 1_008_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 10_500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 50_000
+null_fraction = 0.3
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 100_000
+page_count = 250
+avg_row_size = 200.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 100_000
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.85
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 80
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 3: Flash sale peak --
+[[snapshots]]
+time_offset = 2700
+label = "flash sale peak"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 11_000_000
+page_count = 132_000
+avg_row_size = 96.0
+table_size_bytes = 1_056_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 11_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 300_000
+null_fraction = 0.1
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 300_000
+page_count = 750
+avg_row_size = 200.0
+table_size_bytes = 60_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 300_000
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.7
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 100
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 4: Promotions at max (>500K) --
+[[snapshots]]
+time_offset = 3600
+label = "promotions at max"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 11_500_000
+page_count = 138_000
+avg_row_size = 96.0
+table_size_bytes = 1_104_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 11_500_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.93
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 500_000
+null_fraction = 0.05
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 500_000
+page_count = 1_250
+avg_row_size = 200.0
+table_size_bytes = 100_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 500_000
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.5
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 100
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 5: Sale ending, cleanup starts --
+[[snapshots]]
+time_offset = 4500
+label = "sale ending"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 11_700_000
+page_count = 140_400
+avg_row_size = 96.0
+table_size_bytes = 1_123_200_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 11_700_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.92
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 400_000
+null_fraction = 0.1
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 350_000
+page_count = 875
+avg_row_size = 200.0
+table_size_bytes = 70_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 350_000
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.6
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 100
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 6: Bulk promo cleanup --
+[[snapshots]]
+time_offset = 5400
+label = "bulk promo cleanup"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 11_800_000
+page_count = 141_600
+avg_row_size = 96.0
+table_size_bytes = 1_132_800_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 11_800_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.91
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 100_000
+null_fraction = 0.3
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 100_000
+page_count = 250
+avg_row_size = 200.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 100_000
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.75
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 80
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 7: Post cleanup, promos contracted --
+[[snapshots]]
+time_offset = 6300
+label = "post cleanup"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 11_900_000
+page_count = 142_800
+avg_row_size = 96.0
+table_size_bytes = 1_142_400_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 11_900_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.90
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5_000
+null_fraction = 0.7
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 5_000
+page_count = 13
+avg_row_size = 200.0
+table_size_bytes = 1_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5_000
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 30
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 8: Post ANALYZE refresh --
+[[snapshots]]
+time_offset = 7200
+label = "post-ANALYZE"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 12_000_000
+page_count = 144_000
+avg_row_size = 96.0
+table_size_bytes = 1_152_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 12_000_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.89
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5_000
+null_fraction = 0.7
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 5_000
+page_count = 13
+avg_row_size = 200.0
+table_size_bytes = 1_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5_000
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 30
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 9: Stable after reoptimize --
+[[snapshots]]
+time_offset = 9000
+label = "stable"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 12_200_000
+page_count = 146_400
+avg_row_size = 96.0
+table_size_bytes = 1_171_200_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 12_200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.88
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5_000
+null_fraction = 0.75
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 5_200
+page_count = 13
+avg_row_size = 200.0
+table_size_bytes = 1_040_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5_200
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 0.96
+
+[[snapshots.tables.columns]]
+name = "discount_pct"
+ndv = 30
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 50_000
+page_count = 600
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 50_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 200
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 500
+page_count = 5
+avg_row_size = 160.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 500
+null_fraction = 0.0
+avg_width = 4.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 10
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 200_000
+page_count = 2_500
+avg_row_size = 100.0
+table_size_bytes = 20_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 200_000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Events --
+
+[[events]]
+time_offset = 600
+kind = "insert"
+table = "promotions"
+row_count = 10000
+description = "Flash sale promo batch 1"
+
+[[events]]
+time_offset = 1200
+kind = "insert"
+table = "promotions"
+row_count = 90000
+description = "Flash sale promo batch 2"
+
+[[events]]
+time_offset = 1800
+kind = "insert"
+table = "fact_transactions"
+row_count = 500000
+description = "Sale transactions surge"
+
+[[events]]
+time_offset = 2400
+kind = "insert"
+table = "promotions"
+row_count = 200000
+description = "Flash sale promo batch 3"
+
+[[events]]
+time_offset = 3600
+kind = "reoptimize"
+table = "fact_transactions"
+description = "Join reorder: promotions now large enough for hash join"
+
+[[events]]
+time_offset = 4200
+kind = "delete"
+table = "promotions"
+row_count = 150000
+description = "Expired promo cleanup batch 1"
+
+[[events]]
+time_offset = 5100
+kind = "delete"
+table = "promotions"
+row_count = 245000
+description = "Expired promo cleanup batch 2"
+
+[[events]]
+time_offset = 6000
+kind = "analyze"
+table = "promotions"
+description = "ANALYZE after bulk deletes"
+
+[[events]]
+time_offset = 6600
+kind = "reoptimize"
+table = "fact_transactions"
+description = "Join reorder: promotions small again, back to nested loop"
+
+[[events]]
+time_offset = 7200
+kind = "analyze"
+table = "fact_transactions"
+description = "Full ANALYZE on fact table"
+
+[[events]]
+time_offset = 7800
+kind = "reoptimize"
+table = "fact_transactions"
+description = "Final replan with fresh stats"
+
+[[events]]
+time_offset = 8400
+kind = "vacuum"
+table = "promotions"
+description = "VACUUM after bulk deletes"
+
+# -- Execution feedback --
+
+[[feedback]]
+time_offset = 300
+query = "SELECT p.discount_pct, d.category, s.region, count(*) FROM fact_transactions f JOIN promotions p ON f.promo_id = p.promo_id JOIN dim_products d ON f.product_id = d.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id GROUP BY 1,2,3"
+operator = "Nested Loop on promotions"
+estimated_rows = 50.0
+actual_rows = 50.0
+estimated_cost = 800.0
+actual_time_ms = 120.0
+
+[[feedback]]
+time_offset = 2100
+query = "SELECT p.discount_pct, d.category, s.region, count(*) FROM fact_transactions f JOIN promotions p ON f.promo_id = p.promo_id JOIN dim_products d ON f.product_id = d.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id GROUP BY 1,2,3"
+operator = "Nested Loop on promotions"
+estimated_rows = 50.0
+actual_rows = 200000.0
+estimated_cost = 800.0
+actual_time_ms = 15000.0
+
+[[feedback]]
+time_offset = 3600
+query = "SELECT p.discount_pct, d.category, s.region, count(*) FROM fact_transactions f JOIN promotions p ON f.promo_id = p.promo_id JOIN dim_products d ON f.product_id = d.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id GROUP BY 1,2,3"
+operator = "Hash Join on promotions"
+estimated_rows = 500000.0
+actual_rows = 500000.0
+estimated_cost = 45000.0
+actual_time_ms = 8500.0
+
+[[feedback]]
+time_offset = 5400
+query = "SELECT p.discount_pct, d.category, s.region, count(*) FROM fact_transactions f JOIN promotions p ON f.promo_id = p.promo_id JOIN dim_products d ON f.product_id = d.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id GROUP BY 1,2,3"
+operator = "Hash Join on promotions"
+estimated_rows = 500000.0
+actual_rows = 100000.0
+estimated_cost = 45000.0
+actual_time_ms = 3200.0
+
+[[feedback]]
+time_offset = 7200
+query = "SELECT p.discount_pct, d.category, s.region, count(*) FROM fact_transactions f JOIN promotions p ON f.promo_id = p.promo_id JOIN dim_products d ON f.product_id = d.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id GROUP BY 1,2,3"
+operator = "Nested Loop on promotions"
+estimated_rows = 5000.0
+actual_rows = 5000.0
+estimated_cost = 1200.0
+actual_time_ms = 180.0
