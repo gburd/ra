@@ -1,6 +1,6 @@
 # Plan Visualization
 
-The `ra-cli optimize` command supports colorized plan diffs that highlight
+The `ra optimize` command supports colorized plan diffs that highlight
 structural changes between original and optimized query plans. Four output
 formats are available, from detailed inline diffs to compact summaries.
 
@@ -15,7 +15,7 @@ terminal color. Removed nodes are red with a `-` prefix, added nodes are
 green with `+`, and modified nodes are yellow with `~`.
 
 ```bash
-ra-cli optimize "SELECT ..." --diff colored
+ra optimize "SELECT ..." --diff colored
 ```
 
 ### `plain`
@@ -24,7 +24,7 @@ Same structure as `colored` but without ANSI escape codes. Suitable for
 piping to files, log aggregators, or terminals without color support.
 
 ```bash
-ra-cli optimize "SELECT ..." --diff plain > diff.txt
+ra optimize "SELECT ..." --diff plain > diff.txt
 ```
 
 ### `side-by-side`
@@ -34,7 +34,7 @@ separator. Falls back to a stacked vertical layout if the terminal is
 narrower than 80 columns.
 
 ```bash
-ra-cli optimize "SELECT ..." --diff side-by-side
+ra optimize "SELECT ..." --diff side-by-side
 ```
 
 ### `compact`
@@ -43,7 +43,7 @@ A single-line summary showing the count of removed, added, and modified
 nodes. Useful for scripting and dashboards.
 
 ```bash
-ra-cli optimize "SELECT ..." --diff compact
+ra optimize "SELECT ..." --diff compact
 ```
 
 ## Color Scheme
@@ -100,7 +100,7 @@ When `--resource-budget` is used with `--diff`, the output includes both
 the resource usage report and the plan diff:
 
 ```bash
-ra-cli optimize "SELECT ..." --resource-budget interactive --diff colored
+ra optimize "SELECT ..." --resource-budget interactive --diff colored
 ```
 
 This shows:
@@ -117,10 +117,10 @@ To capture diffs for documentation or bug reports:
 
 ```bash
 # Plain text file
-ra-cli optimize "SELECT ..." --diff plain --no-color > diff.txt
+ra optimize "SELECT ..." --diff plain --no-color > diff.txt
 
 # Compact summary for CI
-ra-cli optimize "SELECT ..." --diff compact --no-color 2>&1 | tail -1
+ra optimize "SELECT ..." --diff compact --no-color 2>&1 | tail -1
 ```
 
 The `plain` format with `--no-color` produces clean text without ANSI

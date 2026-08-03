@@ -12,7 +12,7 @@ translate SQL across database engines.
 
 ```mermaid
 graph TD
-    CLI["CLI (ra-cli)"]
+    CLI["CLI (ra)"]
 
     Engine["Query Optimization<br/>(ra-engine)"]
     Dialect["Dialect Translation<br/>(ra-dialect)"]
@@ -69,7 +69,7 @@ graph TD
     Compiler --> Engine
     Engine --> Adaptive
 
-    Engine --> CLI[ra-cli]
+    Engine --> CLI[ra]
     Dialect --> CLI
 ```
 
@@ -92,7 +92,7 @@ graph BT
     PGExt["ra-pg-extension"] --> Engine
     PGExt --> Hardware
     PGExt --> Core
-    CLI["ra-cli"] --> Engine
+    CLI["ra"] --> Engine
     CLI --> Dialect
 
     style Core fill:#e8f5e9

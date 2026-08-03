@@ -10,7 +10,7 @@ The system consists of several layers:
 
 ```mermaid
 flowchart TD
-    A1["CLI<br/>ra-cli"]
+    A1["CLI<br/>ra"]
 
     B1["Optimization Engine<br/>ra-engine<br/>E-graph + egg"]
     B2["Code Generation<br/>ra-codegen<br/>Cranelift"]
@@ -158,18 +158,18 @@ Generates executable code:
 Input: Optimized physical plan
 Output: Executable query code
 
-### ra-cli {#ra-cli}
+### ra {#ra-cli}
 
 Command-line interface:
 
 ```bash
-ra-cli validate <path>     # Validate .rra files
-ra-cli test <path>         # Run rule test cases
-ra-cli list                # List available rules
-ra-cli show <rule-id>      # Show rule details
-ra-cli optimize <query>    # Optimize a SQL query
-ra-cli explain <query>     # Explain transformations
-ra-cli benchmark           # Run benchmarks
+ra validate <path>     # Validate .rra files
+ra test <path>         # Run rule test cases
+ra list                # List available rules
+ra show <rule-id>      # Show rule details
+ra optimize <query>    # Optimize a SQL query
+ra explain <query>     # Explain transformations
+ra benchmark           # Run benchmarks
 ```
 
 ### ra-dialect {#ra-dialect}
@@ -228,7 +228,7 @@ query optimization cycle, from SQL input through to executable output.
 ```mermaid
 flowchart LR
     subgraph Entry["Entry Points"]
-        CLI["ra-cli"]
+        CLI["ra"]
     end
 
     subgraph Parse["Parsing"]

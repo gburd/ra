@@ -166,19 +166,19 @@ Two crates are excluded from the default workspace build:
 ### CLI (`ra-cli`)
 
 ```bash
-cargo build --release --bin ra-cli
+cargo build --release --bin ra
 
 # Verify
-./target/release/ra-cli --help
+./target/release/ra --help
 ```
 
-::: tip Running ra-cli
-Documentation examples use the short form `ra-cli <args>`, which assumes the
+::: tip Running ra
+Documentation examples use the short form `ra <args>`, which assumes the
 binary is on your `PATH` (e.g. via `cargo install --path crates/ra-cli`).
 
 During development you can run directly from the workspace with:
 ```bash
-cargo run --bin ra-cli -- <args>
+cargo run --bin ra -- <args>
 ```
 :::
 
@@ -249,7 +249,7 @@ cargo xtask docs
 cargo xtask docs --serve
 ```
 
-The full docs build script (`docs/build.sh`) also builds the WASM module and generates rule documentation if `ra-cli` is available.
+The full docs build script (`docs/build.sh`) also builds the WASM module and generates rule documentation if `ra` is available.
 
 ---
 
@@ -277,10 +277,10 @@ cargo bench -p ra-engine --bench optimizer
 
 ```bash
 # Validate all .rra rule files
-ra-cli validate rules/
+ra validate rules/
 
 # Run rule test cases
-ra-cli test rules/
+ra test rules/
 ```
 
 ### Code Coverage

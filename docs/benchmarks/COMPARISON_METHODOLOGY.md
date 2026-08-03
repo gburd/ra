@@ -195,10 +195,10 @@ Some queries show similar performance because:
 ./scripts/run-all-benchmarks.sh
 
 # Run specific database/workload
-ra-cli benchmark --database postgresql --workload hybrid-search
+ra benchmark --database postgresql --workload hybrid-search
 
 # Generate reports
-ra-cli benchmark --all --format html --output results.html
+ra benchmark --all --format html --output results.html
 ```
 
 ### Environment Considerations

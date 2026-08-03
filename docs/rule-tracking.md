@@ -10,7 +10,7 @@ The Ra optimizer now supports detailed rule tracking that shows which optimizati
 Rules that successfully modified the e-graph and contributed to the optimized plan.
 
 ```bash
-ra-cli optimize "SELECT ..." --resource-budget standard --rules-applied
+ra optimize "SELECT ..." --resource-budget standard --rules-applied
 ```
 
 Output:
@@ -23,7 +23,7 @@ Rules Applied:
 Rules that were tried but didn't match patterns or didn't improve the plan.
 
 ```bash
-ra-cli optimize "SELECT ..." --resource-budget standard --rules-evaluated
+ra optimize "SELECT ..." --resource-budget standard --rules-evaluated
 ```
 
 Output:
@@ -36,7 +36,7 @@ Rules Evaluated but Not Applied:
 All rules available in the system (currently 206 rules).
 
 ```bash
-ra-cli optimize "SELECT ..." --resource-budget standard --rules-available
+ra optimize "SELECT ..." --resource-budget standard --rules-available
 ```
 
 Output:
@@ -49,7 +49,7 @@ Available Rules: 206 total
 Show all tracking information at once:
 
 ```bash
-ra-cli optimize "SELECT ..." --resource-budget standard --rules-all
+ra optimize "SELECT ..." --resource-budget standard --rules-all
 ```
 
 ## Implementation Details
@@ -102,7 +102,7 @@ This provides useful insights without requiring modifications to the `egg` libra
 ### Simple Query (No Optimization Needed)
 
 ```bash
-ra-cli optimize "SELECT * FROM users" --resource-budget standard --rules-all
+ra optimize "SELECT * FROM users" --resource-budget standard --rules-all
 ```
 
 Output shows that rules were evaluated but didn't need to modify the plan.
@@ -110,7 +110,7 @@ Output shows that rules were evaluated but didn't need to modify the plan.
 ### Complex Query (Optimization Applied)
 
 ```bash
-ra-cli optimize "
+ra optimize "
   SELECT u.name
   FROM users u
   JOIN orders o ON u.id = o.user_id
@@ -127,7 +127,7 @@ Output shows:
 ### Filter Simplification
 
 ```bash
-ra-cli optimize "
+ra optimize "
   SELECT * FROM users
   WHERE age > 18 AND true
 " --resource-budget standard --rules-applied
@@ -162,13 +162,13 @@ The Rule Advisor is a three-stage pipeline that eliminates irrelevant rules befo
 
 ```bash
 # Enable Stages 1+2 with PostgreSQL context filtering
-ra-cli optimize "SELECT ..." --rule-advisor --rule-advisor-db postgresql
+ra optimize "SELECT ..." --rule-advisor --rule-advisor-db postgresql
 
 # Enable all three stages with learning
-ra-cli optimize "SELECT ..." --rule-advisor --rule-advisor-learn --rule-advisor-db postgresql
+ra optimize "SELECT ..." --rule-advisor --rule-advisor-learn --rule-advisor-db postgresql
 
 # View advisor statistics (with --verbose or --rules flags)
-ra-cli optimize "SELECT ..." --rule-advisor --verbose
+ra optimize "SELECT ..." --rule-advisor --verbose
 ```
 
 ### Advisor Statistics Output

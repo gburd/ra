@@ -346,10 +346,10 @@ training_data_file = "/data/training.jsonl"
 
 ```bash
 # Parse SQL to RelExpr
-ra-cli explain "SELECT * FROM users WHERE age > 25"
+ra explain "SELECT * FROM users WHERE age > 25"
 
 # Optimize with default heuristic cost model
-ra-cli optimize "SELECT u.name, o.total
+ra optimize "SELECT u.name, o.total
   FROM users u
   JOIN orders o ON u.id = o.user_id
   WHERE u.age > 25 AND o.total > 100"
@@ -364,13 +364,13 @@ ra-cli optimize "SELECT u.name, o.total
 
 ```bash
 # Collect training data from PostgreSQL
-ra-cli ml collect-data \
+ra ml collect-data \
   --database postgres://localhost/mydb \
   --workload queries.sql \
   --output training-data.jsonl
 
 # Train neural network
-ra-cli ml train \
+ra ml train \
   --data training-data.jsonl \
   --output model.json \
   --epochs 100 \
@@ -387,7 +387,7 @@ ra-cli ml train \
 
 ```bash
 # Use trained ML model for optimization
-ra-cli optimize \
+ra optimize \
   --cost-model ml \
   --ml-model model.json \
   --stats-provider postgres://localhost/mydb \
@@ -405,7 +405,7 @@ ra-cli optimize \
 
 ```bash
 # Side-by-side comparison
-ra-cli compare-costs \
+ra compare-costs \
   --heuristic \
   --ml model.json \
   --query "SELECT ..."
@@ -421,7 +421,7 @@ ra-cli compare-costs \
 
 ```bash
 # Test model on held-out queries
-ra-cli ml evaluate \
+ra ml evaluate \
   --model model.json \
   --test-data test-queries.jsonl \
   --database postgres://localhost/mydb
@@ -617,7 +617,7 @@ async fn handle_query(query: &str, conn: &PgConnection) -> Result<Response> {
 **Debugging Tools:**
 ```bash
 # Inspect model predictions
-ra-cli ml explain \
+ra ml explain \
   --model model.json \
   --query "SELECT ..." \
   --verbose
@@ -628,7 +628,7 @@ ra-cli ml explain \
 # - Comparison with heuristic estimates
 
 # Find queries with high Q-Error
-ra-cli ml analyze-errors \
+ra ml analyze-errors \
   --training-data training.jsonl \
   --threshold 10
 

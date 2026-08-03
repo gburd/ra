@@ -129,17 +129,17 @@ Use hardware profiles that match your system characteristics:
 
 ```bash
 # Use server profile (optimized for high-end hardware)
-ra-cli optimize \
+ra optimize \
   --hardware-profile server \
   "SELECT * FROM orders WHERE status = 'pending'"
 
 # Use GPU server profile for GPU-accelerated workloads
-ra-cli optimize \
+ra optimize \
   --hardware-profile gpu-server \
   "SELECT * FROM large_dataset GROUP BY category"
 
 # Let RA auto-detect the best profile
-ra-cli optimize \
+ra optimize \
   --hardware-profile auto \
   "SELECT * FROM orders WHERE status = 'pending'"
 ```
@@ -202,7 +202,7 @@ Use the monitoring tools to track query performance:
 
 ```bash
 # Monitor database with tuning advice
-ra-cli monitor \
+ra monitor \
   --postgres 'host=localhost dbname=prod' \
   --tui
 ```

@@ -286,13 +286,13 @@ Use the CLI tool to assist with migration:
 
 ```bash
 # Extract preconditions from existing rules
-ra-cli migrate-preconditions \
+ra migrate-preconditions \
     --input rules/logical/predicate-pushdown/*.rra \
     --output rules-migrated/ \
     --validate
 
 # Validate migration
-ra-cli validate-preconditions \
+ra validate-preconditions \
     --baseline rules/ \
     --migrated rules-migrated/
 ```

@@ -110,7 +110,7 @@ Limit(100)
 
 ```bash
 # Optimize with index awareness
-ra-cli optimize \
+ra optimize \
   "SELECT o.order_id, o.order_date, c.name, c.email \
    FROM orders o JOIN customers c ON o.customer_id = c.id \
    WHERE o.status = 'pending' AND o.order_date >= '2024-01-01' \
@@ -118,7 +118,7 @@ ra-cli optimize \
    ORDER BY o.order_date DESC LIMIT 100"
 
 # View which indexes would be used
-ra-cli explain \
+ra explain \
   "SELECT o.order_id, o.order_date, c.name, c.email \
    FROM orders o JOIN customers c ON o.customer_id = c.id \
    WHERE o.status = 'pending' AND o.order_date >= '2024-01-01' \
@@ -126,7 +126,7 @@ ra-cli explain \
    ORDER BY o.order_date DESC LIMIT 100"
 
 # Compare original vs optimized plan
-ra-cli optimize \
+ra optimize \
   --diff side-by-side \
   "SELECT o.order_id, o.order_date, c.name, c.email \
    FROM orders o JOIN customers c ON o.customer_id = c.id \

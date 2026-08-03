@@ -101,7 +101,7 @@ Each disagreement includes a severity level (`Info`, `Warning`, `High`).
 Load a schema JSON file and write normalized metadata:
 
 ```sh
-ra-cli gather-metadata --schema schema.json --output normalized.json
+ra gather-metadata --schema schema.json --output normalized.json
 ```
 
 Use `--verbose` to list tables with column and index counts.
@@ -111,7 +111,7 @@ Use `--verbose` to list tables with column and index counts.
 Compare the RA optimizer plan for a SQL query against a database EXPLAIN plan:
 
 ```sh
-ra-cli compare \
+ra compare \
   --sql "SELECT * FROM users JOIN orders ON users.id = orders.user_id" \
   --explain-json explain.json
 ```

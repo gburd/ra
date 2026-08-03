@@ -115,7 +115,7 @@ markdown body (description, algebra, before/after examples, tests).
 ## CLI usage
 
 ```
-ra-cli federated analyze \
+ra federated analyze \
   --query "SELECT * FROM orders WHERE total > 100" \
   --remote-db "postgresql://warehouse:5432/sales" \
   --remote-table orders \
@@ -191,5 +191,5 @@ cargo test -p ra-engine federated
 cargo test -p ra-engine --test federated_integration_test
 
 # Validate rule files
-ra-cli validate rules/federated/
+ra validate rules/federated/
 ```

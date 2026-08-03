@@ -585,15 +585,15 @@ View results in `target/criterion/`.
 **CPU profiling:**
 
 ```bash
-cargo build --release --bin ra-cli
-cargo flamegraph --bin ra-cli -- optimize query.sql
+cargo build --release --bin ra
+cargo flamegraph --bin ra -- optimize query.sql
 ```
 
 **Memory profiling:**
 
 ```bash
-cargo build --release --bin ra-cli
-valgrind --tool=massif target/release/ra-cli optimize query.sql
+cargo build --release --bin ra
+valgrind --tool=massif target/release/ra optimize query.sql
 ```
 
 ## Common Tasks
@@ -628,7 +628,7 @@ See [parsers.md](parsers.md) for detailed instructions.
 **Enable trace logging:**
 
 ```bash
-RUST_LOG=trace cargo run --bin ra-cli -- optimize query.sql
+RUST_LOG=trace cargo run --bin ra -- optimize query.sql
 ```
 
 **Debug specific module:**

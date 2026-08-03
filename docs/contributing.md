@@ -69,7 +69,7 @@ cargo test -p ra-core
 cargo bench
 
 # Validate all rules
-ra-cli validate rules/
+ra validate rules/
 
 # Run TLA+ formal verification
 ./scripts/run-tla.sh

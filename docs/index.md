@@ -57,12 +57,10 @@ Transform and optimize your SQL queries:
 
 ```bash
 # Optimize a query
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM orders WHERE amount > 1000 AND status = 'active'"
 
-# Translate between databases
-ra-cli translate --from postgres --to mysql \
-  "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
+# Dialect translation moved to a separate repo: https://codeberg.org/gregburd/ra-lab
 ```
 
 ## Architecture Highlights

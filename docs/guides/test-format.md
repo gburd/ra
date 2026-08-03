@@ -70,19 +70,19 @@ Multiple test cases can appear in one SQL block. Each `-- Positive:` or
 
 ```sh
 # Run all tests (1199 rule files, ~2600 test cases)
-ra-cli test rules/
+ra test rules/
 
 # Run tests for a single file
-ra-cli test rules/logical/predicate-pushdown/filter-through-join.rra
+ra test rules/logical/predicate-pushdown/filter-through-join.rra
 
 # Run only tests matching a substring
-ra-cli test rules/ --filter filter-pushdown
+ra test rules/ --filter filter-pushdown
 
 # Verbose output (show passing tests and per-test timing)
-ra-cli test rules/ --verbose
+ra test rules/ --verbose
 
 # Quiet mode (only show summary)
-ra-cli test rules/ --quiet
+ra test rules/ --quiet
 ```
 
 ## Output

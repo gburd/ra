@@ -347,7 +347,7 @@ for query in queries/tproc-h/*.sql; do
     pg_time=$(psql tproc_medium -f "$query" -c '\timing' | grep 'Time:' | awk '{print $2}')
 
     # Ra neural-guided execution
-    ra_time=$(ra-cli execute --db tproc_medium --file "$query" --timing)
+    ra_time=$(ra execute --db tproc_medium --file "$query" --timing)
 
     # Calculate improvement
     improvement=$(echo "scale=2; ($pg_time - $ra_time) / $pg_time * 100" | bc)

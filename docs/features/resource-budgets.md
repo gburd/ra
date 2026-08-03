@@ -123,16 +123,16 @@ The `optimize` command accepts budget flags:
 
 ```bash
 # Use a named profile
-ra-cli optimize "SELECT ..." --resource-budget interactive
+ra optimize "SELECT ..." --resource-budget interactive
 
 # Custom limits
-ra-cli optimize "SELECT ..." --max-time 500ms --max-memory 256MB
+ra optimize "SELECT ..." --max-time 500ms --max-memory 256MB
 
 # Combine profile with overrides
-ra-cli optimize "SELECT ..." --resource-budget standard --max-iterations 5
+ra optimize "SELECT ..." --resource-budget standard --max-iterations 5
 
 # Set overflow strategy
-ra-cli optimize "SELECT ..." --resource-budget batch --overflow-strategy fail
+ra optimize "SELECT ..." --resource-budget batch --overflow-strategy fail
 ```
 
 When a budget is active, the CLI prints a resource usage report:

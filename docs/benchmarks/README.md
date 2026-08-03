@@ -14,22 +14,22 @@ The Ra benchmark system provides automated performance testing across multiple d
 # Automated script (recommended)
 ./scripts/run-all-benchmarks.sh
 
-# Or use ra-cli directly
-ra-cli benchmark --all --format html --output results.html
+# Or use ra directly
+ra benchmark --all --format html --output results.html
 ```
 
 ### Run Specific Benchmarks
 
 ```bash
 # Specific database and workload
-ra-cli benchmark --database postgresql --workload hybrid-search
+ra benchmark --database postgresql --workload hybrid-search
 
 # Single database, all workloads
-ra-cli benchmark --database mysql --all
+ra benchmark --database mysql --all
 
 # Generate different output formats
-ra-cli benchmark --all --format json --output results.json
-ra-cli benchmark --all --format markdown --output results.md
+ra benchmark --all --format json --output results.json
+ra benchmark --all --format markdown --output results.md
 ```
 
 ## Output Formats
@@ -44,7 +44,7 @@ Interactive web dashboard with:
 - Statistical summaries
 
 ```bash
-ra-cli benchmark --all --format html --output comparison.html
+ra benchmark --all --format html --output comparison.html
 open comparison.html
 ```
 
@@ -53,7 +53,7 @@ open comparison.html
 Machine-readable format for integration:
 
 ```bash
-ra-cli benchmark --all --format json --output results.json
+ra benchmark --all --format json --output results.json
 ```
 
 **Structure:**
@@ -93,7 +93,7 @@ ra-cli benchmark --all --format json --output results.json
 Human-readable report with tables:
 
 ```bash
-ra-cli benchmark --all --format markdown --output report.md
+ra benchmark --all --format markdown --output report.md
 ```
 
 ## Directory Structure
@@ -279,7 +279,7 @@ jobs:
 
       - name: Run Benchmarks
         run: |
-          cargo build --release --bin ra-cli
+          cargo build --release --bin ra
           ./scripts/run-all-benchmarks.sh
 
       - name: Upload Results
@@ -334,7 +334,7 @@ fn get_workload_queries(db: DatabaseSystem, workload: WorkloadType) -> Vec<Query
 
 **Solution:** Install the database or run benchmarks for available databases only:
 ```bash
-ra-cli benchmark --database sqlite --workload joins
+ra benchmark --database sqlite --workload joins
 ```
 
 ### Extension Not Available

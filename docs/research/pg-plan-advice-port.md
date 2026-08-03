@@ -547,8 +547,8 @@ pub struct OptimizerConfig {
 }
 ```
 
-CLI: `ra-cli explain --plan-advice "JOIN_ORDER(a b) HASH_JOIN(b)"`
-and `ra-cli explain --generate-plan-advice`. Render generated and
+CLI: `ra explain --plan-advice "JOIN_ORDER(a b) HASH_JOIN(b)"`
+and `ra explain --generate-plan-advice`. Render generated and
 supplied advice in the existing `Provenance:` block (added in the
 GEQO-lessons work) under `Plan Advice:`.
 
