@@ -24,9 +24,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use ra_plan_advice::ast::{
-    Advice, AdviceTag, AdviceTarget, AdviceTargetKind, IndexTarget,
-};
+use ra_plan_advice::ast::{Advice, AdviceTag, AdviceTarget, AdviceTargetKind, IndexTarget};
 
 /// Preferred scan strategy for a single base relation.
 ///
@@ -148,24 +146,24 @@ impl PhysicalChoices {
                     apply_scan(&mut out, &item.targets, |_| ScanStrategy::DoNotScan);
                 }
                 AdviceTag::IndexScan => apply_scan(&mut out, &item.targets, |idx| {
-                    let IndexTarget { schema, name } = idx
-                        .cloned()
-                        .unwrap_or_else(|| IndexTarget {
+                    let IndexTarget { schema, name } =
+                        idx.cloned().unwrap_or_else(|| IndexTarget {
                             schema: None,
                             name: String::new(),
                         });
                     ScanStrategy::Index { schema, name }
                 }),
                 AdviceTag::IndexOnlyScan => apply_scan(&mut out, &item.targets, |idx| {
-                    let IndexTarget { schema, name } = idx
-                        .cloned()
-                        .unwrap_or_else(|| IndexTarget {
+                    let IndexTarget { schema, name } =
+                        idx.cloned().unwrap_or_else(|| IndexTarget {
                             schema: None,
                             name: String::new(),
                         });
                     ScanStrategy::IndexOnly { schema, name }
                 }),
-                AdviceTag::HashJoin => apply_join(&mut out, &item.targets, &JoinInnerStrategy::Hash),
+                AdviceTag::HashJoin => {
+                    apply_join(&mut out, &item.targets, &JoinInnerStrategy::Hash);
+                }
                 AdviceTag::MergeJoinPlain => {
                     apply_join(&mut out, &item.targets, &JoinInnerStrategy::MergeJoinPlain);
                 }
@@ -203,7 +201,9 @@ impl PhysicalChoices {
                         }
                     }
                 }
-                AdviceTag::Gather => apply_parallel(&mut out, &item.targets, ParallelStrategy::Gather),
+                AdviceTag::Gather => {
+                    apply_parallel(&mut out, &item.targets, ParallelStrategy::Gather);
+                }
                 AdviceTag::GatherMerge => {
                     apply_parallel(&mut out, &item.targets, ParallelStrategy::GatherMerge);
                 }
@@ -309,7 +309,9 @@ impl PhysicalChoices {
     /// (RFC 0090 Phase 3) under supplied advice without overriding it.
     pub fn fill_missing_joins(&mut self, other: &PhysicalChoices) {
         for (alias, strategy) in &other.joins {
-            self.joins.entry(alias.clone()).or_insert_with(|| strategy.clone());
+            self.joins
+                .entry(alias.clone())
+                .or_insert_with(|| strategy.clone());
         }
     }
 }
@@ -321,7 +323,9 @@ impl PhysicalChoices {
 /// of the `augment_from_stats` heuristic. The physical method survives even
 /// though `from_rec` collapses the variants back to a logical `RelExpr::Join`.
 #[must_use]
-pub fn physical_choices_from_recexpr(rec: &egg::RecExpr<crate::egraph::RelLang>) -> PhysicalChoices {
+pub fn physical_choices_from_recexpr(
+    rec: &egg::RecExpr<crate::egraph::RelLang>,
+) -> PhysicalChoices {
     use crate::egraph::RelLang;
     let nodes = rec.as_ref();
     let mut out = PhysicalChoices::new();
@@ -350,13 +354,21 @@ fn first_relation_alias(nodes: &[crate::egraph::RelLang], id: egg::Id) -> Option
         Some(RelLang::Symbol(s)) => Some(s.to_string()),
         _ => None,
     };
+    #[expect(
+        clippy::match_same_arms,
+        reason = "arms share the recurse-into-child body but differ in operand \
+                  arity (Filter/Project/Sort vs Limit/Aggregate); merging would \
+                  need a wildcard that also swallows unrelated variants."
+    )]
     match nodes.get(usize::from(id))? {
         RelLang::Scan([t]) | RelLang::IndexScan([t, _]) => symbol_at(*t),
         RelLang::ScanAlias([_, a]) => symbol_at(*a),
         RelLang::Filter([_, c]) | RelLang::Project([_, c]) | RelLang::Sort([_, c]) => {
             first_relation_alias(nodes, *c)
         }
-        RelLang::Limit([_, _, c]) | RelLang::Aggregate([_, _, c]) => first_relation_alias(nodes, *c),
+        RelLang::Limit([_, _, c]) | RelLang::Aggregate([_, _, c]) => {
+            first_relation_alias(nodes, *c)
+        }
         RelLang::Join([_, _, _, r])
         | RelLang::HashJoinOp([_, _, _, r])
         | RelLang::MergeJoinOp([_, _, _, r])
@@ -502,19 +514,14 @@ mod cost_driven {
             } else {
                 u8::from(idx_stats.is_unique)
             };
-            let selectivity = covered_prefix_selectivity(
-                &idx_stats.columns[..prefix_len],
-                stats,
-            );
+            let selectivity = covered_prefix_selectivity(&idx_stats.columns[..prefix_len], stats);
             let candidate = (idx_name, prefix_len, tie_break, selectivity);
             best = match best {
                 None => Some(candidate),
                 Some((_, cur_len, cur_tie, cur_sel)) => {
                     let strictly_better = prefix_len > cur_len
                         || (prefix_len == cur_len && tie_break > cur_tie)
-                        || (prefix_len == cur_len
-                            && tie_break == cur_tie
-                            && selectivity < cur_sel);
+                        || (prefix_len == cur_len && tie_break == cur_tie && selectivity < cur_sel);
                     if strictly_better {
                         Some(candidate)
                     } else {
@@ -550,19 +557,14 @@ mod cost_driven {
     /// Returns `1.0` for any column with missing or zero NDV
     /// — neutral, so absent statistics never bias the
     /// comparison incorrectly.
-    fn covered_prefix_selectivity(
-        prefix: &[String],
-        stats: &Statistics,
-    ) -> f64 {
+    fn covered_prefix_selectivity(prefix: &[String], stats: &Statistics) -> f64 {
         let mut acc = 1.0_f64;
         for col in prefix {
             let col_sel = stats
                 .columns
                 .iter()
                 .find_map(|(name, cs)| {
-                    if name.eq_ignore_ascii_case(col)
-                        && cs.distinct_count > 0.0
-                    {
+                    if name.eq_ignore_ascii_case(col) && cs.distinct_count > 0.0 {
                         // Equality selectivity ~ 1 / NDV
                         // (adjusted for NULL fraction).
                         let live = (1.0 - cs.null_fraction).max(0.0);
@@ -583,9 +585,7 @@ mod cost_driven {
     fn covered_prefix_len(index_columns: &[String], eq_columns: &[String]) -> usize {
         let mut covered = 0usize;
         for idx_col in index_columns {
-            let hit = eq_columns
-                .iter()
-                .any(|c| c.eq_ignore_ascii_case(idx_col));
+            let hit = eq_columns.iter().any(|c| c.eq_ignore_ascii_case(idx_col));
             if hit {
                 covered += 1;
             } else {
@@ -603,7 +603,11 @@ mod cost_driven {
     /// conditions don't constrain index access.
     fn collect_eq_columns(pred: &Expr, out: &mut Vec<String>) {
         match pred {
-            Expr::BinOp { op: BinOp::Eq, left, right } => {
+            Expr::BinOp {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => {
                 let l_col = as_column_name(left);
                 let r_col = as_column_name(right);
                 match (l_col, r_col) {
@@ -615,7 +619,11 @@ mod cost_driven {
                     _ => {}
                 }
             }
-            Expr::BinOp { op: BinOp::And, left, right } => {
+            Expr::BinOp {
+                op: BinOp::And,
+                left,
+                right,
+            } => {
                 collect_eq_columns(left, out);
                 collect_eq_columns(right, out);
             }
@@ -666,7 +674,9 @@ mod cost_driven {
                 collect_scans(left, None, out);
                 collect_scans(right, None, out);
             }
-            RelExpr::CTE { definition, body, .. } => {
+            RelExpr::CTE {
+                definition, body, ..
+            } => {
                 collect_scans(definition, None, out);
                 collect_scans(body, None, out);
             }
@@ -685,7 +695,13 @@ mod cost_driven {
         table_stats: &HashMap<String, Statistics>,
         out: &mut Vec<(String, JoinInnerStrategy)>,
     ) {
-        if let RelExpr::Join { condition, left, right, .. } = expr {
+        if let RelExpr::Join {
+            condition,
+            left,
+            right,
+            ..
+        } = expr
+        {
             if let Some(inner_alias) = super::inner_join_alias(right) {
                 let outer_rows = leaf_table(left).and_then(|t| row_count(table_stats, &t));
                 let inner_rows = leaf_table(right).and_then(|t| row_count(table_stats, &t));
@@ -727,13 +743,19 @@ mod cost_driven {
     /// joins handle directly.
     fn is_equi_join(cond: &Expr) -> bool {
         match cond {
-            Expr::BinOp { op: BinOp::Eq, left, right } => {
+            Expr::BinOp {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => {
                 matches!(left.as_ref(), Expr::Column(_))
                     && matches!(right.as_ref(), Expr::Column(_))
             }
-            Expr::BinOp { op: BinOp::And, left, right } => {
-                is_equi_join(left) || is_equi_join(right)
-            }
+            Expr::BinOp {
+                op: BinOp::And,
+                left,
+                right,
+            } => is_equi_join(left) || is_equi_join(right),
             _ => false,
         }
     }
@@ -793,11 +815,7 @@ fn apply_scan(
 
 /// Walk a list of advice targets and apply a join-inner
 /// strategy per identifier.
-fn apply_join(
-    out: &mut PhysicalChoices,
-    targets: &[AdviceTarget],
-    strategy: &JoinInnerStrategy,
-) {
+fn apply_join(out: &mut PhysicalChoices, targets: &[AdviceTarget], strategy: &JoinInnerStrategy) {
     for t in targets {
         for alias in flatten_aliases(t) {
             out.joins.insert(alias, strategy.clone());
@@ -807,11 +825,7 @@ fn apply_join(
 
 /// Walk a list of advice targets and apply a parallel-strategy
 /// per identifier.
-fn apply_parallel(
-    out: &mut PhysicalChoices,
-    targets: &[AdviceTarget],
-    strategy: ParallelStrategy,
-) {
+fn apply_parallel(out: &mut PhysicalChoices, targets: &[AdviceTarget], strategy: ParallelStrategy) {
     for t in targets {
         for alias in flatten_aliases(t) {
             out.parallel.insert(alias, strategy);
@@ -946,10 +960,7 @@ mod tests {
         // INDEX wins.
         let advice = parse_advice("SEQ_SCAN(t) INDEX_SCAN(t idx)").unwrap();
         let pc = PhysicalChoices::from_advice(&advice);
-        assert!(matches!(
-            pc.scan_for("t"),
-            Some(ScanStrategy::Index { .. })
-        ));
+        assert!(matches!(pc.scan_for("t"), Some(ScanStrategy::Index { .. })));
     }
 
     #[test]
@@ -972,9 +983,8 @@ mod tests {
 
     #[test]
     fn mixed_advice_populates_each_category() {
-        let advice = parse_advice(
-            "SEQ_SCAN(a) INDEX_SCAN(b b_idx) HASH_JOIN(c) NO_GATHER(d)"
-        ).unwrap();
+        let advice =
+            parse_advice("SEQ_SCAN(a) INDEX_SCAN(b b_idx) HASH_JOIN(c) NO_GATHER(d)").unwrap();
         let pc = PhysicalChoices::from_advice(&advice);
         assert_eq!(pc.len(), 4);
         assert!(matches!(pc.scan_for("a"), Some(ScanStrategy::Seq)));

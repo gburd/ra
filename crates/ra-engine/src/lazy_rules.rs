@@ -34,7 +34,10 @@ use ra_core::algebra::RelExpr;
 ///
 /// Analyzes query structure to determine which rule categories are needed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[expect(clippy::struct_excessive_bools, reason = "boolean flags represent independent query features")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "boolean flags represent independent query features"
+)]
 pub struct LazyQueryPattern {
     /// Query contains joins (inner, left, right, full, cross)
     pub has_joins: bool,
@@ -472,7 +475,10 @@ impl RuleCategory {
 ///
 /// Maintains a cache of rule groups and loads only the categories needed
 /// for the current query pattern.
-#[expect(clippy::type_complexity, reason = "Arc<RwLock<HashMap>> is inherent to concurrent cache")]
+#[expect(
+    clippy::type_complexity,
+    reason = "Arc<RwLock<HashMap>> is inherent to concurrent cache"
+)]
 pub struct LazyRuleCompiler {
     /// Cache of compiled rule sets by category
     rule_cache: std::sync::Arc<
@@ -531,6 +537,16 @@ impl LazyRuleCompiler {
 
     /// Compile only baseline rules (filter, projection, expression simplification).
     /// Used by the Skip route for minimal optimization.
+    ///
+    /// # Panics
+    /// Panics if the internal rule cache lock is poisoned (i.e. another thread
+    /// panicked while holding it).
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "lock poisoning is unrecoverable; panicking surfaces the \
+                  originating panic rather than masking it."
+    )]
     pub fn compile_baseline(
         &self,
         _pattern: &LazyQueryPattern,
@@ -558,7 +574,17 @@ impl LazyRuleCompiler {
     }
 
     /// Compile baseline + join-focused rules.
-    /// Used by the LeftDeep route.
+    /// Used by the `LeftDeep` route.
+    ///
+    /// # Panics
+    /// Panics if the internal rule cache lock is poisoned (i.e. another thread
+    /// panicked while holding it).
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "lock poisoning is unrecoverable; panicking surfaces the \
+                  originating panic rather than masking it."
+    )]
     pub fn compile_join_focused(
         &self,
         pattern: &LazyQueryPattern,
@@ -601,7 +627,8 @@ impl LazyRuleCompiler {
                 crate::rewrite::generated_logical_projection_pushdown_core_rules()
             }
             RuleCategory::ExpressionSimplification => {
-                let mut rules = crate::rewrite::generated_logical_expression_simplification_core_rules();
+                let mut rules =
+                    crate::rewrite::generated_logical_expression_simplification_core_rules();
                 rules.extend(crate::rewrite::generated_logical_constant_folding_core_rules());
                 rules
             }
@@ -625,12 +652,22 @@ impl LazyRuleCompiler {
             RuleCategory::JoinTransformation => {
                 crate::rewrite::generated_logical_join_transformation_core_rules()
             }
-            RuleCategory::SemiJoinOptimization => crate::rewrite::generated_logical_semi_join_core_rules(),
+            RuleCategory::SemiJoinOptimization => {
+                crate::rewrite::generated_logical_semi_join_core_rules()
+            }
 
-            RuleCategory::AggregateOptimization => crate::rewrite::generated_logical_aggregate_optimization_core_rules(),
-            RuleCategory::LimitSortOptimization => crate::rewrite::generated_logical_limit_sort_optimization_core_rules(),
-            RuleCategory::SetOperationOptimization => crate::rewrite::generated_logical_set_operation_core_rules(),
-            RuleCategory::SubqueryOptimization => crate::rewrite::generated_logical_subquery_optimization_core_rules(),
+            RuleCategory::AggregateOptimization => {
+                crate::rewrite::generated_logical_aggregate_optimization_core_rules()
+            }
+            RuleCategory::LimitSortOptimization => {
+                crate::rewrite::generated_logical_limit_sort_optimization_core_rules()
+            }
+            RuleCategory::SetOperationOptimization => {
+                crate::rewrite::generated_logical_set_operation_core_rules()
+            }
+            RuleCategory::SubqueryOptimization => {
+                crate::rewrite::generated_logical_subquery_optimization_core_rules()
+            }
 
             RuleCategory::FileFormatOptimization => {
                 crate::rewrite::generated_physical_parquet_pushdown_core_rules()

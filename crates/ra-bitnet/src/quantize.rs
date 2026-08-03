@@ -131,9 +131,7 @@ mod tests {
 
     #[test]
     fn reconstruction_error_bounded() {
-        let weights: Vec<f32> = (0..100)
-            .map(|i| (i as f32 - 50.0) * 0.02)
-            .collect();
+        let weights: Vec<f32> = (0..100).map(|i| (i as f32 - 50.0) * 0.02).collect();
         let (packed, alpha) = absmean_ternary_pack(weights.iter().copied(), 100);
         let rmse = reconstruction_rmse(&weights, &packed, alpha);
         // RMSE should be bounded — ternary quantization loses precision but

@@ -20,9 +20,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use ra_engine::{
-    AdaptiveCalibrator, CalibrationConfig, CostFeedback, OperatorKind, Optimizer,
-};
+use ra_engine::{AdaptiveCalibrator, CalibrationConfig, CostFeedback, OperatorKind, Optimizer};
 
 #[test]
 fn no_calibrator_returns_neutral_correction() {

@@ -26,7 +26,11 @@ fn combine_bitmap_preds(inputs: &[Box<RelExpr>], op: BinOp) -> Option<Expr> {
         let p = bitmap_source_predicate(inp)?;
         acc = Some(match acc {
             None => p,
-            Some(prev) => Expr::BinOp { op, left: Box::new(prev), right: Box::new(p) },
+            Some(prev) => Expr::BinOp {
+                op,
+                left: Box::new(prev),
+                right: Box::new(p),
+            },
         });
     }
     acc

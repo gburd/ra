@@ -76,8 +76,7 @@ impl PropertyValidator {
     /// Create a validator for the given properties.
     #[must_use]
     pub fn new(properties: Vec<OptimizerProperty>) -> Self {
-        let budget = ResourceBudget::unlimited()
-            .with_time_limit(Duration::from_secs(5));
+        let budget = ResourceBudget::unlimited().with_time_limit(Duration::from_secs(5));
         let mut optimizer = Optimizer::new();
         optimizer.set_resource_budget(budget);
         Self {
@@ -104,8 +103,7 @@ impl PropertyValidator {
     #[must_use]
     pub fn with_time_limit(mut self, limit: Duration) -> Self {
         self.time_limit = limit;
-        let budget = ResourceBudget::unlimited()
-            .with_time_limit(limit);
+        let budget = ResourceBudget::unlimited().with_time_limit(limit);
         self.optimizer.set_resource_budget(budget);
         self
     }
@@ -130,36 +128,23 @@ impl PropertyValidator {
         self.validate(expr).iter().all(|r| r.passed)
     }
 
-    fn check_property(
-        &self,
-        property: OptimizerProperty,
-        expr: &RelExpr,
-    ) -> PropertyResult {
+    fn check_property(&self, property: OptimizerProperty, expr: &RelExpr) -> PropertyResult {
         match property {
-            OptimizerProperty::Roundtrip => {
-                self.check_roundtrip(expr)
-            }
-            OptimizerProperty::TablePreservation => {
-                self.check_table_preservation(expr)
-            }
-            OptimizerProperty::Idempotence => {
-                self.check_idempotence(expr)
-            }
-            OptimizerProperty::Convergence => {
-                self.check_convergence(expr)
-            }
-            OptimizerProperty::PlanValidity => {
-                self.check_plan_validity(expr)
-            }
-            OptimizerProperty::RuleSafety => {
-                self.check_rule_safety(expr)
-            }
+            OptimizerProperty::Roundtrip => self.check_roundtrip(expr),
+            OptimizerProperty::TablePreservation => self.check_table_preservation(expr),
+            OptimizerProperty::Idempotence => self.check_idempotence(expr),
+            OptimizerProperty::Convergence => self.check_convergence(expr),
+            OptimizerProperty::PlanValidity => self.check_plan_validity(expr),
+            OptimizerProperty::RuleSafety => self.check_rule_safety(expr),
         }
     }
 
     /// Roundtrip: `to_rec_expr` -> optimizer -> extract preserves
     /// essential structure.
-    #[expect(clippy::unused_self, reason = "self kept for method dispatch consistency")]
+    #[expect(
+        clippy::unused_self,
+        reason = "self kept for method dispatch consistency"
+    )]
     fn check_roundtrip(&self, expr: &RelExpr) -> PropertyResult {
         let result = ra_engine::to_rec_expr(expr);
         match result {
@@ -174,9 +159,7 @@ impl PropertyValidator {
                     Err(e) => PropertyResult {
                         property: OptimizerProperty::Roundtrip,
                         passed: false,
-                        details: format!(
-                            "rec_expr_to_rel_expr failed: {e}"
-                        ),
+                        details: format!("rec_expr_to_rel_expr failed: {e}"),
                     },
                 }
             }
@@ -195,17 +178,12 @@ impl PropertyValidator {
 
     /// Table preservation: the set of table names referenced in the
     /// optimized plan must be a subset of those in the original.
-    fn check_table_preservation(
-        &self,
-        expr: &RelExpr,
-    ) -> PropertyResult {
+    fn check_table_preservation(&self, expr: &RelExpr) -> PropertyResult {
         let original_tables = collect_tables(expr);
         match self.optimizer.optimize(expr) {
             Ok(optimized) => {
                 let optimized_tables = collect_tables(&optimized);
-                let extra: Vec<_> = optimized_tables
-                    .difference(&original_tables)
-                    .collect();
+                let extra: Vec<_> = optimized_tables.difference(&original_tables).collect();
                 if extra.is_empty() {
                     PropertyResult {
                         property: OptimizerProperty::TablePreservation,
@@ -216,9 +194,7 @@ impl PropertyValidator {
                     PropertyResult {
                         property: OptimizerProperty::TablePreservation,
                         passed: false,
-                        details: format!(
-                            "optimizer introduced tables: {extra:?}"
-                        ),
+                        details: format!("optimizer introduced tables: {extra:?}"),
                     }
                 }
             }
@@ -294,9 +270,7 @@ impl PropertyValidator {
             return PropertyResult {
                 property: OptimizerProperty::Convergence,
                 passed: false,
-                details: format!(
-                    "optimization took {elapsed:?}, limit was {hard_limit:?}"
-                ),
+                details: format!("optimization took {elapsed:?}, limit was {hard_limit:?}"),
             };
         }
 
@@ -309,9 +283,7 @@ impl PropertyValidator {
             Err(e) => PropertyResult {
                 property: OptimizerProperty::Convergence,
                 passed: true,
-                details: format!(
-                    "failed in {elapsed:?} (ok): {e}"
-                ),
+                details: format!("failed in {elapsed:?} (ok): {e}"),
             },
         }
     }
@@ -331,9 +303,7 @@ impl PropertyValidator {
                     Err(e) => PropertyResult {
                         property: OptimizerProperty::PlanValidity,
                         passed: false,
-                        details: format!(
-                            "optimized plan invalid: {e}"
-                        ),
+                        details: format!("optimized plan invalid: {e}"),
                     },
                 }
             }
@@ -347,7 +317,10 @@ impl PropertyValidator {
 
     /// Rule safety: feeding the expression through all rewrite rules
     /// does not panic.
-    #[expect(clippy::unused_self, reason = "self kept for method dispatch consistency")]
+    #[expect(
+        clippy::unused_self,
+        reason = "self kept for method dispatch consistency"
+    )]
     fn check_rule_safety(&self, expr: &RelExpr) -> PropertyResult {
         use egg::Runner;
         use ra_engine::{all_rules, RelAnalysis, RelLang};
@@ -440,8 +413,8 @@ mod tests {
 
     #[test]
     fn all_properties_pass_on_simple_query() {
-        let validator = PropertyValidator::all_properties()
-            .with_time_limit(Duration::from_secs(10));
+        let validator =
+            PropertyValidator::all_properties().with_time_limit(Duration::from_secs(10));
         let results = validator.validate(&simple_query());
         for result in &results {
             assert!(
@@ -454,19 +427,15 @@ mod tests {
 
     #[test]
     fn table_preservation_on_scan() {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::TablePreservation,
-        ]);
+        let validator = PropertyValidator::new(vec![OptimizerProperty::TablePreservation]);
         let results = validator.validate(&simple_scan());
         assert!(results[0].passed);
     }
 
     #[test]
     fn convergence_respects_time_limit() {
-        let validator = PropertyValidator::new(vec![
-            OptimizerProperty::Convergence,
-        ])
-        .with_time_limit(Duration::from_secs(30));
+        let validator = PropertyValidator::new(vec![OptimizerProperty::Convergence])
+            .with_time_limit(Duration::from_secs(30));
         let results = validator.validate(&simple_query());
         assert!(results[0].passed);
     }

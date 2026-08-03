@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "Ra"
-  text: "Query Optimizer"
-  tagline: "1,327+ transformation rules for optimal SQL execution plans"
+  text: "Query Optimizer (research prototype)"
+  tagline: "Experimental parser, planner, and optimizer for PostgreSQL"
   actions:
     - theme: brand
       text: Get Started
@@ -15,8 +15,8 @@ hero:
 
 features:
   - icon: ⚡
-    title: 1,327+ Transformation Rules
-    details: Comprehensive rule library covering logical, physical, hardware, distributed, and multi-model optimizations
+    title: Rule Library
+    details: 1,467 .rra rule sources, 293 currently active, covering logical and physical optimizations
 
   - icon: 🔄
     title: 20+ Database Dialects
@@ -57,12 +57,10 @@ Transform and optimize your SQL queries:
 
 ```bash
 # Optimize a query
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM orders WHERE amount > 1000 AND status = 'active'"
 
-# Translate between databases
-ra-cli translate --from postgres --to mysql \
-  "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
+# Dialect translation moved to a separate repo: https://codeberg.org/gregburd/ra-lab
 ```
 
 ## Architecture Highlights
@@ -73,13 +71,13 @@ ra-cli translate --from postgres --to mysql \
 - **Property testing** via quickcheck for correctness verification
 - **SMT integration** using Z3 for formal rule verification
 
-## Performance Highlights
+## Performance
 
-- Up to **1000x speedup** on complex analytical queries
-- **85% I/O reduction** with automatic covering index detection
-- **O(1)** MIN/MAX/COUNT operations on billion-row tables
-- **95% data skip** with Parquet row group filtering
-- **10-100x improvement** on star schema queries with join reordering
+No end-to-end performance comparison against native PostgreSQL is published
+yet. Planning-time-only speedups were removed because they were measured with
+statistics disabled on the RA side and did not measure plan quality. End-to-end
+(plan + execute) numbers will replace this section once correctness parity is
+reached.
 
 ## Recent Additions
 

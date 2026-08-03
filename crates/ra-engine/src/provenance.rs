@@ -132,8 +132,7 @@ impl PlanProvenance {
         S: AsRef<str>,
     {
         use std::hash::{Hash, Hasher};
-        let mut sorted: Vec<String> =
-            names.into_iter().map(|s| s.as_ref().to_string()).collect();
+        let mut sorted: Vec<String> = names.into_iter().map(|s| s.as_ref().to_string()).collect();
         sorted.sort();
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for name in &sorted {
@@ -195,7 +194,10 @@ mod tests {
     fn diff_reports_changed_fields_only() {
         let a = PlanProvenance::new(fp(), None, None, 1, 1, OptRoute::Skip, "saturated");
         let mut b = a.clone();
-        assert!(a.diff(&b).is_empty(), "identical inputs should produce no diff");
+        assert!(
+            a.diff(&b).is_empty(),
+            "identical inputs should produce no diff"
+        );
 
         b.hardware_profile_hash = 2;
         b.termination_reason = "timeout";

@@ -181,13 +181,12 @@ fn print_summary(
     let mut by_template: std::collections::BTreeMap<u32, Vec<f64>> =
         std::collections::BTreeMap::new();
     for r in &successful {
-        let num: u32 = r
-            .0
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>()
-            .parse()
-            .unwrap_or(0);
+        let num: u32 =
+            r.0.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0);
         by_template.entry(num).or_default().push(r.1);
     }
 

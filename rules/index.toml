@@ -1,371 +1,489 @@
 version = "1.0.0"
-total_rules = 266
-last_updated = "2026-03-22"
+total_rules = 1463
+last_updated = "2026-08-03"
 
-[categories.logical]
-description = "Logical transformations that preserve query semantics"
+[categories.cost-models.cost-models]
+rules = ["geospatial-cost-model", "multi-column-correlation", "outlier-aware-estimation", "time-series-cost-model", "aggregate-cardinality-estimation", "aggregation-cost-formulas", "cache-conscious-cost-model", "cardinality-estimation", "cloud-elastic-cost-model", "composite-cost-model", "concurrency-contention-cost", "cost-calibration-duckdb", "cost-calibration-postgresql", "cost-calibration", "cpu-cost-model", "distributed-query-routing-cost", "gpu-cost-model", "histogram-based-estimation", "io-cost-model", "join-cardinality-estimation", "join-cost-formulas", "memory-cost-model", "network-cost-model", "numa-aware-cost-model", "sampling-based-estimation", "selectivity-estimation", "storage-tiering-cost-model", "system-r-cost-formula", "system-r-join-cardinality", "system-r-selectivity-formulas", "neural-blend-cost-estimation", "online-learning-cost-calibration", "system-fingerprint-aware-costing"]
 
-[categories.logical.predicate-pushdown]
-description = "Push selection predicates closer to data sources"
-rules = [
-    "filter-through-join",
-    "filter-through-project",
-    "filter-through-union",
-    "filter-into-join-condition",
-    "filter-merge",
-    "extract-equijoin-predicate",
-    "filter-null-join-keys",
-]
+[categories.cost-models.cardinality]
+rules = ["cardinality-error-feedback", "cardinality-estimation", "correlation-aware-estimation", "dbest-histogram"]
 
-[categories.logical.join-reordering]
-description = "Reorder joins for optimal execution"
-rules = [
-    "join-associativity",
-    "join-commutativity",
-    "left-deep-to-bushy",
-    "cartesian-to-join",
-    "outer-join-to-inner",
-]
+[categories.cost-models.index-selection]
+rules = ["adaptive-index-selection"]
 
-[categories.logical.join-elimination]
-description = "Eliminate redundant joins"
-rules = []
+[categories.cost-models.ml-based]
+rules = ["bandit-algorithm-selection", "learned-cost-models"]
 
-[categories.logical.subquery-unnesting]
-description = "Convert subqueries to joins"
-rules = []
+[categories.cost-models.operators]
+rules = ["aggregate-operator-cost", "filter-operator-cost", "incremental-sort-operator-cost", "index-nest-loop-operator-cost", "index-scan-operator-cost", "join-operator-cost", "project-operator-cost", "scan-operator-cost", "sort-operator-cost"]
 
-[categories.logical.projection-pushdown]
-description = "Push projections to reduce data movement"
-rules = [
-    "project-merge",
-    "project-through-join",
-    "column-pruning",
-]
+[categories.cost-models.selectivity]
+rules = ["statistics-refinement", "system-r-selectivity"]
 
-[categories.logical.aggregate-pushdown]
-description = "Push aggregations for early reduction"
-rules = []
+[categories.cost-models.system-r]
+rules = ["system-r-access-path-enumeration", "system-r-dp-join-order", "system-r-independence-assumption", "system-r-index-only-access", "system-r-index-vs-scan", "system-r-interesting-orders", "system-r-left-deep-trees", "system-r-merge-scan-cost", "system-r-multi-index-access", "system-r-nested-loop-cost", "system-r-temp-materialization"]
 
-[categories.logical.expression-simplification]
-description = "Simplify expressions and constants"
-rules = [
-    "constant-folding",
-    "boolean-simplification",
-    "arithmetic-simplification",
-    "null-propagation",
-    "common-subexpression-elimination",
-    "propagate-empty-relation",
-]
+[categories.database-specific.apache-doris]
+rules = ["apache-doris-multi-distinct-cte-rewrite", "apache-doris-nereids-cascades", "apache-doris-pk-fk-aggregate-pushdown", "apache-doris-tablet-pruning"]
 
-[categories.logical.limit-pushdown]
-description = "Push limits to reduce processing"
-rules = []
+[categories.database-specific.apache-phoenix]
+rules = ["apache-phoenix-guidepost-parallel-split", "apache-phoenix-skip-scan-composite-key"]
 
-[categories.logical.set-operations]
-description = "Optimize UNION, INTERSECT, EXCEPT"
-rules = [
-    "union-merge",
-    "intersect-to-join",
-]
+[categories.database-specific.calcite]
+rules = ["calcite-aggregate-expand-distinct", "calcite-aggregate-join-transpose", "aggregate-merge", "calcite-aggregate-project-merge", "aggregate-reduce-functions", "calcite-aggregate-remove", "calcite-aggregate-union-transpose", "aggregate-values", "calcite-calc-merge", "exchange-remove-constant-keys", "calcite-filter-aggregate-transpose", "filter-merge", "calcite-filter-project-transpose", "filter-sample-transpose", "calcite-filter-set-op-transpose", "calcite-filter-to-calc", "filter-window-transpose", "intersect-to-distinct", "intersect-to-semi-join", "calcite-join-associate", "calcite-join-commute", "calcite-join-condition-push", "join-derive-is-not-null-filter", "join-expand-or-to-union", "calcite-join-push-through-join", "join-to-multi-join", "calcite-join-to-semi-join", "join-union-transpose", "project-correlate-transpose", "calcite-project-merge", "calcite-project-remove", "calcite-project-set-op-transpose", "calcite-project-to-calc", "project-to-window", "calcite-project-window-transpose", "calcite-reduce-expressions", "semi-join-filter-transpose", "calcite-sort-join-transpose", "calcite-sort-project-transpose", "sort-remove-duplicate-keys", "calcite-sort-remove", "calcite-sort-union-transpose", "calcite-sub-query-remove", "union-eliminator", "calcite-union-merge", "union-pull-up-constants", "values-reduce", "calcite-filter-into-join"]
 
-[categories.physical]
-description = "Physical optimizations for execution"
+[categories.database-specific.clickhouse]
+rules = ["clickhouse-aggregate-projection-rewrite", "clickhouse-column-pruning-unused-removal", "clickhouse-deferred-function-execution", "clickhouse-filter-pushdown-to-storage", "clickhouse-join-to-in-conversion", "clickhouse-lazy-materialization", "clickhouse-limit-pushdown", "clickhouse-merge-expressions", "clickhouse-normal-projection-rewrite", "clickhouse-outer-to-inner-join-conversion", "clickhouse-partition-independent-aggregation", "clickhouse-partition-pruning", "clickhouse-prewhere-filter-pushdown", "clickhouse-read-in-order-sort-elimination", "clickhouse-redundant-sort-removal", "clickhouse-runtime-join-filter", "clickhouse-sparse-index-granule-pruning", "clickhouse-topk-sort-optimization", "clickhouse-aggregate-projection", "clickhouse-direct-text-index-read", "clickhouse-filter-pushdown-through-join", "clickhouse-lift-up-array-join", "clickhouse-lift-up-functions", "clickhouse-limit-pushdown-distributed", "clickhouse-normal-projection-usage", "clickhouse-optimize-join-to-semi", "clickhouse-outer-join-to-inner", "clickhouse-prewhere-pushdown", "clickhouse-primary-key-condition-limit", "clickhouse-read-in-order", "clickhouse-remove-redundant-distinct", "clickhouse-remove-redundant-sorting", "clickhouse-runtime-filter-join", "clickhouse-sparse-index-skip", "clickhouse-split-filter", "clickhouse-topk-optimization", "clickhouse-use-data-parallel-aggregation"]
 
-[categories.physical.join-algorithms]
-description = "Choose optimal join algorithms"
-rules = []
-
-[categories.physical.index-selection]
-description = "Select appropriate indexes"
-rules = []
-
-[categories.physical.aggregation-strategies]
-description = "Choose aggregation strategies"
-rules = []
-
-[categories.physical.parallelization]
-description = "Parallel execution strategies"
-rules = []
-
-[categories.physical.materialization]
-description = "Materialization strategies"
-rules = []
-
-[categories.database-specific]
-description = "Database-specific optimizations"
+[categories.database-specific.cockroachdb]
+rules = ["cockroachdb-anti-join-disjunction-to-union", "cockroachdb-commute-left-to-right-join", "cockroachdb-convert-semi-to-inner-non-equality", "crdb-filter-consolidation", "cockroachdb-generate-index-scans", "cockroachdb-generate-inverted-index-scans", "cockroachdb-generate-limited-index-scans", "crdb-join-reorder", "cockroachdb-locality-optimized-lookup-join", "cockroachdb-locality-optimized-scan", "crdb-lookup-join-virtual-cols", "cockroachdb-push-limit-into-project-scan", "cockroachdb-push-limit-into-scan", "cockroachdb-reorder-joins", "cockroachdb-replace-min-with-limit", "cockroachdb-scalar-min-max-to-limit", "cockroachdb-scalar-min-max-to-subqueries", "cockroachdb-semi-join-to-inner-with-distinct", "cockroachdb-split-disjunction-join-to-union"]
 
 [categories.database-specific.datafusion]
-description = "Apache DataFusion Arrow-native query engine optimizations"
-rules = [
-    "datafusion-filter-pushdown-through-join",
-    "datafusion-projection-pushdown",
-    "datafusion-type-coercion",
-    "datafusion-common-subexpr-elimination",
-    "datafusion-scalar-subquery-to-join",
-    "datafusion-limit-pushdown",
-    "datafusion-aggregate-statistics",
-    "datafusion-join-reordering",
-    "datafusion-parquet-predicate-pushdown",
-    "datafusion-hash-join-selection",
-    "datafusion-repartition-insertion",
-    "datafusion-eliminate-unnecessary-sort",
-    "datafusion-simplify-expressions",
-    "datafusion-propagate-empty-relation",
-    "datafusion-single-distinct-to-groupby",
-    "datafusion-decorrelate-subquery",
-    "datafusion-window-function-optimization",
-    "datafusion-replace-distinct-aggregate",
-    "datafusion-unnest-rewrite",
-    "datafusion-pipeline-breaking-optimization",
-]
+rules = ["datafusion-aggregate-statistics", "datafusion-common-subexpr-elimination", "datafusion-decorrelate-subquery", "datafusion-eliminate-unnecessary-sort", "datafusion-hash-join-selection", "datafusion-join-reordering", "datafusion-limit-pushdown", "datafusion-parquet-predicate-pushdown", "datafusion-pipeline-breaking-optimization", "datafusion-projection-pushdown", "datafusion-propagate-empty-relation", "datafusion-repartition-insertion", "datafusion-replace-distinct-aggregate", "datafusion-scalar-subquery-to-join", "datafusion-simplify-expressions", "datafusion-single-distinct-to-groupby", "datafusion-type-coercion", "datafusion-unnest-rewrite", "datafusion-window-function-optimization", "datafusion-filter-pushdown-through-join"]
+
+[categories.database-specific.derby]
+rules = ["derby-bulk-fetch", "derby-constant-expression-evaluation", "derby-constraint-based-optimization", "derby-covering-index", "derby-distinct-elimination", "derby-exists-to-join", "derby-group-by-optimization", "derby-hash-join", "derby-in-list-multi-probe", "derby-index-selection", "derby-join-ordering", "derby-materialized-subquery", "derby-nested-loop-join", "derby-not-exists-to-antijoin", "derby-outer-to-inner-join", "derby-predicate-pushdown", "derby-scroll-insensitive-optimization", "derby-sort-avoidance", "derby-table-lock-escalation", "derby-transitive-closure", "derby-union-all-optimization", "derby-view-flattening"]
+
+[categories.database-specific.documentdb-core]
+rules = ["docdb-filter-below-project", "docdb-filter-through-join-left", "docdb-match-below-aggregate", "docdb-merge-bson-filters", "docdb-split-conjunctive-bson-filter"]
+
+[categories.database-specific.drill]
+rules = ["drill-dynamic-udf-optimization", "drill-late-materialization", "drill-schema-discovery-pushdown", "drill-schema-versioning"]
+
+[categories.database-specific.duckdb]
+rules = ["duckdb-adaptive-perfect-hash-group", "duckdb-zonemap-pruning"]
+
+[categories.database-specific.duckdb-core]
+rules = ["duckdb-limit-through-union", "duckdb-not-eq", "duckdb-not-ge", "duckdb-not-gt", "duckdb-not-le", "duckdb-not-lt", "duckdb-not-ne", "duckdb-project-pushdown", "duckdb-sort-below-aggregate", "duckdb-sub-self", "duckdb-filter-through-left-join-left"]
+
+[categories.database-specific.exasol]
+rules = ["exasol-auto-small-table-replication", "exasol-automatic-index-management"]
+
+[categories.database-specific.firebird]
+rules = ["firebird-optimize-for-first-rows"]
+
+[categories.database-specific.flink]
+rules = ["flink-deduplication-on-changelog", "flink-lookup-join-caching", "flink-minibatch-aggregation", "flink-retract-optimization", "flink-stream-table-join-temporal", "flink-watermark-pushdown", "flink-window-aggregation-optimization"]
+
+[categories.database-specific.greenplum]
+rules = ["greenplum-external-table-pushdown", "greenplum-motion-node-optimization"]
+
+[categories.database-specific.hyper]
+rules = ["hyper-adaptive-code-generation", "hyper-morsel-driven-parallelism", "hyper-vectorized-interpretation"]
+
+[categories.database-specific.impala]
+rules = ["impala-codegen-disabled-fallback", "impala-hdfs-caching", "impala-parquet-predicate-pushdown", "impala-runtime-filter-propagation"]
 
 [categories.database-specific.materialize]
-description = "Materialize streaming SQL / differential dataflow optimizations"
-rules = [
-    "materialize-temporal-filter-pushdown",
-    "materialize-demand-projection",
-    "materialize-join-implementation",
-    "materialize-reduce-elision",
-    "materialize-nonnull-requirements",
-    "materialize-fusion",
-    "materialize-arrangement-sharing",
-    "materialize-reduce-reduction",
-    "materialize-threshold-elision",
-    "materialize-let-motion",
-    "materialize-canonicalize-mfp",
-    "materialize-topk-monotonic",
-    "materialize-literal-lifting",
-    "materialize-predicate-pushdown-through-join",
-    "materialize-column-knowledge",
-]
+rules = ["materialize-arrangement-sharing", "materialize-bloom-filter-state-pruning", "materialize-canonicalize-mfp", "materialize-column-knowledge", "materialize-delta-join-planning", "materialize-demand-projection", "materialize-fusion", "materialize-join-implementation", "materialize-let-motion", "materialize-literal-lifting", "materialize-monotonic-join-optimization", "materialize-nonnull-requirements", "materialize-reduce-elision", "materialize-reduce-reduction", "materialize-sink-projection-pushdown", "materialize-temporal-filter-pushdown", "materialize-threshold-elision", "materialize-time-window-aggregation", "materialize-topk-monotonic", "materialize-watermark-propagation", "materialize-predicate-pushdown-through-join"]
 
-[categories.database-specific.oracle]
-description = "Oracle Database cost-based optimizer transformations"
-rules = [
-    "oracle-star-transformation",
-    "oracle-bloom-filter-join",
-    "oracle-result-cache",
-    "oracle-partition-pruning",
-    "oracle-or-expansion",
-    "oracle-subquery-unnesting",
-    "oracle-join-predicate-pushdown",
-    "oracle-view-merging",
-    "oracle-index-fast-full-scan",
-    "oracle-materialized-view-rewrite",
-    "oracle-parallel-execution",
-    "oracle-adaptive-plans",
-    "oracle-hash-group-by",
-    "oracle-table-expansion",
-    "oracle-predicate-move-around",
-    "oracle-in-memory-scan",
-    "oracle-join-elimination",
-    "oracle-connect-by-optimization",
-    "oracle-batch-table-access",
-    "oracle-group-by-placement",
-]
+[categories.database-specific.monetdb]
+rules = ["monetdb-band-join", "monetdb-bat-join-ordering", "monetdb-bitwise-bat-operations", "monetdb-bitwise-operations", "monetdb-cand-list-intersection", "monetdb-column-recycling", "monetdb-columnar-hash-join", "monetdb-crackers-adaptive-index", "monetdb-dictionary-compression", "monetdb-imprints-scan", "monetdb-late-materialization", "monetdb-mal-pipeline-optimization", "monetdb-merge-join", "monetdb-mitosis-parallelism", "monetdb-multi-column-sort-sharing", "monetdb-ordered-index-scan", "monetdb-partitioned-hash-group", "monetdb-projection-pushdown", "monetdb-range-select", "monetdb-run-length-encoding", "monetdb-simd-vectorized-selection", "monetdb-stochastic-cracking", "monetdb-strimps-string-filter", "monetdb-string-heap-optimization", "monetdb-tail-ordering", "monetdb-window-function-optimization", "monetdb-zone-map-scan-skipping", "monetdb-zonemap-skipping"]
+
+[categories.database-specific.mongodb]
+rules = ["mongodb-compound-index-selection", "mongodb-document-validation", "mongodb-geospatial-index", "mongodb-lookup-pipeline-optimization", "mongodb-sharded-aggregation", "mongodb-text-search-index", "mongodb-bucket-auto-optimization", "mongodb-change-stream-optimization", "mongodb-covered-query", "mongodb-document-projection-pushdown", "mongodb-graphlookup-optimization", "mongodb-hashed-sharding-targeted-query", "mongodb-index-intersection", "mongodb-merge-output-optimization", "mongodb-multikey-index-bounds", "mongodb-partial-index-selection", "mongodb-pipeline-stage-reordering", "mongodb-sbe-slot-based-execution", "mongodb-wildcard-index-planning"]
 
 [categories.database-specific.mssql]
-description = "Microsoft SQL Server optimizer and execution engine optimizations"
-rules = [
-    "mssql-columnstore-scan",
-    "mssql-adaptive-join",
-    "mssql-batch-mode-execution",
-    "mssql-parameter-sniffing",
-    "mssql-indexed-view-matching",
-    "mssql-batch-mode-on-rowstore",
-    "mssql-partition-elimination",
-    "mssql-spool-optimization",
-    "mssql-memory-grant-feedback",
-    "mssql-predicate-pushdown-computed",
-    "mssql-hash-match-aggregate",
-    "mssql-query-store-forced-plan",
-    "mssql-star-join-optimization",
-    "mssql-key-lookup-elimination",
-    "mssql-window-aggregate-pushdown",
-    "mssql-seek-predicate-optimization",
-    "mssql-subquery-to-apply",
-    "mssql-interleaved-execution",
-    "mssql-in-memory-oltp",
-    "mssql-trivial-plan",
-]
+rules = ["mssql-adaptive-join", "mssql-batch-mode-execution", "mssql-batch-mode-on-rowstore", "mssql-columnstore-scan", "mssql-hash-match-aggregate", "mssql-in-memory-oltp", "mssql-indexed-view-matching", "mssql-memory-grant-feedback", "mssql-interleaved-execution", "mssql-key-lookup-elimination", "mssql-parameter-sniffing", "mssql-partition-elimination", "mssql-predicate-pushdown-computed", "mssql-query-store-forced-plan", "mssql-seek-predicate-optimization", "mssql-spool-optimization", "mssql-star-join-optimization", "mssql-subquery-to-apply", "mssql-trivial-plan", "mssql-window-aggregate-pushdown"]
 
-[categories.execution-models]
-description = "Execution model specific optimizations"
-rules = []
+[categories.database-specific.mysql]
+rules = ["mysql-batched-key-access", "mysql-condition-fanout-filter", "mysql-constant-folding", "mysql-cost-based-subquery", "mysql-covering-index", "mysql-derived-table-merge", "mysql-distinct-optimization", "mysql-eq-range-index", "mysql-exists-to-in", "mysql-group-by-optimization", "mysql-hash-join", "mysql-index-condition-pushdown", "mysql-index-merge", "mysql-invisible-index", "mysql-join-buffer-bnl", "mysql-join-elimination", "mysql-limit-optimization", "mysql-multi-range-read", "mysql-order-by-optimization", "mysql-partition-pruning", "mysql-predicate-pushdown", "mysql-semi-join-strategies", "mysql-skip-scan", "mysql-subquery-materialization", "mysql-window-function-optimization"]
 
-[categories.cost-models]
-description = "Cost estimation rules"
-rules = []
+[categories.database-specific.neo4j]
+rules = ["neo4j-bidirectional-bfs", "neo4j-query-plan-cache", "neo4j-expand-into", "neo4j-index-order-by", "neo4j-label-scan", "neo4j-relationship-index", "neo4j-rel-type-filter", "neo4j-shortest-path-dijkstra", "neo4j-var-length-expansion", "neo4j-degree-pruning", "neo4j-eager-aggregation-avoidance", "neo4j-fulltext-index-query", "neo4j-join-hint-directed-planning", "neo4j-node-count-from-store", "neo4j-optional-match-to-anti-semi-apply", "neo4j-pattern-comprehension-optimization", "neo4j-property-index-seek"]
 
-[categories.hardware]
-description = "Hardware-specific acceleration rules (GPU, FPGA, SIMD, NUMA)"
+[categories.database-specific.oceanbase]
+rules = ["oceanbase-dynamic-sampling-optimization", "oceanbase-skyline-access-path-pruning"]
 
-[categories.hardware.gpu]
-description = "GPU-accelerated operators using CUDA/OpenCL"
-rules = [
-    "gpu-parallel-scan",
-    "gpu-hash-join",
-    "gpu-aggregation",
-    "gpu-sort",
-    "gpu-predicate-evaluation",
-    "gpu-string-operations",
-    "gpu-window-function",
-    "gpu-distinct-aggregation",
-]
+[categories.database-specific.oracle]
+rules = ["oracle-adaptive-plans", "oracle-batch-table-access", "oracle-bloom-filter-join", "oracle-connect-by-optimization", "oracle-group-by-placement", "oracle-hash-group-by", "oracle-in-memory-scan", "oracle-index-fast-full-scan", "oracle-join-elimination", "oracle-join-predicate-pushdown", "oracle-materialized-view-rewrite", "oracle-or-expansion", "oracle-parallel-execution", "oracle-partition-pruning", "oracle-predicate-move-around", "oracle-star-transformation", "oracle-subquery-unnesting", "oracle-table-expansion", "oracle-view-merging"]
 
-[categories.hardware.fpga]
-description = "FPGA streaming and near-storage acceleration"
-rules = [
-    "fpga-stream-filter",
-    "fpga-compression-scan",
-    "fpga-hash-join",
-    "fpga-regex-filter",
-]
+[categories.database-specific.oracle-json-duality-core]
+rules = ["duality-json-filter-below-aggregate", "duality-json-filter-below-project", "duality-json-filter-through-join", "duality-merge-json-filters", "duality-split-json-filters"]
 
-[categories.hardware.accelerator]
-description = "CPU-level hardware optimizations (SIMD, NUMA, cache)"
-rules = [
-    "heterogeneous-operator-placement",
-    "simd-vectorized-scan",
-    "numa-aware-partitioning",
-    "prefetch-aware-join",
-    "cache-conscious-partitioning",
-]
+[categories.database-specific.postgresql]
+rules = ["postgresql-hash-to-sort-aggregate", "postgresql-index-only-scan"]
 
-[categories.hardware.data-placement]
-description = "Host-device data transfer and memory management"
-rules = [
-    "host-to-device-transfer",
-    "device-memory-caching",
-    "columnar-conversion",
-    "unified-memory-management",
-]
+[categories.database-specific.postgresql/extensions]
+rules = ["feedback-driven-plan-correction", "hypothetical-index-testing", "predicate-frequency-index-recommendation"]
 
-[categories.distributed]
-description = "Distributed query optimization rules for multi-node execution"
+[categories.database-specific.presto]
+rules = ["presto-cost-based-join-reordering", "presto-dynamic-partition-pruning", "presto-fragment-result-caching"]
 
-[categories.distributed.exchange-placement]
-description = "Exchange operator insertion, merging, and removal"
-rules = [
-    "insert-exchange",
-    "merge-adjacent-exchanges",
-    "remove-redundant-exchange",
-    "choose-exchange-type",
-]
+[categories.database-specific.sqlite]
+rules = ["sqlite-automatic-index", "sqlite-covering-index-scan"]
 
-[categories.distributed.data-movement]
-description = "Minimize data movement across the network"
-rules = [
-    "push-filter-below-exchange",
-    "push-project-below-exchange",
-    "push-limit-below-exchange",
-    "minimize-network-transfer",
-    "union-all-pushdown",
-]
+[categories.database-specific.sqlite-core]
+rules = ["sqlite-const-prop-join", "sqlite-eq-implies-not-null-left", "sqlite-eq-implies-not-null-right", "sqlite-eq-transitive", "sqlite-not-in-to-anti", "sqlite-or-distribute", "sqlite-range-to-eq"]
 
-[categories.distributed.distributed-joins]
-description = "Distributed join strategies (broadcast, shuffle, co-located)"
-rules = [
-    "broadcast-join",
-    "shuffle-join",
-    "colocated-join",
-    "lookup-join",
-    "semi-join-reduction",
-    "skew-aware-join",
-    "asymmetric-repartition-join",
-]
+[categories.database-specific.starrocks]
+rules = ["starrocks-colocate-join", "starrocks-large-in-to-join", "starrocks-skew-join-split"]
 
-[categories.distributed.partial-aggregation]
-description = "Two/three-phase aggregation for distributed execution"
-rules = [
-    "two-phase-aggregation",
-    "three-phase-distinct-agg",
-    "push-partial-agg-below-exchange",
-]
+[categories.database-specific.teradata]
+rules = ["teradata-amp-partial-groupby", "teradata-star-join-optimization"]
 
-[categories.distributed.partition-pruning]
-description = "Eliminate irrelevant partitions from distributed scans"
-rules = [
-    "static-partition-pruning",
-    "dynamic-partition-pruning",
-    "partition-wise-join",
-]
+[categories.database-specific.tidb]
+rules = ["tidb-aggregation-elimination", "tidb-aggregation-merge", "tidb-aggregation-push-down-join", "tidb-aggregation-pushdown-decomposable", "tidb-coprocessor-limit-pushdown", "tidb-coprocessor-predicate-pushdown", "tidb-coprocessor-projection-pushdown", "tidb-coprocessor-topn-pushdown", "tidb-derive-topn-from-window", "tidb-index-merge-scan", "tidb-index-merge", "tidb-join-reorder-dp", "tidb-outer-join-elimination", "tidb-partition-pruning", "tidb-predicate-push-down-shard-index", "tidb-runtime-filter-generation", "tidb-semi-join-rewrite", "tidb-skew-distinct-agg-rewrite", "tidb-topn-push-down"]
 
-[categories.distributed.distributed-sort]
-description = "Distributed sorting and top-N strategies"
-rules = [
-    "merge-sort-gather",
-    "distributed-topn",
-    "distributed-window-function",
-]
+[categories.database-specific.timescaledb]
+rules = ["timescaledb-chunk-pruning", "timescaledb-continuous-aggregates", "timescaledb-time-bucket-aggregation"]
 
-[categories.distributed.colocation]
-description = "Data co-location and exchange elimination strategies"
-rules = [
-    "reference-table-colocation",
-    "partition-key-colocation",
-    "reference-table-join",
-    "colocation-aware-placement",
-    "multi-join-colocation",
-]
+[categories.database-specific.trino]
+rules = ["trino-adaptive-partitioning", "trino-adaptive-plan-optimization", "trino-connector-pushdown-framework", "trino-index-join-optimizer", "trino-limit-pushdown", "trino-predicate-pushdown-dynamic-filtering"]
 
-[categories.distributed.stage-planning]
-description = "Query stage decomposition and pipeline planning"
-rules = [
-    "stage-decomposition",
-    "pipeline-stages",
-    "minimize-stage-count",
-]
+[categories.database-specific.voltdb]
+rules = ["voltdb-deterministic-order-optimization", "voltdb-replicated-table-optimization", "voltdb-single-partition-optimization"]
 
-[categories.multi-model]
-description = "Multi-model optimization rules for graph, document, and time-series databases"
+[categories.distributed.distributed-execution]
+rules = ["clickhouse-distributed-query-optimization"]
 
-[categories.multi-model.graph]
-description = "Graph database traversal and pattern matching optimizations"
-rules = [
-    "join-to-traversal",
-    "bidirectional-search",
-    "path-materialization",
-    "vertex-centric-index",
-    "expand-into",
-    "label-scan-pushdown",
-    "pattern-decomposition",
-    "degree-aware-join-ordering",
-    "predicate-pushdown-through-traversal",
-    "subgraph-isomorphism-pruning",
-]
+[categories.distributed.locality]
+rules = ["cockroachdb-locality-optimized-lookup"]
 
-[categories.multi-model.document]
-description = "Document database query and pipeline optimizations"
-rules = [
-    "nested-predicate-pushdown",
-    "projection-to-covered-query",
-    "array-unwind-pushdown",
-    "schema-inference-pushdown",
-    "lookup-to-embedded",
-    "compound-index-selection",
-    "pipeline-coalescence",
-    "shard-key-targeted-query",
-    "group-push-accumulator",
-    "change-stream-filter-pushdown",
-]
+[categories.execution-models.execution-models]
+rules = ["column-adaptive-execution", "column-aggregate", "column-cache-conscious", "column-chunk-sizing", "column-compression", "column-decomposed-storage", "column-filter", "column-hash-join", "column-materialization", "column-multi-operation", "column-projection", "column-scan", "column-vectorized-ops", "differential-arrangement", "differential-changelog", "differential-delta-query", "differential-incremental-view", "differential-late-data", "differential-state-management", "differential-stream-aggregate", "differential-stream-join", "differential-timely-dataflow", "differential-watermark", "morsel-driven-adaptive-sizing", "morsel-driven-aggregate", "morsel-driven-hash-join", "morsel-driven-lock-free", "morsel-driven-numa-aware", "morsel-driven-parallelism", "morsel-driven-pipeline", "morsel-driven-scan", "morsel-driven-sort", "morsel-driven-work-stealing", "push-based-adaptive-compilation", "push-based-aggregate", "push-based-expression-fusion", "push-based-filter", "push-based-hash-join", "push-based-llvm-codegen", "push-based-loop-fusion", "push-based-scan", "vectorized-hash-join", "vectorized-scan", "vectorized-adaptive-batching", "vectorized-aggregate", "vectorized-compression", "vectorized-expression-eval", "vectorized-predicate-pushdown", "vectorized-projection", "vectorized-sort", "volcano-aggregate", "volcano-filter", "volcano-hash-join", "volcano-limit", "volcano-nested-loop-join", "volcano-pipeline-breakers", "volcano-projection", "volcano-scan", "volcano-sort", "volcano-union", "volcano-exchange-operator", "volcano-iterator-fusion", "volcano-iterator-protocol", "volcano-memory-management", "volcano-subquery-execution", "volcano-tuple-materialization", "adaptive-aggregation-switching", "adaptive-batch-sizing", "adaptive-bloom-filter", "adaptive-index-routing", "adaptive-join-selection", "adaptive-memory-grant", "adaptive-parallelism-scaling", "adaptive-query-reoptimization", "adaptive-skew-handling", "adaptive-sort-strategy", "adaptive-spill-strategy"]
 
-[categories.multi-model.timeseries]
-description = "Time-series database scan, aggregation, and pruning optimizations"
-rules = [
-    "time-range-pruning",
-    "downsampling-pushdown",
-    "last-point-optimization",
-    "gap-fill-pushdown",
-    "retention-policy-pruning",
-    "window-function-pushdown",
-    "segment-merge-elimination",
-    "tag-index-scan",
-    "aligned-aggregation-merge",
-    "delta-encoding-scan",
-]
+[categories.execution-models.adaptive]
+rules = ["dynamic-pipeline-optimization", "eddy-adaptive-execution", "progressive-sampling", "query-feedback-loop"]
 
-[categories.experimental]
-description = "Research and experimental rules"
-rules = []
+[categories.execution-models.approximate]
+rules = ["approximate-query-processing"]
+
+[categories.execution-models.column-at-a-time]
+rules = ["column-batch-processing", "column-compression-aware", "column-late-materialization", "column-late-tuple-reconstruction", "column-selection-pushdown", "column-string-swar", "column-vectorized-expression"]
+
+[categories.execution-models.compilation]
+rules = ["compilation-to-native"]
+
+[categories.execution-models.differential]
+rules = ["differential-collection-operators", "differential-frontier-advancement", "differential-incremental-aggregation", "differential-incremental-join", "differential-retraction-handling", "differential-time-aware-operators", "differential-consolidation", "differential-monotonic-topk"]
+
+[categories.execution-models.experimental]
+rules = ["adaptive-indexing", "approximate-query-processing", "gpu-offloading", "learned-cost-models", "ml-cardinality-estimation", "quantum-inspired-optimization", "query-compilation-jit", "rl-join-ordering"]
+
+[categories.execution-models.morsel-driven]
+rules = ["morsel-cache-locality", "morsel-memory-management", "morsel-pipeline-breakers"]
+
+[categories.execution-models.pipeline]
+rules = ["volcano-iterator"]
+
+[categories.execution-models.push-based]
+rules = ["push-based-code-generation", "push-based-pipeline"]
+
+[categories.execution-models.streaming]
+rules = ["stream-join-optimization", "window-aggregate-optimization", "stream-operator-fusion", "retraction-optimization", "stream-table-join", "watermark-propagation", "window-over-stream"]
+
+[categories.execution-models.top-down]
+rules = ["cascades-memo"]
+
+[categories.execution-models.vectorized]
+rules = ["vectorized-prewhere-chain", "vectorized-topk-filter", "vectorized-execution", "vectorized-filter"]
+
+[categories.experimental.adaptive]
+rules = ["adaptive-aggregation", "adaptive-indexing", "adaptive-join-selection", "eddies-routing", "eddy-operator", "leo-statistics-feedback", "mid-query-reoptimization", "mid-query-replanning", "parametric-query-optimization", "plan-stability-control", "progressive-optimization", "query-result-caching", "ripple-join", "robust-query-optimization", "runtime-cardinality-feedback", "runtime-plan-switching"]
+
+[categories.experimental.approximate]
+rules = ["approximate-count-distinct", "approximate-percentile", "approximate-query-processing", "sample-based-aggregation", "sample-based-join", "sketches-for-aggregation"]
+
+[categories.experimental.compilation]
+rules = ["compilation-cost-tradeoff", "query-compilation-jit", "vectorized-vs-compiled"]
+
+[categories.experimental.hardware-accel]
+rules = ["fpga-query-acceleration", "gpu-offloading", "quantum-inspired-optimization"]
+
+[categories.experimental.ml-guided]
+rules = ["learned-cardinality", "learned-cost-calibration", "learned-cost-models", "learned-index-structures", "learned-join-ordering", "learned-query-scheduling", "ml-cardinality-estimation", "plan-hint-generation", "query-embedding-similarity", "rl-join-ordering", "workload-aware-indexing"]
+
+[categories.experimental.semantic]
+rules = ["commutativity-aware-rewriting", "constraint-based-rewriting", "egg-extraction-strategies", "equality-saturation", "functional-dependency-rewrite", "hottsql-proof-rewrite", "semijoin-reduction"]
+
+[categories.experimental.wcoj]
+rules = ["delta-wcoj", "factorized-join", "free-join", "generic-join", "honeycomb-join", "leapfrog-triejoin", "level-headed-join", "wcoj-clique-detection", "wcoj-star-pattern", "wcoj-to-binary-fallback"]
+
+[categories.federated.pushdown]
+rules = ["federated-aggregate-pushdown-avg", "federated-aggregate-pushdown-count", "federated-aggregate-pushdown-distinct-count", "federated-aggregate-pushdown-group-by", "federated-aggregate-pushdown-having", "federated-aggregate-pushdown-min-max", "federated-aggregate-pushdown-multi-stage", "federated-aggregate-pushdown-sum", "federated-filter-pushdown-remote", "federated-join-pushdown-bind-join", "federated-join-pushdown-colocated", "federated-join-pushdown-hash-partition", "federated-join-pushdown-semi-join", "federated-projection-pushdown-computed-columns", "federated-projection-pushdown-join-columns", "federated-projection-pushdown-select-columns", "federated-projection-pushdown-star-elimination", "federated-projection-pushdown-with-filter"]
+
+[categories.federated.strategy]
+rules = ["federated-prefer-data-shipping-complex-query", "federated-prefer-data-shipping-cross-site-join", "federated-prefer-data-shipping-small-table", "federated-prefer-query-shipping-high-selectivity", "federated-prefer-query-shipping-limit", "federated-prefer-query-shipping-small-result"]
+
+[categories.logical.aggregate-elimination]
+rules = ["tidb-aggregate-elimination"]
+
+[categories.logical.aggregate-optimization-core]
+rules = ["aggregate-over-aggregate", "filter-below-aggregate"]
+
+[categories.logical.aggregate-pushdown]
+rules = ["calcite-aggregate-case-to-filter", "aggregate-distinct-optimization", "aggregate-expand-distinct-aggregates", "calcite-aggregate-extract-project", "calcite-aggregate-filter-to-case", "aggregate-filter-to-filtered-agg", "calcite-aggregate-filter-to-filtered-aggregate", "calcite-aggregate-filter-transpose", "calcite-aggregate-grouping-sets-to-union", "aggregate-merge", "calcite-aggregate-min-max-to-limit", "aggregate-over-aggregate-fusion", "aggregate-project-merge", "calcite-aggregate-project-pull-up-constants", "aggregate-reduce-functions", "aggregate-selectivity-estimation", "aggregate-through-union", "calcite-aggregate-union-aggregate", "aggregate-values", "aggregate-with-constant-elimination", "count-star-optimization", "distinct-to-group-by", "eager-aggregation", "group-by-pushdown-through-join", "having-to-filter-separation", "min-max-index-scan", "partial-aggregation-insertion", "calcite-project-aggregate-merge", "pk-fk-aware-aggregate"]
+
+[categories.logical.aggregation]
+rules = ["mongodb-grouping-pushdown"]
+
+[categories.logical.cast-optimization-core]
+rules = ["eliminate-double-cast", "remove-cast-int-to-bigint", "remove-cast-int-to-int", "remove-cast-int-to-integer", "remove-cast-str-to-text", "remove-cast-str-to-varchar"]
+
+[categories.logical.column-pruning]
+rules = ["clickhouse-column-pruning", "tidb-column-pruning"]
+
+[categories.logical.column-pruning-core]
+rules = ["project-idempotent", "project-through-except", "project-through-intersect", "project-through-limit", "project-values-all"]
+
+[categories.logical.consensus-core]
+rules = ["empty-anti-join-left", "empty-anti-join-right", "empty-cross-join-left", "empty-cross-join-right", "empty-except-left", "empty-except-right", "empty-filter", "empty-inner-join-left", "empty-inner-join-right", "empty-intersect-left", "empty-intersect-right", "empty-limit", "empty-project", "empty-semi-join-left", "empty-semi-join-right", "empty-sort", "empty-union-left", "empty-union-right", "extract-equijoin-from-and-left", "extract-equijoin-from-and-right", "filter-null-join-key-left", "filter-null-join-key-right"]
+
+[categories.logical.constant-folding-core]
+rules = ["fold-add-constants", "fold-mul-constants", "fold-sub-constants"]
+
+[categories.logical.count-metadata-core]
+rules = ["count-star-to-metadata"]
+
+[categories.logical.cse]
+rules = ["clickhouse-common-expression-elimination"]
+
+[categories.logical.cte-inlining-core]
+rules = ["cte-inline-direct-scan", "cte-inline-filter-scan", "cte-inline-project-filter-scan", "cte-inline-project-scan", "fold-const-int-eq"]
+
+[categories.logical.cte-optimization]
+rules = ["common-rel-sub-expr-register", "cte-column-pruning", "cte-constant-folding", "cte-filter-pushdown-through-union", "cte-inline-vs-materialize", "cte-inlining", "cte-join-elimination", "cte-materialization", "cte-merge-duplicate", "cte-predicate-pushdown", "cte-projection-pushdown", "cte-to-temp-table", "cte-unnesting", "recursive-cte-base-filter-pushdown", "recursive-cte-cycle-detection", "recursive-cte-depth-limit-pushdown", "recursive-cte-join-reorder", "recursive-cte-memoization", "recursive-cte-projection-pushdown", "recursive-cte-semi-naive-eval", "recursive-cte-to-iterative", "recursive-cte-to-tail-recursive"]
+
+[categories.logical.decorrelation-core]
+rules = ["anti-join-filter-absorb", "correlated-scalar-decorrelation", "grouping-set-expansion", "semi-join-filter-absorb"]
+
+[categories.logical.distinct-elimination]
+rules = ["tidb-distinct-elimination", "distinct-after-group-by", "distinct-filter-reorder", "distinct-limit-reorder", "distinct-on-unique-key", "distinct-over-aggregation", "distinct-over-pk", "distinct-over-primary-key", "distinct-pushdown-through-join", "distinct-pushdown-through-union", "distinct-sort-merge", "distinct-to-limit-one"]
+
+[categories.logical.expression-simplification]
+rules = ["arithmetic-identity", "arithmetic-simplification", "boolean-simplification", "calc-merge", "calc-remove", "case-simplification", "codd-relational-completeness", "common-subexpression-elimination", "constant-folding", "calcite-filter-remove-is-not-distinct-from", "in-list-optimization", "like-to-range", "null-propagation", "calcite-project-over-sum-to-sum0", "propagate-empty-relation", "calcite-reduce-decimals", "reduce-expressions", "starburst-contradiction-detection"]
+
+[categories.logical.expression-simplification-core]
+rules = ["add-commutative", "add-zero-left", "add-zero-right", "and-commutative", "and-false-left", "and-false-right", "and-idempotent", "and-true-left", "and-true-right", "demorgan-and-to-or", "demorgan-or-to-and", "double-neg-arith", "double-negation", "eq-commutative", "eq-null", "eq-reflexive", "filter-true", "ge-to-le", "gt-to-lt", "le-to-ge", "lt-to-gt", "mul-commutative", "mul-one-left", "mul-one-right", "mul-zero-left", "mul-zero-right", "ne-commutative", "ne-null", "ne-reflexive", "not-is-not-null", "not-is-null", "or-commutative", "or-false-left", "or-false-right", "or-idempotent", "or-true-left", "or-true-right", "sub-zero"]
+
+[categories.logical.functional-dependencies-core]
+rules = ["distinct-sort-reorder", "double-distinct-elimination", "eliminate-distinct-after-groupby", "sort-after-sort"]
+
+[categories.logical.function-optimization]
+rules = ["aggregate-function-simplification", "cast-elimination-for-index", "collation-aware-index-use", "constant-fold-aggregate", "constant-fold-cast", "constant-fold-comparison", "constant-fold-conditional", "constant-fold-datetime", "constant-fold-logical", "constant-fold-math", "constant-fold-nested", "constant-fold-null", "constant-fold-string", "deterministic-function-caching", "expensive-function-late-eval", "expression-index-rewrite", "function-based-index-scan", "function-filter-pushdown", "function-inverse-transform", "function-projection-pruning", "implicit-cast-index-match", "partial-index-predicate-match", "timezone-aware-index-use", "aggregate-function-decomposition", "array-function-optimization", "between-to-range", "case-simplification", "cast-elimination", "coalesce-simplification", "comparison-normalization", "constant-function-folding", "date-function-optimization", "deterministic-function-dedup", "expensive-function-above-join", "expensive-function-caching", "expensive-predicate-ordering", "expression-index-matching", "function-cost-reordering", "function-index-matching-composite", "function-inlining", "function-pushdown-past-aggregate", "function-pushdown-past-join", "geospatial-function-optimization", "greatest-least-optimization", "if-null-to-coalesce", "in-list-optimization", "is-null-optimization", "json-function-optimization", "like-to-range", "not-pushdown", "nullif-simplification", "predicate-implication", "pure-function-cse", "sargable-function-rewrite", "string-function-optimization", "type-inference-optimization", "volatile-function-barrier", "window-function-optimization"]
+
+[categories.logical.graph]
+rules = ["graph-pattern-matching", "transitive-closure-memoization", "community-detection-pushdown", "graph-index-exploitation", "graph-pattern-match-optimization", "reachability-transitive-closure", "shortest-path-optimization"]
+
+[categories.logical.index-pruning]
+rules = ["clickhouse-segment-index-pruning"]
+
+[categories.logical.join-elimination]
+rules = ["calcite-aggregate-join-join-remove", "calcite-aggregate-join-remove", "anti-join-simplification", "anti-join-to-not-exists", "cross-join-elimination", "degenerate-join-to-filter", "foreign-key-join-elimination", "full-to-left-and-right-join", "inner-join-identity-elimination", "join-add-redundant-semi-join", "key-propagation-for-join-elimination", "left-join-elimination", "left-join-null-rejection", "outer-join-to-filter", "outer-join-to-inner", "calcite-project-join-join-remove", "calcite-project-join-remove", "redundant-join-elimination", "self-join-elimination", "semi-join-filter-transpose", "semi-join-project-transpose", "semi-join-remove", "semi-join-to-existence-check", "starburst-unique-key-join-elimination", "unique-key-join-elimination"]
+
+[categories.logical.join-elimination-core]
+rules = ["cross-join-single-row-right"]
+
+[categories.logical.join-reorder]
+rules = ["cockroachdb-join-reorder", "tidb-join-reorder"]
+
+[categories.logical.join-reordering]
+rules = ["cartesian-to-join", "join-associate", "join-associativity", "join-commute", "join-push-through-join", "join-to-hyper-graph", "join-union-transpose", "learned-join-order", "left-deep-to-bushy", "outer-join-to-inner", "sideways-information-passing", "calcite-dphyp-join-reorder", "join-commutativity", "calcite-multi-join-optimize-bushy", "system-r-dynamic-programming", "system-r-left-deep-enumeration"]
+
+[categories.logical.join-reordering-core]
+rules = ["cartesian-to-join", "cross-join-commutativity", "join-associativity-left", "join-associativity-right", "join-commutativity", "left-outer-to-inner-with-filter", "right-outer-to-inner-with-filter"]
+
+[categories.logical.join-simplification]
+rules = ["tidb-outer-join-elimination", "tidb-semi-anti-join-to-inner"]
+
+[categories.logical.join-split]
+rules = ["cockroachdb-split-disjunctive-joins"]
+
+[categories.logical.join-transformation-core]
+rules = ["left-outer-to-inner-and", "left-outer-to-inner-eq", "left-outer-to-inner-ge", "left-outer-to-inner-gt", "left-outer-to-inner-le", "left-outer-to-inner-lt", "left-outer-to-inner-ne", "right-outer-to-inner-and", "right-outer-to-inner-eq", "right-outer-to-inner-ge", "right-outer-to-inner-gt", "right-outer-to-inner-le", "right-outer-to-inner-lt", "right-outer-to-inner-ne", "self-join-same-table"]
+
+[categories.logical.limit-pushdown]
+rules = ["tidb-limit-pushdown", "aggregate-min-max-to-limit", "limit-before-order-by", "limit-join-pushdown", "limit-one-to-exists", "limit-through-aggregate", "limit-through-projection", "limit-through-union-all", "limit-with-top-k-join", "offset-zero-elimination", "calcite-sort-join-copy", "sort-join-transpose", "sort-limit-fusion", "calcite-sort-merge", "calcite-sort-remove-constant-keys", "calcite-sort-remove-redundant", "sort-remove"]
+
+[categories.logical.limit-sort-optimization-core]
+rules = ["limit-merge", "limit-through-project", "sort-below-sort"]
+
+[categories.logical.materialized-view]
+rules = ["clickhouse-projection-rewrite"]
+
+[categories.logical.merge-cardinality]
+rules = ["neo4j-merge-cardinality"]
+
+[categories.logical.multi-model]
+rules = ["json-path-optimization", "xml-query-rewrite", "array-unnest-pushdown", "json-path-pushdown"]
+
+[categories.logical.null-simplification-core]
+rules = ["add-null-left", "add-null-right", "and-null-left", "and-null-right", "concat-null-left", "concat-null-right", "div-null-left", "div-null-right", "eq-null-left", "eq-null-right", "filter-null-predicate", "ge-null-left", "ge-null-right", "gt-null-left", "gt-null-right", "is-not-null-of-null", "is-null-of-null", "le-null-left", "le-null-right", "lt-null-left", "lt-null-right", "mod-null-left", "mod-null-right", "mul-null-left", "mul-null-right", "ne-null-left", "ne-null-right", "neg-null", "not-null", "or-null-false-left", "or-null-false-right", "or-null-null", "or-null-true-left", "or-null-true-right", "sub-null-left", "sub-null-right"]
+
+[categories.logical.partition-pruning]
+rules = ["clickhouse-partition-pruning"]
+
+[categories.logical.pattern-reorder]
+rules = ["neo4j-pattern-reorder"]
+
+[categories.logical.predicate-pushdown]
+rules = ["clickhouse-predicate-pushdown", "neo4j-predicate-pushdown", "tidb-predicate-pushdown", "function-push-down", "storage-push-down-aware", "expand-disjunction-for-join", "extract-equijoin-predicate", "filter-aggregate-transpose", "calcite-filter-correlate", "filter-into-aggregate", "filter-into-join", "filter-join", "filter-merge", "filter-null-join-keys", "filter-project-transpose", "calcite-filter-sort-transpose", "calcite-filter-table-function-transpose", "calcite-filter-table-scan", "filter-through-join", "filter-through-project", "filter-through-union", "join-derive-is-not-null-filter", "calcite-join-extract-filter", "calcite-join-push-expressions", "calcite-join-push-transitive-predicates", "partition-pushdown", "predicate-transitive-closure", "starburst-constraint-propagation", "starburst-referential-integrity-rewrite", "starburst-semantic-optimization", "calcite-filter-join"]
+
+[categories.logical.predicate-pushdown-core]
+rules = ["filter-merge", "filter-split-and", "filter-through-except-left", "filter-through-intersect", "filter-through-join-left", "filter-through-join-right", "filter-through-project", "filter-through-union", "filter-and-push-left", "filter-and-push-right"]
+
+[categories.logical.projection]
+rules = ["cockroachdb-elide-projection", "cockroachdb-eliminate-noop-project", "cockroachdb-inline-projections"]
+
+[categories.logical.projection-pruning]
+rules = ["neo4j-property-projection-pruning"]
+
+[categories.logical.projection-pushdown]
+rules = ["column-pruning", "calcite-join-project-transpose", "project-aggregate-merge", "calcite-project-calc-merge", "calcite-project-correlate-transpose", "calcite-project-exchange-transpose", "calcite-project-filter-transpose", "calcite-project-join-transpose", "project-merge", "calcite-project-multi-join-merge", "calcite-project-remove", "calcite-project-set-op-transpose", "calcite-project-sort-transpose", "calcite-project-subquery-remove", "calcite-project-table-scan", "project-through-join", "calcite-project-values-reduction", "calcite-project-window-transpose", "sort-project-merge"]
+
+[categories.logical.projection-pushdown-core]
+rules = ["project-merge"]
+
+[categories.logical.redundant-join-core]
+rules = ["eliminate-anti-join-empty-right", "eliminate-cross-join-single-row-left", "eliminate-cross-join-single-row-right", "eliminate-cross-join-values-single", "eliminate-inner-join-true-single-row"]
+
+[categories.logical.rpr]
+rules = ["rpr-constant-fold-define", "rpr-counting-pattern-to-window-aggregate", "rpr-dead-variable-elimination", "rpr-eliminate-redundant-quantifier", "rpr-empty-pattern-elimination", "rpr-factor-common-prefix", "rpr-flatten-sequence", "rpr-merge-equivalent-alternations", "rpr-next-pattern-to-lead", "rpr-normalize-quantifier-ranges", "rpr-one-row-early-termination", "rpr-push-filter-into-define", "rpr-push-order-filter-into-scan", "rpr-push-partition-filter", "rpr-simple-pattern-to-lag"]
+
+[categories.logical.security]
+rules = ["column-level-security", "audit-predicate-injection", "column-masking-pushdown", "label-based-access-control", "query-anonymization", "row-level-security-pushdown"]
+
+[categories.logical.semantic-rewriting]
+rules = ["constraint-propagation", "delta-query-optimization", "function-dependency-elimination", "incremental-view-maintenance", "calcite-calc-remove", "calcite-calc-split", "calcite-filter-calc-merge", "calcite-full-to-left-and-right-join", "hint-guided-optimization", "hottsql-proof-based", "calcite-join-to-correlate", "calcite-mark-to-semi-or-anti-join", "materialized-view-scan", "calcite-project-calc-merge", "calcite-sample-to-filter", "starburst-semantic"]
+
+[categories.logical.semi-join-core]
+rules = ["anti-join-empty-right", "filter-into-semi-join-condition", "merge-duplicate-semi-joins", "semi-join-distinct-elimination"]
+
+[categories.logical.set-operation-core]
+rules = ["except-self", "intersect-commutativity", "intersect-self", "union-commutativity", "union-self-all"]
+
+[categories.logical.set-operations]
+rules = ["aggregate-union-transpose", "except-to-anti-join", "filter-set-op-transpose", "calcite-intersect-reorder", "calcite-intersect-to-exists", "intersect-to-join", "calcite-minus-to-anti-join", "calcite-minus-to-distinct", "calcite-set-op-to-filter", "union-eliminator", "union-merge", "union-pull-up-constants", "calcite-union-to-distinct", "calcite-union-to-values"]
+
+[categories.logical.sideways-information-passing]
+rules = ["bloom-filter-pushdown", "constraint-propagation", "demand-transformation", "magic-sets-adorned-predicates", "magic-sets-adorned-program", "magic-sets-sideways-passing", "magic-sets-supplementary-predicates", "predicate-transfer", "semi-join-reduction", "yannakakis-algorithm"]
+
+[categories.logical.sort-elimination]
+rules = ["mongodb-sort-elimination"]
+
+[categories.logical.subquery-optimization-core]
+rules = ["filter-anti-join-merge", "filter-semi-join-merge"]
+
+[categories.logical.subquery-unnesting]
+rules = ["all-to-aggregation", "any-to-semi-join", "apply-to-join", "correlated-any-to-semi-join", "correlated-subquery-decorrelation", "double-negation-elimination", "exists-to-semi-join", "in-list-to-values-join", "in-subquery-to-semi-join", "intersect-to-distinct", "intersect-to-semi-join", "lateral-join-decorrelation", "magic-sets-rewriting", "max-1-row-subquery-check", "minus-to-anti-join", "not-exists-to-anti-join", "not-in-to-anti-join", "scalar-subquery-to-join", "set-op-to-filter", "subquery-deduplication", "subquery-hoisting", "subquery-predicate-pullup", "subquery-to-window", "subquery-with-aggregation-unnesting", "uncorrelated-subquery-to-join", "calcite-unnest-decorrelate"]
+
+[categories.logical.time-series]
+rules = ["time-series-aggregation-pushdown", "time-series-range-optimization", "chunk-exclusion", "continuous-aggregate-rewriting", "gap-fill-optimization", "last-point-optimization", "time-bucket-pushdown"]
+
+[categories.logical.unnest]
+rules = ["lateral-unnest-to-semi-join", "merge-adjacent-unnests", "unnest-pushdown-into-scan", "filter-through-unnest", "unnest-array-literal-constant-fold"]
+
+[categories.logical.view-rewriting]
+rules = ["mv-join-rewriting", "mv-aggregate-rollup", "mv-delta-maintenance", "mv-filter-compensation", "mv-lattice-optimization", "mv-outer-join-rewriting", "mv-self-maintenance", "mv-union-rewriting", "starburst-query-graph-model", "starburst-view-merging"]
+
+[categories.logical.window-pushdown]
+rules = ["filter-window-transpose", "project-to-window", "project-window-transpose", "window-filter-pushdown", "window-frame-optimization", "window-function-pushdown", "window-limit-pushdown", "window-merge", "window-partition-elimination", "window-partition-pruning", "window-projection-pushdown", "window-sort-elimination", "window-to-aggregate"]
+
+[categories.logical.xml-core]
+rules = ["xml-filter-below-aggregate", "xml-filter-below-project", "xml-filter-through-join-left", "xml-filter-through-join-right", "xml-filter-through-left-join", "xml-filter-through-union", "xml-merge-adjacent-filters", "xml-split-conjunctive-filter"]
+
+[categories.physical.physical]
+rules = ["dictionary-predicate-pushdown", "late-materialization", "parallel-aggregate", "parallel-hash-join", "parallel-seq-scan"]
+
+[categories.physical.access-path-selection]
+rules = ["bitmap-index-combination", "covering-index-scan", "index-condition-pushdown", "index-skip-scan", "system-r-access-path-selection", "system-r-interesting-sort-orders", "system-r-nested-loop-selection", "system-r-sort-merge-selection", "skyline-pruning"]
+
+[categories.physical.aggregate-optimization]
+rules = ["tidb-max-min-to-index-seek"]
+
+[categories.physical.aggregation]
+rules = ["mongodb-pipeline-optimization", "cache-aware-aggregation", "memory-aware-hash-aggregate", "aggregate-pushdown-through-join", "distinct-aggregation-optimization", "hash-vs-sort-aggregation", "ordered-aggregation", "two-phase-aggregation"]
+
+[categories.physical.aggregation-strategies]
+rules = ["aggregation-pushdown", "columnar-aggregation", "distinct-aggregation-strategy", "grouping-sets-expansion", "ordered-aggregation", "preaggregation", "sort-aggregation", "streaming-aggregation", "three-phase-aggregation", "sort-based-aggregation", "adaptive-aggregation", "hash-aggregation", "hybrid-aggregation", "partial-aggregation-cost-model", "two-phase-aggregation", "vectorized-aggregation"]
+
+[categories.physical.apply-strategy]
+rules = ["neo4j-apply-strategy-selection"]
+
+[categories.physical.array-operations]
+rules = ["clickhouse-array-join-optimization"]
+
+[categories.physical.covering-index]
+rules = ["mongodb-covering-index"]
+
+[categories.physical.covering-index-core]
+rules = ["index-only-to-project-filter-scan", "project-filter-scan-to-index-only"]
+
+[categories.physical.distributed]
+rules = ["broadcast-join-selection", "repartition-pushdown", "shuffle-aware-join", "skew-aware-join"]
+
+[categories.physical.fts-core]
+rules = ["fts-and-to-skip-list", "fts-limit-sort-rank-to-rum", "fts-match-to-gin-scan", "fts-merge-bitmap-filters"]
+
+[categories.physical.hardware]
+rules = ["gpu-acceleration-selection", "simd-operation-selection", "branch-free-selection", "cache-conscious-join", "numa-aware-partitioning", "prefetch-optimization", "simd-scan-filter"]
+
+[categories.physical.hint]
+rules = ["mongodb-hint-selection"]
+
+[categories.physical.hybrid-search-core]
+rules = ["hybrid-fts-first", "hybrid-parallel", "hybrid-vector-first"]
+
+[categories.physical.index-intersection]
+rules = ["mongodb-index-intersection"]
+
+[categories.physical.index-selection]
+rules = ["clickhouse-primary-key-selection", "cockroachdb-constraint-index-selection", "cockroachdb-partial-index-scan", "mongodb-index-selection", "hash-index-selection", "index-only-scan", "range-index-selection", "sparse-index-scan", "bitmap-index-combining", "brin-index-for-sequential", "clustered-index-for-range", "clustered-index-selection", "columnstore-for-aggregation", "composite-index-column-order", "covering-index-optimization", "covering-index-selection", "expression-index-selection", "filtered-index-matching", "full-text-index-for-like", "gin-index-for-arrays", "gist-index-for-spatial", "hash-index-for-equality", "index-intersection-vs-union", "index-intersection", "index-join", "index-merge-intersection", "index-only-scan-preference", "index-union", "multi-column-index-selection", "partial-index-selection", "reverse-index-scan", "spatial-index-for-geometry", "inverted-index-for-arrays", "inverted-index-for-fulltext", "adaptive-index-selection", "bitmap-index-selection", "dbmin-index-selection", "index-cost-comparison", "index-scan", "index-skip-scan", "loose-index-scan", "unique-index-for-equality"]
+
+[categories.physical.index-selection-core]
+rules = ["bitmap-index-to-filter-scan", "filter-scan-to-bitmap-index"]
+
+[categories.physical.join-algorithms]
+rules = ["adaptive-join-algorithm", "band-join", "nested-loop-join", "sort-merge-join", "zigzag-join", "adaptive-hash-join", "block-nested-loop-join", "free-join-algorithm", "honeycomb-wcoj", "levelheaded-wcoj", "calcite-semi-join-join-transpose", "calcite-semi-join-project-transpose", "shapiro-symmetric-hash-join", "shuffle-hash-join", "sort-merge", "wcoj-generic-join", "bit-vector-filtering", "broadcast-hash-join", "cache-conscious-join", "grace-hash-join", "hash-join-with-bloom-filter", "hash-join", "hybrid-hash-join", "index-nested-loop-join", "radix-hash-join", "skew-aware-hash-join"]
+
+[categories.physical.join-lowering-core]
+rules = ["join-to-hash-join", "join-to-merge-join", "join-to-nest-loop"]
+
+[categories.physical.join-selection]
+rules = ["cockroachdb-generate-merge-joins", "cockroachdb-inverted-join", "cockroachdb-merge-join-generation", "cockroachdb-lookup-join-generation"]
+
+[categories.physical.label-scan]
+rules = ["neo4j-label-scan-optimization"]
+
+[categories.physical.materialization]
+rules = ["common-subexpression-materialization", "cte-materialization-strategy", "in-memory-materialization", "pipeline-breaker-analysis", "eager-materialization", "incremental-view-maintenance", "lazy-materialization", "calcite-materialized-view-filter-scan", "materialized-view-rewrite", "temp-table-materialization", "volcano-interesting-orders", "work-table-spooling"]
+
+[categories.physical.merge-tree-variant]
+rules = ["clickhouse-final-modifier-optimization"]
+
+[categories.physical.min-max-index-core]
+rules = ["max-filtered-to-index-scan", "max-to-index-scan", "min-filtered-to-index-scan", "min-to-index-scan"]
+
+[categories.physical.optimizer-framework]
+rules = ["cascades-memo-structure", "volcano-branch-and-bound", "volcano-enforcer-placement", "volcano-logical-to-physical", "volcano-transformation-rules"]
+
+[categories.physical.order-limit]
+rules = ["tidb-top-n-pushdown"]
+
+[categories.physical.parallelization]
+rules = ["cpu-affinity-placement", "degree-of-parallelism-selection", "numa-aware-scheduling", "parallel-append", "work-stealing-parallelism", "bushy-parallelism", "inter-operator-parallelism", "intra-operator-parallelism", "morsel-driven-parallelism", "parallel-aggregation", "parallel-hash-join", "parallel-index-scan", "parallel-partition-wise-join", "parallel-scan", "parallel-sort", "parallel-union"]
+
+[categories.physical.parquet-pushdown-core]
+rules = ["parquet-filter-split-for-pushdown"]
+
+[categories.physical.relationship-index]
+rules = ["neo4j-relationship-index-scan"]
+
+[categories.physical.rpr]
+rules = ["rpr-index-for-order-by", "rpr-merge-equivalent-dfa-states", "rpr-partition-index-scan", "rpr-specialize-dfa-for-partition"]
+
+[categories.physical.runtime-filter-core]
+rules = ["runtime-filter-hash-to-semi", "runtime-filter-through-filter", "runtime-filter-through-project"]
+
+[categories.physical.scan-lowering-core]
+rules = ["scan-to-index-scan"]
+
+[categories.physical.sort]
+rules = ["mongodb-sort-pushdown", "memory-aware-sort", "sort-avoidance-by-grouping", "sort-distribution-aware", "sort-elimination-by-index", "sort-limit-to-heap", "sort-merge-adjacent", "sort-partial-order-exploitation", "sort-spill-partitioning"]
+
+[categories.physical.vector-core]
+rules = ["vector-filter-to-range-le", "vector-filter-to-range", "vector-postfilter", "vector-prefilter", "vector-topk-to-knn"]
+
+[categories.physical.vector-search]
+rules = ["topk-from-limit-sort"]

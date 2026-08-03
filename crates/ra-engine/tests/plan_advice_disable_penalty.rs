@@ -12,7 +12,10 @@ use ra_core::expr::{BinOp, ColumnRef, Expr};
 use ra_engine::{Optimizer, OptimizerConfig};
 
 fn scan(name: &str) -> RelExpr {
-    RelExpr::Scan { table: name.into(), alias: None }
+    RelExpr::Scan {
+        table: name.into(),
+        alias: None,
+    }
 }
 
 fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
@@ -32,12 +35,7 @@ fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
 fn complying_join_order_advice_does_not_trigger_penalty() {
     // Plan: ((a JOIN b) JOIN c) — outer-deep order [a, b, c].
     // Advice agrees with that order, so no FAILED bit is set.
-    let q = eq_join(
-        eq_join(scan("a"), scan("b"), "a", "b"),
-        scan("c"),
-        "a",
-        "c",
-    );
+    let q = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
     let config = OptimizerConfig {
         plan_advice: Some("JOIN_ORDER(a b c)".into()),
         ..OptimizerConfig::default()
@@ -57,12 +55,7 @@ fn violating_join_order_advice_triggers_penalty() {
     // ordering for this query (given filter pushdown etc.) is
     // [a, b, c]. validate_advice flags FAILED, the penalty
     // applies.
-    let q = eq_join(
-        eq_join(scan("a"), scan("b"), "a", "b"),
-        scan("c"),
-        "a",
-        "c",
-    );
+    let q = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
     let config = OptimizerConfig {
         plan_advice: Some("JOIN_ORDER(c b a)".into()),
         ..OptimizerConfig::default()

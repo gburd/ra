@@ -33,9 +33,9 @@ echo "Building VitePress site..."
 npm run build
 
 # Generate rule documentation if the tool exists
-if command -v ../target/release/ra-cli &> /dev/null; then
+if command -v ../target/release/ra &> /dev/null; then
     echo "Generating rule documentation..."
-    ../target/release/ra-cli rules list --format markdown > rules/generated.md
+    ../target/release/ra rules list --format markdown > rules/generated.md
 fi
 
 echo "Documentation build complete!"

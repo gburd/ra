@@ -139,7 +139,11 @@ pub fn cmd_explain(
             );
             eprintln!("  {} {}", "optimizer_version:".bold(), p.optimizer_version);
             eprintln!("  {} {:?}", "route:".bold(), p.route);
-            eprintln!("  {} {}", "termination_reason:".bold(), p.termination_reason);
+            eprintln!(
+                "  {} {}",
+                "termination_reason:".bold(),
+                p.termination_reason
+            );
         }
     }
 

@@ -309,7 +309,9 @@ impl StatisticsPoller {
         }
 
         let now = Instant::now();
-        let should_poll = self.last_poll.is_none_or(|last| now.duration_since(last) >= self.interval);
+        let should_poll = self
+            .last_poll
+            .is_none_or(|last| now.duration_since(last) >= self.interval);
 
         if !should_poll {
             return Ok(None);

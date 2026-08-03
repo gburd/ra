@@ -149,11 +149,15 @@ pub fn cmd_optimize(
                 .map_or_else(|_| "unknown".to_owned(), |k| k.to_string());
             eprintln!("Loading schema from {} database...", kind.cyan());
         }
-        let mut connector = ra_metadata::connect(db_url)
-            .with_context(|| format!("connecting to database: {}", ra_metadata::redact_url(db_url)))?;
-        let schema = connector
-            .gather_schema()
-            .with_context(|| format!("gathering schema from: {}", ra_metadata::redact_url(db_url)))?;
+        let mut connector = ra_metadata::connect(db_url).with_context(|| {
+            format!(
+                "connecting to database: {}",
+                ra_metadata::redact_url(db_url)
+            )
+        })?;
+        let schema = connector.gather_schema().with_context(|| {
+            format!("gathering schema from: {}", ra_metadata::redact_url(db_url))
+        })?;
         Some(schema_info_to_table_stats(&schema))
     } else if let Some(json_path) = schema_json {
         if !quiet {

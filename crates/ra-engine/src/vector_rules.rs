@@ -169,7 +169,10 @@ pub fn optimize_vector_filter_order(
 ///
 /// Returns the strategy with the lowest estimated cost.
 #[must_use]
-#[expect(clippy::too_many_arguments, reason = "cost model requires all parameters")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "cost model requires all parameters"
+)]
 pub fn estimate_vector_query_cost(
     dimensions: usize,
     total_rows: usize,

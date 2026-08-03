@@ -89,7 +89,10 @@ impl egg::Condition<RelLang, RelAnalysis> for IsNotConstBool {
 /// Cannot panic in practice; the `expect` is on a compile-time constant
 /// string parse inside the `rewrite!` macro.
 #[must_use]
-#[expect(clippy::expect_used, reason = "constant string parse inside rewrite! macro cannot fail")]
+#[expect(
+    clippy::expect_used,
+    reason = "constant string parse inside rewrite! macro cannot fail"
+)]
 #[cfg(test)] // RFC 0090 Phase 2: test oracle; production uses generated rules
 pub fn index_selection_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![

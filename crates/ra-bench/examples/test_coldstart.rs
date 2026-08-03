@@ -10,10 +10,7 @@ use std::time::Instant;
 
 fn main() {
     let all = all_queries();
-    let cte_queries: Vec<_> = all
-        .iter()
-        .filter(|e| e.category == "ctes")
-        .collect();
+    let cte_queries: Vec<_> = all.iter().filter(|e| e.category == "ctes").collect();
 
     println!("Test 1: First query is 'big_orders' (normal order)");
     println!("======================================================\n");
@@ -24,7 +21,7 @@ fn main() {
             let start = Instant::now();
             let _ = optimizer.optimize(&plan);
             let elapsed = start.elapsed().as_micros() as f64 / 1000.0;
-            println!("Query {}: {:.60}...", i+1, entry.sql);
+            println!("Query {}: {:.60}...", i + 1, entry.sql);
             println!("  Time: {:.2}ms\n", elapsed);
         }
     }
@@ -38,7 +35,7 @@ fn main() {
             let start = Instant::now();
             let _ = optimizer.optimize(&plan);
             let elapsed = start.elapsed().as_micros() as f64 / 1000.0;
-            println!("Query {}: {:.60}...", i+1, entry.sql);
+            println!("Query {}: {:.60}...", i + 1, entry.sql);
             println!("  Time: {:.2}ms\n", elapsed);
         }
     }

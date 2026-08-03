@@ -5,7 +5,7 @@ Welcome to the RA optimizer maintainer documentation. This section is for contri
 ## Quick Links
 
 - **[Build & Install](./build.md)** - Compile from source, run tests
-- **[CLI Reference](./cli-reference.md)** - Complete ra-cli command reference
+- **[CLI Reference](./cli-reference.md)** - Complete ra command reference
 - **[Component APIs](./components.md)** - How major subsystems interact
 - **[RFCs](./rfcs/)** - Formal proposals for major features
 - **[Chores & Tasks](./chores.md)** - Small tasks organized by priority
@@ -119,7 +119,7 @@ const treeData = [
 
 3. **Run CLI**
    ```bash
-   ra-cli optimize "SELECT * FROM users WHERE age > 18"
+   ra optimize "SELECT * FROM users WHERE age > 18"
    ```
 
 ## Contributing

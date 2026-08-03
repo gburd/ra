@@ -262,8 +262,7 @@ impl RuleConsolidator {
                 continue;
             }
             let sum: f64 = record.per_shape_rates.values().sum();
-            record.overall_effectiveness =
-                sum / record.per_shape_rates.len() as f64;
+            record.overall_effectiveness = sum / record.per_shape_rates.len() as f64;
         }
     }
 
@@ -299,17 +298,13 @@ impl RuleConsolidator {
         // Update per-shape rate using EWMA
         let alpha = 0.1;
         let observation = if matched { 1.0 } else { 0.0 };
-        let current = record
-            .per_shape_rates
-            .entry(shape.clone())
-            .or_insert(0.5);
+        let current = record.per_shape_rates.entry(shape.clone()).or_insert(0.5);
         *current = alpha * observation + (1.0 - alpha) * *current;
 
         // Recompute overall effectiveness from per-shape rates
         if !record.per_shape_rates.is_empty() {
             let sum: f64 = record.per_shape_rates.values().sum();
-            record.overall_effectiveness =
-                sum / record.per_shape_rates.len() as f64;
+            record.overall_effectiveness = sum / record.per_shape_rates.len() as f64;
         }
     }
 
@@ -362,8 +357,7 @@ impl RuleConsolidator {
         };
 
         // Phase 6: Apply removals
-        let removal_set: HashSet<&str> =
-            removals.iter().map(String::as_str).collect();
+        let removal_set: HashSet<&str> = removals.iter().map(String::as_str).collect();
         let filtered_rules: Vec<Rewrite<RelLang, RelAnalysis>> = rules
             .into_iter()
             .filter(|rule| !removal_set.contains(rule.name.as_str()))
@@ -543,17 +537,14 @@ impl RuleConsolidator {
     /// they enable other high-value rules.
     fn identify_protected_rules(&self, candidates: &[String]) -> HashSet<String> {
         let mut protected = HashSet::new();
-        let candidate_set: HashSet<&str> =
-            candidates.iter().map(String::as_str).collect();
+        let candidate_set: HashSet<&str> = candidates.iter().map(String::as_str).collect();
 
         for dep in &self.dependencies {
             if dep.kind == DependencyKind::Enables
                 && candidate_set.contains(dep.prerequisite.as_str())
             {
                 // Check if the dependent rule is high-value
-                if let Some(dependent_record) =
-                    self.effectiveness.get(&dep.dependent)
-                {
+                if let Some(dependent_record) = self.effectiveness.get(&dep.dependent) {
                     if dependent_record.overall_effectiveness
                         > self.config.effectiveness_threshold * 10.0
                     {
@@ -582,10 +573,7 @@ impl RuleConsolidator {
         for rule in rules {
             let name = rule.name.as_str();
             if let Some(prefix) = extract_rule_prefix(name) {
-                by_prefix
-                    .entry(prefix.to_string())
-                    .or_default()
-                    .push(name);
+                by_prefix.entry(prefix.to_string()).or_default().push(name);
             }
         }
 
@@ -610,8 +598,7 @@ impl RuleConsolidator {
 
             // Check if the group has similar effectiveness patterns
             let avg: f64 =
-                effectiveness_values.iter().sum::<f64>()
-                    / effectiveness_values.len() as f64;
+                effectiveness_values.iter().sum::<f64>() / effectiveness_values.len() as f64;
             let variance: f64 = effectiveness_values
                 .iter()
                 .map(|v| (v - avg).powi(2))
@@ -636,10 +623,7 @@ impl RuleConsolidator {
 
     /// Detect conflicts between rules based on observed co-occurrence
     /// patterns.
-    fn detect_conflicts(
-        &self,
-        rules: &[Rewrite<RelLang, RelAnalysis>],
-    ) -> Vec<RuleConflict> {
+    fn detect_conflicts(&self, rules: &[Rewrite<RelLang, RelAnalysis>]) -> Vec<RuleConflict> {
         let mut conflicts = Vec::new();
 
         // Check existing dependencies for conflict types
@@ -650,10 +634,8 @@ impl RuleConsolidator {
                 let b_exists = rules.iter().any(|r| r.name.as_str() == dep.dependent);
 
                 if a_exists && b_exists {
-                    let resolution = self.suggest_conflict_resolution(
-                        &dep.prerequisite,
-                        &dep.dependent,
-                    );
+                    let resolution =
+                        self.suggest_conflict_resolution(&dep.prerequisite, &dep.dependent);
                     conflicts.push(RuleConflict {
                         rule_a: dep.prerequisite.clone(),
                         rule_b: dep.dependent.clone(),
@@ -691,11 +673,7 @@ impl RuleConsolidator {
     }
 
     /// Suggest how to resolve a conflict between two rules.
-    fn suggest_conflict_resolution(
-        &self,
-        rule_a: &str,
-        rule_b: &str,
-    ) -> ConflictResolution {
+    fn suggest_conflict_resolution(&self, rule_a: &str, rule_b: &str) -> ConflictResolution {
         let eff_a = self
             .effectiveness
             .get(rule_a)
@@ -718,8 +696,7 @@ impl RuleConsolidator {
                 ConflictResolution::OrderABeforeB
             } else {
                 ConflictResolution::Manual {
-                    reason: "Similar effectiveness and priority; manual review needed"
-                        .to_string(),
+                    reason: "Similar effectiveness and priority; manual review needed".to_string(),
                 }
             }
         }
@@ -1003,7 +980,13 @@ mod tests {
 
         // Mark all rules as ineffective (60 observations needed for
         // EWMA to converge below 0.01 threshold from 0.5 start)
-        for name in ["filter-true", "and-true-left", "and-true-right", "or-false-left", "null-eq"] {
+        for name in [
+            "filter-true",
+            "and-true-left",
+            "and-true-right",
+            "or-false-left",
+            "null-eq",
+        ] {
             for _ in 0..60 {
                 consolidator.record_application(name, &shape, false, false);
             }
@@ -1127,9 +1110,7 @@ mod tests {
         let report = consolidator.effectiveness_report();
         assert_eq!(report.len(), 2);
         // Sorted ascending by effectiveness
-        assert!(
-            report[0].overall_effectiveness <= report[1].overall_effectiveness,
-        );
+        assert!(report[0].overall_effectiveness <= report[1].overall_effectiveness,);
     }
 
     #[test]

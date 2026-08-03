@@ -30,7 +30,10 @@ pub fn propagate_ordering(expr: RelExpr, facts: &dyn FactsProvider) -> RelExpr {
 
 /// Recursively propagate ordering properties and rewrite Sort nodes.
 /// Returns the computed properties of the node and the rewritten tree.
-#[expect(clippy::too_many_lines, reason = "exhaustive match over all RelExpr variants")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive match over all RelExpr variants"
+)]
 fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, RelExpr) {
     match expr {
         RelExpr::Sort { input, keys } => handle_sort(*input, keys, facts),
@@ -544,11 +547,8 @@ fn handle_sort(
         if let Some(prefix_match) = detect_prefix_match(&keys, &input_sort_keys) {
             // Estimate whether incremental sort is beneficial
             let row_count = estimate_row_count_for(&rewritten_child, facts);
-            let prefix_ndv = estimate_prefix_ndv(
-                &prefix_match.prefix_keys,
-                &rewritten_child,
-                facts,
-            );
+            let prefix_ndv =
+                estimate_prefix_ndv(&prefix_match.prefix_keys, &rewritten_child, facts);
             let costs = estimate_costs(row_count, prefix_ndv);
             if costs.is_beneficial() {
                 let isort = RelExpr::IncrementalSort {
@@ -613,12 +613,7 @@ fn derive_index_only_scan_properties(
                 let ordering_cols: Vec<OrderingColumn> = idx
                     .columns
                     .iter()
-                    .map(|c| {
-                        OrderingColumn::new(
-                            ColumnRef::new(c.as_str()),
-                            SortDirection::Asc,
-                        )
-                    })
+                    .map(|c| OrderingColumn::new(ColumnRef::new(c.as_str()), SortDirection::Asc))
                     .collect();
                 if !ordering_cols.is_empty() {
                     return PropertySet::with_ordering(Ordering::new(ordering_cols));
@@ -673,9 +668,9 @@ fn estimate_row_count_for(expr: &RelExpr, facts: &dyn FactsProvider) -> f64 {
         RelExpr::Scan { table, .. }
         | RelExpr::IndexScan { table, .. }
         | RelExpr::IndexOnlyScan { table, .. }
-        | RelExpr::ParallelScan { table, .. } => facts
-            .get_table_stats(table)
-            .map_or(1000.0, |s| s.row_count),
+        | RelExpr::ParallelScan { table, .. } => {
+            facts.get_table_stats(table).map_or(1000.0, |s| s.row_count)
+        }
         RelExpr::Filter { input, .. } => {
             // Conservative: assume 33% selectivity
             estimate_row_count_for(input, facts) * 0.33
@@ -700,11 +695,7 @@ fn estimate_row_count_for(expr: &RelExpr, facts: &dyn FactsProvider) -> f64 {
 }
 
 /// Estimate the number of distinct values for prefix key columns.
-fn estimate_prefix_ndv(
-    prefix_keys: &[SortKey],
-    expr: &RelExpr,
-    facts: &dyn FactsProvider,
-) -> f64 {
+fn estimate_prefix_ndv(prefix_keys: &[SortKey], expr: &RelExpr, facts: &dyn FactsProvider) -> f64 {
     // Find the table name from the expression tree
     let table_name = find_base_table(expr);
 
@@ -861,10 +852,7 @@ mod tests {
             self.schemas.iter().find(|s| s.name == table)
         }
 
-        fn runtime_stats(
-            &self,
-            _operator_id: &str,
-        ) -> Option<&ra_core::facts::OperatorStats> {
+        fn runtime_stats(&self, _operator_id: &str) -> Option<&ra_core::facts::OperatorStats> {
             None
         }
 

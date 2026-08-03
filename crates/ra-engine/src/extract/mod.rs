@@ -15,11 +15,14 @@ mod scalar;
 #[cfg(test)]
 mod tests;
 
-pub use api::{clear_last_physical_choices, extract_best, extract_best_bitnet, extract_best_with_staleness, take_last_physical_choices};
-pub(crate) use api::resolve_table_row_counts;
 #[cfg(feature = "ml")]
 pub use api::extract_best_with_cardinality;
+pub(crate) use api::resolve_table_row_counts;
+pub use api::{
+    clear_last_physical_choices, extract_best, extract_best_bitnet, extract_best_with_staleness,
+    take_last_physical_choices,
+};
 pub use convert::rec_expr_to_rel_expr;
 pub use cost::RelCostFn;
 pub use hybrid_cost::HybridCostFn;
-pub use neural_cost::{NeuralPlanScorer, CostWeights};
+pub use neural_cost::{CostWeights, NeuralPlanScorer};

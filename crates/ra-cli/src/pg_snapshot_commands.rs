@@ -170,7 +170,10 @@ pub fn merge_snapshots_to_timeline(
         bail!("No snapshot files found in {}", snapshot_dir.display());
     }
 
-    eprintln!("{}", format!("Found {} snapshot(s)", snapshots.len()).green());
+    eprintln!(
+        "{}",
+        format!("Found {} snapshot(s)", snapshots.len()).green()
+    );
 
     // Extract unique hardware profiles
     let mut hardware_profiles = Vec::new();

@@ -1,7 +1,10 @@
 //! Integration tests for isolation-aware query planning (RFC 0058).
 //!
 //! Validates that transaction isolation context influences cost
-#![expect(clippy::float_cmp, reason = "test code comparing cost adjustments to zero")]
+#![expect(
+    clippy::float_cmp,
+    reason = "test code comparing cost adjustments to zero"
+)]
 //! adjustments correctly across `PostgreSQL`, `MySQL`, Oracle, `SQLite`,
 //! and `DuckDB` backends.
 

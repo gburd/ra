@@ -65,9 +65,11 @@ fn statements(block: &str) -> Vec<String> {
         .filter(|s| {
             let upper = s.to_ascii_uppercase();
             !s.is_empty()
-                && ["SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "VALUES", "MERGE", "TABLE"]
-                    .iter()
-                    .any(|kw| upper.starts_with(kw))
+                && [
+                    "SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "VALUES", "MERGE", "TABLE",
+                ]
+                .iter()
+                .any(|kw| upper.starts_with(kw))
         })
         .map(ToOwned::to_owned)
         .collect()
@@ -131,7 +133,8 @@ fn rra_test_cases_never_panic_and_report_coverage() {
     );
 
     assert_eq!(
-        panicked, 0,
+        panicked,
+        0,
         "Ra panicked on {panicked} documented .rra test-case statement(s); \
          the parser/optimizer must never panic. Examples:\n  {}",
         panic_examples.join("\n  ")

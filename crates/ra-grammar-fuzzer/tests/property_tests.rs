@@ -40,18 +40,13 @@ fn rule_safety_on_generated_expressions() {
         let mut runner = TestRunner::new(config);
         runner
             .run(&SqlGenerator::new().strategy(), |expr| {
-                let validator = PropertyValidator::new(vec![
-                    OptimizerProperty::RuleSafety,
-                ])
-                .with_time_limit(Duration::from_secs(10));
+                let validator = PropertyValidator::new(vec![OptimizerProperty::RuleSafety])
+                    .with_time_limit(Duration::from_secs(10));
                 for result in &validator.validate(&expr) {
                     if !result.passed {
                         return Err(TestCaseError::Fail(
-                            format!(
-                                "property {} failed: {}",
-                                result.property, result.details,
-                            )
-                            .into(),
+                            format!("property {} failed: {}", result.property, result.details,)
+                                .into(),
                         ));
                     }
                 }
@@ -69,17 +64,12 @@ fn roundtrip_on_generated_expressions() {
         let mut runner = TestRunner::new(config);
         runner
             .run(&SqlGenerator::new().strategy(), |expr| {
-                let validator = PropertyValidator::new(vec![
-                    OptimizerProperty::Roundtrip,
-                ]);
+                let validator = PropertyValidator::new(vec![OptimizerProperty::Roundtrip]);
                 for result in &validator.validate(&expr) {
                     if !result.passed {
                         return Err(TestCaseError::Fail(
-                            format!(
-                                "property {} failed: {}",
-                                result.property, result.details,
-                            )
-                            .into(),
+                            format!("property {} failed: {}", result.property, result.details,)
+                                .into(),
                         ));
                     }
                 }
@@ -97,18 +87,13 @@ fn convergence_on_generated_expressions() {
         let mut runner = TestRunner::new(config);
         runner
             .run(&SqlGenerator::new().strategy(), |expr| {
-                let validator = PropertyValidator::new(vec![
-                    OptimizerProperty::Convergence,
-                ])
-                .with_time_limit(Duration::from_secs(5));
+                let validator = PropertyValidator::new(vec![OptimizerProperty::Convergence])
+                    .with_time_limit(Duration::from_secs(5));
                 for result in &validator.validate(&expr) {
                     if !result.passed {
                         return Err(TestCaseError::Fail(
-                            format!(
-                                "property {} failed: {}",
-                                result.property, result.details,
-                            )
-                            .into(),
+                            format!("property {} failed: {}", result.property, result.details,)
+                                .into(),
                         ));
                     }
                 }
@@ -126,18 +111,13 @@ fn table_preservation_on_joins() {
         let mut runner = TestRunner::new(config);
         runner
             .run(&SqlGenerator::new().join_strategy(), |expr| {
-                let validator = PropertyValidator::new(vec![
-                    OptimizerProperty::TablePreservation,
-                ])
-                .with_time_limit(Duration::from_secs(10));
+                let validator = PropertyValidator::new(vec![OptimizerProperty::TablePreservation])
+                    .with_time_limit(Duration::from_secs(10));
                 for result in &validator.validate(&expr) {
                     if !result.passed {
                         return Err(TestCaseError::Fail(
-                            format!(
-                                "property {} failed: {}",
-                                result.property, result.details,
-                            )
-                            .into(),
+                            format!("property {} failed: {}", result.property, result.details,)
+                                .into(),
                         ));
                     }
                 }
@@ -155,18 +135,13 @@ fn plan_validity_on_aggregates() {
         let mut runner = TestRunner::new(config);
         runner
             .run(&SqlGenerator::new().aggregate_strategy(), |expr| {
-                let validator = PropertyValidator::new(vec![
-                    OptimizerProperty::PlanValidity,
-                ])
-                .with_time_limit(Duration::from_secs(10));
+                let validator = PropertyValidator::new(vec![OptimizerProperty::PlanValidity])
+                    .with_time_limit(Duration::from_secs(10));
                 for result in &validator.validate(&expr) {
                     if !result.passed {
                         return Err(TestCaseError::Fail(
-                            format!(
-                                "property {} failed: {}",
-                                result.property, result.details,
-                            )
-                            .into(),
+                            format!("property {} failed: {}", result.property, result.details,)
+                                .into(),
                         ));
                     }
                 }
@@ -184,16 +159,13 @@ fn all_properties_on_set_ops() {
         let mut runner = TestRunner::new(config);
         runner
             .run(&SqlGenerator::new().set_op_strategy(), |expr| {
-                let validator = PropertyValidator::all_properties()
-                    .with_time_limit(Duration::from_secs(10));
+                let validator =
+                    PropertyValidator::all_properties().with_time_limit(Duration::from_secs(10));
                 for result in &validator.validate(&expr) {
                     if !result.passed {
                         return Err(TestCaseError::Fail(
-                            format!(
-                                "property {} failed: {}",
-                                result.property, result.details,
-                            )
-                            .into(),
+                            format!("property {} failed: {}", result.property, result.details,)
+                                .into(),
                         ));
                     }
                 }
@@ -235,9 +207,7 @@ fn full_lifecycle_all_properties() {
                                 return Err(TestCaseError::Fail(
                                     format!(
                                         "property {} failed at stage {}: {}",
-                                        result.property,
-                                        step.stage,
-                                        result.details,
+                                        result.property, step.stage, result.details,
                                     )
                                     .into(),
                                 ));
@@ -261,10 +231,8 @@ fn read_heavy_rule_safety() {
             .run(
                 &arb_storyline(StorylinePattern::read_heavy()),
                 |storyline| {
-                    let validator = PropertyValidator::new(vec![
-                        OptimizerProperty::RuleSafety,
-                    ])
-                    .with_time_limit(Duration::from_secs(10));
+                    let validator = PropertyValidator::new(vec![OptimizerProperty::RuleSafety])
+                        .with_time_limit(Duration::from_secs(10));
 
                     for step in &storyline.steps {
                         for result in &validator.validate(&step.expr) {
@@ -304,32 +272,26 @@ fn extended_all_properties() {
         let config = ProptestConfig::with_cases(1000);
         let mut runner = TestRunner::new(config);
         runner
-            .run(
-                &ra_grammar_fuzzer::generator::arb_rel_expr(5),
-                |expr| {
-                    let validator = PropertyValidator::new(vec![
-                        OptimizerProperty::Roundtrip,
-                        OptimizerProperty::TablePreservation,
-                        OptimizerProperty::Convergence,
-                        OptimizerProperty::PlanValidity,
-                        OptimizerProperty::RuleSafety,
-                        OptimizerProperty::Idempotence,
-                    ])
-                    .with_time_limit(Duration::from_secs(30));
-                    for result in &validator.validate(&expr) {
-                        if !result.passed {
-                            return Err(TestCaseError::Fail(
-                                format!(
-                                    "property {} failed: {}",
-                                    result.property, result.details,
-                                )
+            .run(&ra_grammar_fuzzer::generator::arb_rel_expr(5), |expr| {
+                let validator = PropertyValidator::new(vec![
+                    OptimizerProperty::Roundtrip,
+                    OptimizerProperty::TablePreservation,
+                    OptimizerProperty::Convergence,
+                    OptimizerProperty::PlanValidity,
+                    OptimizerProperty::RuleSafety,
+                    OptimizerProperty::Idempotence,
+                ])
+                .with_time_limit(Duration::from_secs(30));
+                for result in &validator.validate(&expr) {
+                    if !result.passed {
+                        return Err(TestCaseError::Fail(
+                            format!("property {} failed: {}", result.property, result.details,)
                                 .into(),
-                            ));
-                        }
+                        ));
                     }
-                    Ok(())
-                },
-            )
+                }
+                Ok(())
+            })
             .unwrap();
     });
 }
@@ -353,27 +315,18 @@ fn extended_idempotence() {
         let config = ProptestConfig::with_cases(1000);
         let mut runner = TestRunner::new(config);
         runner
-            .run(
-                &ra_grammar_fuzzer::generator::arb_rel_expr(4),
-                |expr| {
-                    let validator = PropertyValidator::new(vec![
-                        OptimizerProperty::Idempotence,
-                    ])
+            .run(&ra_grammar_fuzzer::generator::arb_rel_expr(4), |expr| {
+                let validator = PropertyValidator::new(vec![OptimizerProperty::Idempotence])
                     .with_time_limit(Duration::from_secs(30));
-                    for result in &validator.validate(&expr) {
-                        if !result.passed {
-                            return Err(TestCaseError::Fail(
-                                format!(
-                                    "idempotence failed: {}",
-                                    result.details,
-                                )
-                                .into(),
-                            ));
-                        }
+                for result in &validator.validate(&expr) {
+                    if !result.passed {
+                        return Err(TestCaseError::Fail(
+                            format!("idempotence failed: {}", result.details,).into(),
+                        ));
                     }
-                    Ok(())
-                },
-            )
+                }
+                Ok(())
+            })
             .unwrap();
     });
 }
@@ -391,36 +344,31 @@ fn extended_mixed_dml_all_properties() {
         let config = ProptestConfig::with_cases(1000);
         let mut runner = TestRunner::new(config);
         runner
-            .run(
-                &arb_storyline(StorylinePattern::mixed_dml()),
-                |storyline| {
-                    let validator = PropertyValidator::new(vec![
-                        OptimizerProperty::Roundtrip,
-                        OptimizerProperty::TablePreservation,
-                        OptimizerProperty::Convergence,
-                        OptimizerProperty::PlanValidity,
-                        OptimizerProperty::RuleSafety,
-                    ])
-                    .with_time_limit(Duration::from_secs(30));
+            .run(&arb_storyline(StorylinePattern::mixed_dml()), |storyline| {
+                let validator = PropertyValidator::new(vec![
+                    OptimizerProperty::Roundtrip,
+                    OptimizerProperty::TablePreservation,
+                    OptimizerProperty::Convergence,
+                    OptimizerProperty::PlanValidity,
+                    OptimizerProperty::RuleSafety,
+                ])
+                .with_time_limit(Duration::from_secs(30));
 
-                    for step in &storyline.steps {
-                        for result in &validator.validate(&step.expr) {
-                            if !result.passed {
-                                return Err(TestCaseError::Fail(
-                                    format!(
-                                        "property {} failed at stage {}: {}",
-                                        result.property,
-                                        step.stage,
-                                        result.details,
-                                    )
-                                    .into(),
-                                ));
-                            }
+                for step in &storyline.steps {
+                    for result in &validator.validate(&step.expr) {
+                        if !result.passed {
+                            return Err(TestCaseError::Fail(
+                                format!(
+                                    "property {} failed at stage {}: {}",
+                                    result.property, step.stage, result.details,
+                                )
+                                .into(),
+                            ));
                         }
                     }
-                    Ok(())
-                },
-            )
+                }
+                Ok(())
+            })
             .unwrap();
     });
 }

@@ -123,10 +123,7 @@ impl AdviceTag {
     pub const fn is_simple(self) -> bool {
         matches!(
             self,
-            Self::BitmapHeapScan
-                | Self::NoGather
-                | Self::SeqScan
-                | Self::TidScan
+            Self::BitmapHeapScan | Self::NoGather | Self::SeqScan | Self::TidScan
         )
     }
 

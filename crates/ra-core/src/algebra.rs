@@ -484,7 +484,6 @@ pub enum RelExpr {
     },
 
     // ===== Data Modification Language (DML) Operators =====
-
     /// INSERT INTO table (columns) source.
     Insert {
         /// Target table name.
@@ -1256,9 +1255,7 @@ impl RelExpr {
             Self::Insert { source, .. } | Self::Merge { source, .. } => {
                 source.references_cte(cte_name)
             }
-            Self::Update { from, .. } => {
-                from.as_ref().is_some_and(|f| f.references_cte(cte_name))
-            }
+            Self::Update { from, .. } => from.as_ref().is_some_and(|f| f.references_cte(cte_name)),
             Self::Delete { using, .. } => {
                 using.as_ref().is_some_and(|u| u.references_cte(cte_name))
             }
@@ -1991,7 +1988,6 @@ mod tests {
         assert_eq!(SortDirection::Desc.to_string(), "DESC");
     }
 }
-
 
 /// Row-level locking mode for SELECT ... FOR UPDATE/SHARE.
 ///

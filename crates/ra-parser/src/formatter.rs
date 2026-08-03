@@ -129,11 +129,14 @@ impl SqlFormatter {
         }
     }
 
-    #[expect(clippy::too_many_lines, reason = "handles CTE body tracking, depth, string literals, and all clause keywords")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "handles CTE body tracking, depth, string literals, and all clause keywords"
+    )]
     fn apply_clause_breaks(&self, sql: &str) -> String {
         let indent = self.indent_string();
         let inner_indent = format!("{indent}{indent}"); // extra indent inside CTE bodies
-        // Alignment width for right-aligning keywords
+                                                        // Alignment width for right-aligning keywords
         let align_width: usize = 9; // len("RETURNING") + 1
         let mut result = String::with_capacity(sql.len() + 128);
         let mut depth: usize = 0;
@@ -614,7 +617,10 @@ mod tests {
         assert!(result.is_ok(), "format() should always succeed");
         // The output should at least contain the original tokens.
         let out = result.expect("format succeeded");
-        assert!(out.contains("NOT") || out.contains("VALID"), "should contain original tokens: {out}");
+        assert!(
+            out.contains("NOT") || out.contains("VALID"),
+            "should contain original tokens: {out}"
+        );
     }
 
     #[test]

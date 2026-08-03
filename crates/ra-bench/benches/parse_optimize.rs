@@ -26,47 +26,65 @@ const SIMPLE_QUERIES: &[(&str, &str)] = &[
 ];
 
 const MEDIUM_QUERIES: &[(&str, &str)] = &[
-    ("join2",
-     "SELECT o_orderkey, c_name FROM orders \
-      JOIN customer ON o_custkey = c_custkey"),
-    ("agg_group",
-     "SELECT o_orderstatus, COUNT(*), SUM(o_totalprice) \
-      FROM orders GROUP BY o_orderstatus"),
-    ("filter_sort",
-     "SELECT * FROM orders WHERE o_totalprice > 50000 ORDER BY o_orderdate DESC"),
-    ("window",
-     "SELECT row_number() OVER (ORDER BY o_totalprice DESC), o_orderkey FROM orders"),
-    ("cte",
-     "WITH big AS (SELECT * FROM orders WHERE o_totalprice > 100000) \
-      SELECT COUNT(*) FROM big"),
+    (
+        "join2",
+        "SELECT o_orderkey, c_name FROM orders \
+      JOIN customer ON o_custkey = c_custkey",
+    ),
+    (
+        "agg_group",
+        "SELECT o_orderstatus, COUNT(*), SUM(o_totalprice) \
+      FROM orders GROUP BY o_orderstatus",
+    ),
+    (
+        "filter_sort",
+        "SELECT * FROM orders WHERE o_totalprice > 50000 ORDER BY o_orderdate DESC",
+    ),
+    (
+        "window",
+        "SELECT row_number() OVER (ORDER BY o_totalprice DESC), o_orderkey FROM orders",
+    ),
+    (
+        "cte",
+        "WITH big AS (SELECT * FROM orders WHERE o_totalprice > 100000) \
+      SELECT COUNT(*) FROM big",
+    ),
 ];
 
 const COMPLEX_QUERIES: &[(&str, &str)] = &[
-    ("join5",
-     "SELECT c_name, n_name, r_name \
+    (
+        "join5",
+        "SELECT c_name, n_name, r_name \
       FROM customer \
       JOIN nation ON c_nationkey = n_nationkey \
       JOIN region ON n_regionkey = r_regionkey \
       JOIN orders ON c_custkey = o_custkey \
-      JOIN lineitem ON o_orderkey = l_orderkey"),
-    ("tpch_q1",
-     "SELECT l_returnflag, l_linestatus, \
+      JOIN lineitem ON o_orderkey = l_orderkey",
+    ),
+    (
+        "tpch_q1",
+        "SELECT l_returnflag, l_linestatus, \
         SUM(l_quantity), SUM(l_extendedprice), COUNT(*) \
       FROM lineitem \
       WHERE l_shipdate <= '1998-09-02' \
       GROUP BY l_returnflag, l_linestatus \
-      ORDER BY l_returnflag, l_linestatus"),
-    ("tpch_q5",
-     "SELECT n_name, SUM(l_extendedprice * (1 - l_discount)) AS revenue \
+      ORDER BY l_returnflag, l_linestatus",
+    ),
+    (
+        "tpch_q5",
+        "SELECT n_name, SUM(l_extendedprice * (1 - l_discount)) AS revenue \
       FROM customer, orders, lineitem, supplier, nation, region \
       WHERE c_custkey = o_custkey AND l_orderkey = o_orderkey \
         AND l_suppkey = s_suppkey AND c_nationkey = s_nationkey \
         AND s_nationkey = n_nationkey AND n_regionkey = r_regionkey \
         AND r_name = 'ASIA' AND o_orderdate >= '1994-01-01' \
-      GROUP BY n_name ORDER BY revenue DESC"),
-    ("nested_subq",
-     "SELECT * FROM orders WHERE o_custkey IN \
-      (SELECT c_custkey FROM customer WHERE c_mktsegment = 'BUILDING')"),
+      GROUP BY n_name ORDER BY revenue DESC",
+    ),
+    (
+        "nested_subq",
+        "SELECT * FROM orders WHERE o_custkey IN \
+      (SELECT c_custkey FROM customer WHERE c_mktsegment = 'BUILDING')",
+    ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -144,20 +162,15 @@ fn bench_optimize(c: &mut Criterion) {
 fn bench_tpch(c: &mut Criterion) {
     let optimizer = Optimizer::new();
     let corpus = all_queries();
-    let tpch: Vec<&CorpusEntry> =
-        corpus.iter().filter(|e| e.category == "tpch").collect();
+    let tpch: Vec<&CorpusEntry> = corpus.iter().filter(|e| e.category == "tpch").collect();
 
     {
         let mut parse_group = c.benchmark_group("tpch_parse");
         for (i, entry) in tpch.iter().enumerate() {
             let label = format!("q{:02}", i + 1);
-            parse_group.bench_with_input(
-                BenchmarkId::new("tpch", &label),
-                entry.sql,
-                |b, sql| {
-                    b.iter(|| sql_to_relexpr(sql).ok());
-                },
-            );
+            parse_group.bench_with_input(BenchmarkId::new("tpch", &label), entry.sql, |b, sql| {
+                b.iter(|| sql_to_relexpr(sql).ok());
+            });
         }
         parse_group.finish();
     }
@@ -167,13 +180,9 @@ fn bench_tpch(c: &mut Criterion) {
         for (i, entry) in tpch.iter().enumerate() {
             let label = format!("q{:02}", i + 1);
             if let Ok(plan) = sql_to_relexpr(entry.sql) {
-                opt_group.bench_with_input(
-                    BenchmarkId::new("tpch", &label),
-                    &plan,
-                    |b, plan| {
-                        b.iter(|| optimizer.optimize(plan).ok());
-                    },
-                );
+                opt_group.bench_with_input(BenchmarkId::new("tpch", &label), &plan, |b, plan| {
+                    b.iter(|| optimizer.optimize(plan).ok());
+                });
             }
         }
         opt_group.finish();
@@ -203,8 +212,7 @@ fn bench_corpus_categories(c: &mut Criterion) {
     };
 
     for cat in categories {
-        let entries: Vec<&CorpusEntry> =
-            corpus.iter().filter(|e| e.category == cat).collect();
+        let entries: Vec<&CorpusEntry> = corpus.iter().filter(|e| e.category == cat).collect();
 
         {
             let mut parse_group = c.benchmark_group(format!("corpus_{cat}_parse"));
@@ -224,13 +232,9 @@ fn bench_corpus_categories(c: &mut Criterion) {
             let mut opt_group = c.benchmark_group(format!("corpus_{cat}_optimize"));
             for (i, entry) in entries.iter().enumerate() {
                 if let Ok(plan) = sql_to_relexpr(entry.sql) {
-                    opt_group.bench_with_input(
-                        BenchmarkId::from_parameter(i),
-                        &plan,
-                        |b, plan| {
-                            b.iter(|| optimizer.optimize(plan).ok());
-                        },
-                    );
+                    opt_group.bench_with_input(BenchmarkId::from_parameter(i), &plan, |b, plan| {
+                        b.iter(|| optimizer.optimize(plan).ok());
+                    });
                 }
             }
             opt_group.finish();

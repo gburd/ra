@@ -14,8 +14,7 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    Advice, AdviceItem, AdviceTag, AdviceTarget, AdviceTargetKind,
-    IndexTarget, RelationIdentifier,
+    Advice, AdviceItem, AdviceTag, AdviceTarget, AdviceTargetKind, IndexTarget, RelationIdentifier,
 };
 
 /// Render an [`Advice`] value as a plan-advice string.
@@ -168,16 +167,14 @@ fn needs_quoting(s: &str) -> bool {
     }
     let mut bytes = s.bytes();
     // We checked s.is_empty() above, so .next() returns Some.
-    let Some(first) = bytes.next() else { return true };
+    let Some(first) = bytes.next() else {
+        return true;
+    };
     if !(first.is_ascii_alphabetic() || first == b'_' || first >= 0x80) {
         return true;
     }
     for b in bytes {
-        if !(b.is_ascii_alphanumeric()
-            || b == b'_'
-            || b == b'$'
-            || b >= 0x80)
-        {
+        if !(b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b >= 0x80) {
             return true;
         }
     }
@@ -198,9 +195,7 @@ mod tests {
     fn simple_seq_scan() {
         let advice = vec![AdviceItem {
             tag: AdviceTag::SeqScan,
-            targets: vec![
-                AdviceTarget::identifier(RelationIdentifier::simple("t")),
-            ],
+            targets: vec![AdviceTarget::identifier(RelationIdentifier::simple("t"))],
         }];
         assert_eq!(render_advice(&advice), "SEQ_SCAN(t)");
     }
@@ -302,9 +297,9 @@ mod tests {
     fn identifier_with_special_chars_gets_quoted() {
         let advice = vec![AdviceItem {
             tag: AdviceTag::SeqScan,
-            targets: vec![AdviceTarget::identifier(
-                RelationIdentifier::simple("has space"),
-            )],
+            targets: vec![AdviceTarget::identifier(RelationIdentifier::simple(
+                "has space",
+            ))],
         }];
         assert_eq!(render_advice(&advice), r#"SEQ_SCAN("has space")"#);
     }
@@ -313,9 +308,7 @@ mod tests {
     fn identifier_starting_with_digit_gets_quoted() {
         let advice = vec![AdviceItem {
             tag: AdviceTag::SeqScan,
-            targets: vec![AdviceTarget::identifier(
-                RelationIdentifier::simple("2col"),
-            )],
+            targets: vec![AdviceTarget::identifier(RelationIdentifier::simple("2col"))],
         }];
         assert_eq!(render_advice(&advice), r#"SEQ_SCAN("2col")"#);
     }
@@ -324,14 +317,11 @@ mod tests {
     fn embedded_double_quote_doubles() {
         let advice = vec![AdviceItem {
             tag: AdviceTag::SeqScan,
-            targets: vec![AdviceTarget::identifier(
-                RelationIdentifier::simple(r#"with"quote"#),
-            )],
+            targets: vec![AdviceTarget::identifier(RelationIdentifier::simple(
+                r#"with"quote"#,
+            ))],
         }];
-        assert_eq!(
-            render_advice(&advice),
-            r#"SEQ_SCAN("with""quote")"#,
-        );
+        assert_eq!(render_advice(&advice), r#"SEQ_SCAN("with""quote")"#,);
     }
 
     #[test]
@@ -341,9 +331,9 @@ mod tests {
         // TOK_TAG_SIMPLE and cause an unexpected-token error.
         let advice = vec![AdviceItem {
             tag: AdviceTag::SeqScan,
-            targets: vec![AdviceTarget::identifier(
-                RelationIdentifier::simple("seq_scan"),
-            )],
+            targets: vec![AdviceTarget::identifier(RelationIdentifier::simple(
+                "seq_scan",
+            ))],
         }];
         assert_eq!(render_advice(&advice), r#"SEQ_SCAN("seq_scan")"#);
     }
@@ -353,15 +343,11 @@ mod tests {
         let advice = vec![
             AdviceItem {
                 tag: AdviceTag::SeqScan,
-                targets: vec![AdviceTarget::identifier(
-                    RelationIdentifier::simple("a"),
-                )],
+                targets: vec![AdviceTarget::identifier(RelationIdentifier::simple("a"))],
             },
             AdviceItem {
                 tag: AdviceTag::HashJoin,
-                targets: vec![AdviceTarget::identifier(
-                    RelationIdentifier::simple("b"),
-                )],
+                targets: vec![AdviceTarget::identifier(RelationIdentifier::simple("b"))],
             },
         ];
         assert_eq!(render_advice(&advice), "SEQ_SCAN(a) HASH_JOIN(b)");

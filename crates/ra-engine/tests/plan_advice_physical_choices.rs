@@ -13,13 +13,14 @@
 
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Expr};
-use ra_engine::plan_advice_physical::{
-    JoinInnerStrategy, ParallelStrategy, ScanStrategy,
-};
+use ra_engine::plan_advice_physical::{JoinInnerStrategy, ParallelStrategy, ScanStrategy};
 use ra_engine::{Optimizer, OptimizerConfig};
 
 fn scan(name: &str) -> RelExpr {
-    RelExpr::Scan { table: name.into(), alias: None }
+    RelExpr::Scan {
+        table: name.into(),
+        alias: None,
+    }
 }
 
 fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
@@ -62,11 +63,15 @@ fn seq_scan_advice_populates_scan_strategy() {
         plan_advice: Some("SEQ_SCAN(a b)".into()),
         ..OptimizerConfig::default()
     };
-    let result = Optimizer::with_config(config)
-        .optimize_bounded(&q)
-        .unwrap();
-    assert_eq!(result.physical_choices.scan_for("a"), Some(&ScanStrategy::Seq));
-    assert_eq!(result.physical_choices.scan_for("b"), Some(&ScanStrategy::Seq));
+    let result = Optimizer::with_config(config).optimize_bounded(&q).unwrap();
+    assert_eq!(
+        result.physical_choices.scan_for("a"),
+        Some(&ScanStrategy::Seq)
+    );
+    assert_eq!(
+        result.physical_choices.scan_for("b"),
+        Some(&ScanStrategy::Seq)
+    );
 }
 
 #[test]
@@ -76,9 +81,7 @@ fn index_scan_advice_carries_index_name() {
         plan_advice: Some("INDEX_SCAN(orders orders_pkey)".into()),
         ..OptimizerConfig::default()
     };
-    let result = Optimizer::with_config(config)
-        .optimize_bounded(&q)
-        .unwrap();
+    let result = Optimizer::with_config(config).optimize_bounded(&q).unwrap();
     match result.physical_choices.scan_for("orders") {
         Some(ScanStrategy::Index { schema, name }) => {
             assert_eq!(schema, &None);
@@ -95,9 +98,7 @@ fn hash_join_advice_populates_join_strategy() {
         plan_advice: Some("HASH_JOIN(b)".into()),
         ..OptimizerConfig::default()
     };
-    let result = Optimizer::with_config(config)
-        .optimize_bounded(&q)
-        .unwrap();
+    let result = Optimizer::with_config(config).optimize_bounded(&q).unwrap();
     assert_eq!(
         result.physical_choices.join_for("b"),
         Some(&JoinInnerStrategy::Hash),
@@ -111,9 +112,7 @@ fn no_gather_advice_populates_parallel_strategy() {
         plan_advice: Some("NO_GATHER(t)".into()),
         ..OptimizerConfig::default()
     };
-    let result = Optimizer::with_config(config)
-        .optimize_bounded(&q)
-        .unwrap();
+    let result = Optimizer::with_config(config).optimize_bounded(&q).unwrap();
     assert_eq!(
         result.physical_choices.parallel_for("t"),
         Some(ParallelStrategy::NoGather),
@@ -122,20 +121,13 @@ fn no_gather_advice_populates_parallel_strategy() {
 
 #[test]
 fn mixed_advice_populates_each_category() {
-    let q = eq_join(
-        eq_join(scan("a"), scan("b"), "a", "b"),
-        scan("c"),
-        "a",
-        "c",
-    );
+    let q = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
     let advice = "SEQ_SCAN(a) INDEX_SCAN(b b_idx) HASH_JOIN(c) NO_GATHER(c)";
     let config = OptimizerConfig {
         plan_advice: Some(advice.into()),
         ..OptimizerConfig::default()
     };
-    let result = Optimizer::with_config(config)
-        .optimize_bounded(&q)
-        .unwrap();
+    let result = Optimizer::with_config(config).optimize_bounded(&q).unwrap();
     assert_eq!(
         result.physical_choices.scan_for("a"),
         Some(&ScanStrategy::Seq),
@@ -165,11 +157,15 @@ fn join_order_does_not_supply_scan_or_join_strategies() {
         plan_advice: Some("JOIN_ORDER(a b)".into()),
         ..OptimizerConfig::default()
     };
-    let result = Optimizer::with_config(config)
-        .optimize_bounded(&q)
-        .unwrap();
-    assert_eq!(result.physical_choices.scan_for("a"), Some(&ScanStrategy::Seq));
-    assert_eq!(result.physical_choices.scan_for("b"), Some(&ScanStrategy::Seq));
+    let result = Optimizer::with_config(config).optimize_bounded(&q).unwrap();
+    assert_eq!(
+        result.physical_choices.scan_for("a"),
+        Some(&ScanStrategy::Seq)
+    );
+    assert_eq!(
+        result.physical_choices.scan_for("b"),
+        Some(&ScanStrategy::Seq)
+    );
     assert_eq!(
         result.physical_choices.join_for("b"),
         Some(&ra_engine::plan_advice_physical::JoinInnerStrategy::Hash),

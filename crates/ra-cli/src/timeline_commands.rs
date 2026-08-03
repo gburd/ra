@@ -125,7 +125,13 @@ pub fn cmd_timeline(cmd: &TimelineCommand, quiet: bool) -> Result<()> {
 
     // Test mode - validate expectations
     if cmd.test {
-        return run_test_mode(&timeline, query, snapshot_filter.as_deref(), cmd.verbose, quiet);
+        return run_test_mode(
+            &timeline,
+            query,
+            snapshot_filter.as_deref(),
+            cmd.verbose,
+            quiet,
+        );
     }
 
     // Normal mode - optimize and output results

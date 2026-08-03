@@ -22,6 +22,6 @@
 
 pub use ra_core::config::{
     config_dir, config_path, ConfigError, ConfigLoader, ConfigSqlDialect as SqlDialect,
-    EditorConfig, EditorMode, HardwareConfig, IndentStyle, KeywordCase, OutputConfig,
-    OutputFormat, RaConfig, SqlConfig, TuiConfig, TuiLayout,
+    EditorConfig, EditorMode, HardwareConfig, IndentStyle, KeywordCase, OutputConfig, OutputFormat,
+    RaConfig, SqlConfig, TuiConfig, TuiLayout,
 };

@@ -145,8 +145,10 @@ impl Analysis<RelLang> for RelAnalysis {
         }
         for child in enode.children() {
             let canonical = egraph.find(*child);
-            data.columns.extend(egraph[canonical].data.columns.iter().cloned());
-            data.qualifiers.extend(egraph[canonical].data.qualifiers.iter().cloned());
+            data.columns
+                .extend(egraph[canonical].data.columns.iter().cloned());
+            data.qualifiers
+                .extend(egraph[canonical].data.qualifiers.iter().cloned());
         }
 
         data

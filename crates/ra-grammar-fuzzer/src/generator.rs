@@ -6,8 +6,8 @@
 
 use proptest::prelude::*;
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering,
-    ProjectionColumn, RelExpr, SortDirection, SortKey,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
+    SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
 
@@ -110,34 +110,28 @@ impl SqlGenerator {
 
     /// Return a strategy for queries with JSONB operators.
     pub fn jsonb_strategy(&self) -> impl Strategy<Value = RelExpr> {
-        (arb_jsonb_expr(), arb_scan()).prop_map(|(pred, input)| {
-            RelExpr::Filter {
-                predicate: pred,
-                input: Box::new(input),
-            }
+        (arb_jsonb_expr(), arb_scan()).prop_map(|(pred, input)| RelExpr::Filter {
+            predicate: pred,
+            input: Box::new(input),
         })
     }
 
     /// Return a strategy for queries with ALL/ANY predicates.
     pub fn all_any_strategy(&self) -> impl Strategy<Value = RelExpr> {
-        (arb_all_any_predicate(), arb_scan()).prop_map(|(pred, input)| {
-            RelExpr::Filter {
-                predicate: pred,
-                input: Box::new(input),
-            }
+        (arb_all_any_predicate(), arb_scan()).prop_map(|(pred, input)| RelExpr::Filter {
+            predicate: pred,
+            input: Box::new(input),
         })
     }
 
     /// Return a strategy for queries with window functions.
     pub fn window_function_strategy(&self) -> impl Strategy<Value = RelExpr> {
-        (arb_window_function(), arb_scan()).prop_map(|(window_expr, input)| {
-            RelExpr::Project {
-                columns: vec![ProjectionColumn {
-                    expr: window_expr,
-                    alias: Some("window_result".to_owned()),
-                }],
-                input: Box::new(input),
-            }
+        (arb_window_function(), arb_scan()).prop_map(|(window_expr, input)| RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: window_expr,
+                alias: Some("window_result".to_owned()),
+            }],
+            input: Box::new(input),
         })
     }
 }
@@ -219,11 +213,7 @@ fn arb_comparison_op() -> impl Strategy<Value = BinOp> {
 }
 
 fn arb_arithmetic_op() -> impl Strategy<Value = BinOp> {
-    prop_oneof![
-        Just(BinOp::Add),
-        Just(BinOp::Sub),
-        Just(BinOp::Mul),
-    ]
+    prop_oneof![Just(BinOp::Add), Just(BinOp::Sub), Just(BinOp::Mul),]
 }
 
 fn arb_logical_op() -> impl Strategy<Value = BinOp> {
@@ -262,13 +252,11 @@ pub fn arb_expr(depth: u32) -> impl Strategy<Value = Expr> {
     leaf.prop_recursive(depth, 64, 2, |inner| {
         prop_oneof![
             // Binary operation
-            (arb_binop(), inner.clone(), inner.clone()).prop_map(
-                |(op, left, right)| Expr::BinOp {
-                    op,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                }
-            ),
+            (arb_binop(), inner.clone(), inner.clone()).prop_map(|(op, left, right)| Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            }),
             // Unary operation
             (arb_unaryop(), inner.clone()).prop_map(|(op, operand)| {
                 Expr::UnaryOp {
@@ -288,23 +276,21 @@ pub fn arb_expr(depth: u32) -> impl Strategy<Value = Expr> {
 
 /// Generate a simple predicate (column op constant).
 pub fn arb_simple_predicate() -> impl Strategy<Value = Expr> {
-    (arb_column_expr(), arb_comparison_op(), arb_const_expr()).prop_map(
-        |(col, op, val)| Expr::BinOp {
+    (arb_column_expr(), arb_comparison_op(), arb_const_expr()).prop_map(|(col, op, val)| {
+        Expr::BinOp {
             op,
             left: Box::new(col),
             right: Box::new(val),
-        },
-    )
+        }
+    })
 }
 
 /// Generate an equality join predicate (col = col).
 pub fn arb_eq_join_pred() -> impl Strategy<Value = Expr> {
-    (arb_column_expr(), arb_column_expr()).prop_map(|(l, r)| {
-        Expr::BinOp {
-            op: BinOp::Eq,
-            left: Box::new(l),
-            right: Box::new(r),
-        }
+    (arb_column_expr(), arb_column_expr()).prop_map(|(l, r)| Expr::BinOp {
+        op: BinOp::Eq,
+        left: Box::new(l),
+        right: Box::new(r),
     })
 }
 
@@ -320,11 +306,9 @@ fn arb_scan() -> impl Strategy<Value = RelExpr> {
 }
 
 fn arb_scan_with_alias() -> impl Strategy<Value = RelExpr> {
-    (arb_table_name(), "[a-z]{1,3}").prop_map(|(t, alias)| {
-        RelExpr::Scan {
-            table: t,
-            alias: Some(alias),
-        }
+    (arb_table_name(), "[a-z]{1,3}").prop_map(|(t, alias)| RelExpr::Scan {
+        table: t,
+        alias: Some(alias),
     })
 }
 
@@ -349,13 +333,13 @@ fn arb_null_ordering() -> impl Strategy<Value = NullOrdering> {
 }
 
 fn arb_sort_key() -> impl Strategy<Value = SortKey> {
-    (arb_expr(0), arb_sort_direction(), arb_null_ordering()).prop_map(
-        |(expr, direction, nulls)| SortKey {
+    (arb_expr(0), arb_sort_direction(), arb_null_ordering()).prop_map(|(expr, direction, nulls)| {
+        SortKey {
             expr,
             direction,
             nulls,
-        },
-    )
+        }
+    })
 }
 
 fn arb_agg_function() -> impl Strategy<Value = AggregateFunction> {
@@ -456,22 +440,20 @@ fn arb_all_any_predicate() -> impl Strategy<Value = Expr> {
 
 /// Generate tuple IN expressions: (col1, col2) IN ((val1, val2), ...)
 fn arb_tuple_in_expr() -> impl Strategy<Value = Expr> {
-    prop::collection::vec(arb_column_expr(), 2..=3).prop_map(|cols| {
-        Expr::Function {
-            name: "__row_constructor".to_owned(),
-            args: cols,
-        }
+    prop::collection::vec(arb_column_expr(), 2..=3).prop_map(|cols| Expr::Function {
+        name: "__row_constructor".to_owned(),
+        args: cols,
     })
 }
 
 /// Generate SUBSTRING FROM FOR expressions
 fn arb_substring_from_for() -> impl Strategy<Value = Expr> {
-    (arb_column_expr(), arb_const_expr(), arb_const_expr()).prop_map(
-        |(col, from_pos, length)| Expr::Function {
+    (arb_column_expr(), arb_const_expr(), arb_const_expr()).prop_map(|(col, from_pos, length)| {
+        Expr::Function {
             name: "substring".to_owned(),
             args: vec![col, from_pos, length],
-        },
-    )
+        }
+    })
 }
 
 /// Generate window function expressions with optional frames
@@ -508,15 +490,14 @@ fn arb_projection_column() -> impl Strategy<Value = ProjectionColumn> {
 fn arb_join_query(depth: u32) -> impl Strategy<Value = RelExpr> {
     let leaf = arb_scan();
     leaf.prop_recursive(depth, 64, 4, |inner| {
-        (arb_join_type(), arb_eq_join_pred(), inner.clone(), inner)
-            .prop_map(
-                |(join_type, condition, left, right)| RelExpr::Join {
-                    join_type,
-                    condition,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                },
-            )
+        (arb_join_type(), arb_eq_join_pred(), inner.clone(), inner).prop_map(
+            |(join_type, condition, left, right)| RelExpr::Join {
+                join_type,
+                condition,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+        )
     })
 }
 
@@ -564,26 +545,24 @@ fn arb_grouping_sets_query() -> impl Strategy<Value = RelExpr> {
 
 /// Generate chained UNION ALL queries
 fn arb_chained_set_operations() -> impl Strategy<Value = RelExpr> {
-    (arb_scan(), arb_scan(), arb_scan()).prop_map(
-        |(left, middle, right)| {
-            // Create: left UNION ALL middle UNION ALL right
-            let left_union = RelExpr::Union {
-                all: true,
-                left: Box::new(left),
-                right: Box::new(middle),
-            };
-            RelExpr::Union {
-                all: true,
-                left: Box::new(left_union),
-                right: Box::new(right),
-            }
-        },
-    )
+    (arb_scan(), arb_scan(), arb_scan()).prop_map(|(left, middle, right)| {
+        // Create: left UNION ALL middle UNION ALL right
+        let left_union = RelExpr::Union {
+            all: true,
+            left: Box::new(left),
+            right: Box::new(middle),
+        };
+        RelExpr::Union {
+            all: true,
+            left: Box::new(left_union),
+            right: Box::new(right),
+        }
+    })
 }
 
 fn arb_set_operation() -> impl Strategy<Value = RelExpr> {
-    (any::<bool>(), arb_scan(), arb_scan(), 0..3u8).prop_map(
-        |(all, left, right, op_type)| match op_type {
+    (any::<bool>(), arb_scan(), arb_scan(), 0..3u8).prop_map(|(all, left, right, op_type)| {
+        match op_type {
             0 => RelExpr::Union {
                 all,
                 left: Box::new(left),
@@ -599,8 +578,8 @@ fn arb_set_operation() -> impl Strategy<Value = RelExpr> {
                 left: Box::new(left),
                 right: Box::new(right),
             },
-        },
-    )
+        }
+    })
 }
 
 /// Generate arbitrary relational expressions up to `depth`.
@@ -628,41 +607,33 @@ pub fn arb_rel_expr(depth: u32) -> impl Strategy<Value = RelExpr> {
                     }
                 }),
             // Join
-            (
-                arb_join_type(),
-                arb_expr(1),
-                inner.clone(),
-                inner.clone()
-            )
-                .prop_map(|(join_type, condition, left, right)| {
+            (arb_join_type(), arb_expr(1), inner.clone(), inner.clone()).prop_map(
+                |(join_type, condition, left, right)| {
                     RelExpr::Join {
                         join_type,
                         condition,
                         left: Box::new(left),
                         right: Box::new(right),
                     }
-                }),
-            // Limit
-            (0u64..100, 0u64..50, inner.clone()).prop_map(
-                |(count, offset, input)| {
-                    RelExpr::Limit {
-                        count,
-                        offset,
-                        input: Box::new(input),
-                    }
                 }
             ),
+            // Limit
+            (0u64..100, 0u64..50, inner.clone()).prop_map(|(count, offset, input)| {
+                RelExpr::Limit {
+                    count,
+                    offset,
+                    input: Box::new(input),
+                }
+            }),
             // Sort
-            (
-                prop::collection::vec(arb_sort_key(), 1..=3),
-                inner.clone()
-            )
-                .prop_map(|(keys, input)| {
+            (prop::collection::vec(arb_sort_key(), 1..=3), inner.clone()).prop_map(
+                |(keys, input)| {
                     RelExpr::Sort {
                         keys,
                         input: Box::new(input),
                     }
-                }),
+                }
+            ),
             // Aggregate
             (
                 prop::collection::vec(arb_expr(0), 0..=2),
@@ -677,35 +648,29 @@ pub fn arb_rel_expr(depth: u32) -> impl Strategy<Value = RelExpr> {
                     }
                 }),
             // Union
-            (any::<bool>(), inner.clone(), inner.clone()).prop_map(
-                |(all, left, right)| {
-                    RelExpr::Union {
-                        all,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    }
+            (any::<bool>(), inner.clone(), inner.clone()).prop_map(|(all, left, right)| {
+                RelExpr::Union {
+                    all,
+                    left: Box::new(left),
+                    right: Box::new(right),
                 }
-            ),
+            }),
             // Intersect
-            (any::<bool>(), inner.clone(), inner.clone()).prop_map(
-                |(all, left, right)| {
-                    RelExpr::Intersect {
-                        all,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    }
+            (any::<bool>(), inner.clone(), inner.clone()).prop_map(|(all, left, right)| {
+                RelExpr::Intersect {
+                    all,
+                    left: Box::new(left),
+                    right: Box::new(right),
                 }
-            ),
+            }),
             // Except
-            (any::<bool>(), inner.clone(), inner.clone()).prop_map(
-                |(all, left, right)| {
-                    RelExpr::Except {
-                        all,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    }
+            (any::<bool>(), inner.clone(), inner.clone()).prop_map(|(all, left, right)| {
+                RelExpr::Except {
+                    all,
+                    left: Box::new(left),
+                    right: Box::new(right),
                 }
-            ),
+            }),
             // Distinct
             inner.clone().prop_map(|input| {
                 RelExpr::Distinct {

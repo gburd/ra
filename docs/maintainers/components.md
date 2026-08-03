@@ -8,7 +8,7 @@ This document describes how RA's major subsystems interact, their public APIs, a
 
 ```mermaid
 graph TD
-    CLI[ra-cli] --> Engine[ra-engine]
+    CLI[ra] --> Engine[ra-engine]
     CLI --> Parser[ra-parser]
     CLI --> Dialect[ra-dialect]
     CLI --> Stats[ra-stats-advanced]
@@ -445,7 +445,7 @@ Generates optimization advice (index suggestions, query rewrites) based on workl
 ```mermaid
 sequenceDiagram
     participant User
-    participant CLI as ra-cli
+    participant CLI as ra
     participant Parser as ra-parser
     participant Compiler as ra-compiler
     participant Engine as ra-engine

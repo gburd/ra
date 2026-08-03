@@ -30,7 +30,8 @@ fn load_from_dir(base: std::path::PathBuf) -> Vec<(String, String)> {
         if ext == Some("sql") {
             let content = fs::read_to_string(&entry).expect("read sql file");
             // Strip comment lines, then split remaining into queries by semicolons
-            let clean: String = content.lines()
+            let clean: String = content
+                .lines()
                 .filter(|l| !l.trim_start().starts_with("--"))
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -88,7 +89,10 @@ fn validate_plan(plan: &RelExpr) -> Option<String> {
 #[test]
 fn exhaustive_ra_qualification() {
     let queries = load_queries();
-    assert!(!queries.is_empty(), "no queries loaded from benchmark corpus");
+    assert!(
+        !queries.is_empty(),
+        "no queries loaded from benchmark corpus"
+    );
 
     let mut results = Results::default();
     let optimizer = Optimizer::default();
@@ -110,7 +114,9 @@ fn exhaustive_ra_qualification() {
         let optimized = match optimizer.optimize(&parsed) {
             Ok(expr) => expr,
             Err(e) => {
-                results.optimize_failures.push((name.clone(), format!("{e}")));
+                results
+                    .optimize_failures
+                    .push((name.clone(), format!("{e}")));
                 continue;
             }
         };
@@ -129,12 +135,21 @@ fn exhaustive_ra_qualification() {
     println!("  RA vs PG QUALIFICATION RESULTS");
     println!("{}", "=".repeat(60));
     println!("  Total queries:     {}", results.total);
-    println!("  Parse OK:          {} ({:.1}%)", results.parse_ok,
-        results.parse_ok as f64 / results.total as f64 * 100.0);
-    println!("  Optimize OK:       {} ({:.1}%)", results.optimize_ok,
-        results.optimize_ok as f64 / results.total as f64 * 100.0);
-    println!("  Plan valid:        {} ({:.1}%)", results.plan_valid,
-        results.plan_valid as f64 / results.total as f64 * 100.0);
+    println!(
+        "  Parse OK:          {} ({:.1}%)",
+        results.parse_ok,
+        results.parse_ok as f64 / results.total as f64 * 100.0
+    );
+    println!(
+        "  Optimize OK:       {} ({:.1}%)",
+        results.optimize_ok,
+        results.optimize_ok as f64 / results.total as f64 * 100.0
+    );
+    println!(
+        "  Plan valid:        {} ({:.1}%)",
+        results.plan_valid,
+        results.plan_valid as f64 / results.total as f64 * 100.0
+    );
 
     if !results.parse_failures.is_empty() {
         println!("\n  PARSE FAILURES ({}):", results.parse_failures.len());
@@ -144,7 +159,10 @@ fn exhaustive_ra_qualification() {
     }
 
     if !results.optimize_failures.is_empty() {
-        println!("\n  OPTIMIZE FAILURES ({}):", results.optimize_failures.len());
+        println!(
+            "\n  OPTIMIZE FAILURES ({}):",
+            results.optimize_failures.len()
+        );
         for (name, err) in &results.optimize_failures {
             println!("    {name}: {err}");
         }
@@ -158,8 +176,12 @@ fn exhaustive_ra_qualification() {
     }
 
     // Assert zero failures for release qualification
-    println!("\n  VERDICT: {} parse failures, {} optimize failures, {} plan issues",
-        results.parse_failures.len(), results.optimize_failures.len(), results.plan_issues.len());
+    println!(
+        "\n  VERDICT: {} parse failures, {} optimize failures, {} plan issues",
+        results.parse_failures.len(),
+        results.optimize_failures.len(),
+        results.plan_issues.len()
+    );
 
     // Don't assert — record for review
     // The test passes but prints exceptions for manual review

@@ -166,9 +166,9 @@ mod tests {
     fn flag_bit_values_match_pg() {
         // From pg_plan_advice.h:42-46
         assert_eq!(FeedbackFlags::MATCH_PARTIAL, 0x01);
-        assert_eq!(FeedbackFlags::MATCH_FULL,    0x02);
-        assert_eq!(FeedbackFlags::INAPPLICABLE,  0x04);
-        assert_eq!(FeedbackFlags::CONFLICTING,   0x08);
-        assert_eq!(FeedbackFlags::FAILED,        0x10);
+        assert_eq!(FeedbackFlags::MATCH_FULL, 0x02);
+        assert_eq!(FeedbackFlags::INAPPLICABLE, 0x04);
+        assert_eq!(FeedbackFlags::CONFLICTING, 0x08);
+        assert_eq!(FeedbackFlags::FAILED, 0x10);
     }
 }

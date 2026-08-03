@@ -444,11 +444,7 @@ impl fmt::Display for Location {
         if self.line == 0 {
             return Ok(());
         }
-        write!(
-            f,
-            " at {}:{}",
-            self.line, self.column,
-        )
+        write!(f, " at {}:{}", self.line, self.column,)
     }
 }
 

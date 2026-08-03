@@ -9,8 +9,7 @@ use std::fs;
 use std::path::Path;
 
 fn parse_and_optimize(sql: &str) -> Result<(), String> {
-    let rel = sql_to_relexpr::sql_to_relexpr(sql)
-        .map_err(|e| format!("PARSE: {e}"))?;
+    let rel = sql_to_relexpr::sql_to_relexpr(sql).map_err(|e| format!("PARSE: {e}"))?;
     let opt = Optimizer::new();
     opt.optimize(&rel).map_err(|e| format!("OPT: {e}"))?;
     Ok(())
@@ -24,9 +23,7 @@ fn test_sql_dir(dir: &Path) -> (usize, usize, Vec<String>) {
     let mut files: Vec<_> = fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path().extension().map(|x| x == "sql").unwrap_or(false)
-        })
+        .filter(|e| e.path().extension().map(|x| x == "sql").unwrap_or(false))
         .map(|e| e.path())
         .collect();
     files.sort();
@@ -72,15 +69,11 @@ fn test_sql_dir(dir: &Path) -> (usize, usize, Vec<String>) {
                 Ok(()) => pass += 1,
                 Err(e) => {
                     fail += 1;
-                    let snippet: String =
-                        stmt.chars().take(80).collect();
+                    let snippet: String = stmt.chars().take(80).collect();
                     let snippet = snippet.replace('\n', " ");
                     errors.push(format!(
                         "  [{}] {} → {}",
-                        file.file_name()
-                            .unwrap_or_default()
-                            .to_str()
-                            .unwrap_or("?"),
+                        file.file_name().unwrap_or_default().to_str().unwrap_or("?"),
                         snippet,
                         e
                     ));

@@ -226,17 +226,10 @@ impl ReferenceComparator {
         let conn_str = self
             .pg_connection
             .as_deref()
-            .ok_or_else(|| {
-                ReferenceError::Connection(
-                    "PostgreSQL not configured".to_owned(),
-                )
-            })?;
+            .ok_or_else(|| ReferenceError::Connection("PostgreSQL not configured".to_owned()))?;
 
-        let mut client = postgres::Client::connect(
-            conn_str,
-            postgres::NoTls,
-        )
-        .map_err(|e| ReferenceError::Connection(e.to_string()))?;
+        let mut client = postgres::Client::connect(conn_str, postgres::NoTls)
+            .map_err(|e| ReferenceError::Connection(e.to_string()))?;
 
         let explain_sql = format!("EXPLAIN (FORMAT JSON, ANALYZE, TIMING) {sql}");
         let rows = client
@@ -274,7 +267,9 @@ impl ReferenceComparator {
 
     /// Extract execution statistics from EXPLAIN (ANALYZE) JSON output.
     #[cfg(feature = "reference-comparison")]
-    fn extract_execution_stats(plan_json: &serde_json::Value) -> (Option<f64>, Option<u64>, Option<u64>) {
+    fn extract_execution_stats(
+        plan_json: &serde_json::Value,
+    ) -> (Option<f64>, Option<u64>, Option<u64>) {
         // EXPLAIN (ANALYZE, FORMAT JSON) returns: [{"Plan": {...}}]
         let plan = plan_json
             .as_array()
@@ -282,17 +277,11 @@ impl ReferenceComparator {
             .and_then(|obj| obj.get("Plan"));
 
         if let Some(plan) = plan {
-            let actual_time = plan
-                .get("Actual Total Time")
-                .and_then(|v| v.as_f64());
+            let actual_time = plan.get("Actual Total Time").and_then(|v| v.as_f64());
 
-            let actual_rows = plan
-                .get("Actual Rows")
-                .and_then(|v| v.as_u64());
+            let actual_rows = plan.get("Actual Rows").and_then(|v| v.as_u64());
 
-            let estimated_rows = plan
-                .get("Plan Rows")
-                .and_then(|v| v.as_u64());
+            let estimated_rows = plan.get("Plan Rows").and_then(|v| v.as_u64());
 
             (actual_time, actual_rows, estimated_rows)
         } else {
@@ -315,17 +304,10 @@ impl ReferenceComparator {
         let conn_str = self
             .pg_connection
             .as_deref()
-            .ok_or_else(|| {
-                ReferenceError::Connection(
-                    "PostgreSQL not configured".to_owned(),
-                )
-            })?;
+            .ok_or_else(|| ReferenceError::Connection("PostgreSQL not configured".to_owned()))?;
 
-        let mut client = postgres::Client::connect(
-            conn_str,
-            postgres::NoTls,
-        )
-        .map_err(|e| ReferenceError::Connection(e.to_string()))?;
+        let mut client = postgres::Client::connect(conn_str, postgres::NoTls)
+            .map_err(|e| ReferenceError::Connection(e.to_string()))?;
 
         let explain_sql = format!("EXPLAIN (FORMAT JSON) {sql}");
         let rows = client
@@ -333,9 +315,7 @@ impl ReferenceComparator {
             .map_err(|e| ReferenceError::Explain(e.to_string()))?;
 
         if rows.is_empty() {
-            return Err(ReferenceError::Explain(
-                "empty EXPLAIN result".to_owned(),
-            ));
+            return Err(ReferenceError::Explain("empty EXPLAIN result".to_owned()));
         }
 
         let plan_json: serde_json::Value = rows[0].get(0);
@@ -352,9 +332,9 @@ impl ReferenceComparator {
         let (similarity, join_match, notes) = Self::compare_plan_nodes(&pg_plan, &ra_plan_node);
 
         // Extract cost ratio if available
-        let cost_ratio = pg_plan.estimated_cost.and_then(|pg_cost| {
-            ra_plan_node.estimated_cost.map(|ra_cost| pg_cost / ra_cost)
-        });
+        let cost_ratio = pg_plan
+            .estimated_cost
+            .and_then(|pg_cost| ra_plan_node.estimated_cost.map(|ra_cost| pg_cost / ra_cost));
 
         Ok(ComparisonResult {
             reference: ReferenceDb::PostgreSQL,
@@ -466,32 +446,32 @@ impl ReferenceComparator {
                 estimated_cost: None,
                 children: vec![Self::ra_relexpr_to_plan_node(input)],
             },
-            RelExpr::Join { left, right, .. }
-            | RelExpr::ParallelHashJoin { left, right, .. } => PlanNode {
-                operator: PlanOperator::Join,
-                estimated_rows: None,
-                estimated_cost: None,
-                children: vec![
-                    Self::ra_relexpr_to_plan_node(left),
-                    Self::ra_relexpr_to_plan_node(right),
-                ],
-            },
-            RelExpr::Aggregate { input, .. }
-            | RelExpr::ParallelAggregate { input, .. } => PlanNode {
-                operator: PlanOperator::Aggregate,
-                estimated_rows: None,
-                estimated_cost: None,
-                children: vec![Self::ra_relexpr_to_plan_node(input)],
-            },
-            RelExpr::Sort { input, .. }
-            | RelExpr::IncrementalSort { input, .. } => PlanNode {
+            RelExpr::Join { left, right, .. } | RelExpr::ParallelHashJoin { left, right, .. } => {
+                PlanNode {
+                    operator: PlanOperator::Join,
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![
+                        Self::ra_relexpr_to_plan_node(left),
+                        Self::ra_relexpr_to_plan_node(right),
+                    ],
+                }
+            }
+            RelExpr::Aggregate { input, .. } | RelExpr::ParallelAggregate { input, .. } => {
+                PlanNode {
+                    operator: PlanOperator::Aggregate,
+                    estimated_rows: None,
+                    estimated_cost: None,
+                    children: vec![Self::ra_relexpr_to_plan_node(input)],
+                }
+            }
+            RelExpr::Sort { input, .. } | RelExpr::IncrementalSort { input, .. } => PlanNode {
                 operator: PlanOperator::Sort,
                 estimated_rows: None,
                 estimated_cost: None,
                 children: vec![Self::ra_relexpr_to_plan_node(input)],
             },
-            RelExpr::Limit { input, .. }
-            | RelExpr::TopK { input, .. } => PlanNode {
+            RelExpr::Limit { input, .. } | RelExpr::TopK { input, .. } => PlanNode {
                 operator: PlanOperator::Limit,
                 estimated_rows: None,
                 estimated_cost: None,
@@ -593,7 +573,10 @@ impl ReferenceComparator {
 
         while let Some(current) = queue.pop_front() {
             // Skip auxiliary nodes — just traverse their children
-            if matches!(current.operator, PlanOperator::Materialize | PlanOperator::Hash) {
+            if matches!(
+                current.operator,
+                PlanOperator::Materialize | PlanOperator::Hash
+            ) {
                 for child in &current.children {
                     queue.push_back(child);
                 }
@@ -618,7 +601,12 @@ impl ReferenceComparator {
             _ => 0,
         };
 
-        self_count + node.children.iter().map(|child| Self::count_joins(child)).sum::<usize>()
+        self_count
+            + node
+                .children
+                .iter()
+                .map(|child| Self::count_joins(child))
+                .sum::<usize>()
     }
 
     /// Compare a SQL query's plan against `DuckDB`.
@@ -628,10 +616,7 @@ impl ReferenceComparator {
     /// Returns error if `DuckDB` initialization fails or `EXPLAIN`
     /// returns unexpected output.
     #[cfg(feature = "reference-comparison")]
-    pub fn compare_with_duckdb(
-        &self,
-        sql: &str,
-    ) -> Result<ComparisonResult, ReferenceError> {
+    pub fn compare_with_duckdb(&self, sql: &str) -> Result<ComparisonResult, ReferenceError> {
         let db = if let Some(ref path) = self.duckdb_path {
             duckdb::Connection::open(path)
         } else {
@@ -662,10 +647,7 @@ impl ReferenceComparator {
             actual_execution_time_ms: None,
             actual_rows: None,
             estimated_rows: None,
-            notes: vec![format!(
-                "DuckDB plan retrieved ({} lines)",
-                plan_text.len()
-            )],
+            notes: vec![format!("DuckDB plan retrieved ({} lines)", plan_text.len())],
         })
     }
 
@@ -706,10 +688,7 @@ mod tests {
 
     #[test]
     fn reference_db_display() {
-        assert_eq!(
-            format!("{}", ReferenceDb::PostgreSQL),
-            "PostgreSQL"
-        );
+        assert_eq!(format!("{}", ReferenceDb::PostgreSQL), "PostgreSQL");
         assert_eq!(format!("{}", ReferenceDb::DuckDB), "DuckDB");
     }
 

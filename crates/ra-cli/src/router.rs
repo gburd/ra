@@ -215,9 +215,22 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 "Benchmark command is temporarily disabled due to incomplete implementation"
             )
         }
+        Commands::Verify {
+            tier,
+            report,
+            corpus,
+            format,
+        } => {
+            let passed =
+                commands::verify::cmd_verify(tier, report, corpus.as_deref(), &format, cli.quiet)?;
+            if !passed {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
-            generate(shell, &mut cmd, "ra-cli", &mut std::io::stdout());
+            generate(shell, &mut cmd, "ra", &mut std::io::stdout());
             Ok(())
         }
     }
@@ -230,7 +243,9 @@ fn dispatch_pg_snapshot(sub: PgSnapshotCommands) -> Result<()> {
             tables,
             output,
             label,
-        } => pg_snapshot_commands::capture_pg_snapshot(&database, &tables, &output, label.as_deref()),
+        } => {
+            pg_snapshot_commands::capture_pg_snapshot(&database, &tables, &output, label.as_deref())
+        }
         PgSnapshotCommands::GenerateScript {
             tables,
             output_dir,

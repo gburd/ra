@@ -101,7 +101,11 @@ impl JoinGraph {
     /// Extract join predicates from an expression.
     fn extract_join_predicates(&mut self, expr: &Expr) {
         match expr {
-            Expr::BinOp { op: BinOp::Eq, left, right } => {
+            Expr::BinOp {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => {
                 // Look for column = column (equi-join)
                 if let (Some(left_table), Some(right_table)) = (
                     Self::extract_table_from_expr(left),
@@ -112,7 +116,11 @@ impl JoinGraph {
                     }
                 }
             }
-            Expr::BinOp { op: BinOp::And, left, right } => {
+            Expr::BinOp {
+                op: BinOp::And,
+                left,
+                right,
+            } => {
                 // Recursively process AND clauses
                 self.extract_join_predicates(left);
                 self.extract_join_predicates(right);

@@ -185,7 +185,11 @@ impl TriggerSet {
         }
         // Estimate budgeted memory as proportional to estimated rows
         // (8 bytes per row as a baseline).
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "legacy allow")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "legacy allow"
+        )]
         let budgeted = (stats.estimated_rows * 8.0) as u64;
         if budgeted == 0 {
             return;

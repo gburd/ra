@@ -6,7 +6,7 @@ set -euo pipefail
 # ============================================================================
 #
 # Prerequisites:
-#   1. Build ra-cli:  cargo build --bin ra-cli
+#   1. Build ra-cli:  cargo build --bin ra
 #   2. Start Citus cluster (coordinator + 3 workers):
 #        # Start coordinator
 #        docker run -d --name citus-coord \
@@ -45,7 +45,7 @@ set -euo pipefail
 #   - Real-world scalable analytics query patterns
 # ============================================================================
 
-RA="cargo run --bin ra-cli --"
+RA="cargo run --bin ra --"
 COORD_DB="postgresql://citus_demo:citus_demo@localhost:5432/citus_demo"
 SCHEMA="examples/citus-demo-schema.json"
 

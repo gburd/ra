@@ -15,6 +15,7 @@ pub mod test_cmd;
 pub mod translate;
 pub mod tui;
 pub mod validate;
+pub mod verify;
 
 // Temporarily disabled due to incomplete implementation
 // pub mod benchmark;

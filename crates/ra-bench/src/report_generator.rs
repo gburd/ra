@@ -114,7 +114,10 @@ impl ReportGenerator {
     pub fn new() -> Self {
         Self {
             reports: Vec::new(),
-            analyzer_config: AnalyzerConfig { min_samples: 3, ..Default::default() },
+            analyzer_config: AnalyzerConfig {
+                min_samples: 3,
+                ..Default::default()
+            },
         }
     }
 
@@ -235,7 +238,9 @@ impl ReportGenerator {
             }
         }
         regressions.sort_by(|a, b| {
-            b.slowdown_pct.partial_cmp(&a.slowdown_pct).unwrap_or(std::cmp::Ordering::Equal)
+            b.slowdown_pct
+                .partial_cmp(&a.slowdown_pct)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         regressions
     }
@@ -394,7 +399,11 @@ impl ReportGenerator {
                     r.ra_mean_ms,
                     r.postgres_mean_ms,
                     r.improvement_pct,
-                    if r.significant_after_correction { "✓" } else { "" },
+                    if r.significant_after_correction {
+                        "✓"
+                    } else {
+                        ""
+                    },
                 ));
             }
             md.push('\n');
@@ -429,7 +438,9 @@ impl ReportGenerator {
         let mut by_workload: HashMap<&str, (Vec<f64>, Vec<f64>)> = HashMap::new();
 
         for report in &self.reports {
-            let entry = by_workload.entry(report.workload_name.as_str()).or_default();
+            let entry = by_workload
+                .entry(report.workload_name.as_str())
+                .or_default();
             for t in &report.query_timings {
                 if t.ra_success_count > 0 {
                     parse_times.push(t.mean_parse_ms);
@@ -473,10 +484,7 @@ impl ReportGenerator {
                 "Overall improvement > 10%",
                 summary.overall_improvement_pct > 10.0,
             ),
-            (
-                "CI lower bound > 0%",
-                summary.ci_lower > 0.0,
-            ),
+            ("CI lower bound > 0%", summary.ci_lower > 0.0),
             (
                 ">50% queries show significant improvement",
                 summary.pct_significantly_improved > 50.0,
@@ -536,8 +544,11 @@ pub fn ra_timing_summaries(reports: &[BenchmarkReport]) -> Vec<RaTimingSummary> 
     reports
         .iter()
         .map(|r| {
-            let successful: Vec<&QueryTimings> =
-                r.query_timings.iter().filter(|t| t.ra_success_count > 0).collect();
+            let successful: Vec<&QueryTimings> = r
+                .query_timings
+                .iter()
+                .filter(|t| t.ra_success_count > 0)
+                .collect();
             let totals: Vec<f64> = successful
                 .iter()
                 .map(|t| t.mean_parse_ms + t.mean_optimize_ms)
@@ -549,10 +560,16 @@ pub fn ra_timing_summaries(reports: &[BenchmarkReport]) -> Vec<RaTimingSummary> 
                 mean_total_ms: mean(&totals),
                 std_total_ms: std_dev(&totals),
                 mean_parse_ms: mean(
-                    &successful.iter().map(|t| t.mean_parse_ms).collect::<Vec<_>>(),
+                    &successful
+                        .iter()
+                        .map(|t| t.mean_parse_ms)
+                        .collect::<Vec<_>>(),
                 ),
                 mean_optimize_ms: mean(
-                    &successful.iter().map(|t| t.mean_optimize_ms).collect::<Vec<_>>(),
+                    &successful
+                        .iter()
+                        .map(|t| t.mean_optimize_ms)
+                        .collect::<Vec<_>>(),
                 ),
             }
         })
@@ -599,8 +616,14 @@ mod tests {
         let mut gen = ReportGenerator::new();
         gen.add_report(make_report("test_olap", vec![]));
         let md = gen.generate_markdown();
-        assert!(md.contains("Executive Summary"), "must contain executive summary");
-        assert!(md.contains("Production Deployment"), "must contain deployment section");
+        assert!(
+            md.contains("Executive Summary"),
+            "must contain executive summary"
+        );
+        assert!(
+            md.contains("Production Deployment"),
+            "must contain deployment section"
+        );
     }
 
     #[test]

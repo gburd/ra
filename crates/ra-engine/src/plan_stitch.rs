@@ -304,7 +304,10 @@ pub fn count_stitch_points(plan: &RelExpr) -> usize {
 /// Replace the first subtree matching `target` with `replacement`.
 /// Returns the modified plan and `true` if a replacement was made.
 #[must_use]
-#[expect(clippy::too_many_lines, reason = "match over all RelExpr variants for recursive replacement")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "match over all RelExpr variants for recursive replacement"
+)]
 pub fn replace_subtree(plan: &RelExpr, target: &RelExpr, replacement: &RelExpr) -> (RelExpr, bool) {
     if plan == target {
         return (replacement.clone(), true);

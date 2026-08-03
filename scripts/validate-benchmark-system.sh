@@ -83,9 +83,9 @@ main() {
         echo -e "${GREEN}✓ All validation checks passed!${NC}"
         echo
         echo "Next steps:"
-        echo "  1. cargo check --bin ra-cli"
-        echo "  2. cargo run --bin ra-cli -- benchmark --help"
-        echo "  3. cargo run --bin ra-cli -- benchmark --database sqlite --workload joins"
+        echo "  1. cargo check --bin ra"
+        echo "  2. cargo run --bin ra -- benchmark --help"
+        echo "  3. cargo run --bin ra -- benchmark --database sqlite --workload joins"
         echo "  4. ./scripts/run-all-benchmarks.sh"
         exit 0
     else

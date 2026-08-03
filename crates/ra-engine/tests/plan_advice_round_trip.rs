@@ -30,7 +30,10 @@ use ra_engine::{Optimizer, OptimizerConfig};
 use ra_plan_advice::render_advice;
 
 fn scan(name: &str) -> RelExpr {
-    RelExpr::Scan { table: name.into(), alias: None }
+    RelExpr::Scan {
+        table: name.into(),
+        alias: None,
+    }
 }
 
 fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
@@ -156,24 +159,14 @@ fn round_trip_two_table_join() {
 
 #[test]
 fn round_trip_three_table_chain() {
-    let q = eq_join(
-        eq_join(scan("a"), scan("b"), "a", "b"),
-        scan("c"),
-        "a",
-        "c",
-    );
+    let q = eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c");
     assert_round_trip(&q, "three_table_chain");
 }
 
 #[test]
 fn round_trip_four_table_chain() {
     let q = eq_join(
-        eq_join(
-            eq_join(scan("a"), scan("b"), "a", "b"),
-            scan("c"),
-            "a",
-            "c",
-        ),
+        eq_join(eq_join(scan("a"), scan("b"), "a", "b"), scan("c"), "a", "c"),
         scan("d"),
         "a",
         "d",

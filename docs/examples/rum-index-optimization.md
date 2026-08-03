@@ -360,7 +360,7 @@ Use Ra's workload analyzer to profile actual queries:
 pg_stat_statements > queries.sql
 
 # Analyze with Ra
-ra-cli analyze-workload \
+ra analyze-workload \
   --queries queries.sql \
   --recommend-indexes \
   --output recommendations.json

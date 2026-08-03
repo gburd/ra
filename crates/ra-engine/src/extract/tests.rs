@@ -1,4 +1,9 @@
-#![expect(clippy::expect_used, clippy::panic, clippy::unwrap_used, reason = "test code")]
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test code"
+)]
 
 use std::collections::HashMap;
 
@@ -856,7 +861,10 @@ fn extract_bitmap_index_scan() {
             left: Box::new(Expr::Column(ColumnRef::new("status"))),
             right: Box::new(Expr::Const(Const::String("active".into()))),
         },
-        input: Box::new(RelExpr::Scan { table: "orders".into(), alias: None }),
+        input: Box::new(RelExpr::Scan {
+            table: "orders".into(),
+            alias: None,
+        }),
     };
     assert_eq!(result, expected);
 }
@@ -892,9 +900,14 @@ fn extract_bitmap_and() {
             left: Box::new(Expr::Column(ColumnRef::new(c))),
             right: Box::new(Expr::Const(Const::Int(v))),
         },
-        input: Box::new(RelExpr::Scan { table: "t".into(), alias: None }),
+        input: Box::new(RelExpr::Scan {
+            table: "t".into(),
+            alias: None,
+        }),
     };
-    let expected = RelExpr::BitmapAnd { inputs: vec![Box::new(mk("a",1)), Box::new(mk("b",2))] };
+    let expected = RelExpr::BitmapAnd {
+        inputs: vec![Box::new(mk("a", 1)), Box::new(mk("b", 2))],
+    };
     assert_eq!(result, expected);
 }
 
@@ -929,9 +942,14 @@ fn extract_bitmap_or() {
             left: Box::new(Expr::Column(ColumnRef::new(c))),
             right: Box::new(Expr::Const(Const::Int(v))),
         },
-        input: Box::new(RelExpr::Scan { table: "t".into(), alias: None }),
+        input: Box::new(RelExpr::Scan {
+            table: "t".into(),
+            alias: None,
+        }),
     };
-    let expected = RelExpr::BitmapOr { inputs: vec![Box::new(mk("x",1)), Box::new(mk("y",2))] };
+    let expected = RelExpr::BitmapOr {
+        inputs: vec![Box::new(mk("x", 1)), Box::new(mk("y", 2))],
+    };
     assert_eq!(result, expected);
 }
 
@@ -964,7 +982,10 @@ fn extract_bitmap_heap_scan() {
             left: Box::new(Expr::Column(ColumnRef::new("date"))),
             right: Box::new(Expr::Const(Const::String("2024-01-01".into()))),
         },
-        input: Box::new(RelExpr::Scan { table: "orders".into(), alias: None }),
+        input: Box::new(RelExpr::Scan {
+            table: "orders".into(),
+            alias: None,
+        }),
     };
     assert_eq!(result, expected);
 }
@@ -1236,7 +1257,15 @@ fn extract_best_without_stats() {
     let root = egraph.add_expr(&rec);
 
     let stats: HashMap<String, ra_core::statistics::Statistics> = HashMap::new();
-    let result = extract_best(&egraph, root, &stats, &hw, crate::cost::LiveConditions::NEUTRAL, None).expect("extraction should succeed");
+    let result = extract_best(
+        &egraph,
+        root,
+        &stats,
+        &hw,
+        crate::cost::LiveConditions::NEUTRAL,
+        None,
+    )
+    .expect("extraction should succeed");
     assert!(matches!(result, RelExpr::Filter { .. }));
 }
 
@@ -1254,7 +1283,15 @@ fn extract_best_with_stats() {
         "users".to_string(),
         ra_core::statistics::Statistics::new(10000.0),
     );
-    let result = extract_best(&egraph, root, &stats, &hw, crate::cost::LiveConditions::NEUTRAL, None).expect("extraction should succeed");
+    let result = extract_best(
+        &egraph,
+        root,
+        &stats,
+        &hw,
+        crate::cost::LiveConditions::NEUTRAL,
+        None,
+    )
+    .expect("extraction should succeed");
     assert!(matches!(result, RelExpr::Scan { .. }));
 }
 

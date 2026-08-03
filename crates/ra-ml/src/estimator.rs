@@ -321,7 +321,7 @@ fn collect_tables_recursive(
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Distinct { input, .. }
-            | RelExpr::DistinctOn { input, .. }
+        | RelExpr::DistinctOn { input, .. }
         | RelExpr::RowPattern { input, .. }
         | RelExpr::ParallelAggregate { input, .. }
         | RelExpr::Gather { input, .. }

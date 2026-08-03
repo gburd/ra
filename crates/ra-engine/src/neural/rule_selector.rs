@@ -297,10 +297,7 @@ impl NeuralRuleSelector {
 
     /// Concatenate query features and fingerprint into the input vector.
     #[inline]
-    fn concat_input(
-        features: &QueryFeatures,
-        fingerprint: &SystemFingerprint,
-    ) -> [f32; INPUT_DIM] {
+    fn concat_input(features: &QueryFeatures, fingerprint: &SystemFingerprint) -> [f32; INPUT_DIM] {
         let mut input = [0.0f32; INPUT_DIM];
 
         // First 12 dims: query features
@@ -448,9 +445,7 @@ mod tests {
 
         // Train as batch
         let mut selector_batch = NeuralRuleSelector::new();
-        let batch: Vec<_> = (0..10)
-            .map(|_| (features.clone(), fp, labels))
-            .collect();
+        let batch: Vec<_> = (0..10).map(|_| (features.clone(), fp, labels)).collect();
         selector_batch.train_batch(&batch);
 
         // Both should move the productive groups (0, 3) above 0.5

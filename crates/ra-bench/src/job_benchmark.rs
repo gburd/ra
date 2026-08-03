@@ -67,7 +67,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND ct.id = mc.company_type_id \
                      AND t.id = mc.movie_id",
         },
-
         // ---- 3-table joins ------------------------------------------------
         JobQuery {
             id: "2a",
@@ -101,7 +100,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND t.id = mk.movie_id \
                      AND mk.keyword_id = k.id",
         },
-
         // ---- 4-table joins ------------------------------------------------
         JobQuery {
             id: "3a",
@@ -133,7 +131,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND t.id = mk.movie_id \
                      AND mk.keyword_id = k.id",
         },
-
         // ---- 5-table joins ------------------------------------------------
         JobQuery {
             id: "5a",
@@ -169,7 +166,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND t.id = mk.movie_id \
                      AND mk.keyword_id = k.id",
         },
-
         // ---- 6-table joins ------------------------------------------------
         JobQuery {
             id: "7a",
@@ -196,7 +192,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND lt.id = ml.link_type_id \
                      AND pi.info_type_id = it.id",
         },
-
         // ---- 7-table joins ------------------------------------------------
         JobQuery {
             id: "8a",
@@ -224,7 +219,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND mc.company_id = cn.id \
                      AND ci.role_id = rt.id",
         },
-
         // ---- 8-table joins ------------------------------------------------
         JobQuery {
             id: "9a",
@@ -281,7 +275,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND mc.company_id = cn.id \
                      AND ci.role_id = rt.id",
         },
-
         // ---- 10-table joins -----------------------------------------------
         JobQuery {
             id: "10a",
@@ -316,7 +309,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND mk.movie_id = t.id \
                      AND mk.keyword_id = k.id",
         },
-
         // ---- 11-table joins -----------------------------------------------
         JobQuery {
             id: "11a",
@@ -348,7 +340,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND cct1.id = cc.subject_id \
                      AND cct2.id = cc.status_id",
         },
-
         // ---- 12-table joins -----------------------------------------------
         JobQuery {
             id: "12a",
@@ -391,7 +382,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND mk.movie_id = t.id \
                      AND mk.keyword_id = k.id",
         },
-
         // ---- 13-table joins -----------------------------------------------
         JobQuery {
             id: "13a",
@@ -436,7 +426,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND rt.id = ci.role_id \
                      AND ci.movie_id = t.id",
         },
-
         // ---- 15-table joins -----------------------------------------------
         JobQuery {
             id: "16a",
@@ -490,7 +479,6 @@ pub fn job_queries() -> Vec<JobQuery> {
                      AND mk.movie_id = t.id \
                      AND mk.keyword_id = k.id",
         },
-
         // ---- 17-table joins (maximum complexity) --------------------------
         JobQuery {
             id: "33a",
@@ -556,10 +544,38 @@ pub fn job_queries() -> Vec<JobQuery> {
 pub fn job_queries_by_tier() -> Vec<(&'static str, Vec<JobQuery>)> {
     let queries = job_queries();
     vec![
-        ("simple (2-4 tables)", queries.iter().cloned().filter(|q| q.table_count <= 4).collect()),
-        ("medium (5-8 tables)", queries.iter().cloned().filter(|q| (5..=8).contains(&q.table_count)).collect()),
-        ("complex (9-12 tables)", queries.iter().cloned().filter(|q| (9..=12).contains(&q.table_count)).collect()),
-        ("very complex (13+ tables)", queries.iter().cloned().filter(|q| q.table_count >= 13).collect()),
+        (
+            "simple (2-4 tables)",
+            queries
+                .iter()
+                .cloned()
+                .filter(|q| q.table_count <= 4)
+                .collect(),
+        ),
+        (
+            "medium (5-8 tables)",
+            queries
+                .iter()
+                .cloned()
+                .filter(|q| (5..=8).contains(&q.table_count))
+                .collect(),
+        ),
+        (
+            "complex (9-12 tables)",
+            queries
+                .iter()
+                .cloned()
+                .filter(|q| (9..=12).contains(&q.table_count))
+                .collect(),
+        ),
+        (
+            "very complex (13+ tables)",
+            queries
+                .iter()
+                .cloned()
+                .filter(|q| q.table_count >= 13)
+                .collect(),
+        ),
     ]
 }
 
@@ -588,7 +604,10 @@ mod tests {
         let max_tables = queries.iter().map(|q| q.table_count).max().unwrap();
         let min_tables = queries.iter().map(|q| q.table_count).min().unwrap();
         assert!(min_tables <= 3, "need queries with ≤3 tables for easy tier");
-        assert!(max_tables >= 10, "need queries with ≥10 tables for hard tier");
+        assert!(
+            max_tables >= 10,
+            "need queries with ≥10 tables for hard tier"
+        );
     }
 
     #[test]

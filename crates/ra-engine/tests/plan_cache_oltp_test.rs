@@ -576,12 +576,8 @@ fn latency_cached_vs_uncached_percentiles() {
     {
         println!("\n=== Latency Comparison (200 queries) ===");
         println!("         {:>12} {:>12} {:>12}", "p50", "p95", "p99");
-        println!(
-            "Uncached {uncached_p50:>12?} {uncached_p95:>12?} {uncached_p99:>12?}",
-        );
-        println!(
-            "Cached   {cached_p50:>12?} {cached_p95:>12?} {cached_p99:>12?}",
-        );
+        println!("Uncached {uncached_p50:>12?} {uncached_p95:>12?} {uncached_p99:>12?}");
+        println!("Cached   {cached_p50:>12?} {cached_p95:>12?} {cached_p99:>12?}");
         if !uncached_p50.is_zero() {
             let speedup = uncached_p50.as_nanos() as f64 / cached_p50.as_nanos().max(1) as f64;
             println!("p50 speedup: {speedup:.1}x");
@@ -768,7 +764,7 @@ fn per_template_hit_rate_report() {
     // Report
     #[expect(clippy::print_stdout)]
     {
-        println!("\n=== Per-Template Hit Rate (200 queries each) ===" );
+        println!("\n=== Per-Template Hit Rate (200 queries each) ===");
         println!(
             "{:<20} {:>6} {:>6} {:>8}",
             "Template", "Hits", "Misses", "Hit Rate",

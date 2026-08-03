@@ -196,10 +196,7 @@ fn column_likely_belongs_to(table: &str, column: &str) -> bool {
 ///
 /// This replaces the former `split_correlation_predicates` + TPC-H heuristic.
 #[must_use]
-pub fn classify_predicates(
-    predicates: &[Expr],
-    inner_scope: &Scope,
-) -> (Vec<Expr>, Vec<Expr>) {
+pub fn classify_predicates(predicates: &[Expr], inner_scope: &Scope) -> (Vec<Expr>, Vec<Expr>) {
     let mut correlation = Vec::new();
     let mut local = Vec::new();
 
@@ -328,10 +325,7 @@ mod tests {
     #[test]
     fn qualified_columns_classified_correctly() {
         // t1.id = t2.id with inner_scope = {t2}
-        let inner_scope = make_scope(
-            &["t2"],
-            &[ColumnRef::qualified("t2", "id")],
-        );
+        let inner_scope = make_scope(&["t2"], &[ColumnRef::qualified("t2", "id")]);
 
         let pred = Expr::BinOp {
             op: BinOp::Eq,
@@ -354,10 +348,7 @@ mod tests {
     fn unqualified_column_in_scope_by_name() {
         let inner_scope = make_scope(
             &["employees"],
-            &[
-                ColumnRef::new("salary"),
-                ColumnRef::new("department_id"),
-            ],
+            &[ColumnRef::new("salary"), ColumnRef::new("department_id")],
         );
 
         // "salary" is in scope
@@ -389,8 +380,7 @@ mod tests {
             right: Box::new(Expr::Column(ColumnRef::new("10"))),
         };
 
-        let (corr, local) =
-            classify_predicates(&[eq_pred, local_pred], &inner_scope);
+        let (corr, local) = classify_predicates(&[eq_pred, local_pred], &inner_scope);
         assert_eq!(corr.len(), 1, "should have 1 correlation predicate");
         assert_eq!(local.len(), 1, "should have 1 local predicate");
     }
@@ -419,10 +409,7 @@ mod tests {
 
     #[test]
     fn classify_eq_sides_correct() {
-        let inner_scope = make_scope(
-            &["t2"],
-            &[ColumnRef::qualified("t2", "customer_id")],
-        );
+        let inner_scope = make_scope(&["t2"], &[ColumnRef::qualified("t2", "customer_id")]);
 
         let left = Expr::Column(ColumnRef::qualified("t2", "customer_id"));
         let right = Expr::Column(ColumnRef::qualified("t1", "customer_id"));

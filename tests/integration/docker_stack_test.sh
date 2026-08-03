@@ -63,16 +63,16 @@ section() {
     printf "\n${CYAN}── %s ──${NC}\n\n" "$1"
 }
 
-RA="cargo run --bin ra-cli --quiet --"
+RA="cargo run --bin ra --quiet --"
 
 # ── Build ───────────────────────────────────────────────
 
 section "Build Verification"
 
-if cargo build --bin ra-cli 2>/dev/null; then
-    pass "cargo build --bin ra-cli"
+if cargo build --bin ra 2>/dev/null; then
+    pass "cargo build --bin ra"
 else
-    fail "cargo build --bin ra-cli" "Build failed"
+    fail "cargo build --bin ra" "Build failed"
     printf "\n${RED}Cannot continue without a working build.${NC}\n"
     exit 1
 fi

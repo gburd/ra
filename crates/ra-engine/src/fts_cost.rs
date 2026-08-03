@@ -85,7 +85,10 @@ pub fn inverted_index_lookup_cost(term: &str, total_docs: usize, term_frequency:
 ///
 /// Returns CPU cost in arbitrary units.
 #[must_use]
-#[expect(clippy::similar_names, reason = "list_a and list_b are the standard naming convention")]
+#[expect(
+    clippy::similar_names,
+    reason = "list_a and list_b are the standard naming convention"
+)]
 pub fn skip_list_intersection_cost(list_a_size: usize, list_b_size: usize) -> f64 {
     const COMPARISON_COST: f64 = 0.3;
     const SKIP_TRAVERSAL_COST: f64 = 0.5;

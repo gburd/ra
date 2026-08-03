@@ -5,7 +5,7 @@
 //! a standard egg rewrite, but the macro-rule system guarantees they fire
 //! in order and shares metavariable bindings across steps.
 //!
-//! ## Example: uncorrelated IN → SemiJoin
+//! ## Example: uncorrelated IN → `SemiJoin`
 //!
 //! ```text
 //! steps:
@@ -13,7 +13,7 @@
 //!      → (semi-join (= ?test ?col) ?outer ?inner)
 //! ```
 //!
-//! ## Example: uncorrelated EXISTS → SemiJoin  
+//! ## Example: uncorrelated EXISTS → `SemiJoin`  
 //!
 //! ```text
 //! steps:
@@ -26,9 +26,9 @@
 //! require matching nested structures (subqueries inside predicates)
 //! which single-level egg patterns can't express.
 
-use egg::Rewrite;
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+use egg::Rewrite;
 
 /// A compiled macro-rule: one or more egg rewrites that together
 /// accomplish a multi-step transformation.
@@ -42,6 +42,7 @@ pub struct MacroRule {
 /// Load all macro-rules from the rule corpus.
 /// Currently returns hard-coded decorrelation macro-rules;
 /// future: parse from .rra files with `kind: macro`.
+#[must_use]
 pub fn load_macro_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     // Simple decorrelation patterns expressed as egg rewrites.
     // These fire during saturation alongside regular rules.
@@ -68,7 +69,6 @@ fn decorrelation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(join semi (and ?cond ?pred) ?left ?right)"
             if crate::conditions::references_only("?pred", "?right")
         ),
-
         // Anti-join condition absorption (NOT EXISTS already decorrelated)
         rewrite!("anti-join-absorb-filter";
             "(filter ?pred (join anti ?cond ?left ?right))" =>

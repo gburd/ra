@@ -6,7 +6,7 @@ set -euo pipefail
 # ============================================================================
 #
 # Prerequisites:
-#   1. Build ra-cli:  cargo build --bin ra-cli
+#   1. Build ra-cli:  cargo build --bin ra
 #   2. Start PostgreSQL (podman or docker):
 #        podman run -d --name ra-demo-pg \
 #          -e POSTGRES_USER=ra_demo -e POSTGRES_PASSWORD=ra_demo \
@@ -25,7 +25,7 @@ set -euo pipefail
 #   - Resource-budgeted optimization with rule tracking
 # ============================================================================
 
-RA="cargo run --bin ra-cli --"
+RA="cargo run --bin ra --"
 DB="postgresql://ra_demo:ra_demo@localhost:5499/ra_demo"
 SCHEMA="examples/demo-schema.json"
 

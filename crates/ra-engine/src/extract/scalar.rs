@@ -51,7 +51,10 @@ fn convert_const_float(nodes: &[RelLang], val_id: Id) -> Result<ra_core::expr::E
     Ok(ra_core::expr::Expr::Const(ra_core::expr::Const::Float(f)))
 }
 
-#[expect(clippy::too_many_lines, reason = "match over all scalar operator variants")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "match over all scalar operator variants"
+)]
 fn convert_scalar_operator(
     nodes: &[RelLang],
     idx: usize,

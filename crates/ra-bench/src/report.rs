@@ -77,7 +77,8 @@ impl BenchReport {
                     Some(pg_times.iter().sum::<f64>() / pg_times.len() as f64)
                 };
 
-                let structural_sims: Vec<f64> = parsed.iter().filter_map(|r| r.structural_sim).collect();
+                let structural_sims: Vec<f64> =
+                    parsed.iter().filter_map(|r| r.structural_sim).collect();
                 let avg_structural_sim = if structural_sims.is_empty() {
                     None
                 } else {
@@ -158,7 +159,15 @@ impl BenchReport {
         writeln!(
             out,
             "\n{:<22} {:>6} {:>6} {:>10} {:>10} {:>10} {:>8} {:>8} {:>8}",
-            "Category", "Total", "Parse%", "AvgParse", "AvgOpt", "PG-ms", "StructSim", "CostRatio", "Score"
+            "Category",
+            "Total",
+            "Parse%",
+            "AvgParse",
+            "AvgOpt",
+            "PG-ms",
+            "StructSim",
+            "CostRatio",
+            "Score"
         )
         .ok();
         writeln!(out, "{}", "-".repeat(104)).ok();
@@ -169,10 +178,18 @@ impl BenchReport {
             } else {
                 100.0 * cat.parsed as f64 / cat.total as f64
             };
-            let pg_str = cat.avg_pg_explain_ms.map_or("-".to_owned(), |t| format!("{:.2}ms", t));
-            let struct_str = cat.avg_structural_sim.map_or("-".to_owned(), |s| format!("{:.3}", s));
-            let cost_str = cat.avg_cost_ratio.map_or("-".to_owned(), |c| format!("{:.3}", c));
-            let score_str = cat.avg_score.map_or("-".to_owned(), |s| format!("{:.3}", s));
+            let pg_str = cat
+                .avg_pg_explain_ms
+                .map_or("-".to_owned(), |t| format!("{:.2}ms", t));
+            let struct_str = cat
+                .avg_structural_sim
+                .map_or("-".to_owned(), |s| format!("{:.3}", s));
+            let cost_str = cat
+                .avg_cost_ratio
+                .map_or("-".to_owned(), |c| format!("{:.3}", c));
+            let score_str = cat
+                .avg_score
+                .map_or("-".to_owned(), |s| format!("{:.3}", s));
             writeln!(
                 out,
                 "{:<22} {:>6} {:>5.0}% {:>9.2}ms {:>9.2}ms {:>10} {:>8} {:>8} {:>8}",

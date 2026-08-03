@@ -39,20 +39,19 @@
 pub mod adaptive_calibration;
 pub mod analysis;
 pub mod appliers;
-pub mod conditions;
 pub mod beam_search;
-pub mod cost_model;
 #[cfg(feature = "ml")]
 pub mod cardinality_cost;
 pub mod citus_optimizer;
 pub mod column_pruning;
-pub mod correlation_analysis;
-pub mod grouping_sets;
+pub mod conditions;
 pub mod consensus_rules;
 #[cfg(feature = "metadata")]
 pub mod constraint_optimizer;
 pub mod convergence;
+pub mod correlation_analysis;
 pub mod cost;
+pub mod cost_model;
 pub mod cost_pruning;
 pub mod count_metadata;
 pub mod covering_index;
@@ -70,24 +69,17 @@ pub mod fts_cost;
 pub mod fts_rules;
 pub mod functional_deps;
 pub mod genetic_fingerprint;
-pub mod provenance;
+pub mod grouping_sets;
 pub mod incremental_sort;
 pub mod index_selection;
-pub mod ordering_pass;
 pub mod isolation_cost;
 pub mod join_graph;
 pub mod join_graph_shape;
-pub mod plan_advice_emit;
-pub mod plan_advice_honor;
-pub mod plan_advice_physical;
-pub mod plan_advice_validate;
-pub mod physical_props;
-pub mod partition_pruning;
 pub mod join_transformations;
 pub mod large_join;
 pub mod lazy_rules;
-pub mod macro_rules;
 pub mod left_deep;
+pub mod macro_rules;
 pub mod memo;
 #[cfg(feature = "ml")]
 pub mod ml_integration;
@@ -96,13 +88,21 @@ pub mod mv_rewrite;
 pub mod network_cost;
 pub mod neural;
 pub mod null_simplification;
+pub mod ordering_pass;
 pub mod parquet_pushdown;
+pub mod partition_pruning;
 pub mod pattern_fingerprint;
+pub mod physical_props;
+pub mod plan_advice_emit;
+pub mod plan_advice_honor;
+pub mod plan_advice_physical;
+pub mod plan_advice_validate;
 pub mod plan_cache;
 pub mod plan_comparison;
 pub mod plan_stitch;
 pub mod precondition_eval;
 pub mod progressive_reopt;
+pub mod provenance;
 pub mod query_features;
 pub mod recursive;
 pub mod redundant_join;
@@ -121,6 +121,7 @@ pub mod state;
 pub mod stats_cache;
 pub mod subquery_decorrelation;
 // Phase 6: Timeline system (deferred)
+pub mod continuation_gate;
 pub mod hybrid_search;
 pub mod oracle_json_duality;
 pub mod rum_index;
@@ -128,8 +129,6 @@ pub mod runtime_filters;
 pub mod selectivity;
 pub mod semi_join;
 pub mod speculative_router;
-pub mod continuation_gate;
-pub mod training_coordinator;
 #[cfg(feature = "timeline")]
 pub mod timeline_config;
 #[cfg(feature = "timeline")]
@@ -138,6 +137,7 @@ pub mod timeline_facts;
 pub mod timeline_optimizer;
 #[cfg(feature = "streaming")]
 pub mod timely;
+pub mod training_coordinator;
 #[cfg(feature = "metadata")]
 pub mod trigger_optimizer;
 pub mod vector_cost;
@@ -160,10 +160,12 @@ pub use citus_optimizer::{
 pub use consensus_rules::consensus_rules;
 #[cfg(feature = "metadata")]
 pub use constraint_optimizer::{optimize_with_constraints, ConstraintOptResult};
+pub use continuation_gate::{ContinuationDecision, ContinuationGate};
 pub use convergence::{
     ConvergenceDetector, ConvergenceStats, IterationMetrics, TerminationDecision,
 };
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel, LiveConditions};
+pub use cost_model::BitNetCostModel;
 pub use cost_pruning::{CostPruner, PruningStats};
 pub use covering_index::{covering_index_rules, index_only_scan_cost_factor};
 #[cfg(feature = "streaming")]
@@ -194,13 +196,12 @@ pub use egraph::{
 pub use executors::{
     LateralJoinExecutor, MultiUnnestExecutor, TableFunctionExecutor, UnnestExecutor,
 };
-pub use cost_model::BitNetCostModel;
+#[cfg(feature = "ml")]
+pub use extract::extract_best_with_cardinality;
 pub use extract::{
     extract_best, extract_best_bitnet, extract_best_with_staleness, rec_expr_to_rel_expr,
     HybridCostFn, RelCostFn,
 };
-#[cfg(feature = "ml")]
-pub use extract::extract_best_with_cardinality;
 pub use facts_context::{FactsContext, FactsContextBuilder};
 pub use federated_cost::FederatedCostModel;
 pub use federated_optimizer::{FederatedAnalysis, FederatedError, FederatedOptimizer};
@@ -215,7 +216,6 @@ pub use fts_rules::{
     OptimizationDecision,
 };
 pub use genetic_fingerprint::QueryFingerprint;
-pub use provenance::PlanProvenance;
 pub use hybrid_search::{
     choose_hybrid_strategy, fuse_scores, hybrid_fts_first_cost_factor, hybrid_parallel_cost_factor,
     hybrid_scan_cost_factor, hybrid_search_rules, hybrid_vector_first_cost_factor, HybridStrategy,
@@ -226,7 +226,6 @@ pub use incremental_sort::{
     IncrementalSortCost, PrefixMatch,
 };
 pub use isolation_cost::{isolation_cost_adjustment, IsolationCostConfig, PlanEstimates};
-pub use ordering_pass::propagate_ordering;
 pub use join_graph::{JoinGraph, JoinGraphStats};
 pub use join_transformations::{
     apply_join_transformations, can_eliminate_self_join, detect_self_join, is_null_rejecting,
@@ -240,13 +239,9 @@ pub use memo::{structural_hash, MemoTable};
 pub use mv_matching::{
     match_query_with_mv, view_benefit, MatchType, MaterializedViewInfo, MvCatalog, MvMatch,
 };
-pub use shortcuts::fast_path::{
-    can_use_fast_path, FastPathDecision, FastPathKind, FastPathSelector, SimpleAggFunction,
-};
 pub use mv_rewrite::{mv_rewrite_rules, mv_scan_cost_factor};
 pub use network_cost::{DistributionStrategy, JoinSides, NetworkCostEstimate, NetworkCostModel};
 pub use neural::{NeuralConvergenceDetector, NeuralRuleSelector, RuleStallingTracker};
-pub use state::{AtomicFingerprint, FingerprintReader, SystemFingerprint};
 pub use oracle_json_duality::{
     benchmark_access_patterns, choose_access_path, duality_document_scan_cost_factor,
     duality_rewrite_rules, eliminable_joins, estimate_document_cost, estimate_relational_cost,
@@ -254,6 +249,7 @@ pub use oracle_json_duality::{
     AccessPath, AccessPathDecision, DualityCostParams, DualityError, DualityField,
     DualityFieldMapping, DualityView, PredicateTarget, Updatability,
 };
+pub use ordering_pass::propagate_ordering;
 pub use parquet_pushdown::{
     evaluate_predicate, filter_row_groups, parquet_pushdown_rules, pruning_selectivity, CompareOp,
     ParquetMetadataRegistry, PushdownPredicate, RowGroupMatch,
@@ -275,11 +271,7 @@ pub use progressive_reopt::{
     ReoptDecision, ReoptError, ReoptResult, ReoptimizeFn, RuntimeStatistics, StitchPointKind,
     StitchPointMeta, StitchTransferKind,
 };
-pub use speculative_router::{OptimizationFeatures, OptRoute, RoutePrediction, SpeculativeRouter};
-pub use continuation_gate::{ContinuationDecision, ContinuationGate};
-pub use training_coordinator::{
-    SharedTrainingCoordinator, TrainingCoordinator, TrainingStats,
-};
+pub use provenance::PlanProvenance;
 pub use query_features::QueryFeatureSet;
 pub use recursive::{
     ExecutionContext, ExecutionError, ExprEvaluator, RecursionResult, RecursiveCTEConfig,
@@ -320,6 +312,11 @@ pub use runtime_filters::{
     InListFilterState, MinMaxFilterState, RuntimeFilter, RuntimeFilterCost,
 };
 pub use selectivity::estimate_selectivity as estimate_predicate_selectivity;
+pub use shortcuts::fast_path::{
+    can_use_fast_path, FastPathDecision, FastPathKind, FastPathSelector, SimpleAggFunction,
+};
+pub use speculative_router::{OptRoute, OptimizationFeatures, RoutePrediction, SpeculativeRouter};
+pub use state::{AtomicFingerprint, FingerprintReader, SystemFingerprint};
 pub use stats_cache::{StatsCache, StatsCacheBuilder};
 #[cfg(feature = "timeline")]
 pub use timeline_config::{
@@ -337,6 +334,7 @@ pub use timeline_optimizer::{
 };
 #[cfg(feature = "streaming")]
 pub use timely::{ComputationStats, TimelyConfig};
+pub use training_coordinator::{SharedTrainingCoordinator, TrainingCoordinator, TrainingStats};
 #[cfg(feature = "metadata")]
 pub use trigger_optimizer::{
     analyze_dml_cost, detect_cascade, CascadeWarning, DmlCostEstimate, TriggerAnalysis,
@@ -370,9 +368,6 @@ pub fn parse_var(s: &str) -> egg::Var {
     s.parse()
         .expect("invalid egg::Var literal; pattern variables must start with '?'")
 }
-
-
-
 
 /// Pay egg's one-time, process-global initialization up front.
 ///

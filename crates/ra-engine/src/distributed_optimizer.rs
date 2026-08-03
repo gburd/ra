@@ -369,7 +369,10 @@ impl DistributedOptimizer {
     }
 
     /// Annotate a scan node.
-    #[expect(clippy::unnecessary_wraps, reason = "consistent Result return with other annotate methods")]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "consistent Result return with other annotate methods"
+    )]
     fn annotate_scan(
         &self,
         table: &str,

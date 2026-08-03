@@ -62,10 +62,9 @@ pub mod render;
 pub mod trove;
 
 pub use ast::{
-    Advice, AdviceItem, AdviceTag, AdviceTarget, AdviceTargetKind,
-    IndexTarget, RelationIdentifier,
+    Advice, AdviceItem, AdviceTag, AdviceTarget, AdviceTargetKind, IndexTarget, RelationIdentifier,
 };
-pub use feedback::{FeedbackFlags, format_feedback};
+pub use feedback::{format_feedback, FeedbackFlags};
 pub use mask::PgsMask;
 pub use parser::{parse_advice, ParseError};
 pub use render::render_advice;

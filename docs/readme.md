@@ -1,10 +1,16 @@
 # RA Documentation
 
-**RA** is a state-of-the-art query optimizer built on relational algebra transformation rules, equality saturation, and differential dataflow. It transforms SQL queries into optimal execution plans using **1,387 transformation rules** derived from decades of database research and production experience.
+**RA** is an experimental parser, planner, and optimizer for PostgreSQL — a
+research prototype. It converts SQL queries into a relational algebra tree and
+explores equivalent plans via equality saturation and differential dataflow.
+The `rules/` tree contains **1,467 `.rra` rule sources**; **293 currently
+compile to active rewrite rules** (regenerate: `cargo run --release -p
+ra-engine --example count_rules`). RA is not a working drop-in replacement; see
+the correctness status in the main [README](../README.md).
 
 ## Key Features
 
-- **1,387 Transformation Rules** - Comprehensive rule library covering logical, physical, hardware, distributed, and multi-model optimizations
+- **Rule Library** - 1,467 `.rra` rule sources, 293 currently active, covering logical and physical optimizations (hardware/distributed/multi-model sources moved to [ra-lab](https://codeberg.org/gregburd/ra-lab))
 - **20+ Database Dialects** - Seamless SQL translation between PostgreSQL, MySQL, Oracle, SQL Server, SQLite, DuckDB, and more
 - **Hardware-Aware Optimization** - Adaptive plans for CPU (SIMD), GPU, FPGA, and heterogeneous systems
 - **Cost-Based Optimization** - Calibratable cost models with cardinality estimation and statistics management
@@ -22,12 +28,10 @@
 cargo build --release
 
 # Optimize your first query
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM orders WHERE amount > 1000 AND status = 'active'"
 
-# Translate between databases
-ra-cli translate --from postgres --to mysql \
-  "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
+# Dialect translation moved to a separate repo: https://codeberg.org/gregburd/ra-lab
 
 # Launch web UI
 ./scripts/docker-compose-up.sh
@@ -99,7 +103,7 @@ Database and system integrations:
 
 ###  Encyclopedia
 
-Comprehensive reference for SQL patterns, schemas, and optimization:
+Reference for SQL patterns, schemas, and optimization:
 
 - **[SQL Query Encyclopedia](encyclopedia/)** - 50+ query patterns with relational algebra and optimization details
   - **[Query Patterns](encyclopedia/query-patterns/)** - OLTP, OLAP, analytical, recursive, temporal, joins, subqueries
@@ -135,7 +139,7 @@ graph LR
     SQL["SQL Query"] --> Parser["Parser"]
     Parser --> RA["Relational<br/>Algebra"]
     RA --> EGraph["E-Graph<br/>(egg crate)"]
-    Rules["Transformation<br/>Rules (1,387)"] --> EGraph
+    Rules["Transformation<br/>Rules (293 active)"] --> EGraph
     EGraph --> Extractor["Extractor<br/>(Cost-based)"]
     Extractor --> Plan["Optimized<br/>Plan"]
 
@@ -148,16 +152,14 @@ graph LR
     style Plan fill:#e8f5e9
 ```
 
-## Performance Highlights
+## Performance
 
-- **Plan Cache**: 37x OLTP speedup with template-based caching (97.5% hit rate)
-- **Rule Prioritization**: 20-27% faster optimization from cost-to-benefit rule ordering
-- **Query Optimization**: Up to 1000x speedup on complex analytical queries
-- **Index Selection**: 85% I/O reduction with automatic covering index detection
-- **Metadata Shortcuts**: O(1) MIN/MAX/COUNT operations on billion-row tables
-- **Predicate Pushdown**: 95% data skip with Parquet row group filtering
-- **Join Reordering**: 10-100x improvement on star schema queries
-- **Hardware Adaptation**: 2-5x speedup with SIMD/GPU awareness
+No end-to-end performance comparison against native PostgreSQL is published
+yet. Prior planning-time-only speedup numbers were removed because they were
+measured with statistics disabled on the RA side and did not measure plan
+quality. End-to-end (plan + execute) numbers, with statistics loaded on both
+sides and per-query regressions reported, will replace this section once
+correctness parity is reached.
 
 ## Building Documentation
 

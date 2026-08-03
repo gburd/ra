@@ -101,8 +101,18 @@ fn print_relexpr_tree(expr: &ra_core::algebra::RelExpr, depth: usize) {
             println!("{}Filter", indent);
             print_relexpr_tree(input, depth + 1);
         }
-        RelExpr::Aggregate { input, aggregates, group_by, .. } => {
-            println!("{}Aggregate (aggregates: {}, group_by: {})", indent, aggregates.len(), group_by.len());
+        RelExpr::Aggregate {
+            input,
+            aggregates,
+            group_by,
+            ..
+        } => {
+            println!(
+                "{}Aggregate (aggregates: {}, group_by: {})",
+                indent,
+                aggregates.len(),
+                group_by.len()
+            );
             print_relexpr_tree(input, depth + 1);
         }
         RelExpr::Join { left, right, .. } => {

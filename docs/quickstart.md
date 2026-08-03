@@ -32,7 +32,7 @@ cargo build --release
 Optimize a simple query and see the improved plan:
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM orders WHERE customer_id = 123 AND amount > 1000"
 ```
 
@@ -54,7 +54,7 @@ Cost: 45.2 → 12.3 (73% reduction)
 Use `explain` to see how Ra transformed the query:
 
 ```bash
-cargo run --bin ra-cli -- explain \
+cargo run --bin ra -- explain \
   "SELECT c.name, o.total
    FROM customers c
    JOIN orders o ON c.id = o.customer_id
@@ -83,7 +83,7 @@ Final cost: 1,234 → 156 (87% reduction)
 Track exactly which optimization rules were used:
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM products WHERE category = 'electronics' ORDER BY price" \
   --rules-applied
 ```
@@ -101,7 +101,7 @@ Applied Rules:
 List all rules in the system:
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM users LIMIT 10" \
   --rules-available
 ```
@@ -133,7 +133,7 @@ Hardware:
 See which rules were evaluated but didn't match:
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM small_table" \
   --rules-evaluated
 ```
@@ -167,22 +167,22 @@ Control optimizer time and memory usage with resource budgets.
 
 ```bash
 # Fast optimization for interactive queries (100ms limit)
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM orders WHERE id = 123" \
   --resource-budget interactive
 
 # Standard optimization (1 second limit)
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM orders JOIN customers ON ..." \
   --resource-budget standard
 
 # Exhaustive optimization for batch workloads (10 seconds limit)
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM big_table JOIN ..." \
   --resource-budget batch
 
 # Memory-constrained (64 MB e-graph limit)
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM huge_table ..." \
   --resource-budget memory-constrained
 ```
@@ -190,7 +190,7 @@ cargo run --bin ra-cli -- optimize \
 ### Custom Limits
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM orders" \
   --max-iterations 500 \
   --time-limit-ms 2000 \
@@ -199,37 +199,9 @@ cargo run --bin ra-cli -- optimize \
 
 ## SQL Dialect Translation
 
-Translate SQL between 20+ database dialects.
-
-### PostgreSQL to MySQL
-
-```bash
-cargo run --bin ra-cli -- translate \
-  --from postgres \
-  --to mysql \
-  "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
-```
-
-Output:
-```sql
--- MySQL equivalent:
-SELECT * FROM orders WHERE created_at > NOW() - INTERVAL 7 DAY
-```
-
-### DuckDB to SQLite
-
-```bash
-cargo run --bin ra-cli -- translate \
-  --from duckdb \
-  --to sqlite \
-  "SELECT list_aggregate(tags, 'string_agg', ',') FROM articles"
-```
-
-Output:
-```sql
--- SQLite equivalent:
-SELECT group_concat(tags, ',') FROM articles
-```
+Dialect translation has moved out of the core toolkit to a separate repository,
+[ra-lab](https://codeberg.org/gregburd/ra-lab), along with the `ra-dialect`
+crate. The `translate` subcommand is no longer part of the `ra` binary.
 
 ## Plan Visualization
 
@@ -238,7 +210,7 @@ SELECT group_concat(tags, ',') FROM articles
 See before/after plans with color-coded changes:
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM orders WHERE customer_id = 123" \
   --diff colored
 ```
@@ -251,7 +223,7 @@ Shows:
 ### Side-by-Side Comparison
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM orders JOIN customers ..." \
   --diff side-by-side
 ```
@@ -324,7 +296,7 @@ CREATE INDEX idx_tags_rum ON articles USING rum(tags);
 ### See Discovered Indexes
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+cargo run --bin ra -- optimize \
   "SELECT * FROM articles WHERE tags @> ARRAY['rust']" \
   --show-indexes
 ```
@@ -416,13 +388,13 @@ cargo bench --package ra-engine
 
 ```bash
 # Validate all .rra files
-cargo run --bin ra-cli -- validate rules/
+cargo run --bin ra -- validate rules/
 
 # Validate specific category
-cargo run --bin ra-cli -- validate rules/logical/
+cargo run --bin ra -- validate rules/logical/
 
 # Check for rule conflicts
-cargo run --bin ra-cli -- validate --check-conflicts rules/
+cargo run --bin ra -- validate --check-conflicts rules/
 ```
 
 ### Run Benchmarks

@@ -8,8 +8,8 @@ use crate::cloud_profiles::ProfileSelector;
 use crate::deployment_profiles::DeploymentProfile;
 use proptest::prelude::*;
 use ra_core::facts::{
-    CpuArchitecture, DataType, ForeignKey, HardwareProfile, IndexInfo, IndexType,
-    OperatorStats, SqlDialect, StorageFormat, TableInfo, TableStats, FactsProvider,
+    CpuArchitecture, DataType, FactsProvider, ForeignKey, HardwareProfile, IndexInfo, IndexType,
+    OperatorStats, SqlDialect, StorageFormat, TableInfo, TableStats,
 };
 use ra_core::statistics::ColumnStats;
 use std::collections::HashMap;
@@ -168,8 +168,8 @@ impl DatabaseScenario {
     pub fn staleness_factor(self) -> f64 {
         match self {
             Self::StaleStats => 10.0, // Very stale
-            Self::SkewedData => 3.0,   // Moderately stale due to skew
-            _ => 1.0,                  // Fresh statistics
+            Self::SkewedData => 3.0,  // Moderately stale due to skew
+            _ => 1.0,                 // Fresh statistics
         }
     }
 
@@ -177,9 +177,9 @@ impl DatabaseScenario {
     #[must_use]
     pub fn skew_factor(self) -> f64 {
         match self {
-            Self::SkewedData => 0.95, // 95% of data in top 5% of values
+            Self::SkewedData => 0.95,   // 95% of data in top 5% of values
             Self::DataWarehouse => 0.8, // Some skew typical in warehouses
-            _ => 0.1, // Relatively uniform distributions
+            _ => 0.1,                   // Relatively uniform distributions
         }
     }
 }
@@ -205,10 +205,7 @@ impl DynamicFactsProvider {
     /// The hardware profile is derived from the deployment profile,
     /// overriding the scenario's default.
     #[must_use]
-    pub fn with_deployment_profile(
-        scenario: DatabaseScenario,
-        profile: DeploymentProfile,
-    ) -> Self {
+    pub fn with_deployment_profile(scenario: DatabaseScenario, profile: DeploymentProfile) -> Self {
         let hardware = profile.to_hardware_profile();
         Self {
             scenario,
@@ -240,7 +237,7 @@ impl DynamicFactsProvider {
             // Calculate derived statistics
             let avg_row_size = match table_name {
                 "users" | "customers" => fastrand::f64() * 100.0 + 50.0, // 50-150 bytes
-                "events" | "logs" => fastrand::f64() * 500.0 + 200.0, // 200-700 bytes (JSON)
+                "events" | "logs" => fastrand::f64() * 500.0 + 200.0,    // 200-700 bytes (JSON)
                 "products" | "inventory" => fastrand::f64() * 150.0 + 75.0, // 75-225 bytes
                 _ => fastrand::f64() * 200.0 + 100.0, // 100-300 bytes (orders/transactions/default)
             };
@@ -302,7 +299,10 @@ impl DynamicFactsProvider {
     /// # Panics
     ///
     /// Panics if internal state is inconsistent (should not happen).
-    #[expect(clippy::expect_used, reason = "generate_table_stats guarantees entry exists")]
+    #[expect(
+        clippy::expect_used,
+        reason = "generate_table_stats guarantees entry exists"
+    )]
     pub fn generate_column_stats(&mut self, table_name: &str, column_name: &str) -> &ColumnStats {
         // Get scenario data first to avoid borrowing issues
         let skew_factor = self.scenario.skew_factor();
@@ -313,14 +313,16 @@ impl DynamicFactsProvider {
         let table_cols = self.column_stats.entry(table_name.to_string()).or_default();
 
         if !table_cols.contains_key(column_name) {
-            let table_stats = self.table_stats.get(table_name)
+            let table_stats = self
+                .table_stats
+                .get(table_name)
                 .expect("generate_table_stats was called above");
 
             // Generate NDV based on column semantics and skew
             let ndv = match column_name {
                 "id" | "user_id" | "order_id" => table_stats.row_count, // Unique keys
-                "status" => fastrand::f64() * 5.0 + 2.0, // 2-7 statuses
-                "category" | "type" => fastrand::f64() * 20.0 + 5.0, // 5-25 categories
+                "status" => fastrand::f64() * 5.0 + 2.0,                // 2-7 statuses
+                "category" | "type" => fastrand::f64() * 20.0 + 5.0,    // 5-25 categories
                 "country" | "region" => fastrand::f64() * 200.0 + 50.0, // 50-250 countries
                 "created_at" | "updated_at" => {
                     // Time columns have high NDV but can be skewed
@@ -352,8 +354,8 @@ impl DynamicFactsProvider {
                     "id" | "user_id" | "order_id" | "created_at" | "updated_at" => 8.0, // 8-byte fixed-width
                     "name" | "title" => fastrand::f64() * 30.0 + 10.0, // 10-40 chars
                     "description" | "notes" => fastrand::f64() * 200.0 + 50.0, // 50-250 chars
-                    "email" => 25.0, // Typical email length
-                    _ => fastrand::f64() * 20.0 + 5.0, // 5-25 bytes default
+                    "email" => 25.0,                                   // Typical email length
+                    _ => fastrand::f64() * 20.0 + 5.0,                 // 5-25 bytes default
                 }),
                 histogram: None, // TODO: Generate realistic histograms
                 correlation: Some(if skew_factor > 0.5 { 0.8 } else { 0.0 }), // Correlation with row order
@@ -397,13 +399,11 @@ impl DynamicFactsProvider {
                     ],
                     primary_key: vec!["id".to_string()],
                     indexes: self.generate_indexes_for_table("orders"),
-                    foreign_keys: vec![
-                        ForeignKey {
-                            columns: vec!["user_id".to_string()],
-                            referenced_table: "users".to_string(),
-                            referenced_columns: vec!["id".to_string()],
-                        }
-                    ],
+                    foreign_keys: vec![ForeignKey {
+                        columns: vec!["user_id".to_string()],
+                        referenced_table: "users".to_string(),
+                        referenced_columns: vec!["id".to_string()],
+                    }],
                     storage_format: StorageFormat::RowBased,
                 },
                 _ => TableInfo {
@@ -574,22 +574,16 @@ impl FactsProvider for DynamicFactsProvider {
         if let Some(profile) = &self.deployment_profile {
             return match feature {
                 "btree_indexes" | "hash_joins" | "sort_merge_joins" | "compression" => true,
-                "hash_indexes" | "nested_loop_joins" => {
-                    self.hardware.cpu_cores >= 2
-                }
+                "hash_indexes" | "nested_loop_joins" => self.hardware.cpu_cores >= 2,
                 "bitmap_indexes" | "columnar_storage" => {
                     self.hardware.available_memory >= 16 * 1024 * 1024 * 1024
                 }
                 "parallel_execution" => self.hardware.cpu_cores >= 4,
                 "vectorized_execution" => self.hardware.simd_width >= 256,
                 "gpu_acceleration" => self.hardware.has_gpu,
-                "distributed_execution" => {
-                    profile.supports_distributed_execution()
-                }
+                "distributed_execution" => profile.supports_distributed_execution(),
                 "tiered_storage" => profile.supports_tiered_storage(),
-                "partition_pruning" => {
-                    profile.topology.node_count() > 1
-                }
+                "partition_pruning" => profile.topology.node_count() > 1,
                 _ => false,
             };
         }
@@ -599,18 +593,30 @@ impl FactsProvider for DynamicFactsProvider {
                 matches!(feature, "btree_indexes" | "hash_joins" | "sort_merge_joins")
             }
             DatabaseScenario::HighPerformance | DatabaseScenario::DataWarehouse => {
-                matches!(feature,
-                    "btree_indexes" | "hash_indexes" | "bitmap_indexes" |
-                    "hash_joins" | "sort_merge_joins" | "nested_loop_joins" |
-                    "parallel_execution" | "vectorized_execution" |
-                    "gpu_acceleration" | "columnar_storage" | "compression"
+                matches!(
+                    feature,
+                    "btree_indexes"
+                        | "hash_indexes"
+                        | "bitmap_indexes"
+                        | "hash_joins"
+                        | "sort_merge_joins"
+                        | "nested_loop_joins"
+                        | "parallel_execution"
+                        | "vectorized_execution"
+                        | "gpu_acceleration"
+                        | "columnar_storage"
+                        | "compression"
                 )
             }
             _ => {
-                matches!(feature,
-                    "btree_indexes" | "hash_indexes" |
-                    "hash_joins" | "sort_merge_joins" | "nested_loop_joins" |
-                    "parallel_execution"
+                matches!(
+                    feature,
+                    "btree_indexes"
+                        | "hash_indexes"
+                        | "hash_joins"
+                        | "sort_merge_joins"
+                        | "nested_loop_joins"
+                        | "parallel_execution"
                 )
             }
         }
@@ -658,8 +664,7 @@ pub fn arb_database_scenario() -> impl Strategy<Value = DatabaseScenario> {
 /// cloud deployment profile applied to a random scenario.
 pub fn arb_facts_with_profile() -> impl Strategy<Value = DynamicFactsProvider> {
     arb_database_scenario().prop_map(|scenario| {
-        let profile =
-            crate::cloud_profiles::CloudProfileSelector::select_random();
+        let profile = crate::cloud_profiles::CloudProfileSelector::select_random();
         DynamicFactsProvider::with_deployment_profile(scenario, profile)
     })
 }
@@ -703,8 +708,10 @@ impl EnhancedPropertyValidator {
         scenarios
             .iter()
             .map(|&scenario| {
-                let profile = crate::cloud_profiles::CloudProfileSelector::select_for_scenario(&scenario);
-                let mut facts_provider = DynamicFactsProvider::with_deployment_profile(scenario, profile);
+                let profile =
+                    crate::cloud_profiles::CloudProfileSelector::select_for_scenario(&scenario);
+                let mut facts_provider =
+                    DynamicFactsProvider::with_deployment_profile(scenario, profile);
 
                 // Pre-generate statistics for tables mentioned in the query
                 Self::populate_facts_for_query(&mut facts_provider, expr);
@@ -728,7 +735,10 @@ impl EnhancedPropertyValidator {
     }
 
     /// Pre-populate facts provider with statistics for all tables in the query.
-    fn populate_facts_for_query(facts: &mut DynamicFactsProvider, expr: &ra_core::algebra::RelExpr) {
+    fn populate_facts_for_query(
+        facts: &mut DynamicFactsProvider,
+        expr: &ra_core::algebra::RelExpr,
+    ) {
         let tables = Self::collect_table_names(expr);
         for table in tables {
             facts.generate_table_stats(&table);
@@ -743,9 +753,7 @@ impl EnhancedPropertyValidator {
     }
 
     /// Extract all table names from a query expression (iterative).
-    fn collect_table_names(
-        expr: &ra_core::algebra::RelExpr,
-    ) -> std::collections::HashSet<String> {
+    fn collect_table_names(expr: &ra_core::algebra::RelExpr) -> std::collections::HashSet<String> {
         use ra_core::algebra::RelExpr;
         let mut tables = std::collections::HashSet::new();
         let mut stack: Vec<&RelExpr> = vec![expr];

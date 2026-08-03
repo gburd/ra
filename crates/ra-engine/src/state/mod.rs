@@ -22,6 +22,4 @@
 
 pub mod fingerprint;
 
-pub use fingerprint::{
-    AtomicFingerprint, SystemFingerprint, capabilities, FingerprintReader,
-};
+pub use fingerprint::{capabilities, AtomicFingerprint, FingerprintReader, SystemFingerprint};

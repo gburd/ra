@@ -37,8 +37,8 @@ pub mod storyline;
 
 pub use cloud_profiles::{CloudProfileSelector, ProfileSelector};
 pub use deployment_profiles::{
-    ClusterTopology, ComputeInstance, DeploymentProfile, InstanceClass,
-    StorageInstance, StorageTier,
+    ClusterTopology, ComputeInstance, DeploymentProfile, InstanceClass, StorageInstance,
+    StorageTier,
 };
 pub use dynamic_facts::{DatabaseScenario, DynamicFactsProvider, EnhancedPropertyValidator};
 pub use generator::SqlGenerator;

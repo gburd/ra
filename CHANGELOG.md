@@ -70,7 +70,7 @@ and interactive web demonstrations.
 - Cost model calibration interface
 
 **Documentation** (`docs/`)
-- Comprehensive Ra Web UI quickstart guide with demo walkthroughs
+- Ra Web UI quickstart guide with demo walkthroughs
 - Detailed descriptions of all 10 interactive demonstrations
 - API endpoint documentation for programmatic access
 - Troubleshooting and architecture sections

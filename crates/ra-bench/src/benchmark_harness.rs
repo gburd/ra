@@ -218,12 +218,7 @@ impl BenchmarkHarness {
     // Ra measurement
     // -----------------------------------------------------------------------
 
-    fn measure_ra(
-        &self,
-        query_id: &str,
-        sql: &str,
-        postgres_times_ms: &[f64],
-    ) -> QueryTimings {
+    fn measure_ra(&self, query_id: &str, sql: &str, postgres_times_ms: &[f64]) -> QueryTimings {
         let mut ra_times = Vec::with_capacity(self.config.ra_repetitions);
         let mut total_parse = 0.0f64;
         let mut total_optimize = 0.0f64;
@@ -388,7 +383,10 @@ mod tests {
 
     #[test]
     fn test_run_tpch_benchmark_smoke() {
-        let config = WorkloadConfig { ra_repetitions: 2, ..Default::default() };
+        let config = WorkloadConfig {
+            ra_repetitions: 2,
+            ..Default::default()
+        };
         let report = run_tpch_benchmark(config, &std::collections::HashMap::new());
         assert_eq!(report.workload_name, "tpch_olap");
         assert!(!report.query_timings.is_empty());

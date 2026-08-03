@@ -1,5 +1,11 @@
-#![expect(clippy::unwrap_used, reason = "test code; unwrap is the conventional shorthand for surfacing failures in tests")]
-#![expect(clippy::panic, reason = "test code; panic is how we report a failed expectation")]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test code; unwrap is the conventional shorthand for surfacing failures in tests"
+)]
+#![expect(
+    clippy::panic,
+    reason = "test code; panic is how we report a failed expectation"
+)]
 //! Parser conformance against the test cases in
 //! `~/src/postgres/contrib/pg_plan_advice/sql/syntax.sql`.
 //!
@@ -7,9 +13,7 @@
 //! line in PG's regression suite. Cases under "Syntax errors"
 //! must fail to parse; everything else must parse without error.
 
-use ra_plan_advice::{
-    parse_advice, AdviceTag, AdviceTargetKind,
-};
+use ra_plan_advice::{parse_advice, AdviceTag, AdviceTargetKind};
 
 // ────────────────────────────────────────────────────────────────
 // Positive: should parse without error
@@ -43,7 +47,8 @@ fn empty_target_list_legal_for_nested_loop_plain() {
 fn empty_target_list_illegal_for_join_order() {
     let err = parse_advice("JOIN_ORDER()").unwrap_err();
     assert!(
-        err.message.contains("JOIN_ORDER must have at least one target"),
+        err.message
+            .contains("JOIN_ORDER must have at least one target"),
         "{}",
         err.message
     );
@@ -52,12 +57,7 @@ fn empty_target_list_illegal_for_join_order() {
 #[test]
 fn capitalization_variations_normalize() {
     // Mixed-case tag names downcase to the canonical form.
-    for s in [
-        "SEQ_SCAN(x)",
-        "seq_scan(x)",
-        "Seq_Scan(x)",
-        "SEQ_scan(x)",
-    ] {
+    for s in ["SEQ_SCAN(x)", "seq_scan(x)", "Seq_Scan(x)", "SEQ_scan(x)"] {
         let out = parse_advice(s).unwrap_or_else(|e| panic!("{s}: {e}"));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].tag, AdviceTag::SeqScan);
@@ -274,11 +274,7 @@ fn deeply_nested_sublists_rejected_not_stack_overflow() {
     // before any stack risk. 5000 levels would overflow an
     // unguarded recursive-descent parser.
     let depth = 5000;
-    let s = format!(
-        "JOIN_ORDER({}{})",
-        "(".repeat(depth),
-        ")".repeat(depth),
-    );
+    let s = format!("JOIN_ORDER({}{})", "(".repeat(depth), ")".repeat(depth),);
     // Must return an Err (not panic, not crash).
     let result = parse_advice(&s);
     assert!(

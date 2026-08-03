@@ -1081,7 +1081,7 @@ fn high_frequency_changes_stable() {
 
     // System should still be functional
     assert!(cache.len() <= 50);
-    assert!(opt.plan_dependency_count() == 10);
+    assert_eq!(opt.plan_dependency_count(), 10);
 }
 
 // ================================================================

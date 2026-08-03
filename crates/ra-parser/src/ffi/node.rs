@@ -43,11 +43,7 @@ impl fmt::Display for StructuredParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)?;
         if !self.expected_tokens.is_empty() {
-            write!(
-                f,
-                " (expected one of: {})",
-                self.expected_tokens.join(", ")
-            )?;
+            write!(f, " (expected one of: {})", self.expected_tokens.join(", "))?;
         }
         Ok(())
     }
@@ -467,14 +463,9 @@ impl RaParseState {
         if !self.errors.is_empty() {
             return Err(ParseErrors::Strings(self.errors));
         }
-        self.rel_nodes
-            .into_iter()
-            .last()
-            .ok_or_else(|| {
-                ParseErrors::Strings(
-                    vec!["no relational expression produced".to_owned()],
-                )
-            })
+        self.rel_nodes.into_iter().last().ok_or_else(|| {
+            ParseErrors::Strings(vec!["no relational expression produced".to_owned()])
+        })
     }
 }
 

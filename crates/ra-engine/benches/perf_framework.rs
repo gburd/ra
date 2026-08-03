@@ -12,12 +12,8 @@
 //! Run with:
 //!   `cargo bench --package ra-engine --bench perf_framework`
 
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
-};
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, RelExpr,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::Statistics;
 use ra_engine::{Optimizer, ResourceBudget};
@@ -111,11 +107,7 @@ fn filter(input: RelExpr, pred: Expr) -> RelExpr {
     }
 }
 
-fn aggregate(
-    input: RelExpr,
-    group_by: Vec<Expr>,
-    aggregates: Vec<AggregateExpr>,
-) -> RelExpr {
+fn aggregate(input: RelExpr, group_by: Vec<Expr>, aggregates: Vec<AggregateExpr>) -> RelExpr {
     RelExpr::Aggregate {
         input: Box::new(input),
         group_by,
@@ -196,10 +188,7 @@ fn oltp_two_table_join() -> RelExpr {
     join(
         scan("orders"),
         scan("lineitem"),
-        eq(
-            qcol("orders", "o_orderkey"),
-            qcol("lineitem", "l_orderkey"),
-        ),
+        eq(qcol("orders", "o_orderkey"), qcol("lineitem", "l_orderkey")),
     )
 }
 
@@ -211,16 +200,10 @@ fn oltp_three_table_join() -> RelExpr {
                 eq(col("c_mktsegment"), str_const("BUILDING")),
             ),
             scan("orders"),
-            eq(
-                qcol("customer", "c_custkey"),
-                qcol("orders", "o_custkey"),
-            ),
+            eq(qcol("customer", "c_custkey"), qcol("orders", "o_custkey")),
         ),
         scan("lineitem"),
-        eq(
-            qcol("orders", "o_orderkey"),
-            qcol("lineitem", "l_orderkey"),
-        ),
+        eq(qcol("orders", "o_orderkey"), qcol("lineitem", "l_orderkey")),
     )
 }
 
@@ -264,10 +247,7 @@ fn olap_tpch_q5() -> RelExpr {
                 join(
                     join(
                         join(
-                            filter(
-                                scan("region"),
-                                eq(col("r_name"), str_const("ASIA")),
-                            ),
+                            filter(scan("region"), eq(col("r_name"), str_const("ASIA"))),
                             scan("nation"),
                             eq(col("r_regionkey"), col("n_regionkey")),
                         ),
@@ -306,10 +286,7 @@ fn tproc_c_stock_level() -> RelExpr {
                 join(
                     filter(
                         scan("district"),
-                        and(
-                            eq(col("d_w_id"), int(1)),
-                            eq(col("d_id"), int(5)),
-                        ),
+                        and(eq(col("d_w_id"), int(1)), eq(col("d_id"), int(5))),
                     ),
                     scan("order_line"),
                     eq(col("d_id"), col("ol_d_id")),
@@ -344,8 +321,7 @@ fn bench_simple_oltp(c: &mut Criterion) {
     let mut group = c.benchmark_group("simple_oltp");
     group.sample_size(50);
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
 
     group.bench_function("point_lookup", |b| {
         let expr = oltp_point_lookup();
@@ -504,17 +480,13 @@ fn bench_budget_switching(c: &mut Criterion) {
         let mut optimizer = make_tpch_optimizer();
         optimizer.set_resource_budget(budget);
 
-        group.bench_with_input(
-            BenchmarkId::new("tpch_q3", label),
-            &expr,
-            |b, expr| {
-                b.iter(|| {
-                    optimizer
-                        .optimize_bounded(black_box(expr))
-                        .expect("should succeed")
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("tpch_q3", label), &expr, |b, expr| {
+            b.iter(|| {
+                optimizer
+                    .optimize_bounded(black_box(expr))
+                    .expect("should succeed")
+            });
+        });
     }
 
     group.finish();

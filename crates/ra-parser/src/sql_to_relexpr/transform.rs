@@ -57,7 +57,11 @@ fn transform_order_by_aliases(rel: RelExpr) -> RelExpr {
     };
     if let Some(cols) = projection_below(&input) {
         for key in &mut keys {
-            let Expr::Column(ColumnRef { table: None, column }) = &key.expr else {
+            let Expr::Column(ColumnRef {
+                table: None,
+                column,
+            }) = &key.expr
+            else {
                 continue;
             };
             if let Some(pc) = cols
@@ -78,15 +82,11 @@ fn transform_order_by_aliases(rel: RelExpr) -> RelExpr {
 /// Map a distance function name to a `DistanceMetric`.
 fn distance_metric_for(name: &str) -> Option<DistanceMetric> {
     match name.to_ascii_lowercase().as_str() {
-        "vec_distance_l2" | "l2_distance" | "euclidean_distance" => {
-            Some(DistanceMetric::L2)
-        }
+        "vec_distance_l2" | "l2_distance" | "euclidean_distance" => Some(DistanceMetric::L2),
         "vec_distance_cosine" | "cosine_distance" | "cosine_similarity" => {
             Some(DistanceMetric::Cosine)
         }
-        "vec_distance_ip" | "inner_product" | "dot_product" => {
-            Some(DistanceMetric::InnerProduct)
-        }
+        "vec_distance_ip" | "inner_product" | "dot_product" => Some(DistanceMetric::InnerProduct),
         _ => None,
     }
 }
@@ -107,11 +107,20 @@ fn extract_distance_call(expr: &Expr) -> Option<(DistanceMetric, Expr, Expr)> {
 /// Attempt to rewrite a `Limit(Sort(...))` into a `TopK` node.
 fn try_topk(rel: RelExpr) -> RelExpr {
     // Decompose the Limit.
-    let RelExpr::Limit { count, offset, input } = rel else {
+    let RelExpr::Limit {
+        count,
+        offset,
+        input,
+    } = rel
+    else {
         return rel;
     };
     if offset != 0 {
-        return RelExpr::Limit { count, offset, input };
+        return RelExpr::Limit {
+            count,
+            offset,
+            input,
+        };
     }
 
     // Decompose the Sort inside.
@@ -131,13 +140,14 @@ fn try_topk(rel: RelExpr) -> RelExpr {
         return RelExpr::Limit {
             count,
             offset,
-            input: Box::new(RelExpr::Sort { keys, input: sort_input }),
+            input: Box::new(RelExpr::Sort {
+                keys,
+                input: sort_input,
+            }),
         };
     }
 
-    if let Some((metric, vector_expr, query_vector)) =
-        extract_distance_call(&keys[0].expr)
-    {
+    if let Some((metric, vector_expr, query_vector)) = extract_distance_call(&keys[0].expr) {
         RelExpr::TopK {
             vector_expr,
             query_vector,
@@ -149,14 +159,21 @@ fn try_topk(rel: RelExpr) -> RelExpr {
         RelExpr::Limit {
             count,
             offset,
-            input: Box::new(RelExpr::Sort { keys, input: sort_input }),
+            input: Box::new(RelExpr::Sort {
+                keys,
+                input: sort_input,
+            }),
         }
     }
 }
 
 /// Attempt to rewrite `Filter(distance_fn < threshold)` into `VectorFilter`.
 fn try_vector_filter(rel: RelExpr) -> RelExpr {
-    let RelExpr::Filter { ref predicate, ref input } = rel else {
+    let RelExpr::Filter {
+        ref predicate,
+        ref input,
+    } = rel
+    else {
         return rel;
     };
 
@@ -169,8 +186,7 @@ fn try_vector_filter(rel: RelExpr) -> RelExpr {
         return rel;
     };
 
-    let Some((metric, vector_expr, query_vector)) = extract_distance_call(left)
-    else {
+    let Some((metric, vector_expr, query_vector)) = extract_distance_call(left) else {
         return rel;
     };
 
@@ -197,7 +213,11 @@ fn try_vector_filter(rel: RelExpr) -> RelExpr {
 /// `Project { [*], input: VectorFilter }` after `try_vector_filter`.
 /// The tests expect `VectorFilter` at the top level.
 fn promote_vector_filter(rel: RelExpr) -> RelExpr {
-    let RelExpr::Project { ref columns, ref input } = rel else {
+    let RelExpr::Project {
+        ref columns,
+        ref input,
+    } = rel
+    else {
         return rel;
     };
     let is_star_select = columns.len() == 1
@@ -312,9 +332,7 @@ fn extract_window_exprs(
 /// Separate real function args from sentinel args encoding window OVER clause.
 ///
 /// Returns `(real_args, partition_by_exprs, order_by_sort_keys)`.
-fn decode_window_sentinels(
-    args: Vec<Expr>,
-) -> (Vec<Expr>, Vec<Expr>, Vec<SortKey>, bool) {
+fn decode_window_sentinels(args: Vec<Expr>) -> (Vec<Expr>, Vec<Expr>, Vec<SortKey>, bool) {
     let mut real_args = Vec::new();
     let mut partition_by = Vec::new();
     let mut order_by = Vec::new();
@@ -393,15 +411,12 @@ fn aggregate_function_for(name: &str) -> Option<AggregateFunction> {
         "stddev" | "std_dev" | "stdev" | "stddev_pop" | "stddev_samp" => {
             Some(AggregateFunction::StdDev)
         }
-        "variance" | "var_pop" | "var_samp" | "var" => {
-            Some(AggregateFunction::Variance)
-        }
+        "variance" | "var_pop" | "var_samp" | "var" => Some(AggregateFunction::Variance),
         "string_agg" => Some(AggregateFunction::StringAgg),
         "array_agg" => Some(AggregateFunction::ArrayAgg),
         _ => None,
     }
 }
-
 
 /// Build an `AggregateExpr` from a function call, returning `None` if it
 /// is not a recognised aggregate.
@@ -466,7 +481,11 @@ fn collect_aggs(expr: &Expr, out: &mut Vec<AggregateExpr>) {
                 collect_aggs(a, out);
             }
         }
-        Expr::Case { operand, when_clauses, else_result } => {
+        Expr::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } => {
             if let Some(o) = operand {
                 collect_aggs(o, out);
             }
@@ -488,7 +507,11 @@ fn collect_aggs(expr: &Expr, out: &mut Vec<AggregateExpr>) {
 }
 
 fn wrap_scalar_aggregate(rel: RelExpr) -> RelExpr {
-    let RelExpr::Project { ref columns, ref input } = rel else {
+    let RelExpr::Project {
+        ref columns,
+        ref input,
+    } = rel
+    else {
         return rel;
     };
 
@@ -557,7 +580,9 @@ fn normalize_subqueries(rel: RelExpr) -> RelExpr {
 /// Normalize the inner query of every `SubQuery` nested in `e` (in place).
 fn normalize_expr_subqueries(e: &mut Expr) {
     match e {
-        Expr::SubQuery { query, test_expr, .. } => {
+        Expr::SubQuery {
+            query, test_expr, ..
+        } => {
             let inner = std::mem::replace(query.as_mut(), RelExpr::Values { rows: Vec::new() });
             *query.as_mut() = apply_all(inner);
             if let Some(t) = test_expr {
@@ -574,7 +599,11 @@ fn normalize_expr_subqueries(e: &mut Expr) {
                 normalize_expr_subqueries(a);
             }
         }
-        Expr::Case { operand, when_clauses, else_result } => {
+        Expr::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } => {
             if let Some(o) = operand {
                 normalize_expr_subqueries(o);
             }
@@ -620,7 +649,10 @@ fn normalize_expr_subqueries(e: &mut Expr) {
 // Tree-walk helper
 // ---------------------------------------------------------------------------
 
-#[expect(clippy::too_many_lines, reason = "exhaustive match over all RelExpr variants")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive match over all RelExpr variants"
+)]
 fn map_children<F>(rel: RelExpr, f: F) -> RelExpr
 where
     F: Fn(RelExpr) -> RelExpr,
@@ -657,7 +689,11 @@ where
             input: Box::new(f(*input)),
         },
 
-        RelExpr::Limit { count, offset, input } => RelExpr::Limit {
+        RelExpr::Limit {
+            count,
+            offset,
+            input,
+        } => RelExpr::Limit {
             count,
             offset,
             input: Box::new(f(*input)),

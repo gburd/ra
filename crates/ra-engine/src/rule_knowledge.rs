@@ -174,9 +174,7 @@ impl RuleKnowledge {
 
     /// Iterate over all per-shape-bucket effectiveness entries.
     #[must_use]
-    pub fn entries(
-        &self,
-    ) -> &HashMap<ShapeKeyBucket, HashMap<String, RuleEffectivenessEntry>> {
+    pub fn entries(&self) -> &HashMap<ShapeKeyBucket, HashMap<String, RuleEffectivenessEntry>> {
         &self.entries
     }
 

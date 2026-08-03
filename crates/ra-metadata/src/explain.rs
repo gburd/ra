@@ -2354,10 +2354,7 @@ pub fn relexpr_to_explain_node(expr: &ra_core::algebra::RelExpr) -> ExplainNode 
         }
 
         RelExpr::Merge {
-            target,
-            source,
-            on,
-            ..
+            target, source, on, ..
         } => ExplainNode {
             node_type: NodeType::Other,
             join_type: None,

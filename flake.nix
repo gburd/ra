@@ -80,7 +80,7 @@
             shfmt
 
             # Web development
-            nodejs_20
+            nodejs_22
             nodePackages.pnpm
           ] ++ lib.optionals stdenv.isDarwin [
             # Darwin-specific system libraries and frameworks
@@ -166,11 +166,11 @@
               # Install dependencies if needed (check for vitepress specifically)
               if [ ! -x node_modules/.bin/vitepress ]; then
                 echo "📦 Installing dependencies with npm..."
-                ${pkgs.nodejs_20}/bin/npm install
+                ${pkgs.nodejs_22}/bin/npm install
               fi
 
               echo "🔧 Generating navigation..."
-              ${pkgs.nodejs_20}/bin/node .vitepress/generate-rule-nav.js
+              ${pkgs.nodejs_22}/bin/node .vitepress/generate-rule-nav.js
 
               echo "📚 Starting documentation server..."
               echo ""
@@ -181,7 +181,7 @@
               echo ""
 
               export NODE_OPTIONS='--max-old-space-size=8192'
-              exec ${pkgs.nodejs_20}/bin/npx vitepress dev
+              exec ${pkgs.nodejs_22}/bin/npx vitepress dev
             '');
           };
 
@@ -196,16 +196,16 @@
               # Install npm dependencies if needed (check for vitepress specifically)
               if [ ! -x node_modules/.bin/vitepress ]; then
                 echo "📦 Installing npm dependencies..."
-                ${pkgs.nodejs_20}/bin/npm install
+                ${pkgs.nodejs_22}/bin/npm install
               fi
 
               echo "📚 Building documentation..."
               echo "🔧 Generating navigation..."
-              ${pkgs.nodejs_20}/bin/node .vitepress/generate-rule-nav.js
+              ${pkgs.nodejs_22}/bin/node .vitepress/generate-rule-nav.js
 
               echo "🏗️  Building VitePress site..."
               export NODE_OPTIONS='--max-old-space-size=8192'
-              ${pkgs.nodejs_20}/bin/npx vitepress build
+              ${pkgs.nodejs_22}/bin/npx vitepress build
 
               echo "✅ Documentation built successfully!"
               echo "   Output: docs/.vitepress/dist/"

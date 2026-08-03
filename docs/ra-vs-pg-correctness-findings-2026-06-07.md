@@ -93,7 +93,7 @@ speculative router does not fast-path UNION/INTERSECT/EXCEPT.
 
 ## Update — same day, second pass (root-caused one family, narrowed the gate)
 
-Deeper diagnosis with `EXPLAIN (VERBOSE)` + `ra-cli optimize` turned the
+Deeper diagnosis with `EXPLAIN (VERBOSE)` + `ra optimize` turned the
 broad "all non-inner joins are wrong" finding into two distinct causes:
 
 ### Real bug fixed: missing collation on coerced comparisons
@@ -118,7 +118,7 @@ deferred**. Commit `fix(pg): assign collations on coerced comparisons` (main
 ### Genuine remaining bug: outer-join WHERE pushdown to the wrong child
 
 `SELECT o.o_orderkey FROM orders o LEFT JOIN customer c ON o.o_custkey=c.c_custkey
-WHERE o.o_orderkey<50` → 20000 rows vs PG's 49. `ra-cli optimize` shows a
+WHERE o.o_orderkey<50` → 20000 rows vs PG's 49. `ra optimize` shows a
 predicate-pushdown rewrite places the **outer**-relation predicate
 (`o.o_orderkey<50`) on the **inner** (customer) child:
 `LEFT JOIN(Scan orders, Filter(o.o_orderkey<50, Scan customer))`. The executed
@@ -155,7 +155,7 @@ are inserted into the e-graph; they stay hidden whenever cost extracts a correct
 equivalent, and surface as wrong results when the cost model (e.g. with the
 extension's live-fingerprint + page-size tuning) extracts the bad one. That is
 why `Optimizer::new().optimize()` returns the correct plan but the extension
-(and ra-cli with cost tuning) returns the buggy `LEFT JOIN(orders, Filter(o.col,
+(and ra with cost tuning) returns the buggy `LEFT JOIN(orders, Filter(o.col,
 customer))`.
 
 This is **systemic**: the same weakness underlies the inner-join pushdown rules

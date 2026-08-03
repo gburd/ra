@@ -92,7 +92,7 @@ For large join graphs, RA uses heuristics:
 
 ```bash
 # Optimize with join reordering
-ra-cli optimize \
+ra optimize \
   --join-reorder dynamic \
   "SELECT * FROM orders o \
    JOIN customers c ON o.customer_id = c.id \
@@ -101,7 +101,7 @@ ra-cli optimize \
    WHERE s.country = 'USA'"
 
 # Compare different strategies
-ra-cli compare-join-orders \
+ra compare-join-orders \
   --strategies "original,greedy,dynamic" \
   "YOUR_QUERY"
 ```

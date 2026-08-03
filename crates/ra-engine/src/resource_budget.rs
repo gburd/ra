@@ -331,10 +331,7 @@ impl ResourceBudget {
 
     /// Set the overflow strategy.
     #[must_use]
-    pub fn with_overflow_strategy(
-        mut self,
-        strategy: OverflowStrategy,
-    ) -> Self {
+    pub fn with_overflow_strategy(mut self, strategy: OverflowStrategy) -> Self {
         self.overflow_strategy = strategy;
         self
     }
@@ -343,30 +340,21 @@ impl ResourceBudget {
 
     /// Set the rule selection behavior.
     #[must_use]
-    pub fn with_rule_selection(
-        mut self,
-        behavior: RuleSelectionBehavior,
-    ) -> Self {
+    pub fn with_rule_selection(mut self, behavior: RuleSelectionBehavior) -> Self {
         self.rule_selection = behavior;
         self
     }
 
     /// Set the convergence behavior.
     #[must_use]
-    pub fn with_convergence(
-        mut self,
-        behavior: ConvergenceBehavior,
-    ) -> Self {
+    pub fn with_convergence(mut self, behavior: ConvergenceBehavior) -> Self {
         self.convergence = behavior;
         self
     }
 
     /// Set the fast-path preferences.
     #[must_use]
-    pub fn with_fast_path(
-        mut self,
-        prefs: FastPathPreferences,
-    ) -> Self {
+    pub fn with_fast_path(mut self, prefs: FastPathPreferences) -> Self {
         self.fast_path = prefs;
         self
     }
@@ -647,24 +635,21 @@ mod tests {
 
     #[test]
     fn with_time_limit_sets_constraint() {
-        let budget = ResourceBudget::unlimited()
-            .with_time_limit(Duration::from_millis(100));
+        let budget = ResourceBudget::unlimited().with_time_limit(Duration::from_millis(100));
         assert!(!budget.is_unlimited());
         assert_eq!(budget.max_time, Some(Duration::from_millis(100)));
     }
 
     #[test]
     fn with_cpu_time_limit_sets_constraint() {
-        let budget = ResourceBudget::unlimited()
-            .with_cpu_time_limit(Duration::from_secs(1));
+        let budget = ResourceBudget::unlimited().with_cpu_time_limit(Duration::from_secs(1));
         assert!(!budget.is_unlimited());
         assert_eq!(budget.max_cpu_time, Some(Duration::from_secs(1)));
     }
 
     #[test]
     fn with_memory_limit_sets_constraint() {
-        let budget = ResourceBudget::unlimited()
-            .with_memory_limit(50 * 1024 * 1024);
+        let budget = ResourceBudget::unlimited().with_memory_limit(50 * 1024 * 1024);
         assert!(!budget.is_unlimited());
         assert_eq!(budget.max_memory, Some(50 * 1024 * 1024));
     }
@@ -686,8 +671,7 @@ mod tests {
 
     #[test]
     fn with_overflow_strategy_sets_strategy() {
-        let budget = ResourceBudget::unlimited()
-            .with_overflow_strategy(OverflowStrategy::Fail);
+        let budget = ResourceBudget::unlimited().with_overflow_strategy(OverflowStrategy::Fail);
         assert_eq!(budget.overflow_strategy, OverflowStrategy::Fail);
     }
 
@@ -722,22 +706,19 @@ mod tests {
             min_observations: 20,
             max_rules_per_iteration: Some(10),
         };
-        let budget = ResourceBudget::unlimited()
-            .with_rule_selection(custom.clone());
+        let budget = ResourceBudget::unlimited().with_rule_selection(custom.clone());
         assert_eq!(budget.rule_selection, custom);
     }
 
     #[test]
     fn with_convergence_overrides_default() {
-        let budget = ResourceBudget::unlimited()
-            .with_convergence(ConvergenceBehavior::Complete);
+        let budget = ResourceBudget::unlimited().with_convergence(ConvergenceBehavior::Complete);
         assert_eq!(budget.convergence, ConvergenceBehavior::Complete);
     }
 
     #[test]
     fn with_fast_path_overrides_default() {
-        let budget = ResourceBudget::unlimited()
-            .with_fast_path(FastPathPreferences::disabled());
+        let budget = ResourceBudget::unlimited().with_fast_path(FastPathPreferences::disabled());
         assert!(!budget.fast_path.any_enabled());
     }
 
@@ -946,9 +927,7 @@ mod tests {
     fn interactive_plus_enables_learning() {
         let budget = ResourceBudget::interactive_plus();
         assert!(budget.rule_selection.adaptive_learning);
-        assert!(
-            budget.rule_selection.success_rate_threshold > 0.0
-        );
+        assert!(budget.rule_selection.success_rate_threshold > 0.0);
     }
 
     // ---- Workload ordering ----
@@ -971,28 +950,21 @@ mod tests {
     fn oltp_iterations_less_than_olap() {
         let oltp_budget = ResourceBudget::oltp();
         let olap_budget = ResourceBudget::olap();
-        assert!(
-            oltp_budget.max_iterations.unwrap()
-                < olap_budget.max_iterations.unwrap()
-        );
+        assert!(oltp_budget.max_iterations.unwrap() < olap_budget.max_iterations.unwrap());
     }
 
     #[test]
     fn olap_iterations_less_than_research() {
         let olap = ResourceBudget::olap();
         let research = ResourceBudget::research();
-        assert!(
-            olap.max_iterations.unwrap()
-                < research.max_iterations.unwrap()
-        );
+        assert!(olap.max_iterations.unwrap() < research.max_iterations.unwrap());
     }
 
     // ---- Workload budgets can be customized ----
 
     #[test]
     fn oltp_can_override_convergence() {
-        let budget = ResourceBudget::oltp()
-            .with_convergence(ConvergenceBehavior::Thorough);
+        let budget = ResourceBudget::oltp().with_convergence(ConvergenceBehavior::Thorough);
         assert_eq!(budget.convergence, ConvergenceBehavior::Thorough);
         // Other fields unchanged
         assert_eq!(budget.max_time, Some(Duration::from_millis(200)));
@@ -1000,8 +972,7 @@ mod tests {
 
     #[test]
     fn olap_can_override_fast_path() {
-        let budget = ResourceBudget::olap()
-            .with_fast_path(FastPathPreferences::oltp());
+        let budget = ResourceBudget::olap().with_fast_path(FastPathPreferences::oltp());
         // Overridden to OLTP fast paths (lower confidence)
         assert!(budget.fast_path.any_enabled());
         assert!(budget.fast_path.min_confidence < 0.6);
@@ -1011,8 +982,7 @@ mod tests {
 
     #[test]
     fn research_can_add_time_limit() {
-        let budget = ResourceBudget::research()
-            .with_time_limit(Duration::from_secs(30));
+        let budget = ResourceBudget::research().with_time_limit(Duration::from_secs(30));
         assert_eq!(budget.max_time, Some(Duration::from_secs(30)));
         // Convergence unchanged
         assert_eq!(budget.convergence, ConvergenceBehavior::Complete);
@@ -1056,8 +1026,7 @@ mod tests {
 
     #[test]
     fn remaining_time_some_and_decreasing_when_bounded() {
-        let budget =
-            ResourceBudget::unlimited().with_time_limit(Duration::from_millis(200));
+        let budget = ResourceBudget::unlimited().with_time_limit(Duration::from_millis(200));
         let tracker = ResourceTracker::start(budget);
         let r = tracker
             .remaining_time()
@@ -1177,8 +1146,7 @@ mod tests {
 
     #[test]
     fn time_limit_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_time_limit(Duration::from_millis(0));
+        let budget = ResourceBudget::unlimited().with_time_limit(Duration::from_millis(0));
         let tracker = ResourceTracker::start(budget);
         // Even a zero-duration limit should be exceeded immediately
         // (or nearly so). We spin briefly to ensure time passes.
@@ -1191,8 +1159,7 @@ mod tests {
 
     #[test]
     fn cpu_time_limit_exceeded() {
-        let budget = ResourceBudget::unlimited()
-            .with_cpu_time_limit(Duration::from_millis(0));
+        let budget = ResourceBudget::unlimited().with_cpu_time_limit(Duration::from_millis(0));
         let tracker = ResourceTracker::start(budget);
         std::thread::sleep(Duration::from_millis(1));
         assert_eq!(
@@ -1243,8 +1210,7 @@ mod tests {
 
     #[test]
     fn tracker_returns_budget_overflow_strategy() {
-        let budget = ResourceBudget::unlimited()
-            .with_overflow_strategy(OverflowStrategy::Fail);
+        let budget = ResourceBudget::unlimited().with_overflow_strategy(OverflowStrategy::Fail);
         let tracker = ResourceTracker::start(budget);
         assert_eq!(tracker.overflow_strategy(), OverflowStrategy::Fail);
     }

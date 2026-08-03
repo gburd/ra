@@ -27,7 +27,10 @@ use ra_core::expr::{BinOp, Expr, UnaryOp};
 /// typical queries) and cheap to compare (three integer comparisons
 /// for exact match, a handful of bit ops for similarity).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[expect(clippy::struct_excessive_bools, reason = "boolean flags represent independent query features")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "boolean flags represent independent query features"
+)]
 pub struct QueryFingerprint {
     /// Hash of the join graph: tables involved and join topology.
     pub join_graph_hash: u64,
@@ -199,8 +202,7 @@ impl FingerprintCollector {
                 }
                 self.visit(input);
             }
-            RelExpr::Sort { input, .. }
-            | RelExpr::IncrementalSort { input, .. } => {
+            RelExpr::Sort { input, .. } | RelExpr::IncrementalSort { input, .. } => {
                 self.has_sort = true;
                 self.visit(input);
             }

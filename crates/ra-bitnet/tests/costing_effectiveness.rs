@@ -41,12 +41,22 @@ fn realistic_cost(features: &[f32; F]) -> [f32; O] {
     let window_cost = windows * log_card * 1.5;
     let distinct_cost = distinct * cardinality.max(1.0).sqrt() * 0.2;
 
-    let cpu = (join_cost + sort_cost + agg_cost + filter_cost
-        + subquery_cost + window_cost + distinct_cost + tables * 0.5)
+    let cpu = (join_cost
+        + sort_cost
+        + agg_cost
+        + filter_cost
+        + subquery_cost
+        + window_cost
+        + distinct_cost
+        + tables * 0.5)
         .max(0.1);
 
     // Limit reduces output but not computation
-    let effective_output = if limit > 0.5 { 100.0 } else { cardinality.max(1.0).sqrt() };
+    let effective_output = if limit > 0.5 {
+        100.0
+    } else {
+        cardinality.max(1.0).sqrt()
+    };
 
     let memory = effective_output * 0.01 + joins * 2.0;
     let io_ops = tables * 50.0 + joins * 200.0 + cardinality.max(1.0).sqrt() * 0.5;
@@ -70,23 +80,25 @@ fn generate_data(n: usize, seed_start: u64) -> Vec<([f32; F], [f32; O])> {
 
     for _ in 0..n {
         let mut r = || -> f32 {
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1442695040888963407);
             (seed >> 33) as f32 / (u32::MAX >> 1) as f32
         };
 
         let features: [f32; F] = [
-            (r() * 8.0).floor().max(1.0),       // tables: 1-8
-            (r() * 7.0).floor(),                 // joins: 0-7
-            (r() * 12.0).floor(),                // filters: 0-12
-            (r() * 4.0).floor(),                 // aggregates: 0-4
-            (r() * 3.0).floor(),                 // subqueries: 0-3
-            (r() * 2.0).floor(),                 // CTEs: 0-2
-            (r() * 4.0).floor(),                 // windows: 0-4
-            (r() * 4.0).floor(),                 // order_by: 0-4
-            (r() * 4.0).floor(),                 // group_by: 0-4
-            if r() > 0.7 { 1.0 } else { 0.0 },  // distinct
-            if r() > 0.5 { 1.0 } else { 0.0 },  // limit
-            (10.0f32).powf(r() * 6.0 + 1.0),    // cardinality: 10 - 10M
+            (r() * 8.0).floor().max(1.0),      // tables: 1-8
+            (r() * 7.0).floor(),               // joins: 0-7
+            (r() * 12.0).floor(),              // filters: 0-12
+            (r() * 4.0).floor(),               // aggregates: 0-4
+            (r() * 3.0).floor(),               // subqueries: 0-3
+            (r() * 2.0).floor(),               // CTEs: 0-2
+            (r() * 4.0).floor(),               // windows: 0-4
+            (r() * 4.0).floor(),               // order_by: 0-4
+            (r() * 4.0).floor(),               // group_by: 0-4
+            if r() > 0.7 { 1.0 } else { 0.0 }, // distinct
+            if r() > 0.5 { 1.0 } else { 0.0 }, // limit
+            (10.0f32).powf(r() * 6.0 + 1.0),   // cardinality: 10 - 10M
             // OptimizationFeatures padding
             0.0,
             0.0,
@@ -146,18 +158,31 @@ fn training_with_more_data_improves_accuracy() {
     let (mape, rank_corr) = evaluate_model(&model, &eval_data);
 
     eprintln!("\n=== Training Results (2000 samples, 50 epochs) ===");
-    eprintln!("Loss:      {:.4} → {:.4}", epoch_losses[0], epoch_losses[99]);
+    eprintln!(
+        "Loss:      {:.4} → {:.4}",
+        epoch_losses[0], epoch_losses[99]
+    );
     eprintln!("Eval MAPE: {:.1}%", mape * 100.0);
     eprintln!("Rank corr: {:.3}", rank_corr);
     eprintln!("Steps:     {}", trainer.steps());
 
     // Accuracy assertions
-    assert!(epoch_losses[99] < epoch_losses[0] * 0.1,
-        "Loss should decrease >10x: {:.4} → {:.4}", epoch_losses[0], epoch_losses[99]);
-    assert!(mape < 0.5,
-        "MAPE should be under 50%: got {:.1}%", mape * 100.0);
-    assert!(rank_corr > 0.3,
-        "Rank correlation should exceed 0.3: got {:.3}", rank_corr);
+    assert!(
+        epoch_losses[99] < epoch_losses[0] * 0.1,
+        "Loss should decrease >10x: {:.4} → {:.4}",
+        epoch_losses[0],
+        epoch_losses[99]
+    );
+    assert!(
+        mape < 0.5,
+        "MAPE should be under 50%: got {:.1}%",
+        mape * 100.0
+    );
+    assert!(
+        rank_corr > 0.3,
+        "Rank correlation should exceed 0.3: got {:.3}",
+        rank_corr
+    );
 }
 
 #[test]
@@ -190,15 +215,41 @@ fn model_preserves_cost_ordering_for_plan_comparison() {
     for i in 0..100 {
         // "Cheap" query: few joins, low cardinality
         let cheap = [
-            2.0, 1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            2.0,
+            1.0,
+            2.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
             100.0 + (i as f32) * 10.0,
-            0.0, 0.0, 0.0, 0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
         ];
         // "Expensive" query: many joins, high cardinality
         let expensive = [
-            6.0, 5.0, 8.0, 2.0, 1.0, 0.0, 2.0, 2.0, 2.0, 1.0, 0.0,
+            6.0,
+            5.0,
+            8.0,
+            2.0,
+            1.0,
+            0.0,
+            2.0,
+            2.0,
+            2.0,
+            1.0,
+            0.0,
             100_000.0 + (i as f32) * 1000.0,
-            0.0, 0.0, 0.0, 0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
         ];
 
         let cheap_pred = model.predict_cpu_ms(&cheap);
@@ -212,12 +263,18 @@ fn model_preserves_cost_ordering_for_plan_comparison() {
 
     let ordering_accuracy = correct_orderings as f64 / total_comparisons as f64;
     eprintln!("\n=== Plan Ordering Accuracy ===");
-    eprintln!("Correct orderings: {}/{} ({:.1}%)",
-        correct_orderings, total_comparisons, ordering_accuracy * 100.0);
+    eprintln!(
+        "Correct orderings: {}/{} ({:.1}%)",
+        correct_orderings,
+        total_comparisons,
+        ordering_accuracy * 100.0
+    );
 
-    assert!(ordering_accuracy > 0.90,
+    assert!(
+        ordering_accuracy > 0.90,
         "Model should correctly order cheap vs expensive plans >90%: got {:.1}%",
-        ordering_accuracy * 100.0);
+        ordering_accuracy * 100.0
+    );
 }
 
 #[test]
@@ -246,15 +303,23 @@ fn blend_alpha_influence_is_bounded() {
 
     for (features, _) in &test_inputs {
         let pred = model.predict_cpu_ms(features);
-        if !pred.is_finite() { all_finite = false; }
-        if pred < 0.0 { all_non_negative = false; }
+        if !pred.is_finite() {
+            all_finite = false;
+        }
+        if pred < 0.0 {
+            all_non_negative = false;
+        }
     }
 
     assert!(all_finite, "All predictions must be finite");
-    assert!(all_non_negative, "All predictions must be non-negative (softplus)");
+    assert!(
+        all_non_negative,
+        "All predictions must be non-negative (softplus)"
+    );
 
     // Verify model distinguishes between queries (in log-space)
-    let preds: Vec<f32> = test_inputs.iter()
+    let preds: Vec<f32> = test_inputs
+        .iter()
         .map(|(f, _)| model.predict_cpu_ms(f))
         .collect();
     let min_pred = preds.iter().copied().fold(f32::INFINITY, f32::min);
@@ -262,12 +327,18 @@ fn blend_alpha_influence_is_bounded() {
     let spread = max_pred - min_pred; // absolute spread in log-space
 
     eprintln!("\n=== Prediction Spread (log-space) ===");
-    eprintln!("Min: {:.4}, Max: {:.4}, Spread: {:.4}", min_pred, max_pred, spread);
+    eprintln!(
+        "Min: {:.4}, Max: {:.4}, Spread: {:.4}",
+        min_pred, max_pred, spread
+    );
 
     // In log-space, a spread of 0.5 means exp(0.5)=1.6x cost difference
     // With diverse queries, we expect at least some differentiation
-    assert!(spread > 0.1,
-        "Model should differentiate queries (spread > 0.1): got {:.4}", spread);
+    assert!(
+        spread > 0.1,
+        "Model should differentiate queries (spread > 0.1): got {:.4}",
+        spread
+    );
 }
 
 // --- Helpers ---
@@ -323,7 +394,9 @@ fn compute_inv_std(samples: &[[f32; F]], mean: &[f32; F]) -> [f32; F] {
 
 fn rank_correlation(predictions: &[f32], actuals: &[f32]) -> f64 {
     let n = predictions.len();
-    if n < 3 { return 0.0; }
+    if n < 3 {
+        return 0.0;
+    }
 
     let pred_ranks = ranks(predictions);
     let actual_ranks = ranks(actuals);
@@ -344,7 +417,11 @@ fn rank_correlation(predictions: &[f32], actuals: &[f32]) -> f64 {
     }
 
     let denom = (var_p * var_a).sqrt();
-    if denom < 1e-10 { 0.0 } else { cov / denom }
+    if denom < 1e-10 {
+        0.0
+    } else {
+        cov / denom
+    }
 }
 
 fn ranks(values: &[f32]) -> Vec<f64> {

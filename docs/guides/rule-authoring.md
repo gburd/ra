@@ -387,13 +387,13 @@ Before submitting a rule, validate it:
 
 ```bash
 # Validate syntax and schema
-ra-cli validate rules/logical/predicate-pushdown/filter-through-join.rra
+ra validate rules/logical/predicate-pushdown/filter-through-join.rra
 
 # Run test cases
-ra-cli test rules/logical/predicate-pushdown/filter-through-join.rra
+ra test rules/logical/predicate-pushdown/filter-through-join.rra
 
 # Check against real database
-ra-cli compare --database postgresql filter-through-join
+ra compare --database postgresql filter-through-join
 ```
 
 ## Example: Complete Rule

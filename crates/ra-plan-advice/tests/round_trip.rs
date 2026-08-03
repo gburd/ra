@@ -1,12 +1,14 @@
-#![expect(clippy::unwrap_used, reason = "test code; unwrap is the conventional shorthand for surfacing failures in tests")]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test code; unwrap is the conventional shorthand for surfacing failures in tests"
+)]
 //! Proptest-driven round-trip property: any AST that survives
 //! `parse(render(a))` must round-trip to itself.
 
 use proptest::prelude::*;
 
 use ra_plan_advice::ast::{
-    Advice, AdviceItem, AdviceTag, AdviceTarget,
-    IndexTarget, RelationIdentifier,
+    Advice, AdviceItem, AdviceTag, AdviceTarget, IndexTarget, RelationIdentifier,
 };
 use ra_plan_advice::{parse_advice, render_advice};
 
@@ -22,17 +24,11 @@ use ra_plan_advice::{parse_advice, render_advice};
 /// search space without adding coverage we don't already have in
 /// targeted unit tests.
 fn arb_simple_ident() -> impl Strategy<Value = String> {
-    "[a-z][a-z0-9_]{0,7}".prop_filter(
-        "skip empty",
-        |s: &String| !s.is_empty(),
-    )
+    "[a-z][a-z0-9_]{0,7}".prop_filter("skip empty", |s: &String| !s.is_empty())
 }
 
 fn arb_index_target() -> impl Strategy<Value = IndexTarget> {
-    (
-        prop::option::of(arb_simple_ident()),
-        arb_simple_ident(),
-    )
+    (prop::option::of(arb_simple_ident()), arb_simple_ident())
         .prop_map(|(schema, name)| IndexTarget { schema, name })
 }
 
@@ -75,8 +71,7 @@ fn arb_simple_target() -> impl Strategy<Value = AdviceTarget> {
 fn arb_generic_target() -> impl Strategy<Value = AdviceTarget> {
     prop_oneof![
         arb_simple_target(),
-        prop::collection::vec(arb_simple_target(), 1..4)
-            .prop_map(AdviceTarget::ordered),
+        prop::collection::vec(arb_simple_target(), 1..4).prop_map(AdviceTarget::ordered),
     ]
 }
 
@@ -84,19 +79,17 @@ fn arb_generic_target() -> impl Strategy<Value = AdviceTarget> {
 /// curly-brace sublists. Use `prop_recursive` to bound depth.
 fn arb_join_order_target() -> impl Strategy<Value = AdviceTarget> {
     arb_simple_target().prop_recursive(
-        2,  // depth
-        8,  // max nodes
-        4,  // max children per node
+        2, // depth
+        8, // max nodes
+        4, // max children per node
         |inner| {
             prop_oneof![
                 arb_simple_target(),
-                prop::collection::vec(inner, 1..4)
-                    .prop_map(AdviceTarget::ordered),
+                prop::collection::vec(inner, 1..4).prop_map(AdviceTarget::ordered),
                 // Curly-brace sublists themselves cannot contain
                 // sublists per pgpa_parser.y::join_order_sublist;
                 // populate with leaves only.
-                prop::collection::vec(arb_simple_target(), 1..3)
-                    .prop_map(AdviceTarget::unordered),
+                prop::collection::vec(arb_simple_target(), 1..3).prop_map(AdviceTarget::unordered),
             ]
         },
     )
@@ -107,19 +100,22 @@ fn arb_item() -> impl Strategy<Value = AdviceItem> {
     prop_oneof![
         // SEQ_SCAN, BITMAP_HEAP_SCAN, TID_SCAN, NO_GATHER:
         // simple target list (no sublists).
-        (prop_oneof![
-            Just(AdviceTag::SeqScan),
-            Just(AdviceTag::BitmapHeapScan),
-            Just(AdviceTag::TidScan),
-            Just(AdviceTag::NoGather),
-        ], prop::collection::vec(arb_simple_target(), 0..4))
+        (
+            prop_oneof![
+                Just(AdviceTag::SeqScan),
+                Just(AdviceTag::BitmapHeapScan),
+                Just(AdviceTag::TidScan),
+                Just(AdviceTag::NoGather),
+            ],
+            prop::collection::vec(arb_simple_target(), 0..4)
+        )
             .prop_map(|(tag, targets)| AdviceItem { tag, targets }),
         // INDEX_SCAN / INDEX_ONLY_SCAN: each target carries an
         // IndexTarget.
-        (prop_oneof![
-            Just(AdviceTag::IndexScan),
-            Just(AdviceTag::IndexOnlyScan),
-        ], prop::collection::vec((arb_rid(), arb_index_target()), 0..3))
+        (
+            prop_oneof![Just(AdviceTag::IndexScan), Just(AdviceTag::IndexOnlyScan),],
+            prop::collection::vec((arb_rid(), arb_index_target()), 0..3)
+        )
             .prop_map(|(tag, pairs)| {
                 let targets = pairs
                     .into_iter()
@@ -132,34 +128,35 @@ fn arb_item() -> impl Strategy<Value = AdviceItem> {
                 AdviceItem { tag, targets }
             }),
         // JOIN_ORDER: at least one target, may contain sublists.
-        prop::collection::vec(arb_join_order_target(), 1..4)
-            .prop_map(|targets| AdviceItem {
-                tag: AdviceTag::JoinOrder,
-                targets,
-            }),
+        prop::collection::vec(arb_join_order_target(), 1..4).prop_map(|targets| AdviceItem {
+            tag: AdviceTag::JoinOrder,
+            targets,
+        }),
         // Generic tags (HASH_JOIN, MERGE_JOIN_*, NESTED_LOOP_*,
         // GATHER, GATHER_MERGE, SEMIJOIN_*, PARTITIONWISE,
         // DO_NOT_SCAN): allow simple identifiers and one level of
         // ordered sublist.
-        (prop_oneof![
-            Just(AdviceTag::HashJoin),
-            Just(AdviceTag::MergeJoinPlain),
-            Just(AdviceTag::MergeJoinMaterialize),
-            Just(AdviceTag::NestedLoopPlain),
-            Just(AdviceTag::NestedLoopMaterialize),
-            Just(AdviceTag::NestedLoopMemoize),
-            Just(AdviceTag::Gather),
-            Just(AdviceTag::GatherMerge),
-            Just(AdviceTag::SemijoinUnique),
-            Just(AdviceTag::SemijoinNonUnique),
-            Just(AdviceTag::Partitionwise),
-            Just(AdviceTag::DoNotScan),
-        ], prop::collection::vec(arb_generic_target(), 0..3))
+        (
+            prop_oneof![
+                Just(AdviceTag::HashJoin),
+                Just(AdviceTag::MergeJoinPlain),
+                Just(AdviceTag::MergeJoinMaterialize),
+                Just(AdviceTag::NestedLoopPlain),
+                Just(AdviceTag::NestedLoopMaterialize),
+                Just(AdviceTag::NestedLoopMemoize),
+                Just(AdviceTag::Gather),
+                Just(AdviceTag::GatherMerge),
+                Just(AdviceTag::SemijoinUnique),
+                Just(AdviceTag::SemijoinNonUnique),
+                Just(AdviceTag::Partitionwise),
+                Just(AdviceTag::DoNotScan),
+            ],
+            prop::collection::vec(arb_generic_target(), 0..3)
+        )
             .prop_map(|(tag, targets)| AdviceItem { tag, targets }),
         // FOREIGN_JOIN: each target must be a sublist of >= 2.
         prop::collection::vec(
-            prop::collection::vec(arb_simple_target(), 2..4)
-                .prop_map(AdviceTarget::ordered),
+            prop::collection::vec(arb_simple_target(), 2..4).prop_map(AdviceTarget::ordered),
             1..3,
         )
         .prop_map(|targets| AdviceItem {

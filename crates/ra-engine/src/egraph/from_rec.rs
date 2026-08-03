@@ -65,8 +65,7 @@ fn from_node(
             let predicate = extract_scalar_expr(egraph, *pred_id)?;
             let table = extract_symbol(egraph, *table_id)?;
             // Extract the indexed column from the predicate (first column ref).
-            let column = extract_first_column(&predicate)
-                .unwrap_or_else(|| "id".to_string());
+            let column = extract_first_column(&predicate).unwrap_or_else(|| "id".to_string());
             Ok(RelExpr::IndexScan { table, column })
         }
         RelLang::Project([cols_id, input_id]) => {
@@ -1060,7 +1059,13 @@ mod physical_lowering_tests {
     /// hold physical variants without changing extracted-plan shape.
     #[test]
     fn physical_join_variants_lower_to_logical_join() {
-        for head in ["join", "hash-join", "merge-join", "nest-loop", "index-nest-loop"] {
+        for head in [
+            "join",
+            "hash-join",
+            "merge-join",
+            "nest-loop",
+            "index-nest-loop",
+        ] {
             let s = format!("({head} inner (eq (qcol t a) (qcol s b)) (scan t) (scan s))");
             let rec: RecExpr<RelLang> = s.parse().expect("valid expr");
             let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();

@@ -40,7 +40,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 
 # Rule validation
-ra-cli validate rules/
+ra validate rules/
 ```
 
 ### 2. No Open P0 Bugs

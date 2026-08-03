@@ -76,10 +76,7 @@ impl StorylinePattern {
         Self {
             stages: StorylineStage::lifecycle_order().to_vec(),
             queries_per_stage: 3,
-            table_names: vec![
-                "test_table".to_owned(),
-                "ref_table".to_owned(),
-            ],
+            table_names: vec!["test_table".to_owned(), "ref_table".to_owned()],
         }
     }
 
@@ -124,10 +121,7 @@ impl StorylinePattern {
                 StorylineStage::Insert,
             ],
             queries_per_stage: 3,
-            table_names: vec![
-                "events".to_owned(),
-                "metrics".to_owned(),
-            ],
+            table_names: vec!["events".to_owned(), "metrics".to_owned()],
         }
     }
 
@@ -147,10 +141,7 @@ impl StorylinePattern {
                 StorylineStage::Query,
             ],
             queries_per_stage: 2,
-            table_names: vec![
-                "accounts".to_owned(),
-                "transactions".to_owned(),
-            ],
+            table_names: vec!["accounts".to_owned(), "transactions".to_owned()],
         }
     }
 
@@ -227,9 +218,7 @@ impl SqlStoryline {
 ///
 /// Produces varied query patterns: simple selects, filtered queries,
 /// joins, aggregates, and set operations.
-fn arb_query_step(
-    table: String,
-) -> impl Strategy<Value = StorylineStep> {
+fn arb_query_step(table: String) -> impl Strategy<Value = StorylineStep> {
     arb_rel_expr(2).prop_map(move |expr| StorylineStep {
         stage: StorylineStage::Query,
         expr,
@@ -249,15 +238,11 @@ fn scan_for(table: &str) -> RelExpr {
 ///
 /// Models INSERT as a Project over Values (the optimizer sees the
 /// source query of INSERT ... SELECT).
-fn arb_insert_step(
-    table: String,
-) -> impl Strategy<Value = StorylineStep> {
-    arb_rel_expr(1).prop_map(move |source| {
-        StorylineStep {
-            stage: StorylineStage::Insert,
-            expr: source,
-            description: format!("insert into {table}"),
-        }
+fn arb_insert_step(table: String) -> impl Strategy<Value = StorylineStep> {
+    arb_rel_expr(1).prop_map(move |source| StorylineStep {
+        stage: StorylineStage::Insert,
+        expr: source,
+        description: format!("insert into {table}"),
     })
 }
 
@@ -265,36 +250,28 @@ fn arb_insert_step(
 ///
 /// Models UPDATE as a Filter over a Scan (the WHERE clause of the
 /// UPDATE determines which rows change).
-fn arb_update_step(
-    table: String,
-) -> impl Strategy<Value = StorylineStep> {
-    arb_simple_predicate().prop_map(move |pred| {
-        StorylineStep {
-            stage: StorylineStage::Update,
-            expr: RelExpr::Filter {
-                predicate: pred,
-                input: Box::new(scan_for(&table)),
-            },
-            description: format!("update {table}"),
-        }
+fn arb_update_step(table: String) -> impl Strategy<Value = StorylineStep> {
+    arb_simple_predicate().prop_map(move |pred| StorylineStep {
+        stage: StorylineStage::Update,
+        expr: RelExpr::Filter {
+            predicate: pred,
+            input: Box::new(scan_for(&table)),
+        },
+        description: format!("update {table}"),
     })
 }
 
 /// Generate a storyline step for a Delete stage.
 ///
 /// Models DELETE as a Filter over a Scan.
-fn arb_delete_step(
-    table: String,
-) -> impl Strategy<Value = StorylineStep> {
-    arb_simple_predicate().prop_map(move |pred| {
-        StorylineStep {
-            stage: StorylineStage::Delete,
-            expr: RelExpr::Filter {
-                predicate: pred,
-                input: Box::new(scan_for(&table)),
-            },
-            description: format!("delete from {table}"),
-        }
+fn arb_delete_step(table: String) -> impl Strategy<Value = StorylineStep> {
+    arb_simple_predicate().prop_map(move |pred| StorylineStep {
+        stage: StorylineStage::Delete,
+        expr: RelExpr::Filter {
+            predicate: pred,
+            input: Box::new(scan_for(&table)),
+        },
+        description: format!("delete from {table}"),
     })
 }
 
@@ -302,19 +279,17 @@ fn arb_delete_step(
 ///
 /// Each stage in the pattern generates one or more relational
 /// expressions that the optimizer should be able to handle.
-pub fn arb_storyline(
-    pattern: StorylinePattern,
-) -> impl Strategy<Value = SqlStoryline> {
+pub fn arb_storyline(pattern: StorylinePattern) -> impl Strategy<Value = SqlStoryline> {
     let table_names = pattern.table_names.clone();
     let stages = pattern.stages.clone();
 
     let step_strategies: Vec<_> = stages
         .iter()
         .map(|stage| {
-            let table =
-                table_names.first().cloned().unwrap_or_else(|| {
-                    "default_table".to_owned()
-                });
+            let table = table_names
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "default_table".to_owned());
             match stage {
                 StorylineStage::Create | StorylineStage::Drop => {
                     let stage_copy = *stage;
@@ -322,24 +297,14 @@ pub fn arb_storyline(
                     Just(StorylineStep {
                         stage: stage_copy,
                         expr: scan_for(&table_copy),
-                        description: format!(
-                            "{stage_copy} {table_copy}"
-                        ),
+                        description: format!("{stage_copy} {table_copy}"),
                     })
                     .boxed()
                 }
-                StorylineStage::Insert => {
-                    arb_insert_step(table).boxed()
-                }
-                StorylineStage::Query => {
-                    arb_query_step(table).boxed()
-                }
-                StorylineStage::Update => {
-                    arb_update_step(table).boxed()
-                }
-                StorylineStage::Delete => {
-                    arb_delete_step(table).boxed()
-                }
+                StorylineStage::Insert => arb_insert_step(table).boxed(),
+                StorylineStage::Query => arb_query_step(table).boxed(),
+                StorylineStage::Update => arb_update_step(table).boxed(),
+                StorylineStage::Delete => arb_delete_step(table).boxed(),
             }
         })
         .collect();
@@ -372,8 +337,7 @@ mod tests {
 
                 assert_eq!(storyline.len(), 6);
 
-                let stages: Vec<_> =
-                    storyline.steps.iter().map(|s| s.stage).collect();
+                let stages: Vec<_> = storyline.steps.iter().map(|s| s.stage).collect();
                 assert_eq!(stages[0], StorylineStage::Create);
                 assert_eq!(stages[1], StorylineStage::Insert);
                 assert_eq!(stages[2], StorylineStage::Query);
@@ -394,10 +358,7 @@ mod tests {
             .iter()
             .filter(|s| **s == StorylineStage::Query)
             .count();
-        assert!(
-            query_count >= 5,
-            "read-heavy should have >= 5 query stages"
-        );
+        assert!(query_count >= 5, "read-heavy should have >= 5 query stages");
     }
 
     #[test]

@@ -126,10 +126,14 @@ pub fn extract_best<S: BuildHasher>(
             .map(|k| (k.clone(), Staleness::Fresh))
             .collect();
 
-        let mut cost_fn =
-            IntegratedCostFn::with_id_row_counts(hardware.clone(), stats, staleness_map, id_row_counts)
-                .with_id_selectivity(resolve_index_selectivity(egraph, table_stats))
-                .with_live_conditions(live);
+        let mut cost_fn = IntegratedCostFn::with_id_row_counts(
+            hardware.clone(),
+            stats,
+            staleness_map,
+            id_row_counts,
+        )
+        .with_id_selectivity(resolve_index_selectivity(egraph, table_stats))
+        .with_live_conditions(live);
         if let Some(ps) = page_size_bytes {
             cost_fn = cost_fn.with_page_size_bytes(ps);
         }
@@ -372,7 +376,10 @@ pub fn extract_best_bitnet<S: BuildHasher, S2: BuildHasher>(
 ) -> Result<RelExpr, EGraphError> {
     let cost_fn = HybridCostFn::new(
         hardware.clone(),
-        table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        table_stats
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
         model,
         fingerprint,
@@ -411,7 +418,9 @@ mod selectivity_tests {
         eg.rebuild();
 
         let mut stats = Statistics::new(100_000.0);
-        stats.columns.insert("c".to_string(), ColumnStats::new(1000.0));
+        stats
+            .columns
+            .insert("c".to_string(), ColumnStats::new(1000.0));
         let mut ts = HashMap::new();
         ts.insert("t".to_string(), stats);
 
@@ -444,14 +453,15 @@ mod model_variation_tests {
     /// pressure / staleness). Without this the blend is 0 and the model is
     /// deliberately shape-inert.
     fn trusted_fingerprint() -> SystemFingerprint {
-        let mut fp = SystemFingerprint::default();
-        fp.model_samples_trained = 100_000;
-        fp.memory_pressure = 0.0;
-        fp.io_saturation = 0.0;
-        fp.cpu_load_fraction = 0.0;
-        fp.avg_staleness = 0.0;
-        fp.stats_coverage = 1.0;
-        fp
+        SystemFingerprint {
+            model_samples_trained: 100_000,
+            memory_pressure: 0.0,
+            io_saturation: 0.0,
+            cpu_load_fraction: 0.0,
+            avg_staleness: 0.0,
+            stats_coverage: 1.0,
+            ..Default::default()
+        }
     }
 
     /// A second well-known model: an all-zero-weight model (`new_zeros`). Same
@@ -459,9 +469,7 @@ mod model_variation_tests {
     /// different weights" scenario. A zero-weight model emits a constant
     /// multiplier (no per-plan discrimination); the trained model varies per
     /// plan, so their cost evaluations diverge.
-    fn saturate(
-        sql: &str,
-    ) -> (egg::EGraph<RelLang, RelAnalysis>, egg::Id) {
+    fn saturate(sql: &str) -> (egg::EGraph<RelLang, RelAnalysis>, egg::Id) {
         let expr = ra_parser::sql_to_relexpr(sql).expect("parse");
         let rec = to_rec_expr(&expr).expect("to_rec");
         let mut egraph: egg::EGraph<RelLang, RelAnalysis> = egg::EGraph::default();
@@ -501,7 +509,7 @@ mod model_variation_tests {
 
     /// Different model weights must produce a different cost evaluation (and may
     /// therefore select a different plan) once the neural blend is active. This
-    /// is the guard that the BitNet model genuinely influences planning and that
+    /// is the guard that the `BitNet` model genuinely influences planning and that
     /// swapping model snapshots is observable — the prerequisite for trusting
     /// (and freezing, via `ra_planner.online_learning`) a specific model.
     #[test]
@@ -539,13 +547,14 @@ mod model_variation_tests {
         let path = format!("{manifest}/../../models/cost_model.bitnet.json");
         let trained = BitNetCostModel::load_from_file(&path).expect("load trained model");
         let fp = trusted_fingerprint();
-        let (egraph, root) = saturate(
-            "SELECT a FROM t1 JOIN t2 ON t1.x = t2.x",
-        );
+        let (egraph, root) = saturate("SELECT a FROM t1 JOIN t2 ON t1.x = t2.x");
         let (baseline, baseline_plan) = extract_cost(&egraph, root, &trained, &fp);
         for _ in 0..8 {
             let (c, plan) = extract_cost(&egraph, root, &trained, &fp);
-            assert!((c - baseline).abs() < f64::EPSILON, "cost drifted: {c} vs {baseline}");
+            assert!(
+                (c - baseline).abs() < f64::EPSILON,
+                "cost drifted: {c} vs {baseline}"
+            );
             assert_eq!(plan, baseline_plan, "plan drifted for a fixed model");
         }
     }

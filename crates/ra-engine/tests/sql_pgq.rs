@@ -1,6 +1,10 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test code; expect surfaces failures with a clear message"
+)]
 //! SQL/PGQ (`GRAPH_TABLE`, SQL:2023) pipeline coverage.
 //!
-//! PostgreSQL 19devel does not yet ship the SQL/PGQ grammar, so a
+//! `PostgreSQL` 19devel does not yet ship the SQL/PGQ grammar, so a
 //! `GRAPH_TABLE` query is rejected by PG's raw parser before Ra's planner
 //! hook ever sees it — there is no way to exercise the feature end-to-end
 //! against that build. These tests cover the part of the pipeline that *is*
@@ -28,17 +32,31 @@ fn find_graph_table(e: &RelExpr) -> Option<&RelExpr> {
 fn assert_pgq_roundtrip(sql: &str, pattern_len: usize, columns_len: usize) {
     let parsed = ra_parser::sql_to_relexpr(sql).expect("GRAPH_TABLE should parse");
     let before = find_graph_table(&parsed).expect("parse should yield a GraphTable");
-    let RelExpr::GraphTable { graph, pattern, columns, .. } = before else {
+    let RelExpr::GraphTable {
+        graph,
+        pattern,
+        columns,
+        ..
+    } = before
+    else {
         unreachable!()
     };
     let (graph, plen, clen) = (graph.clone(), pattern.len(), columns.len());
     assert_eq!(plen, pattern_len, "pattern length for: {sql}");
     assert_eq!(clen, columns_len, "columns length for: {sql}");
 
-    let optimized = Optimizer::new().optimize(&parsed).expect("optimize must not fail on GRAPH_TABLE");
-    let after = find_graph_table(&optimized)
-        .expect("GraphTable must survive optimization (passthrough)");
-    let RelExpr::GraphTable { graph: g2, pattern: p2, columns: c2, .. } = after else {
+    let optimized = Optimizer::new()
+        .optimize(&parsed)
+        .expect("optimize must not fail on GRAPH_TABLE");
+    let after =
+        find_graph_table(&optimized).expect("GraphTable must survive optimization (passthrough)");
+    let RelExpr::GraphTable {
+        graph: g2,
+        pattern: p2,
+        columns: c2,
+        ..
+    } = after
+    else {
         unreachable!()
     };
     assert_eq!(*g2, graph, "graph name preserved: {sql}");
@@ -73,10 +91,15 @@ fn pgq_optimize_is_passthrough_direction() {
         .optimize(&ra_parser::sql_to_relexpr(sql).expect("parse"))
         .expect("optimize");
     let gt = find_graph_table(&optimized).expect("GraphTable present");
-    let RelExpr::GraphTable { pattern, .. } = gt else { unreachable!() };
+    let RelExpr::GraphTable { pattern, .. } = gt else {
+        unreachable!()
+    };
     assert!(matches!(pattern[0], GraphPatternElement::Vertex { .. }));
     assert!(matches!(
         pattern[1],
-        GraphPatternElement::Edge { direction: EdgeDirection::Right, .. }
+        GraphPatternElement::Edge {
+            direction: EdgeDirection::Right,
+            ..
+        }
     ));
 }

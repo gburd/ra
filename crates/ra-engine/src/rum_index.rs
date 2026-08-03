@@ -619,9 +619,7 @@ fn contains_text_search_pattern(
             {
                 return true;
             }
-            RelLang::Not([inner])
-                if contains_text_search_pattern(egraph, *inner, depth - 1) =>
-            {
+            RelLang::Not([inner]) if contains_text_search_pattern(egraph, *inner, depth - 1) => {
                 return true;
             }
             _ => {}

@@ -1,6 +1,45 @@
 # Ra
 
-Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner_hook` extension. It converts SQL into a relational algebra tree, runs equality saturation (e-graph rewrite rules) to explore equivalent plan forms, then extracts the lowest-cost plan using a 452-byte BitNet 1.58-bit neural cost model trained online from execution feedback. A speculative router makes an O(1) prediction (~80 ns BitNet forward pass on Apple M3 Max, release build) about each query's optimization difficulty and routes trivial cases (equi-join chains, single-table scans) directly to heuristic construction, reserving the full e-graph search for queries that actually benefit from it.
+**Experimental parser, planner, and optimizer for PostgreSQL. Research
+prototype — see correctness status below.**
+
+## Correctness status
+
+Ra is not yet a drop-in replacement. The goal is to replace PostgreSQL's
+parsing, planning, and optimization with results logically identical to the
+native planner, but that parity is unproven and a fallback to the native
+planner is still present. Progress is tracked mechanically:
+
+| Tier | Corpus | Structural (parse+optimize) | Answer-correctness vs PG | Harness |
+|------|--------|------|------|---------|
+| 0 | 120-query smoke suite | 117/120 parse+optimize | 3 known wrong-answer defects (tracked) | `ra verify --tier 0 --report` |
+| 1 | PostgreSQL `src/test/regress` | not yet run | not yet run | — |
+| 2 | sqllogictest | not yet run | not yet run | — |
+| 3 | TPC-H / TPC-DS / JOB (results) | not yet run | not yet run | — |
+| 4 | Differential fuzzing | not yet run | not yet run | — |
+
+`ra verify` checks *structural* success (Ra parses and optimizes each query
+without error). It does **not** check answer-correctness — that Ra's plan
+produces the same rows as PostgreSQL's — which requires the PG oracle (a live
+connection, tracked as an open issue). The 3 wrong-answer defects parse and
+optimize fine but produce incorrect results, so structural success is not a
+correctness score.
+
+The native-planner fallback is **not yet instrumented** (tracked): once it is,
+the fallback count becomes the project's headline number until it reaches
+zero. No performance claim is published until correctness parity is reached
+and measured end-to-end (plan + execute) against native PostgreSQL.
+
+## Overview
+
+Ra converts SQL into a relational algebra tree, runs equality saturation
+(e-graph rewrite rules) to explore equivalent plan forms, then extracts the
+lowest-cost plan using a BitNet 1.58-bit neural cost model trained online from
+execution feedback. A speculative router makes an O(1) prediction (~80 ns
+BitNet forward pass on Apple M3 Max, release build) about each query's
+optimization difficulty and routes trivial cases (equi-join chains,
+single-table scans) directly to heuristic construction, reserving the full
+e-graph search for queries that actually benefit from it.
 
 ## Architecture
 
@@ -36,7 +75,7 @@ Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner
            │  ┌───────────────────────────────────────────────────────┐
            │  │  E-GRAPH EQUALITY SATURATION (egg library)            │
            │  │                                                       │
-           │  │  ~170 rewrite rules applied simultaneously:           │
+           │  │  rewrite rules applied simultaneously:                     │
            │  │    • Predicate pushdown (filter through joins)        │
            │  │    • Join reordering (commutativity, associativity)   │
            │  │    • Projection pruning (remove unused columns)       │
@@ -68,7 +107,7 @@ Ra is a query optimizer that replaces PostgreSQL's native planner via a `planner
 ┌───────────────────────────────────────────────────────────────────┐
 │  OPTIMIZED RelExpr                                                │
 │                                                                   │
-│  → Plan cache (template-based, 97.5% hit rate on OLTP)            │
+│  → Plan cache (template-based)                                    │
 │  → Training coordinator (feeds back to BitNet model)              │
 │  → PostgreSQL PlannedStmt (via plan_builder)                      │
 └───────────────────────────────────────────────────────────────────┘
@@ -155,7 +194,13 @@ Training happens online: every e-graph optimization run produces an `Optimizatio
 
 The optimizer uses [egg](https://arxiv.org/abs/2004.03082) (e-graphs good) for equality saturation. Instead of applying transformations sequentially (potentially missing better orderings), the e-graph represents ALL equivalent plans simultaneously and extracts the cheapest.
 
-### Rule Categories (293 rules active)
+### Rule Categories
+
+The optimizer loads **293 active rewrite rules** (hand-coded rules in
+`ra-engine` plus rules compiled from `.rra` sources). Regenerate the count with
+`cargo run --release -p ra-engine --example count_rules`. The table below groups
+representative categories; the counts are approximate minimums, not a partition
+of the 293 total.
 
 | Category | Rules | Examples |
 |----------|-------|----------|
@@ -181,11 +226,11 @@ Rules are defined in literate `.rra` files with formal algebra, implementation, 
 ```
 rules/
 ├── logical/           Predicate pushdown, join reordering, ...
-├── physical/          Join algorithms, index selection, ...
-├── hardware/          GPU, FPGA, SIMD, NUMA
-├── distributed/       Exchange, broadcast, partition pruning
-└── multi-model/       Graph, document, time-series
+└── physical/          Join algorithms, index selection, ...
 ```
+
+> Hardware, distributed, and multi-model rule sources moved to
+> [ra-lab](https://codeberg.org/gregburd/ra-lab).
 
 ## Dataflow: Planning and Statistics
 
@@ -238,7 +283,13 @@ PostgreSQL catalogs (pg_statistic, pg_class)
 └─────────────────────────────────┘
 ```
 
-The feedback loop closes the gap between predicted and actual costs. The MAPE (Mean Absolute Percentage Error) tracker monitors prediction quality with exponential decay (β=0.99, ~100 sample half-life). When MAPE drops below a threshold, the model is considered reliable enough to influence routing decisions with high confidence.
+The feedback loop closes the gap between predicted and actual costs. The MAPE
+(Mean Absolute Percentage Error) tracker monitors prediction quality with
+exponential decay (β=0.99, ~100 sample half-life). **No MAPE value has been
+published yet** — whether the learned cost model beats PostgreSQL's own cost
+estimates on a held-out workload is an open question (see the cost-model
+validation gate in the steering doc). Until that number exists, the model's
+influence on routing is unproven.
 
 ## Quick Start
 
@@ -275,23 +326,31 @@ CREATE EXTENSION pg_ra_planner;
 SET ra_planner.enabled = off;
 ```
 
-### CLI
+### CLI: `ra`
 
 ```bash
-cargo build -p ra-cli
+cargo build -p ra-cli        # produces the `ra` binary
 
-ra-cli explain  'SELECT ...'           # Show relational algebra tree
-ra-cli optimize 'SELECT ...'           # Optimize with rewrite rules
-ra-cli optimize 'SELECT ...' --diff    # Before/after diff
-ra-cli translate --from postgres --to mysql 'SELECT ...'
+ra explain  'SELECT ...'            # Show relational algebra tree
+ra optimize 'SELECT ...'            # Optimize with rewrite rules
+ra optimize 'SELECT ...' --diff     # Before/after plan diff
+ra optimize 'SELECT ...' --trace    # Per-iteration rules fired, cost deltas
+ra optimize 'SELECT ...' --rules-applied   # Which rules changed the plan
+ra list                             # List active rules
+ra verify --tier 0 --report         # Run the qualification corpus
 
-# `ra-cli benchmark` compares Ra against a real PostgreSQL instance.
+# `ra verify --tier 0` runs the 120-query corpus and reports per-category
+# parse+optimize success. It checks STRUCTURAL success only (Ra parses and
+# optimizes without error) — NOT answer-correctness vs PostgreSQL, which
+# needs the PG oracle (a live connection; tracked, not yet wired).
+
+# `ra benchmark` compares Ra against a real PostgreSQL instance.
 # Set RA_BENCHMARK_PG_URL to a libpq-style URL and the command will run
 # `EXPLAIN (ANALYZE, FORMAT JSON)` on PG for each query. Without the
 # variable the command fails with a clear error rather than fabricating
 # output (the prior `simulate_native_*` helpers were removed in E1).
 RA_BENCHMARK_PG_URL='host=localhost user=postgres dbname=tpch' \
-    ra-cli benchmark --workload tpch
+    ra benchmark --workload tpch
 ```
 
 ## Project Structure
@@ -315,7 +374,6 @@ ra/
 │   │   ├── lime-sys/             # Lime parser generator (C, git submodule)
 │   ├── CLI layer (--features cli):
 │   │   ├── ra-cli/               # Command-line interface
-│   │   ├── ra-adapters/          # DuckDB, MySQL, Stoolap connectors
 │   │   └── ra-metadata/          # Database metadata factory
 │   ├── Experimental layer (--features experimental):
 │   │   ├── ra-ml/                # Cost-model ML extras (legacy interface)
@@ -323,7 +381,6 @@ ra/
 │   │   ├── ra-cache-impl/        # LRU/LFU/adaptive cache implementations
 │   │   ├── ra-adaptive/          # Adaptive optimization experiments
 │   │   ├── ra-test-utils/        # Shared test fixtures
-│   │   ├── ra-quel-parser/       # QUEL parser stub (1976 INGRES dialect)
 │   │   ├── ra-grammar-fuzzer/    # Property-based grammar fuzzer
 │   │   ├── ra-bench/             # Benchmarks: TPC-H, JOB, ra_vs_pg
 │   │   ├── ra-sqltest/           # Cross-engine SQL test runner
@@ -332,72 +389,33 @@ ra/
 │   │   └── ra-pg-extension/      # PostgreSQL planner_hook extension (pgrx)
 │   └── Compatibility shims:
 │       └── ra-config/            # Re-export shim for ra_core::config
-├── rules/                        # 1,387 optimization rule sources (.rra files)
+├── rules/                        # optimization rule sources (.rra files)
 ├── benchmarks/                   # Benchmark suites and results
 ├── tla/                          # TLA+ formal specifications
 ├── rfcs/                         # Design documents
 └── docs/                         # Documentation
 ```
 
-> Note: Of the 1,387 `.rra` rule sources, ~94 currently compile to
-> active rewrite rules. Combined with the hand-coded rules in
-> `ra-engine`, `Optimizer::all_rules()` returns **293 active rewrite
-> rules** (verified via `cargo run --release -p ra-engine --example
-> count_rules`). The remaining .rra files are spec-only and require
-> additional condition functions or operator-mapping work to activate.
-> Pre-2026-05-26, two malformed `.rra` rules (`push-func-filter-to-left/right`)
-> contained metavariables in operator position and panicked the entire
-> generated batch via `catch_unwind`; the build script now rejects
-> such patterns and `all_generated_rules()` wraps each category
-> independently so a single bad rule cannot drop the rest.
+> Note: The `rules/` tree contains 1,467 `.rra` rule sources. Of those,
+> a subset currently compile to active rewrite rules; combined with the
+> hand-coded rules in `ra-engine`, `Optimizer::all_rules()` returns **293
+> active rewrite rules** (regenerate via `cargo run --release -p ra-engine
+> --example count_rules`). The remaining `.rra` files are spec-only and
+> require additional condition functions or operator-mapping work to
+> activate. Pre-2026-05-26, two malformed `.rra` rules
+> (`push-func-filter-to-left/right`) contained metavariables in operator
+> position and panicked the entire generated batch via `catch_unwind`; the
+> build script now rejects such patterns and `all_generated_rules()` wraps
+> each category independently so a single bad rule cannot drop the rest.
 
 ## Performance
 
-Head-to-head planning time comparison: Ra v0.4.0 vs PostgreSQL 18.4 native planner (TPC-H SF=0.01, 21 queries, median of 30 runs):
-
-| Metric | Ra | PostgreSQL 18.4 |
-|--------|-----|-----------------|
-| Queries won | 21/21 (100%) | 0/21 (0%) |
-| Geo mean planning time | 12.8 μs | 1089 μs |
-| Geo mean speedup | **89x**[^1] | — |
-| Range | 3.4-37.6 μs | 434-3425 μs |
-
-[^1]: Planning time only, asymmetric work — see [Methodology disclosure](#methodology-disclosure) below for the four caveats.
-
-Ra wins all queries with speedups ranging from 30x (single-table aggregation) to 163x (2-table equi-join). Full results: [`benchmarks/ra-vs-pg18-head-to-head.md`](benchmarks/ra-vs-pg18-head-to-head.md).
-
-### Methodology disclosure
-
-The "89x" headline measures **planning time only** — the time each
-optimizer takes to turn SQL into an executable plan. Several caveats
-apply, all documented in detail in
-[`benchmarks/ra-vs-pg18-head-to-head.md`](benchmarks/ra-vs-pg18-head-to-head.md):
-
-1. **Asymmetric work performed.** PostgreSQL's planner reads
-   `pg_statistic`, `pg_class`, and `pg_index` from the system catalogs
-   on every plan. The default Ra binary used in this benchmark
-   (`crates/ra-bench/src/ra_vs_pg.rs`) constructs an `Optimizer::new()`
-   *without* preloaded statistics or a cost model. The same binary now
-   accepts `--with-stats` to load TPC-H SF=0.01 statistics into the
-   optimizer (via `Optimizer::with_table_stats`), so the comparison is
-   methodologically symmetric. The 89× headline above was measured
-   without the flag; rerun with `cargo run --release -p ra-bench
-   --bin ra_vs_pg -- --with-stats` to compare apples-to-apples.
-2. **Parse vs plan boundary.** Ra's measurement includes parse time
-   (`sql_to_relexpr` + decorrelation + ordering pass + optimize). PG's
-   "Planning Time" (the `EXPLAIN ANALYZE` field) excludes parse and
-   measures only its own optimizer. The Ra side therefore carries
-   extra work the PG side doesn't, which slightly understates Ra's
-   advantage if anything.
-3. **Plan quality is not the metric.** This benchmark answers "how
-   fast does the optimizer terminate?", not "how good is the plan?".
-   The plan-quality answer requires running the produced plans
-   end-to-end against the same data; the
-   [`benchmarks/planner_comparison/`](benchmarks/planner_comparison/)
-   harness measures that separately and is not reflected in the 89x.
-4. **Synthetic OLTP plan-cache hit rate.** The README's plan-cache
-   "97.5% hit rate" claim derives from a fixed 5-template × 40-variation
-   integration test. Real-workload measurement is a follow-up item.
+No performance comparison is published. Planning-time-only speedups against
+native PostgreSQL were removed: they were measured with statistics disabled on
+the Ra side and did not measure plan quality, so they compared unlike work.
+End-to-end (plan + execute) numbers against native PostgreSQL, with statistics
+loaded on both sides and per-query regressions reported, will replace this
+section once correctness parity is reached.
 
 ## References
 
@@ -409,21 +427,22 @@ apply, all documented in detail in
 
 ## Copyright and License
 
-As a US Citizen the Author (Greg Burd <greg@burd.me>) acknowledges that this project
-was a joint effort written using AI under his guidance.  The form of this work would
-not have naturally occured without the Author, the code would not have been possible
-without AI.  IANAL, so I don't know where this work sits on the spectrum of copyright
-law in the US as of today.  Here are resources for you to make your own informed
-decision.
+The Author (Greg Burd <greg@burd.me>) directed and reviewed this work, which was
+written with substantial AI assistance under his guidance. The Author asserts
+copyright in the selection, arrangement, direction, and human-authored portions
+of this work, and licenses the whole under the terms below. Where individual
+AI-generated fragments may not be independently copyrightable under current US
+law, they are offered under the same terms for the avoidance of doubt; no
+additional restriction is placed on their use. Background reading:
+
 - https://legalclarity.org/can-you-copyright-ai-generated-content/
 - https://www.congress.gov/crs-product/LSB10922
 
-Assuming the Author(s) has the right to assert copyright, you may use this work under
-any of the following license's terms.
+You may use this work under any one of the following licenses:
+
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT License ([LICENSE-MIT](LICENSE-MIT))
 - ISC License ([LICENSE-ISC](LICENSE-ISC))
-- or contact the Author as he's likely to allow a change.
 
 ## Disclosure
 

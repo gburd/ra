@@ -96,7 +96,7 @@ Currently, model training happens through observation collection:
 
 ```bash
 # Enable ML-enhanced optimization
-ra-cli optimize 'SELECT ...' --ml-ordering --ml-filtering
+ra optimize 'SELECT ...' --ml-ordering --ml-filtering
 
 # Observations are automatically collected and stored
 ```
@@ -105,20 +105,20 @@ ra-cli optimize 'SELECT ...' --ml-ordering --ml-filtering
 
 ```bash
 # View model statistics
-ra-cli ml stats --name production_model
+ra ml stats --name production_model
 
 # Show statistics for specific rule
-ra-cli ml stats --name production_model --rule filter-pushdown
+ra ml stats --name production_model --rule filter-pushdown
 
 # Load model from database
-ra-cli ml load --name production_model --scope overall
+ra ml load --name production_model --scope overall
 
 # Save model to database
-ra-cli ml save --input model.json --name production_model
+ra ml save --input model.json --name production_model
 
 # Export model for analysis
-ra-cli ml export --name production_model --output export.json
-ra-cli ml export --name production_model --format csv --output stats.csv
+ra ml export --name production_model --output export.json
+ra ml export --name production_model --format csv --output stats.csv
 ```
 
 ### Database Configuration
@@ -127,7 +127,7 @@ By default, models are stored in SQLite:
 
 ```bash
 # Use PostgreSQL instead
-ra-cli ml save \
+ra ml save \
     --input model.json \
     --name prod_model \
     --backend postgres \

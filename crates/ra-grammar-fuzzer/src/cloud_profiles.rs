@@ -6,8 +6,8 @@
 //! vendor-neutral categories.
 
 use crate::deployment_profiles::{
-    ClusterTopology, ComputeInstance, DeploymentProfile, InstanceClass,
-    StorageInstance, StorageTier,
+    ClusterTopology, ComputeInstance, DeploymentProfile, InstanceClass, StorageInstance,
+    StorageTier,
 };
 use crate::dynamic_facts::DatabaseScenario;
 use ra_core::facts::CpuArchitecture;
@@ -15,17 +15,13 @@ use ra_core::facts::CpuArchitecture;
 /// Selects deployment profiles for fuzzing scenarios.
 pub trait ProfileSelector {
     /// Select a representative profile for a database scenario.
-    fn select_for_scenario(
-        scenario: &DatabaseScenario,
-    ) -> DeploymentProfile;
+    fn select_for_scenario(scenario: &DatabaseScenario) -> DeploymentProfile;
 
     /// Select a random profile from the full catalog.
     fn select_random() -> DeploymentProfile;
 
     /// Select profiles filtered by CPU architecture.
-    fn select_by_architecture(
-        arch: CpuArchitecture,
-    ) -> Vec<DeploymentProfile>;
+    fn select_by_architecture(arch: CpuArchitecture) -> Vec<DeploymentProfile>;
 
     /// Select edge-case profiles that stress optimizer boundaries.
     fn select_edge_cases() -> Vec<DeploymentProfile>;
@@ -388,51 +384,175 @@ impl CloudProfileSelector {
 
     fn general_purpose_profiles() -> Vec<DeploymentProfile> {
         vec![
-            DeploymentProfile::new(Self::nano_x86(), vec![Self::ssd(20)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::nano_arm(), vec![Self::ssd(20)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::micro_x86(), vec![Self::ssd(50)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::micro_arm(), vec![Self::ssd(50)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::small_x86(), vec![Self::ssd(100)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::small_arm(), vec![Self::ssd(100)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::small_riscv(), vec![Self::ssd(100)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::medium_x86(), vec![Self::ssd(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::medium_arm(), vec![Self::ssd(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::medium_riscv(), vec![Self::ssd(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::medium_x86(), vec![Self::hi_ssd(500)], ClusterTopology::SmallCluster(3)),
-            DeploymentProfile::new(Self::medium_arm(), vec![Self::hi_ssd(500)], ClusterTopology::SmallCluster(3)),
-            DeploymentProfile::new(Self::large_x86(), vec![Self::hi_ssd(1000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::large_arm(), vec![Self::hi_ssd(1000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::large_x86(), vec![Self::hi_ssd(1000)], ClusterTopology::SmallCluster(5)),
-            DeploymentProfile::new(Self::large_arm(), vec![Self::hi_ssd(2000)], ClusterTopology::SmallCluster(8)),
-            DeploymentProfile::new(Self::xlarge_x86(), vec![Self::hi_ssd(2000), Self::nvme(1000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::xlarge_arm(), vec![Self::hi_ssd(4000), Self::nvme(2000)], ClusterTopology::SmallCluster(4)),
+            DeploymentProfile::new(
+                Self::nano_x86(),
+                vec![Self::ssd(20)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::nano_arm(),
+                vec![Self::ssd(20)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::micro_x86(),
+                vec![Self::ssd(50)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::micro_arm(),
+                vec![Self::ssd(50)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::small_x86(),
+                vec![Self::ssd(100)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::small_arm(),
+                vec![Self::ssd(100)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::small_riscv(),
+                vec![Self::ssd(100)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::medium_x86(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::medium_arm(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::medium_riscv(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::medium_x86(),
+                vec![Self::hi_ssd(500)],
+                ClusterTopology::SmallCluster(3),
+            ),
+            DeploymentProfile::new(
+                Self::medium_arm(),
+                vec![Self::hi_ssd(500)],
+                ClusterTopology::SmallCluster(3),
+            ),
+            DeploymentProfile::new(
+                Self::large_x86(),
+                vec![Self::hi_ssd(1000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::large_arm(),
+                vec![Self::hi_ssd(1000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::large_x86(),
+                vec![Self::hi_ssd(1000)],
+                ClusterTopology::SmallCluster(5),
+            ),
+            DeploymentProfile::new(
+                Self::large_arm(),
+                vec![Self::hi_ssd(2000)],
+                ClusterTopology::SmallCluster(8),
+            ),
+            DeploymentProfile::new(
+                Self::xlarge_x86(),
+                vec![Self::hi_ssd(2000), Self::nvme(1000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::xlarge_arm(),
+                vec![Self::hi_ssd(4000), Self::nvme(2000)],
+                ClusterTopology::SmallCluster(4),
+            ),
         ]
     }
 
     fn specialized_profiles() -> Vec<DeploymentProfile> {
         vec![
             // Compute-optimized
-            DeploymentProfile::new(Self::compute_opt_x86(), vec![Self::ssd(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::compute_opt_arm(), vec![Self::ssd(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::compute_opt_x86(), vec![Self::hi_ssd(1000)], ClusterTopology::MediumCluster(16)),
+            DeploymentProfile::new(
+                Self::compute_opt_x86(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::compute_opt_arm(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::compute_opt_x86(),
+                vec![Self::hi_ssd(1000)],
+                ClusterTopology::MediumCluster(16),
+            ),
             // Memory-optimized
-            DeploymentProfile::new(Self::memory_opt_x86(), vec![Self::hi_ssd(2000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::memory_opt_arm(), vec![Self::hi_ssd(4000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::memory_opt_x86(), vec![Self::hi_ssd(2000)], ClusterTopology::SmallCluster(3)),
+            DeploymentProfile::new(
+                Self::memory_opt_x86(),
+                vec![Self::hi_ssd(2000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::memory_opt_arm(),
+                vec![Self::hi_ssd(4000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::memory_opt_x86(),
+                vec![Self::hi_ssd(2000)],
+                ClusterTopology::SmallCluster(3),
+            ),
             // Storage-optimized
-            DeploymentProfile::new(Self::storage_opt_x86(), vec![Self::nvme(2000), Self::hdd(10000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::storage_opt_x86(), vec![Self::nvme(4000), Self::hdd(50000)], ClusterTopology::MediumCluster(16)),
             DeploymentProfile::new(
                 Self::storage_opt_x86(),
-                vec![Self::nvme(1000), Self::ssd(5000), StorageInstance::new(StorageTier::ColdHdd, 100_000)],
+                vec![Self::nvme(2000), Self::hdd(10000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::storage_opt_x86(),
+                vec![Self::nvme(4000), Self::hdd(50000)],
+                ClusterTopology::MediumCluster(16),
+            ),
+            DeploymentProfile::new(
+                Self::storage_opt_x86(),
+                vec![
+                    Self::nvme(1000),
+                    Self::ssd(5000),
+                    StorageInstance::new(StorageTier::ColdHdd, 100_000),
+                ],
                 ClusterTopology::SmallCluster(6),
             ),
             // Network-optimized
-            DeploymentProfile::new(Self::network_opt_x86(), vec![Self::hi_ssd(2000)], ClusterTopology::MediumCluster(32)),
-            DeploymentProfile::new(Self::network_opt_x86(), vec![Self::hi_ssd(4000)], ClusterTopology::LargeCluster(128)),
+            DeploymentProfile::new(
+                Self::network_opt_x86(),
+                vec![Self::hi_ssd(2000)],
+                ClusterTopology::MediumCluster(32),
+            ),
+            DeploymentProfile::new(
+                Self::network_opt_x86(),
+                vec![Self::hi_ssd(4000)],
+                ClusterTopology::LargeCluster(128),
+            ),
             // High-frequency
-            DeploymentProfile::new(Self::high_freq_x86(), vec![Self::nvme(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::high_freq_x86(), vec![Self::nvme(1000)], ClusterTopology::SmallCluster(3)),
+            DeploymentProfile::new(
+                Self::high_freq_x86(),
+                vec![Self::nvme(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::high_freq_x86(),
+                vec![Self::nvme(1000)],
+                ClusterTopology::SmallCluster(3),
+            ),
         ]
     }
 
@@ -442,36 +562,134 @@ impl CloudProfileSelector {
 
         vec![
             // Many-core
-            DeploymentProfile::new(Self::many_core_x86(), vec![Self::nvme(2000), Self::hi_ssd(8000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::many_core_arm(), vec![Self::nvme(4000), Self::hi_ssd(16000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::many_core_x86(), vec![Self::nvme(2000)], ClusterTopology::MediumCluster(16)),
+            DeploymentProfile::new(
+                Self::many_core_x86(),
+                vec![Self::nvme(2000), Self::hi_ssd(8000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::many_core_arm(),
+                vec![Self::nvme(4000), Self::hi_ssd(16000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::many_core_x86(),
+                vec![Self::nvme(2000)],
+                ClusterTopology::MediumCluster(16),
+            ),
             // High-memory
-            DeploymentProfile::new(Self::high_mem_x86(), vec![Self::nvme(2000), Self::hi_ssd(10000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::high_mem_ultra_x86(), vec![Self::nvme(4000), Self::hi_ssd(20000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::high_mem_x86(), vec![Self::nvme(2000)], ClusterTopology::SmallCluster(4)),
+            DeploymentProfile::new(
+                Self::high_mem_x86(),
+                vec![Self::nvme(2000), Self::hi_ssd(10000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::high_mem_ultra_x86(),
+                vec![Self::nvme(4000), Self::hi_ssd(20000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::high_mem_x86(),
+                vec![Self::nvme(2000)],
+                ClusterTopology::SmallCluster(4),
+            ),
             // GPU
-            DeploymentProfile::new(Self::gpu_training_x86(), vec![Self::nvme(4000), Self::hi_ssd(16000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::gpu_inference_x86(), vec![Self::ssd(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::gpu_inference_arm(), vec![Self::ssd(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::gpu_training_x86(), vec![Self::nvme(4000)], ClusterTopology::SmallCluster(8)),
+            DeploymentProfile::new(
+                Self::gpu_training_x86(),
+                vec![Self::nvme(4000), Self::hi_ssd(16000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::gpu_inference_x86(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::gpu_inference_arm(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::gpu_training_x86(),
+                vec![Self::nvme(4000)],
+                ClusterTopology::SmallCluster(8),
+            ),
             // FPGA
-            DeploymentProfile::new(Self::fpga_x86(), vec![Self::hi_ssd(1000)], ClusterTopology::SingleNode),
+            DeploymentProfile::new(
+                Self::fpga_x86(),
+                vec![Self::hi_ssd(1000)],
+                ClusterTopology::SingleNode,
+            ),
             // RISC-V
-            DeploymentProfile::new(Self::riscv_large(), vec![Self::ssd(500)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::riscv_large(), vec![Self::ssd(1000)], ClusterTopology::SmallCluster(3)),
+            DeploymentProfile::new(
+                Self::riscv_large(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::riscv_large(),
+                vec![Self::ssd(1000)],
+                ClusterTopology::SmallCluster(3),
+            ),
             // Data warehouse topologies
-            DeploymentProfile::new(Self::xlarge_x86(), vec![Self::nvme(2000), obj(50000), archive(500_000)], ClusterTopology::MediumCluster(16)),
-            DeploymentProfile::new(Self::many_core_x86(), vec![Self::nvme(4000), Self::hi_ssd(20000), obj(200_000)], ClusterTopology::LargeCluster(64)),
-            DeploymentProfile::new(Self::many_core_arm(), vec![Self::nvme(8000), Self::hi_ssd(50000), archive(1_000_000)], ClusterTopology::MassiveCluster(512)),
+            DeploymentProfile::new(
+                Self::xlarge_x86(),
+                vec![Self::nvme(2000), obj(50000), archive(500_000)],
+                ClusterTopology::MediumCluster(16),
+            ),
+            DeploymentProfile::new(
+                Self::many_core_x86(),
+                vec![Self::nvme(4000), Self::hi_ssd(20000), obj(200_000)],
+                ClusterTopology::LargeCluster(64),
+            ),
+            DeploymentProfile::new(
+                Self::many_core_arm(),
+                vec![Self::nvme(8000), Self::hi_ssd(50000), archive(1_000_000)],
+                ClusterTopology::MassiveCluster(512),
+            ),
             // Multi-region
-            DeploymentProfile::new(Self::large_x86(), vec![Self::hi_ssd(2000)], ClusterTopology::MultiRegion { regions: 3, nodes_per_region: 3 }),
-            DeploymentProfile::new(Self::xlarge_arm(), vec![Self::hi_ssd(4000), Self::nvme(1000)], ClusterTopology::MultiRegion { regions: 5, nodes_per_region: 8 }),
+            DeploymentProfile::new(
+                Self::large_x86(),
+                vec![Self::hi_ssd(2000)],
+                ClusterTopology::MultiRegion {
+                    regions: 3,
+                    nodes_per_region: 3,
+                },
+            ),
+            DeploymentProfile::new(
+                Self::xlarge_arm(),
+                vec![Self::hi_ssd(4000), Self::nvme(1000)],
+                ClusterTopology::MultiRegion {
+                    regions: 5,
+                    nodes_per_region: 8,
+                },
+            ),
             // Miscellaneous
-            DeploymentProfile::new(Self::medium_x86(), vec![StorageInstance::new(StorageTier::NetworkFs, 5000)], ClusterTopology::SmallCluster(4)),
-            DeploymentProfile::new(Self::small_x86(), vec![Self::hdd(2000)], ClusterTopology::SingleNode),
-            DeploymentProfile::new(Self::large_arm(), vec![Self::hi_ssd(2000)], ClusterTopology::MediumCluster(32)),
-            DeploymentProfile::new(Self::xlarge_arm(), vec![Self::nvme(2000), Self::hi_ssd(8000)], ClusterTopology::LargeCluster(128)),
-            DeploymentProfile::new(Self::many_core_x86(), vec![Self::nvme(4000), Self::hi_ssd(20000)], ClusterTopology::MassiveCluster(1024)),
+            DeploymentProfile::new(
+                Self::medium_x86(),
+                vec![StorageInstance::new(StorageTier::NetworkFs, 5000)],
+                ClusterTopology::SmallCluster(4),
+            ),
+            DeploymentProfile::new(
+                Self::small_x86(),
+                vec![Self::hdd(2000)],
+                ClusterTopology::SingleNode,
+            ),
+            DeploymentProfile::new(
+                Self::large_arm(),
+                vec![Self::hi_ssd(2000)],
+                ClusterTopology::MediumCluster(32),
+            ),
+            DeploymentProfile::new(
+                Self::xlarge_arm(),
+                vec![Self::nvme(2000), Self::hi_ssd(8000)],
+                ClusterTopology::LargeCluster(128),
+            ),
+            DeploymentProfile::new(
+                Self::many_core_x86(),
+                vec![Self::nvme(4000), Self::hi_ssd(20000)],
+                ClusterTopology::MassiveCluster(1024),
+            ),
         ]
     }
 
@@ -484,35 +702,50 @@ impl CloudProfileSelector {
 }
 
 impl ProfileSelector for CloudProfileSelector {
-    fn select_for_scenario(
-        scenario: &DatabaseScenario,
-    ) -> DeploymentProfile {
+    fn select_for_scenario(scenario: &DatabaseScenario) -> DeploymentProfile {
         match scenario {
             DatabaseScenario::SmallDev => DeploymentProfile::new(
-                Self::small_x86(), vec![Self::ssd(100)], ClusterTopology::SingleNode,
+                Self::small_x86(),
+                vec![Self::ssd(100)],
+                ClusterTopology::SingleNode,
             ),
             DatabaseScenario::MediumProd => DeploymentProfile::new(
-                Self::medium_x86(), vec![Self::hi_ssd(500)], ClusterTopology::SmallCluster(3),
+                Self::medium_x86(),
+                vec![Self::hi_ssd(500)],
+                ClusterTopology::SmallCluster(3),
             ),
             DatabaseScenario::LargeEnterprise => DeploymentProfile::new(
-                Self::xlarge_x86(), vec![Self::hi_ssd(2000), Self::nvme(1000)], ClusterTopology::MediumCluster(16),
+                Self::xlarge_x86(),
+                vec![Self::hi_ssd(2000), Self::nvme(1000)],
+                ClusterTopology::MediumCluster(16),
             ),
             DatabaseScenario::DataWarehouse => DeploymentProfile::new(
                 Self::many_core_x86(),
-                vec![Self::nvme(4000), StorageInstance::new(StorageTier::ObjectStandard, 200_000)],
+                vec![
+                    Self::nvme(4000),
+                    StorageInstance::new(StorageTier::ObjectStandard, 200_000),
+                ],
                 ClusterTopology::LargeCluster(64),
             ),
             DatabaseScenario::MemoryConstrained => DeploymentProfile::new(
-                Self::nano_arm(), vec![Self::ssd(20)], ClusterTopology::SingleNode,
+                Self::nano_arm(),
+                vec![Self::ssd(20)],
+                ClusterTopology::SingleNode,
             ),
             DatabaseScenario::HighPerformance => DeploymentProfile::new(
-                Self::many_core_arm(), vec![Self::nvme(4000), Self::hi_ssd(16000)], ClusterTopology::SmallCluster(4),
+                Self::many_core_arm(),
+                vec![Self::nvme(4000), Self::hi_ssd(16000)],
+                ClusterTopology::SmallCluster(4),
             ),
             DatabaseScenario::StaleStats => DeploymentProfile::new(
-                Self::medium_arm(), vec![Self::ssd(500)], ClusterTopology::SingleNode,
+                Self::medium_arm(),
+                vec![Self::ssd(500)],
+                ClusterTopology::SingleNode,
             ),
             DatabaseScenario::SkewedData => DeploymentProfile::new(
-                Self::large_x86(), vec![Self::hi_ssd(2000)], ClusterTopology::SmallCluster(3),
+                Self::large_x86(),
+                vec![Self::hi_ssd(2000)],
+                ClusterTopology::SmallCluster(3),
             ),
         }
     }
@@ -523,9 +756,7 @@ impl ProfileSelector for CloudProfileSelector {
         catalog.swap_remove(idx)
     }
 
-    fn select_by_architecture(
-        arch: CpuArchitecture,
-    ) -> Vec<DeploymentProfile> {
+    fn select_by_architecture(arch: CpuArchitecture) -> Vec<DeploymentProfile> {
         Self::build_catalog()
             .into_iter()
             .filter(|p| p.compute.architecture == arch)
@@ -538,28 +769,61 @@ impl ProfileSelector for CloudProfileSelector {
 
         vec![
             // Minimum viable: 1 core, 1 GB, HDD
-            DeploymentProfile::new(Self::nano_x86(), vec![cold(10)], ClusterTopology::SingleNode),
+            DeploymentProfile::new(
+                Self::nano_x86(),
+                vec![cold(10)],
+                ClusterTopology::SingleNode,
+            ),
             // Maximum single node: 128 cores, 2 TB, NVMe
-            DeploymentProfile::new(Self::high_mem_ultra_x86(), vec![Self::nvme(8000)], ClusterTopology::SingleNode),
+            DeploymentProfile::new(
+                Self::high_mem_ultra_x86(),
+                vec![Self::nvme(8000)],
+                ClusterTopology::SingleNode,
+            ),
             // Massive cluster: 1024 nodes
-            DeploymentProfile::new(Self::many_core_x86(), vec![Self::nvme(4000)], ClusterTopology::MassiveCluster(1024)),
+            DeploymentProfile::new(
+                Self::many_core_x86(),
+                vec![Self::nvme(4000)],
+                ClusterTopology::MassiveCluster(1024),
+            ),
             // All-archive storage (cold-only analytics)
-            DeploymentProfile::new(Self::medium_x86(), vec![archive(1_000_000)], ClusterTopology::SingleNode),
+            DeploymentProfile::new(
+                Self::medium_x86(),
+                vec![archive(1_000_000)],
+                ClusterTopology::SingleNode,
+            ),
             // Multi-tier storage: 5 tiers
             DeploymentProfile::new(
                 Self::xlarge_x86(),
-                vec![Self::nvme(500), Self::hi_ssd(2000), Self::ssd(10000), cold(50000), archive(500_000)],
+                vec![
+                    Self::nvme(500),
+                    Self::hi_ssd(2000),
+                    Self::ssd(10000),
+                    cold(50000),
+                    archive(500_000),
+                ],
                 ClusterTopology::SmallCluster(4),
             ),
             // RISC-V with large cluster
-            DeploymentProfile::new(Self::riscv_large(), vec![Self::ssd(1000)], ClusterTopology::MediumCluster(32)),
+            DeploymentProfile::new(
+                Self::riscv_large(),
+                vec![Self::ssd(1000)],
+                ClusterTopology::MediumCluster(32),
+            ),
             // GPU cluster at scale
-            DeploymentProfile::new(Self::gpu_training_x86(), vec![Self::nvme(4000)], ClusterTopology::MediumCluster(16)),
+            DeploymentProfile::new(
+                Self::gpu_training_x86(),
+                vec![Self::nvme(4000)],
+                ClusterTopology::MediumCluster(16),
+            ),
             // Geo-distributed: 10 regions
             DeploymentProfile::new(
                 Self::large_arm(),
                 vec![Self::hi_ssd(2000)],
-                ClusterTopology::MultiRegion { regions: 10, nodes_per_region: 5 },
+                ClusterTopology::MultiRegion {
+                    regions: 10,
+                    nodes_per_region: 5,
+                },
             ),
         ]
     }
@@ -606,8 +870,7 @@ mod tests {
             DatabaseScenario::SkewedData,
         ];
         for scenario in &scenarios {
-            let profile =
-                CloudProfileSelector::select_for_scenario(scenario);
+            let profile = CloudProfileSelector::select_for_scenario(scenario);
             let hw = profile.to_hardware_profile();
             assert!(hw.cpu_cores > 0);
         }
@@ -630,8 +893,7 @@ mod tests {
             CpuArchitecture::ARM64,
             CpuArchitecture::RISCV,
         ] {
-            let profiles =
-                CloudProfileSelector::select_by_architecture(arch);
+            let profiles = CloudProfileSelector::select_by_architecture(arch);
             assert!(
                 profiles.len() >= 2,
                 "architecture {:?} has only {} profiles",

@@ -842,10 +842,10 @@ Request recommendations after workload profiling:
 
 ```bash
 # Collect workload
-ra-cli profile-workload --duration 1h --output workload.json
+ra profile-workload --duration 1h --output workload.json
 
 # Generate recommendations
-ra-cli recommend-indexes --workload workload.json --platform postgres-rum
+ra recommend-indexes --workload workload.json --platform postgres-rum
 ```
 
 ### 5. Fallback Behavior

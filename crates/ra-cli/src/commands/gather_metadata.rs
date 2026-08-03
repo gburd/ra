@@ -18,8 +18,8 @@ pub fn cmd_gather_metadata(
                 .map_or_else(|_| "unknown".to_owned(), |k| k.to_string());
             eprintln!("Connecting to {} database...", kind.cyan());
         }
-        let mut connector =
-            ra_metadata::connect(url).with_context(|| format!("connecting to database: {}", ra_metadata::redact_url(url)))?;
+        let mut connector = ra_metadata::connect(url)
+            .with_context(|| format!("connecting to database: {}", ra_metadata::redact_url(url)))?;
         connector
             .gather_schema()
             .with_context(|| format!("gathering schema from: {}", ra_metadata::redact_url(url)))?

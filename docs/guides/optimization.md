@@ -27,13 +27,13 @@ equivalent expressions using rewrite rules.
 ### Basic Optimization
 
 ```bash
-ra-cli optimize "SELECT * FROM t1 WHERE x > 10"
+ra optimize "SELECT * FROM t1 WHERE x > 10"
 ```
 
 ### With Explanation
 
 ```bash
-ra-cli explain \
+ra explain \
   "SELECT c.name FROM customers c JOIN orders o ON c.id = o.cid"
 ```
 
@@ -46,7 +46,7 @@ reordering to find the lowest-cost plan.
 Predefined profiles control time, memory, and iteration limits:
 
 ```bash
-ra-cli optimize "SELECT * FROM t1" \
+ra optimize "SELECT * FROM t1" \
   --resource-budget interactive
 ```
 
@@ -77,7 +77,7 @@ full framework.
 Use `--diff` to compare the original and optimized plans:
 
 ```bash
-ra-cli optimize "SELECT * FROM t1" \
+ra optimize "SELECT * FROM t1" \
   --diff side-by-side
 ```
 

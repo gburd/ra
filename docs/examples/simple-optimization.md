@@ -158,7 +158,7 @@ fn main() -> anyhow::Result<()> {
 
 ```bash
 # Using the CLI
-ra-cli optimize "
+ra optimize "
 SELECT c.name, c.email
 FROM customers c
 JOIN orders o ON c.id = o.customer_id
@@ -166,7 +166,7 @@ WHERE o.amount > 1000
 "
 
 # With explanation
-ra-cli explain "
+ra explain "
 SELECT c.name, c.email
 FROM customers c
 JOIN orders o ON c.id = o.customer_id

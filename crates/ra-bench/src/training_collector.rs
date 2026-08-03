@@ -9,9 +9,9 @@
 //!   [`TrainingCollector::execute_and_measure`] and all production methods.
 //! - `execute` — implies `live-comparison`.
 
+use anyhow::Result;
 use ra_engine::cost_model::{ActualCost, QueryFeatures};
 use serde::{Deserialize, Serialize};
-use anyhow::Result;
 
 #[cfg(feature = "live-comparison")]
 use postgres::{Client, NoTls};
@@ -327,7 +327,9 @@ pub struct TrainingCollector {
 impl TrainingCollector {
     /// Create a new empty collector.
     pub fn new() -> Self {
-        Self { samples: Vec::new() }
+        Self {
+            samples: Vec::new(),
+        }
     }
 
     /// Collect training samples for all TPC-H queries across configurations.
@@ -459,7 +461,10 @@ impl TrainingCollector {
         // Apply session-level planner settings
         client.execute(&format!("SET work_mem = '{}MB'", config.work_mem_mb), &[])?;
         client.execute(
-            &format!("SET effective_cache_size = '{}MB'", config.effective_cache_size_mb),
+            &format!(
+                "SET effective_cache_size = '{}MB'",
+                config.effective_cache_size_mb
+            ),
             &[],
         )?;
         client.execute(

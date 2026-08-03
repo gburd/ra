@@ -19,8 +19,7 @@
 use std::time::{Duration, Instant};
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering,
-    RelExpr, SortDirection, SortKey,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, RelExpr, SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::statistics::Statistics;
@@ -128,11 +127,7 @@ fn filter(input: RelExpr, pred: Expr) -> RelExpr {
     }
 }
 
-fn aggregate(
-    input: RelExpr,
-    group_by: Vec<Expr>,
-    aggregates: Vec<AggregateExpr>,
-) -> RelExpr {
+fn aggregate(input: RelExpr, group_by: Vec<Expr>, aggregates: Vec<AggregateExpr>) -> RelExpr {
     RelExpr::Aggregate {
         input: Box::new(input),
         group_by,
@@ -195,10 +190,7 @@ fn oltp_two_table_join() -> RelExpr {
     join(
         scan("orders"),
         scan("lineitem"),
-        eq(
-            qcol("orders", "o_orderkey"),
-            qcol("lineitem", "l_orderkey"),
-        ),
+        eq(qcol("orders", "o_orderkey"), qcol("lineitem", "l_orderkey")),
     )
 }
 
@@ -211,16 +203,10 @@ fn oltp_three_table_join() -> RelExpr {
                 eq(col("c_mktsegment"), str_const("BUILDING")),
             ),
             scan("orders"),
-            eq(
-                qcol("customer", "c_custkey"),
-                qcol("orders", "o_custkey"),
-            ),
+            eq(qcol("customer", "c_custkey"), qcol("orders", "o_custkey")),
         ),
         scan("lineitem"),
-        eq(
-            qcol("orders", "o_orderkey"),
-            qcol("lineitem", "l_orderkey"),
-        ),
+        eq(qcol("orders", "o_orderkey"), qcol("lineitem", "l_orderkey")),
     )
 }
 
@@ -230,10 +216,7 @@ fn oltp_join_with_aggregation() -> RelExpr {
         join(
             scan("customer"),
             scan("orders"),
-            eq(
-                qcol("customer", "c_custkey"),
-                qcol("orders", "o_custkey"),
-            ),
+            eq(qcol("customer", "c_custkey"), qcol("orders", "o_custkey")),
         ),
         vec![col("c_custkey")],
         vec![count_star(), sum_col("o_totalprice")],
@@ -285,10 +268,7 @@ fn olap_tpch_q5() -> RelExpr {
                 join(
                     join(
                         join(
-                            filter(
-                                scan("region"),
-                                eq(col("r_name"), str_const("ASIA")),
-                            ),
+                            filter(scan("region"), eq(col("r_name"), str_const("ASIA"))),
                             scan("nation"),
                             eq(col("r_regionkey"), col("n_regionkey")),
                         ),
@@ -383,10 +363,7 @@ fn tproc_c_order_status() -> RelExpr {
 fn tproc_c_delivery() -> RelExpr {
     filter(
         scan("new_order"),
-        and(
-            eq(col("no_w_id"), int(1)),
-            le(col("no_d_id"), int(10)),
-        ),
+        and(eq(col("no_w_id"), int(1)), le(col("no_d_id"), int(10))),
     )
 }
 
@@ -579,7 +556,9 @@ impl PerfMeasurement {
     }
 
     fn all_completed_within_budget(&self) -> bool {
-        self.reports.iter().all(ResourceUsageReport::completed_within_budget)
+        self.reports
+            .iter()
+            .all(ResourceUsageReport::completed_within_budget)
     }
 }
 
@@ -664,12 +643,11 @@ fn simple_oltp_point_lookup_under_1ms() {
     let profile = TestProfile::current();
     let target_ms = target_ms(profile, 1.0);
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(
-            ResourceBudget::oltp()
-                .with_iteration_limit(1)
-                .with_convergence(ConvergenceBehavior::Immediate)
-        );
+    let optimizer = Optimizer::new().with_resource_budget(
+        ResourceBudget::oltp()
+            .with_iteration_limit(1)
+            .with_convergence(ConvergenceBehavior::Immediate),
+    );
     let expr = oltp_point_lookup();
 
     let m = measure_bounded(&optimizer, "point_lookup", &expr, 10);
@@ -681,12 +659,11 @@ fn simple_oltp_filtered_scan_under_1ms() {
     let profile = TestProfile::current();
     let target_ms = target_ms(profile, 1.0);
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(
-            ResourceBudget::oltp()
-                .with_iteration_limit(1)
-                .with_convergence(ConvergenceBehavior::Immediate)
-        );
+    let optimizer = Optimizer::new().with_resource_budget(
+        ResourceBudget::oltp()
+            .with_iteration_limit(1)
+            .with_convergence(ConvergenceBehavior::Immediate),
+    );
     let expr = oltp_filtered_scan();
 
     let m = measure_bounded(&optimizer, "filtered_scan", &expr, 10);
@@ -834,9 +811,7 @@ fn dynamic_budget_switching_same_query_different_budgets() {
 
     // Run with batch budget (generous)
     let batch = make_tpch_optimizer_with_budget(ResourceBudget::batch());
-    let batch_result = batch
-        .optimize_bounded(&expr)
-        .expect("batch should succeed");
+    let batch_result = batch.optimize_bounded(&expr).expect("batch should succeed");
 
     // Interactive should use fewer iterations than standard
     assert!(
@@ -881,9 +856,7 @@ fn dynamic_budget_switching_preserves_plan_quality() {
     let interactive_result = interactive
         .optimize_bounded(&expr)
         .expect("interactive should succeed");
-    let batch_result = batch
-        .optimize_bounded(&expr)
-        .expect("batch should succeed");
+    let batch_result = batch.optimize_bounded(&expr).expect("batch should succeed");
 
     // Batch should produce cost <= interactive (more optimization time)
     // Allow 20% tolerance for non-determinism
@@ -979,7 +952,7 @@ fn tproc_c_delivery_performance() {
     optimizer.set_resource_budget(
         ResourceBudget::oltp()
             .with_iteration_limit(1)
-            .with_convergence(ConvergenceBehavior::Immediate)
+            .with_convergence(ConvergenceBehavior::Immediate),
     );
     let expr = tproc_c_delivery();
 
@@ -1009,7 +982,7 @@ fn tproc_c_full_workload_mix() {
     optimizer.set_resource_budget(
         ResourceBudget::oltp()
             .with_iteration_limit(1)
-            .with_convergence(ConvergenceBehavior::Immediate)
+            .with_convergence(ConvergenceBehavior::Immediate),
     );
 
     // HammerDB TPROC-C standard mix: 45% New-Order, 43% Payment,
@@ -1142,8 +1115,7 @@ fn regression_optimization_always_produces_valid_plan() {
 
         // Plan should not be empty (Scan at minimum)
         assert!(
-            !matches!(result, RelExpr::Scan { .. })
-                || matches!(expr, RelExpr::Scan { .. }),
+            !matches!(result, RelExpr::Scan { .. }) || matches!(expr, RelExpr::Scan { .. }),
             "{label}: optimized plan unexpectedly collapsed to bare scan"
         );
     }
@@ -1186,10 +1158,8 @@ fn regression_cost_monotonically_non_increasing() {
     let expr = olap_tpch_q3();
 
     // Run with very tight budget (1 iteration)
-    let tight = Optimizer::new()
-        .with_resource_budget(
-            ResourceBudget::unlimited().with_iteration_limit(1),
-        );
+    let tight =
+        Optimizer::new().with_resource_budget(ResourceBudget::unlimited().with_iteration_limit(1));
     let tight_result = tight
         .optimize_bounded(&expr)
         .expect("tight budget should succeed");
@@ -1219,9 +1189,7 @@ fn regression_repeated_optimization_is_stable() {
     // Run the same query 5 times
     let mut costs = Vec::new();
     for _ in 0..5 {
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         costs.push(result.cost);
     }
 
@@ -1263,13 +1231,7 @@ fn ab_compare(
             .optimize_bounded(expr)
             .map_or(f64::INFINITY, |r| r.cost);
 
-        results.push((
-            label.to_string(),
-            cost_a,
-            cost_b,
-            time_a,
-            time_b,
-        ));
+        results.push((label.to_string(), cost_a, cost_b, time_a, time_b));
     }
 
     results
@@ -1328,10 +1290,8 @@ fn ab_test_interactive_vs_standard_budget() {
     let interactive = make_tpch_optimizer_with_budget(ResourceBudget::interactive());
     let standard = make_tpch_optimizer_with_budget(ResourceBudget::standard());
 
-    let queries: Vec<(&str, RelExpr)> = vec![
-        ("tpch_q1", olap_tpch_q1()),
-        ("tpch_q3", olap_tpch_q3()),
-    ];
+    let queries: Vec<(&str, RelExpr)> =
+        vec![("tpch_q1", olap_tpch_q1()), ("tpch_q3", olap_tpch_q3())];
 
     for (label, expr) in &queries {
         let start_i = Instant::now();
@@ -1348,13 +1308,15 @@ fn ab_test_interactive_vs_standard_budget() {
 
         // Interactive should be faster (or equal)
         // Both should produce finite costs
-        assert!(result_i.cost.is_finite(), "{label}: interactive cost infinite");
+        assert!(
+            result_i.cost.is_finite(),
+            "{label}: interactive cost infinite"
+        );
         assert!(result_s.cost.is_finite(), "{label}: standard cost infinite");
 
         // Standard should have at least as many or more iterations
         assert!(
-            result_i.resource_usage.iterations_used
-                <= result_s.resource_usage.iterations_used,
+            result_i.resource_usage.iterations_used <= result_s.resource_usage.iterations_used,
             "{label}: interactive iterations ({}) > standard iterations ({})",
             result_i.resource_usage.iterations_used,
             result_s.resource_usage.iterations_used,
@@ -1431,9 +1393,7 @@ fn memory_does_not_leak_across_optimizations() {
     // Run multiple optimizations and check peak memory doesn't grow
     let mut peak_memories = Vec::new();
     for _ in 0..5 {
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
         peak_memories.push(result.resource_usage.peak_memory_estimate);
     }
 
@@ -1462,9 +1422,7 @@ fn egraph_node_count_bounded_by_budget() {
 
     for (label, budget, node_limit) in queries {
         let optimizer = make_tpch_optimizer_with_budget(budget);
-        let result = optimizer
-            .optimize_bounded(&expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(&expr).expect("should succeed");
 
         assert!(
             result.resource_usage.peak_egraph_nodes <= node_limit,
@@ -1493,16 +1451,13 @@ fn production_mixed_oltp_olap_workload() {
         tproc_c_payment_customer_lookup(),
         tproc_c_delivery(),
     ];
-    let olap_queries: Vec<RelExpr> = vec![
-        olap_tpch_q1(),
-        olap_tpch_q3(),
-    ];
+    let olap_queries: Vec<RelExpr> = vec![olap_tpch_q1(), olap_tpch_q3()];
 
     let oltp_target_ms = target_ms(profile, 10.0);
     let olap_target_ms = target_ms(profile, 100.0);
 
     let _ = (oltp_target_ms, olap_target_ms); // latency targets retained for reference
-    // Test OLTP queries with interactive budget
+                                              // Test OLTP queries with interactive budget
     for (i, expr) in oltp_queries.iter().enumerate() {
         let opt = if i >= 5 {
             make_tpcc_optimizer_with_budget(ResourceBudget::interactive())
@@ -1510,7 +1465,8 @@ fn production_mixed_oltp_olap_workload() {
             make_tpch_optimizer_with_budget(ResourceBudget::interactive())
         };
 
-        let result = opt.optimize_bounded(expr)
+        let result = opt
+            .optimize_bounded(expr)
             .unwrap_or_else(|e| panic!("OLTP query {i} failed: {e}"));
         assert!(
             result.resource_usage.peak_egraph_nodes <= 700,
@@ -1524,7 +1480,8 @@ fn production_mixed_oltp_olap_workload() {
     for (i, expr) in olap_queries.iter().enumerate() {
         let opt = make_tpch_optimizer_with_budget(ResourceBudget::standard());
 
-        let result = opt.optimize_bounded(expr)
+        let result = opt
+            .optimize_bounded(expr)
             .unwrap_or_else(|e| panic!("OLAP query {i} failed: {e}"));
         assert!(
             result.resource_usage.peak_egraph_nodes <= 9000,
@@ -1560,8 +1517,8 @@ fn production_throughput_under_load() {
     }
 
     let _ = target_ms(profile, 10.0); // latency target retained for reference
-    // Deterministic effort ceiling across the OLTP mix (heaviest
-    // is three-table-join at ~127 nodes).
+                                      // Deterministic effort ceiling across the OLTP mix (heaviest
+                                      // is three-table-join at ~127 nodes).
     assert!(
         max_nodes <= 300,
         "sustained throughput peak {max_nodes} e-graph nodes exceeds ceiling 300",
@@ -1578,9 +1535,7 @@ fn metrics_collection_reports_all_fields() {
     optimizer.set_resource_budget(ResourceBudget::standard());
 
     let expr = olap_tpch_q3();
-    let result = optimizer
-        .optimize_bounded(&expr)
-        .expect("should succeed");
+    let result = optimizer.optimize_bounded(&expr).expect("should succeed");
 
     let report = &result.resource_usage;
 
@@ -1615,9 +1570,7 @@ fn metrics_collection_cost_is_valid() {
     ];
 
     for (label, expr) in &queries {
-        let result = optimizer
-            .optimize_bounded(expr)
-            .expect("should succeed");
+        let result = optimizer.optimize_bounded(expr).expect("should succeed");
 
         assert!(
             result.cost.is_finite() && result.cost > 0.0,
@@ -1632,20 +1585,15 @@ fn metrics_status_reflects_budget_completion() {
     let expr = olap_tpch_q3();
 
     // With generous budget: should complete
-    let generous = make_tpch_optimizer()
-        .with_resource_budget(ResourceBudget::batch());
+    let generous = make_tpch_optimizer().with_resource_budget(ResourceBudget::batch());
     let result_generous = generous
         .optimize_bounded(&expr)
         .expect("generous should succeed");
 
     // With extremely tight budget: may be incomplete
     let tight = make_tpch_optimizer()
-        .with_resource_budget(
-            ResourceBudget::unlimited().with_iteration_limit(1),
-        );
-    let result_tight = tight
-        .optimize_bounded(&expr)
-        .expect("tight should succeed");
+        .with_resource_budget(ResourceBudget::unlimited().with_iteration_limit(1));
+    let result_tight = tight.optimize_bounded(&expr).expect("tight should succeed");
 
     // Generous should report Complete status
     assert_eq!(
@@ -1661,12 +1609,11 @@ fn metrics_status_reflects_budget_completion() {
 
 #[test]
 fn metrics_overflow_strategy_fail_returns_error() {
-    let optimizer = make_tpch_optimizer()
-        .with_resource_budget(
-            ResourceBudget::unlimited()
-                .with_iteration_limit(0)
-                .with_overflow_strategy(OverflowStrategy::Fail),
-        );
+    let optimizer = make_tpch_optimizer().with_resource_budget(
+        ResourceBudget::unlimited()
+            .with_iteration_limit(0)
+            .with_overflow_strategy(OverflowStrategy::Fail),
+    );
 
     let expr = olap_tpch_q3();
     let result = optimizer.optimize_bounded(&expr);
@@ -1708,8 +1655,7 @@ fn metrics_resource_tracker_is_deterministic_and_nondistorting() {
 
 #[test]
 fn edge_case_single_table_scan() {
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
     let expr = scan("users");
 
     let result = optimizer
@@ -1731,8 +1677,7 @@ fn edge_case_deeply_nested_filters() {
         expr = filter(expr, gt(col("l_quantity"), int(i)));
     }
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
     let result = optimizer
         .optimize_bounded(&expr)
         .expect("nested filters should succeed");
@@ -1746,7 +1691,11 @@ fn edge_case_wide_join_star_schema() {
     let expr = join(
         join(
             join(
-                join(fact, scan("orders"), eq(col("l_orderkey"), col("o_orderkey"))),
+                join(
+                    fact,
+                    scan("orders"),
+                    eq(col("l_orderkey"), col("o_orderkey")),
+                ),
                 scan("customer"),
                 eq(col("o_custkey"), col("c_custkey")),
             ),
@@ -1773,11 +1722,14 @@ fn edge_case_aggregation_only() {
     let expr = aggregate(
         scan("lineitem"),
         vec![],
-        vec![count_star(), sum_col("l_quantity"), avg_col("l_extendedprice")],
+        vec![
+            count_star(),
+            sum_col("l_quantity"),
+            avg_col("l_extendedprice"),
+        ],
     );
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
     let result = optimizer
         .optimize_bounded(&expr)
         .expect("aggregation-only should succeed");
@@ -1795,12 +1747,9 @@ fn edge_case_sort_limit_pattern() {
         )),
     };
 
-    let optimizer = Optimizer::new()
-        .with_resource_budget(ResourceBudget::interactive());
+    let optimizer = Optimizer::new().with_resource_budget(ResourceBudget::interactive());
     let result = optimizer
         .optimize_bounded(&expr)
         .expect("sort+limit should succeed");
     assert!(result.cost.is_finite());
 }
-
-

@@ -416,8 +416,8 @@ mod tests {
         if let Ok(dir) = tempfile::tempdir() {
             return dir;
         }
-        let fallback = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/test-tmp");
+        let fallback =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test-tmp");
         std::fs::create_dir_all(&fallback).expect("create fallback test temp dir");
         tempfile::Builder::new()
             .prefix("ra-test-")

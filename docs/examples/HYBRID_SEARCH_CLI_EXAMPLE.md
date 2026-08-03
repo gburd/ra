@@ -1,6 +1,6 @@
-# Hybrid Search with ra-cli: Complete Example
+# Hybrid Search with ra: Complete Example
 
-This document demonstrates how to use `ra-cli` to optimize hybrid search queries that combine vector similarity and full-text search.
+This document demonstrates how to use `ra` to optimize hybrid search queries that combine vector similarity and full-text search.
 
 ## Query Example
 
@@ -25,7 +25,7 @@ LIMIT 10;
 ### 1. Parse SQL to Relational Algebra
 
 ```bash
-ra-cli explain examples/hybrid-search-example.sql
+ra explain examples/hybrid-search-example.sql
 ```
 
 **Expected Output:**
@@ -47,7 +47,7 @@ TopK(k=10, orderBy=[hybrid_score DESC])
 ### 2. Optimize with Verbose Output
 
 ```bash
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --verbose \
   --rules-applied \
   --stats
@@ -121,7 +121,7 @@ Total:                  125 ms
 ### 3. Show Plan Diff (Before vs After)
 
 ```bash
-ra-cli optimize examples/hybrid-search-example.sql --diff colored
+ra optimize examples/hybrid-search-example.sql --diff colored
 ```
 
 **Expected Output:**
@@ -146,11 +146,11 @@ Cost: 13,000ms → 125ms (104x faster)
 
 ```bash
 # Mobile device (limited resources)
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --hardware-profile mobile
 
 # GPU-accelerated server
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --hardware-profile gpu-server
 ```
 
@@ -174,7 +174,7 @@ Strategy: Parallel (GPU + CPU)
 ### 5. Show All Available Hybrid Search Rules
 
 ```bash
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --rules-available \
   | grep -E "(hybrid|vector|fts)"
 ```
@@ -211,7 +211,7 @@ Full-Text Search Rules (7):
 psql -c "SELECT ra.capture_snapshot_to_file('/tmp/production.toml')"
 
 # Then optimize with real production statistics
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --timeline /tmp/production.toml \
   --verbose
 ```
@@ -248,7 +248,7 @@ Improvement: 14.5x better
 ### Show E-graph Exploration
 
 ```bash
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --verbose \
   --rules-evaluated
 ```
@@ -279,17 +279,17 @@ Total: 5 rules applied, 12 evaluated
 
 ```bash
 # Export as JSON
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --explain-format json \
   > optimized-plan.json
 
 # Export as GraphML (for visualization)
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --explain-format graphml \
   > plan.graphml
 
 # Visualize with Graphviz
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --explain-format dot \
   | dot -Tpng > plan.png
 ```
@@ -298,16 +298,16 @@ ra-cli optimize examples/hybrid-search-example.sql \
 
 ```bash
 # Interactive mode (< 50ms optimization time)
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --resource-budget interactive
 
 # Batch mode (unlimited optimization time)
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --resource-budget batch \
   --max-iterations 1000
 
 # Custom budget
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --max-time 5000 \
   --max-memory 2048 \
   --max-iterations 500
@@ -359,21 +359,21 @@ SELECT ra.capture_snapshot_to_file(
 );
 ```
 
-### 4. Analyze Snapshot with ra-cli
+### 4. Analyze Snapshot with ra
 
 ```bash
 # Optimize against production snapshot
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --timeline /tmp/snapshot.toml \
   --verbose \
   --stats
 
 # Compare multiple snapshots
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --timeline /tmp/morning-snapshot.toml \
   --diff colored
 
-ra-cli optimize examples/hybrid-search-example.sql \
+ra optimize examples/hybrid-search-example.sql \
   --timeline /tmp/evening-snapshot.toml \
   --diff colored
 ```

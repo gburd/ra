@@ -98,7 +98,6 @@ pub fn tproc_c_queries() -> Vec<TprocCQuery> {
                    WHERE s_i_id = 42 AND s_w_id = 1",
             expected_rows: RowEstimate::Single,
         },
-
         // ---- Payment reads --------------------------------------------------
         TprocCQuery {
             transaction: TprocCTransaction::Payment,
@@ -140,7 +139,6 @@ pub fn tproc_c_queries() -> Vec<TprocCQuery> {
                    ORDER BY c_first",
             expected_rows: RowEstimate::Few,
         },
-
         // ---- Order-Status reads ---------------------------------------------
         TprocCQuery {
             transaction: TprocCTransaction::OrderStatus,
@@ -169,7 +167,6 @@ pub fn tproc_c_queries() -> Vec<TprocCQuery> {
                    WHERE ol_o_id = 3001 AND ol_d_id = 1 AND ol_w_id = 1",
             expected_rows: RowEstimate::Few,
         },
-
         // ---- Delivery reads -------------------------------------------------
         TprocCQuery {
             transaction: TprocCTransaction::Delivery,
@@ -206,7 +203,6 @@ pub fn tproc_c_queries() -> Vec<TprocCQuery> {
                    ORDER BY no_d_id",
             expected_rows: RowEstimate::Few,
         },
-
         // ---- Stock-Level reads ----------------------------------------------
         TprocCQuery {
             transaction: TprocCTransaction::StockLevel,
@@ -229,7 +225,6 @@ pub fn tproc_c_queries() -> Vec<TprocCQuery> {
                      AND s.s_quantity < 15",
             expected_rows: RowEstimate::Single,
         },
-
         // ---- Analytical overlaps (mixed OLTP+reporting) --------------------
         TprocCQuery {
             transaction: TprocCTransaction::OrderStatus,
@@ -268,11 +263,41 @@ pub fn queries_by_transaction() -> Vec<(TprocCTransaction, Vec<TprocCQuery>)> {
     use TprocCTransaction::*;
     let all = tproc_c_queries();
     vec![
-        (NewOrder, all.iter().cloned().filter(|q| q.transaction == NewOrder).collect()),
-        (Payment, all.iter().cloned().filter(|q| q.transaction == Payment).collect()),
-        (OrderStatus, all.iter().cloned().filter(|q| q.transaction == OrderStatus).collect()),
-        (Delivery, all.iter().cloned().filter(|q| q.transaction == Delivery).collect()),
-        (StockLevel, all.iter().cloned().filter(|q| q.transaction == StockLevel).collect()),
+        (
+            NewOrder,
+            all.iter()
+                .cloned()
+                .filter(|q| q.transaction == NewOrder)
+                .collect(),
+        ),
+        (
+            Payment,
+            all.iter()
+                .cloned()
+                .filter(|q| q.transaction == Payment)
+                .collect(),
+        ),
+        (
+            OrderStatus,
+            all.iter()
+                .cloned()
+                .filter(|q| q.transaction == OrderStatus)
+                .collect(),
+        ),
+        (
+            Delivery,
+            all.iter()
+                .cloned()
+                .filter(|q| q.transaction == Delivery)
+                .collect(),
+        ),
+        (
+            StockLevel,
+            all.iter()
+                .cloned()
+                .filter(|q| q.transaction == StockLevel)
+                .collect(),
+        ),
     ]
 }
 

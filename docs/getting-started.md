@@ -1,6 +1,10 @@
 # Getting Started with RA
 
-This guide demonstrates RA's major features through practical examples. RA is a query optimizer that transforms SQL queries into optimal execution plans using 1,327+ transformation rules, equality saturation, and cost-based optimization.
+This guide demonstrates RA's major features through practical examples. RA is
+an experimental parser, planner, and optimizer for PostgreSQL (a research
+prototype) that transforms SQL queries into a relational algebra tree using its
+rule library (1,467 `.rra` rule sources; 293 currently active), equality
+saturation, and cost-based optimization.
 
 ## Installation
 
@@ -28,9 +32,9 @@ cargo test --all-features
 ```
 
 ::: tip
-Examples in this guide use the short form `ra-cli <command>`, which assumes the
+Examples in this guide use the short form `ra <command>`, which assumes the
 binary is installed on your `PATH`. During development you can also run
-`cargo run --bin ra-cli -- <args>` from the workspace root.
+`cargo run --bin ra -- <args>` from the workspace root.
 :::
 
 ## Quick Start: Basic Optimization
@@ -38,7 +42,7 @@ binary is installed on your `PATH`. During development you can also run
 Optimize your first SQL query:
 
 ```bash
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM orders WHERE amount > 1000 AND status = 'active'"
 ```
 
@@ -55,24 +59,9 @@ flowchart LR
 
 ### 1. Dialect Translation
 
-Translate queries between 20+ database dialects:
-
-```bash
-# PostgreSQL to MySQL
-ra-cli translate \
-  --from postgres --to mysql \
-  "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
-
-# Oracle to SQLite
-ra-cli translate \
-  --from oracle --to sqlite \
-  "SELECT * FROM dual WHERE ROWNUM <= 10"
-
-# SQL Server to DuckDB
-ra-cli translate \
-  --from sqlserver --to duckdb \
-  "SELECT TOP 10 * FROM orders WITH (NOLOCK)"
-```
+Dialect translation has moved out of the core toolkit to a separate repository,
+[ra-lab](https://codeberg.org/gregburd/ra-lab), along with the `ra-dialect`
+crate. The `translate` subcommand is no longer part of the `ra` binary.
 
 ### 2. Hardware-Aware Optimization
 
@@ -80,22 +69,22 @@ Optimize for specific hardware configurations:
 
 ```bash
 # Desktop/workstation profile
-ra-cli optimize \
+ra optimize \
   --hardware-profile desktop \
   "SELECT SUM(amount) FROM large_dataset GROUP BY category"
 
 # Server profile for high-end hardware
-ra-cli optimize \
+ra optimize \
   --hardware-profile server \
   "SELECT * FROM orders WHERE amount BETWEEN 100 AND 1000"
 
 # GPU-accelerated server profile
-ra-cli optimize \
+ra optimize \
   --hardware-profile gpu-server \
   "SELECT * FROM large_dataset GROUP BY category"
 
 # Automatically detect optimal profile
-ra-cli optimize \
+ra optimize \
   --hardware-profile auto \
   "SELECT * FROM orders WHERE status = 'active'"
 ```
@@ -108,16 +97,16 @@ Track how statistics change over time for better optimization:
 
 ```bash
 # Import historical statistics
-ra-cli stats import \
+ra stats import \
   --timeline stats-history.json
 
 # Optimize with time-aware statistics
-ra-cli optimize \
+ra optimize \
   --stats-time "2024-03-15T10:00:00Z" \
   "SELECT * FROM orders WHERE date = '2024-03-15'"
 
 # Export statistics timeline
-ra-cli stats export \
+ra stats export \
   --format json \
   --output current-stats.json
 ```
@@ -144,7 +133,7 @@ Leverage indexes during optimization:
 
 ```bash
 # Optimize with index metadata
-ra-cli optimize \
+ra optimize \
   --hardware-profile server \
   "SELECT customer_id, order_date, total FROM orders WHERE status = 'shipped'"
 
@@ -158,12 +147,12 @@ Leverage metadata for instant MIN/MAX results:
 
 ```bash
 # Traditional scan (before optimization)
-ra-cli explain \
+ra explain \
   "SELECT MIN(id), MAX(id) FROM billion_row_table"
 # Output: Full table scan required
 
 # With optimization
-ra-cli optimize \
+ra optimize \
   "SELECT MIN(id), MAX(id) FROM billion_row_table"
 # RA automatically applies MIN/MAX shortcuts when appropriate
 ```
@@ -174,12 +163,12 @@ Use table metadata for instant counts:
 
 ```bash
 # Optimize count queries
-ra-cli optimize \
+ra optimize \
   "SELECT COUNT(*) FROM large_table"
 # RA automatically uses metadata shortcuts when applicable
 
 # Complex COUNT with filters
-ra-cli optimize \
+ra optimize \
   "SELECT COUNT(*) FROM orders WHERE year = 2024"
 # RA uses partition metadata if available
 ```
@@ -190,12 +179,12 @@ Distribute query execution across multiple cores:
 
 ```bash
 # Parallel aggregation
-ra-cli optimize \
+ra optimize \
   --hardware-profile server \
   "SELECT category, SUM(amount) FROM sales GROUP BY category"
 
 # Parallel join optimization
-ra-cli optimize \
+ra optimize \
   --hardware-profile server \
   "SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id"
 
@@ -208,15 +197,15 @@ Optimize queries using bitmap indexes:
 
 ```bash
 # Single bitmap index
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM products WHERE color = 'red'"
 
 # Bitmap AND operation
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM products WHERE color = 'red' AND size = 'large'"
 
 # Bitmap OR with multiple conditions
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM orders WHERE (status = 'pending' OR status = 'processing')
    AND priority = 'high'"
 
@@ -229,7 +218,7 @@ Handle complex join graphs efficiently:
 
 ```bash
 # Star schema optimization
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM fact_sales f
    JOIN dim_product p ON f.product_id = p.id
    JOIN dim_customer c ON f.customer_id = c.id
@@ -237,7 +226,7 @@ ra-cli optimize \
    WHERE t.year = 2024"
 
 # Complex multi-way joins
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM t1 JOIN t2 ON ... JOIN t3 ON ... JOIN t4 ON ..."
 
 # RA automatically determines optimal join order and algorithm
@@ -249,17 +238,17 @@ Push filters directly to Parquet file readers:
 
 ```bash
 # Basic predicate pushdown
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM parquet_table WHERE year = 2024 AND month = 3"
 # RA automatically pushes predicates to Parquet readers
 
 # Column pruning with Parquet
-ra-cli optimize \
+ra optimize \
   "SELECT customer_id, total FROM large_parquet_dataset"
 # RA automatically prunes unnecessary columns
 
 # Statistics-based pruning
-ra-cli optimize \
+ra optimize \
   "SELECT * FROM events WHERE timestamp BETWEEN '2024-01-01' AND '2024-01-31'"
 # RA leverages Parquet statistics when available
 ```
@@ -270,17 +259,17 @@ Fine-grained control over transformation rules:
 
 ```bash
 # View rules that were applied
-ra-cli optimize \
+ra optimize \
   --rules-applied \
   "SELECT * FROM t1 JOIN t2 WHERE t1.x > 10"
 
 # View rules that were evaluated but not applied
-ra-cli optimize \
+ra optimize \
   --rules-evaluated \
   "SELECT * FROM orders"
 
 # Show detailed optimizer statistics
-ra-cli optimize \
+ra optimize \
   --stats \
   "SELECT * FROM complex_query"
 ```
@@ -291,17 +280,17 @@ Eliminate irrelevant rules before optimization using the three-stage Rule Adviso
 
 ```bash
 # Filter rules for PostgreSQL — excludes DocumentDB, Oracle, XML, vector, FTS rules
-ra-cli optimize \
+ra optimize \
   --rule-advisor --rule-advisor-db postgresql \
   "SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id WHERE u.age > 18"
 
 # Enable learning to improve rule ordering over time
-ra-cli optimize \
+ra optimize \
   --rule-advisor --rule-advisor-learn --rule-advisor-db postgresql \
   "SELECT * FROM products WHERE category = 'electronics'"
 
 # View advisor filtering statistics
-ra-cli optimize \
+ra optimize \
   --rule-advisor --rule-advisor-db postgresql --verbose \
   "SELECT * FROM orders JOIN items ON orders.id = items.order_id"
 ```
@@ -317,7 +306,7 @@ Optimize queries for distributed execution. See the [federated queries](features
 See detailed transformation steps:
 
 ```bash
-ra-cli explain \
+ra explain \
   --verbose \
   "SELECT c.name, SUM(o.total)
    FROM customers c
@@ -337,7 +326,7 @@ Output shows:
 Compare original and optimized plans:
 
 ```bash
-ra-cli optimize \
+ra optimize \
   --diff side-by-side \
   --highlight-changes \
   "SELECT * FROM large_table WHERE complex_conditions"
@@ -348,7 +337,7 @@ ra-cli optimize \
 Get detailed performance analysis:
 
 ```bash
-ra-cli benchmark \
+ra benchmark \
   --iterations 100 \
   --warmup 10 \
   "SELECT * FROM orders WHERE status = 'pending'"
@@ -407,7 +396,7 @@ cost_calibration:
 **Query takes too long to optimize:**
 ```bash
 # Use resource budgets
-ra-cli optimize \
+ra optimize \
   --resource-budget interactive \
   --max-time 500ms \
   "YOUR_QUERY"
@@ -416,7 +405,7 @@ ra-cli optimize \
 **Out of memory during optimization:**
 ```bash
 # Limit e-graph size
-ra-cli optimize \
+ra optimize \
   --max-egraph-nodes 10000 \
   --memory-limit 1GB \
   "YOUR_QUERY"
@@ -425,7 +414,7 @@ ra-cli optimize \
 **Unexpected plan chosen:**
 ```bash
 # Debug cost model
-ra-cli debug-costs \
+ra debug-costs \
   --trace \
   "YOUR_QUERY"
 ```
@@ -434,34 +423,31 @@ ra-cli debug-costs \
 
 ```bash
 # Show available commands
-ra-cli help
+ra help
 
 # Get help for specific command
-ra-cli optimize --help
+ra optimize --help
 
 # Validate your query
-ra-cli validate "YOUR_QUERY"
+ra validate "YOUR_QUERY"
 
 # Check rule compatibility
-ra-cli check-rules --query "YOUR_QUERY"
+ra check-rules --query "YOUR_QUERY"
 ```
 
 ## Recent Performance Features
 
 ### Plan Cache
 
-Ra caches optimized plans by query template, delivering 37x speedup
-for OLTP workloads with repeated query patterns:
-
-- Cold start: ~325 us per query (full optimization)
-- Cached lookup: ~0.46 us per query (706x faster)
-- Hit rate: 97.5% with 5 query templates
+Ra caches optimized plans by query template. No end-to-end speedup number
+is published yet; cache hit rate and cold/warm timings will be reported once
+measured with a committed harness against native PostgreSQL.
 
 ### Rule Complexity Prioritization
 
 Rules are sorted by cost-to-benefit ratio before each e-graph
 saturation iteration (RFC 0058). High-benefit, low-complexity rules
-run first, yielding 20-27% faster optimization on complex queries
+run first, aiming to reduce optimization work on complex queries
 without sacrificing plan quality.
 
 ### Streaming Statistics
@@ -487,22 +473,22 @@ Ra automatically detects and optimizes for database-specific features:
 
 ```bash
 # PostgreSQL RUM indexes for full-text search
-ra-cli optimize \
+ra optimize \
   --detect-platform \
   "SELECT title FROM articles WHERE tsv @@ 'optimization' ORDER BY ts_rank(tsv, 'optimization') LIMIT 10"
 
 # Citus distributed query optimization
-ra-cli optimize \
+ra optimize \
   --detect-platform \
   "SELECT customer_id, SUM(total) FROM orders GROUP BY customer_id"
 
 # DocumentDB BSON query optimization
-ra-cli optimize \
+ra optimize \
   --detect-platform \
   "SELECT * FROM collection WHERE data @= '{\"status\": \"active\"}'"
 
 # Oracle JSON Duality views
-ra-cli optimize \
+ra optimize \
   --detect-platform \
   "SELECT * FROM orders_dv WHERE JSON_VALUE(doc, '$.customer.name') = 'Acme'"
 ```

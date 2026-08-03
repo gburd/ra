@@ -2,11 +2,7 @@
 //!
 //! Provides utilities for generating synthetic documents, embeddings,
 //! queries, and expected results for testing hybrid search functionality.
-#![expect(
-    clippy::float_cmp,
-    clippy::unwrap_used,
-    reason = "test code"
-)]
+#![expect(clippy::float_cmp, clippy::unwrap_used, reason = "test code")]
 #![allow(dead_code)]
 
 use rand::rngs::StdRng;

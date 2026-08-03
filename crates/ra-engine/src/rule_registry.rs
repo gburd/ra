@@ -113,7 +113,10 @@ impl RuleRegistry {
         reg
     }
 
-    #[expect(clippy::too_many_lines, reason = "rule registration for all optimizer rules")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "rule registration for all optimizer rules"
+    )]
     fn init(&mut self) {
         // Register all rules with numeric IDs from rule_priority.rs
         let mut id = 0;

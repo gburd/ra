@@ -420,11 +420,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
                     when_clauses,
                     ..
                 } => {
-                    let _ = writeln!(
-                        buf,
-                        "Merge({target}, {} when clauses)",
-                        when_clauses.len()
-                    );
+                    let _ = writeln!(buf, "Merge({target}, {} when clauses)", when_clauses.len());
                 }
                 _ => {
                     let _ = writeln!(buf, "{:?}", std::mem::discriminant(other));

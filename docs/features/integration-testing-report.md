@@ -9,7 +9,7 @@
 | Area | Passed | Failed | Total | Pass Rate |
 |------|--------|--------|-------|-----------|
 | Full workspace (`cargo test`) | 3854 | 234 | 4089 | 94.3% |
-| ra-cli (unit + integration) | 239 | 0 | 239 | 100% |
+| ra (unit + integration) | 239 | 0 | 239 | 100% |
 | ra-core | 213 | 0 | 213 | 100% |
 | ra-metadata (EXPLAIN + connectors) | 161 | 0 | 161 | 100% |
 | ra-hardware | 219 | 0 | 219 | 100% |
@@ -69,11 +69,11 @@ All five EXPLAIN formats produce valid, well-structured output:
 ### Test commands run
 
 ```
-ra-cli optimize --explain-format postgresql "SELECT c.name, COUNT(*) ..."
-ra-cli optimize --explain-format pg-text "SELECT * FROM orders WHERE status = 'pending'"
-ra-cli optimize --explain-format mysql "SELECT * FROM customers WHERE region = 'US'"
-ra-cli optimize --explain-format oracle "SELECT * FROM customers WHERE region = 'US'"
-ra-cli optimize --explain-format sqlserver "SELECT * FROM customers WHERE region = 'US'"
+ra optimize --explain-format postgresql "SELECT c.name, COUNT(*) ..."
+ra optimize --explain-format pg-text "SELECT * FROM orders WHERE status = 'pending'"
+ra optimize --explain-format mysql "SELECT * FROM customers WHERE region = 'US'"
+ra optimize --explain-format oracle "SELECT * FROM customers WHERE region = 'US'"
+ra optimize --explain-format sqlserver "SELECT * FROM customers WHERE region = 'US'"
 ```
 
 All produce correct output matching their respective database formats.
@@ -83,25 +83,25 @@ All produce correct output matching their respective database formats.
 ### Positional argument
 
 ```
-ra-cli optimize "SELECT * FROM users"            # PASS
-ra-cli explain "SELECT * FROM users"              # PASS
+ra optimize "SELECT * FROM users"            # PASS
+ra explain "SELECT * FROM users"              # PASS
 ```
 
 ### Pipe via --stdin
 
 ```
-echo "SELECT ..." | ra-cli optimize --stdin                           # PASS
-echo "SELECT ..." | ra-cli optimize --stdin --explain-format postgresql  # PASS
-echo "SELECT ..." | ra-cli optimize --stdin --diff colored              # PASS
-echo "SELECT ..." | ra-cli explain --stdin                              # PASS
+echo "SELECT ..." | ra optimize --stdin                           # PASS
+echo "SELECT ..." | ra optimize --stdin --explain-format postgresql  # PASS
+echo "SELECT ..." | ra optimize --stdin --diff colored              # PASS
+echo "SELECT ..." | ra explain --stdin                              # PASS
 ```
 
 ### Error handling
 
 ```
-echo "" | ra-cli optimize --stdin          # PASS - "no SQL received on stdin"
-echo "   " | ra-cli explain --stdin        # PASS - "no SQL received on stdin"
-ra-cli optimize                            # PASS - "no SQL query provided"
+echo "" | ra optimize --stdin          # PASS - "no SQL received on stdin"
+echo "   " | ra explain --stdin        # PASS - "no SQL received on stdin"
+ra optimize                            # PASS - "no SQL query provided"
 ```
 
 ### Integration tests (5 new tests, all passing)

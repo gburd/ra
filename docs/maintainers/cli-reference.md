@@ -1,6 +1,6 @@
-# ra-cli Command Reference
+# ra Command Reference
 
-`ra-cli` is the primary command-line interface for the Ra relational algebra optimizer toolkit. It provides tools for analyzing, optimizing, and testing SQL queries using rewrite rules.
+`ra` is the primary command-line interface for the Ra relational algebra optimizer toolkit. It provides tools for analyzing, optimizing, and testing SQL queries using rewrite rules.
 
 ## Installation
 
@@ -11,7 +11,7 @@ cargo install --path crates/ra-cli
 Or build from the workspace:
 
 ```bash
-cargo build --release --bin ra-cli
+cargo build --release --bin ra
 ```
 
 ## Global Options
@@ -30,9 +30,9 @@ cargo build --release --bin ra-cli
 Validate `.rra` rule files for correct YAML frontmatter, required fields (`id`, `name`, `category`, `version`), and category format.
 
 ```bash
-ra-cli validate rules/filter-pushdown.rra
-ra-cli validate rules/                    # scan directory recursively
-ra-cli --verbose validate rules/          # show per-file PASS/FAIL
+ra validate rules/filter-pushdown.rra
+ra validate rules/                    # scan directory recursively
+ra --verbose validate rules/          # show per-file PASS/FAIL
 ```
 
 Exits with code 1 if any file fails validation.
@@ -42,9 +42,9 @@ Exits with code 1 if any file fails validation.
 Run embedded test cases defined in `.rra` rule files. Each test case specifies input SQL, expected plans, or expected optimizations.
 
 ```bash
-ra-cli test rules/
-ra-cli test rules/ --filter pushdown      # run only matching tests
-ra-cli test rules/join-commutativity.rra --verbose
+ra test rules/
+ra test rules/ --filter pushdown      # run only matching tests
+ra test rules/join-commutativity.rra --verbose
 ```
 
 ### list
@@ -52,9 +52,9 @@ ra-cli test rules/join-commutativity.rra --verbose
 Display a table of all valid `.rra` rules in a directory.
 
 ```bash
-ra-cli list                                    # defaults to ./rules
-ra-cli list --dir rules/ --category logical/join
-ra-cli list --tag performance
+ra list                                    # defaults to ./rules
+ra list --dir rules/ --category logical/join
+ra list --tag performance
 ```
 
 | Option | Description |
@@ -68,8 +68,8 @@ ra-cli list --tag performance
 Look up a rule by ID and display all metadata sections: name, category, description, relational algebra, implementation notes, and test cases.
 
 ```bash
-ra-cli show filter-pushdown-basic
-ra-cli show join-commutativity --dir rules/
+ra show filter-pushdown-basic
+ra show join-commutativity --dir rules/
 ```
 
 ### stats
@@ -77,8 +77,8 @@ ra-cli show join-commutativity --dir rules/
 Show collection statistics for rules in a directory, including counts by category and duplicate analysis.
 
 ```bash
-ra-cli stats
-ra-cli stats --dir rules/
+ra stats
+ra stats --dir rules/
 ```
 
 ### explain
@@ -86,9 +86,9 @@ ra-cli stats --dir rules/
 Parse SQL into relational algebra and display the unoptimized plan tree.
 
 ```bash
-ra-cli explain 'SELECT * FROM orders WHERE amount > 100'
-echo 'SELECT 1' | ra-cli explain --stdin
-ra-cli explain 'SELECT ...' --hardware-profile server
+ra explain 'SELECT * FROM orders WHERE amount > 100'
+echo 'SELECT 1' | ra explain --stdin
+ra explain 'SELECT ...' --hardware-profile server
 ```
 
 | Option | Description |
@@ -101,10 +101,10 @@ ra-cli explain 'SELECT ...' --hardware-profile server
 Parse SQL, apply optimization rules, and show the resulting plan.
 
 ```bash
-ra-cli optimize 'SELECT * FROM users WHERE active = true'
-ra-cli optimize 'SELECT ...' --diff side-by-side
-ra-cli optimize 'SELECT ...' --explain-format postgresql
-echo 'SELECT ...' | ra-cli optimize --stdin --trace
+ra optimize 'SELECT * FROM users WHERE active = true'
+ra optimize 'SELECT ...' --diff side-by-side
+ra optimize 'SELECT ...' --explain-format postgresql
+echo 'SELECT ...' | ra optimize --stdin --trace
 ```
 
 | Option | Description |
@@ -129,9 +129,9 @@ echo 'SELECT ...' | ra-cli optimize --stdin --trace
 Format a SQL query with configurable style options.
 
 ```bash
-ra-cli format 'select * from users where id=1'
-echo 'SELECT ...' | ra-cli format --stdin
-ra-cli format 'SELECT ...' --capitalize all --indent spaces4
+ra format 'select * from users where id=1'
+echo 'SELECT ...' | ra format --stdin
+ra format 'SELECT ...' --capitalize all --indent spaces4
 ```
 
 | Option | Description |
@@ -142,24 +142,17 @@ ra-cli format 'SELECT ...' --capitalize all --indent spaces4
 
 ### translate
 
-Translate SQL between database dialects.
-
-```bash
-ra-cli translate 'SELECT LIMIT 10' --from postgresql --to mysql
-```
-
-| Option | Description |
-|--------|-------------|
-| `--from` | Source dialect: `postgresql`, `mysql`, `sqlite`, `duckdb`, `mssql`, `oracle` |
-| `--to` | Target dialect (same options) |
+Dialect translation has moved out of the core toolkit to a separate repository,
+[ra-lab](https://codeberg.org/gregburd/ra-lab), along with the `ra-dialect`
+crate. The `translate` subcommand is no longer part of the `ra` binary.
 
 ### gather-metadata
 
 Collect database metadata and write to a JSON file for offline analysis.
 
 ```bash
-ra-cli gather-metadata --db 'postgresql://localhost/mydb' -o schema.json
-ra-cli gather-metadata --schema existing-schema.json -o merged.json
+ra gather-metadata --db 'postgresql://localhost/mydb' -o schema.json
+ra gather-metadata --schema existing-schema.json -o merged.json
 ```
 
 ### compare
@@ -167,8 +160,8 @@ ra-cli gather-metadata --schema existing-schema.json -o merged.json
 Compare the Ra optimizer plan against a database EXPLAIN plan.
 
 ```bash
-ra-cli compare --sql 'SELECT ...' --db 'postgresql://localhost/mydb'
-ra-cli compare --sql 'SELECT ...' --explain-json plan.json
+ra compare --sql 'SELECT ...' --db 'postgresql://localhost/mydb'
+ra compare --sql 'SELECT ...' --explain-json plan.json
 ```
 
 ### tui
@@ -176,9 +169,9 @@ ra-cli compare --sql 'SELECT ...' --explain-json plan.json
 Launch the interactive terminal UI for real-time plan monitoring.
 
 ```bash
-ra-cli tui --demo              # run with built-in demo data
-ra-cli tui --timeline data.json
-ra-cli tui --record session.cast
+ra tui --demo              # run with built-in demo data
+ra tui --timeline data.json
+ra tui --record session.cast
 ```
 
 ### stats-timeline
@@ -186,9 +179,9 @@ ra-cli tui --record session.cast
 Statistics timeline subcommands for replaying, simulating feedback, and visualizing cost/cardinality evolution.
 
 ```bash
-ra-cli stats-timeline play --timeline data.toml
-ra-cli stats-timeline feedback --timeline data.toml --batch-size 10
-ra-cli stats-timeline visualize --timeline data.toml --format ascii
+ra stats-timeline play --timeline data.toml
+ra stats-timeline feedback --timeline data.toml --batch-size 10
+ra stats-timeline visualize --timeline data.toml --format ascii
 ```
 
 ### config
@@ -196,12 +189,12 @@ ra-cli stats-timeline visualize --timeline data.toml --format ascii
 Manage configuration settings.
 
 ```bash
-ra-cli config list
-ra-cli config get editor.mode
-ra-cli config set editor.mode vim
-ra-cli config edit              # open in $EDITOR
-ra-cli config reset
-ra-cli config path
+ra config list
+ra config get editor.mode
+ra config set editor.mode vim
+ra config edit              # open in $EDITOR
+ra config reset
+ra config path
 ```
 
 ### cache
@@ -209,12 +202,12 @@ ra-cli config path
 Plan cache management.
 
 ```bash
-ra-cli cache list
-ra-cli cache stats
-ra-cli cache clear
-ra-cli cache clear --table orders
-ra-cli cache reoptimize --threshold-pct 20
-ra-cli cache drift
+ra cache list
+ra cache stats
+ra cache clear
+ra cache clear --table orders
+ra cache reoptimize --threshold-pct 20
+ra cache drift
 ```
 
 ### migrate
@@ -222,10 +215,10 @@ ra-cli cache drift
 Migrate rule pre-conditions from prose descriptions to formal YAML format.
 
 ```bash
-ra-cli migrate preconditions -i rules/ -o migrated/
-ra-cli migrate preconditions -i rules/ -o migrated/ --validate --dry-run
-ra-cli migrate validate -b rules/ -m migrated/
-ra-cli migrate validate -b rules/ -m migrated/ -f facts.toml
+ra migrate preconditions -i rules/ -o migrated/
+ra migrate preconditions -i rules/ -o migrated/ --validate --dry-run
+ra migrate validate -b rules/ -m migrated/
+ra migrate validate -b rules/ -m migrated/ -f facts.toml
 ```
 
 ### monitor
@@ -233,9 +226,9 @@ ra-cli migrate validate -b rules/ -m migrated/ -f facts.toml
 Monitor a PostgreSQL database with schema analysis and tuning advice.
 
 ```bash
-ra-cli monitor --demo                   # demo mode, no database needed
-ra-cli monitor --postgres 'host=localhost dbname=prod' --tui
-ra-cli monitor --postgres '...' --format json
+ra monitor --demo                   # demo mode, no database needed
+ra monitor --postgres 'host=localhost dbname=prod' --tui
+ra monitor --postgres '...' --format json
 ```
 
 ### regression
@@ -243,9 +236,9 @@ ra-cli monitor --postgres '...' --format json
 Query regression detection: establish baselines and check for performance regressions.
 
 ```bash
-ra-cli regression baseline query.sql
-ra-cli regression check query.sql --warn-threshold 1.25 --error-threshold 2.0
-ra-cli regression report --format json --only-regressions
+ra regression baseline query.sql
+ra regression check query.sql --warn-threshold 1.25 --error-threshold 2.0
+ra regression report --format json --only-regressions
 ```
 
 ### federated
@@ -253,7 +246,7 @@ ra-cli regression report --format json --only-regressions
 Analyze federated query execution strategies.
 
 ```bash
-ra-cli federated analyze \
+ra federated analyze \
   --query 'SELECT ...' \
   --remote-db postgresql \
   --remote-table remote_orders \
@@ -266,8 +259,8 @@ ra-cli federated analyze \
 Analyze triggers on a table and estimate DML costs.
 
 ```bash
-ra-cli analyze-triggers orders --database-url 'postgresql://localhost/mydb'
-ra-cli analyze-triggers orders --schema schema.json
+ra analyze-triggers orders --database-url 'postgresql://localhost/mydb'
+ra analyze-triggers orders --schema schema.json
 ```
 
 ### completions
@@ -276,19 +269,19 @@ Generate shell tab-completion scripts. Source the output in your shell profile.
 
 ```bash
 # Bash
-ra-cli completions bash > ~/.local/share/bash-completion/completions/ra-cli
+ra completions bash > ~/.local/share/bash-completion/completions/ra
 
 # Zsh
-ra-cli completions zsh > ~/.zfunc/_ra-cli
+ra completions zsh > ~/.zfunc/_ra
 
 # Fish
-ra-cli completions fish > ~/.config/fish/completions/ra-cli.fish
+ra completions fish > ~/.config/fish/completions/ra.fish
 
 # Elvish
-ra-cli completions elvish
+ra completions elvish
 
 # PowerShell
-ra-cli completions powershell
+ra completions powershell
 ```
 
 ## Shell Completion Setup
@@ -296,9 +289,9 @@ ra-cli completions powershell
 ### Bash
 
 ```bash
-ra-cli completions bash > ~/.local/share/bash-completion/completions/ra-cli
+ra completions bash > ~/.local/share/bash-completion/completions/ra
 # Or for system-wide:
-ra-cli completions bash | sudo tee /etc/bash_completion.d/ra-cli > /dev/null
+ra completions bash | sudo tee /etc/bash_completion.d/ra > /dev/null
 ```
 
 ### Zsh
@@ -306,7 +299,7 @@ ra-cli completions bash | sudo tee /etc/bash_completion.d/ra-cli > /dev/null
 ```bash
 # Create completions directory if needed
 mkdir -p ~/.zfunc
-ra-cli completions zsh > ~/.zfunc/_ra-cli
+ra completions zsh > ~/.zfunc/_ra
 
 # Add to .zshrc (before compinit):
 fpath=(~/.zfunc $fpath)
@@ -316,7 +309,7 @@ autoload -Uz compinit && compinit
 ### Fish
 
 ```bash
-ra-cli completions fish > ~/.config/fish/completions/ra-cli.fish
+ra completions fish > ~/.config/fish/completions/ra.fish
 ```
 
 ## Exit Codes

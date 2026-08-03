@@ -35,11 +35,7 @@ fn arb_operator_set() -> impl Strategy<Value = HashSet<OperatorKind>> {
 fn arb_rule_info() -> impl Strategy<Value = RuleInfo> {
     (
         "[a-z][a-z0-9-]{0,15}",
-        prop_oneof![
-            Just("logical"),
-            Just("physical"),
-            Just("implementation"),
-        ],
+        prop_oneof![Just("logical"), Just("physical"), Just("implementation"),],
         arb_operator_set(),
         arb_operator_set(),
     )

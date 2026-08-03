@@ -140,8 +140,7 @@ impl RuleUsageStats {
     /// Update the EWMA with a new observation.
     pub fn update_ewma(&mut self, hit: bool, alpha: f64) {
         let observation = if hit { 1.0 } else { 0.0 };
-        self.ewma_success_rate =
-            alpha * observation + (1.0 - alpha) * self.ewma_success_rate;
+        self.ewma_success_rate = alpha * observation + (1.0 - alpha) * self.ewma_success_rate;
         if hit {
             self.lifetime_hits += 1;
         } else {
@@ -310,12 +309,18 @@ impl AdaptiveState {
 
     /// Record a rule application (it matched and fired).
     pub fn record_hit(&mut self, rule_name: &str) {
-        *self.iteration_hits.entry(rule_name.to_string()).or_insert(0) += 1;
+        *self
+            .iteration_hits
+            .entry(rule_name.to_string())
+            .or_insert(0) += 1;
     }
 
     /// Record a rule miss (it was available but didn't match).
     pub fn record_miss(&mut self, rule_name: &str) {
-        *self.iteration_misses.entry(rule_name.to_string()).or_insert(0) += 1;
+        *self
+            .iteration_misses
+            .entry(rule_name.to_string())
+            .or_insert(0) += 1;
     }
 
     /// Advance to the next iteration.
@@ -339,11 +344,7 @@ impl AdaptiveState {
     ///
     /// Rules with enough observations and success rate below the threshold
     /// are candidates for demotion within this optimization run.
-    fn identify_demotions(
-        &mut self,
-        threshold: f64,
-        min_observations: u32,
-    ) -> Vec<String> {
+    fn identify_demotions(&mut self, threshold: f64, min_observations: u32) -> Vec<String> {
         let mut new_demotions = Vec::new();
 
         for (name, &misses) in &self.iteration_misses {
@@ -567,13 +568,9 @@ impl RuleAdvisor {
                 continue;
             }
 
-            let new_tier = if stats.ewma_success_rate
-                >= thresholds.promotion_threshold
-            {
+            let new_tier = if stats.ewma_success_rate >= thresholds.promotion_threshold {
                 RuleTier::Promoted
-            } else if stats.ewma_success_rate
-                <= thresholds.demotion_threshold
-            {
+            } else if stats.ewma_success_rate <= thresholds.demotion_threshold {
                 RuleTier::Demoted
             } else {
                 RuleTier::Standard
@@ -662,13 +659,8 @@ impl RuleAdvisor {
         };
         let min_obs = behavior.min_observations;
 
-        let mut rules = self.select_rules_inner(
-            expr,
-            use_learning,
-            min_obs,
-            threshold,
-            Some(behavior),
-        );
+        let mut rules =
+            self.select_rules_inner(expr, use_learning, min_obs, threshold, Some(behavior));
 
         // Apply consolidation exclusions
         let consolidation_removed = if let Some(ref consolidator) = self.consolidator {
@@ -686,9 +678,7 @@ impl RuleAdvisor {
                 0
             } else {
                 let before = rules.len();
-                rules.retain(|r| {
-                    !demoted.iter().any(|d| d == r.name.as_str())
-                });
+                rules.retain(|r| !demoted.iter().any(|d| d == r.name.as_str()));
                 before - rules.len()
             }
         } else {
@@ -732,8 +722,7 @@ impl RuleAdvisor {
         let query_features = QueryFeatureSet::from_pattern(&pattern);
 
         // Determine whether fact-based filtering is active
-        let use_fact_filtering = behavior
-            .is_some_and(|b| b.fact_based_filtering);
+        let use_fact_filtering = behavior.is_some_and(|b| b.fact_based_filtering);
 
         // Stage 2: query-shape elimination with RuleApplicability
         let mut selected = Vec::with_capacity(200);
@@ -863,11 +852,7 @@ impl RuleAdvisor {
     /// individual rule match/improvement results, feeding the
     /// persistent knowledge store, the per-run adaptive state, and
     /// the lifetime usage statistics for tier promotion/demotion.
-    pub fn record_detailed_outcome(
-        &mut self,
-        expr: &RelExpr,
-        outcomes: &[RuleOutcome],
-    ) {
+    pub fn record_detailed_outcome(&mut self, expr: &RelExpr, outcomes: &[RuleOutcome]) {
         let shape_key = ShapeKeyBucket::from_expr(expr);
 
         // Update persistent knowledge
@@ -925,10 +910,7 @@ impl RuleAdvisor {
     ///
     /// Returns the names of newly demoted rules (rules that were not
     /// previously demoted but now fall below the threshold).
-    pub fn run_adaptive_demotion(
-        &mut self,
-        behavior: &RuleSelectionBehavior,
-    ) -> Vec<String> {
+    pub fn run_adaptive_demotion(&mut self, behavior: &RuleSelectionBehavior) -> Vec<String> {
         if !behavior.adaptive_learning {
             return Vec::new();
         }
@@ -939,10 +921,8 @@ impl RuleAdvisor {
             self.config.effectiveness_threshold
         };
 
-        self.adaptive_state.identify_demotions(
-            threshold,
-            behavior.min_observations,
-        )
+        self.adaptive_state
+            .identify_demotions(threshold, behavior.min_observations)
     }
 
     /// Reset the adaptive state for a new optimization run.
@@ -1249,11 +1229,10 @@ mod tests {
         assert!(uncapped_count > 5, "need enough rules to test capping");
 
         // Now select with a budget that caps at 5
-        let budget = ResourceBudget::unlimited()
-            .with_rule_selection(RuleSelectionBehavior {
-                max_rules_per_iteration: Some(5),
-                ..RuleSelectionBehavior::default()
-            });
+        let budget = ResourceBudget::unlimited().with_rule_selection(RuleSelectionBehavior {
+            max_rules_per_iteration: Some(5),
+            ..RuleSelectionBehavior::default()
+        });
         let capped = advisor.select_rules_with_budget(&expr, &budget);
         assert_eq!(capped.len(), 5);
     }
@@ -1278,11 +1257,10 @@ mod tests {
         let mut advisor = RuleAdvisor::new(config);
 
         let expr = RelExpr::scan("users");
-        let budget = ResourceBudget::unlimited()
-            .with_rule_selection(RuleSelectionBehavior {
-                adaptive_learning: true,
-                ..RuleSelectionBehavior::default()
-            });
+        let budget = ResourceBudget::unlimited().with_rule_selection(RuleSelectionBehavior {
+            adaptive_learning: true,
+            ..RuleSelectionBehavior::default()
+        });
 
         let _ = advisor.select_rules_with_budget(&expr, &budget);
         assert!(advisor.stats().adaptive_learning_active);
@@ -1360,14 +1338,8 @@ mod tests {
             rules: vec![],
         };
 
-        assert!(slot.is_applicable(
-            QueryFeatureSet::EMPTY,
-            &RuleSelectionBehavior::default(),
-        ));
-        assert!(slot.is_applicable(
-            QueryFeatureSet::HAS_JOIN,
-            &RuleSelectionBehavior::default(),
-        ));
+        assert!(slot.is_applicable(QueryFeatureSet::EMPTY, &RuleSelectionBehavior::default(),));
+        assert!(slot.is_applicable(QueryFeatureSet::HAS_JOIN, &RuleSelectionBehavior::default(),));
     }
 
     #[test]
@@ -1381,10 +1353,7 @@ mod tests {
             rules: vec![],
         };
 
-        assert!(slot.is_applicable(
-            QueryFeatureSet::HAS_JOIN,
-            &RuleSelectionBehavior::default(),
-        ));
+        assert!(slot.is_applicable(QueryFeatureSet::HAS_JOIN, &RuleSelectionBehavior::default(),));
         assert!(!slot.is_applicable(
             QueryFeatureSet::HAS_AGGREGATE,
             &RuleSelectionBehavior::default(),
@@ -1480,10 +1449,7 @@ mod tests {
 
         let changes = advisor.update_tiers();
         assert_eq!(changes, 1);
-        assert_eq!(
-            advisor.usage_stats["high-rule"].tier,
-            RuleTier::Promoted,
-        );
+        assert_eq!(advisor.usage_stats["high-rule"].tier, RuleTier::Promoted,);
         assert_eq!(advisor.usage_stats["high-rule"].promotion_count, 1);
     }
 
@@ -1507,10 +1473,7 @@ mod tests {
 
         let changes = advisor.update_tiers();
         assert_eq!(changes, 1);
-        assert_eq!(
-            advisor.usage_stats["low-rule"].tier,
-            RuleTier::Demoted,
-        );
+        assert_eq!(advisor.usage_stats["low-rule"].tier, RuleTier::Demoted,);
         assert_eq!(advisor.usage_stats["low-rule"].demotion_count, 1);
     }
 
@@ -1534,10 +1497,7 @@ mod tests {
 
         let changes = advisor.update_tiers();
         assert_eq!(changes, 0);
-        assert_eq!(
-            advisor.usage_stats["new-rule"].tier,
-            RuleTier::Standard,
-        );
+        assert_eq!(advisor.usage_stats["new-rule"].tier, RuleTier::Standard,);
     }
 
     #[test]
@@ -1581,10 +1541,9 @@ mod tests {
                 ..RuleUsageStats::new()
             },
         );
-        advisor.usage_stats.insert(
-            "standard-1".to_string(),
-            RuleUsageStats::new(),
-        );
+        advisor
+            .usage_stats
+            .insert("standard-1".to_string(), RuleUsageStats::new());
         advisor.usage_stats.insert(
             "demoted-1".to_string(),
             RuleUsageStats {
@@ -1645,10 +1604,7 @@ mod tests {
             min_observations: 5,
         });
 
-        assert!(
-            (advisor.tier_thresholds().promotion_threshold - 0.9).abs()
-                < f64::EPSILON,
-        );
+        assert!((advisor.tier_thresholds().promotion_threshold - 0.9).abs() < f64::EPSILON,);
     }
 
     // ---- Fact-based filtering via budget ----
@@ -1661,25 +1617,21 @@ mod tests {
         let expr = RelExpr::scan("users");
 
         // With fact_based_filtering enabled (uses RuleApplicability)
-        let budget = ResourceBudget::unlimited()
-            .with_rule_selection(RuleSelectionBehavior {
-                fact_based_filtering: true,
-                ..RuleSelectionBehavior::default()
-            });
+        let budget = ResourceBudget::unlimited().with_rule_selection(RuleSelectionBehavior {
+            fact_based_filtering: true,
+            ..RuleSelectionBehavior::default()
+        });
 
         let rules_with_facts = advisor.select_rules_with_budget(&expr, &budget);
 
         // With fact_based_filtering disabled
-        let budget_no_facts = ResourceBudget::unlimited()
-            .with_rule_selection(RuleSelectionBehavior {
+        let budget_no_facts =
+            ResourceBudget::unlimited().with_rule_selection(RuleSelectionBehavior {
                 fact_based_filtering: false,
                 ..RuleSelectionBehavior::default()
             });
 
-        let rules_no_facts = advisor.select_rules_with_budget(
-            &expr,
-            &budget_no_facts,
-        );
+        let rules_no_facts = advisor.select_rules_with_budget(&expr, &budget_no_facts);
 
         // Both should produce valid (non-empty) results.
         // The exact count may differ since fact_based_filtering
@@ -1694,12 +1646,8 @@ mod tests {
     #[test]
     fn default_tier_thresholds() {
         let thresholds = TierThresholds::default();
-        assert!(
-            (thresholds.promotion_threshold - 0.3).abs() < f64::EPSILON,
-        );
-        assert!(
-            (thresholds.demotion_threshold - 0.02).abs() < f64::EPSILON,
-        );
+        assert!((thresholds.promotion_threshold - 0.3).abs() < f64::EPSILON,);
+        assert!((thresholds.demotion_threshold - 0.02).abs() < f64::EPSILON,);
         assert_eq!(thresholds.min_observations, 20);
     }
 }

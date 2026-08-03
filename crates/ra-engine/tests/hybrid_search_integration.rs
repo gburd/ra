@@ -118,7 +118,7 @@ fn test_alpha_0_1_favors_vector() {
 
     // Compare with higher alpha
     let score_high_alpha = fuse_scores(bm25, vector, ScoreFusion::WeightedAverage, 0.9, 60);
-    assert!(score != score_high_alpha);
+    assert_ne!(score, score_high_alpha);
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn test_alpha_0_9_favors_fts() {
 
     // Compare with lower alpha
     let score_low_alpha = fuse_scores(bm25, vector, ScoreFusion::WeightedAverage, 0.1, 60);
-    assert!(score != score_low_alpha);
+    assert_ne!(score, score_low_alpha);
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn test_alpha_extremes() {
     // Alpha = 1.0: pure BM25
     let pure_bm25 = fuse_scores(bm25, vector, ScoreFusion::WeightedAverage, 1.0, 60);
 
-    assert!(pure_vector != pure_bm25);
+    assert_ne!(pure_vector, pure_bm25);
     assert!(pure_vector > 0.0);
     assert!(pure_bm25 > 0.0);
 }
@@ -343,8 +343,8 @@ fn test_rrf_fusion_different_k_values() {
     let score_k30 = fuse_scores(bm25, vector, ScoreFusion::ReciprocalRankFusion, 0.5, 30);
     let score_k90 = fuse_scores(bm25, vector, ScoreFusion::ReciprocalRankFusion, 0.5, 90);
 
-    assert!(score_k60 != score_k30);
-    assert!(score_k60 != score_k90);
+    assert_ne!(score_k60, score_k30);
+    assert_ne!(score_k60, score_k90);
 }
 
 #[test]

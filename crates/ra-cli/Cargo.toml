@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "ra-cli"
+name = "ra"
 path = "src/main.rs"
 
 [dependencies]
@@ -27,6 +27,7 @@ clap_complete = { workspace = true }
 colored = { workspace = true }
 libc = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 serde_yml = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

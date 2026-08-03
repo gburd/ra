@@ -64,10 +64,7 @@ impl AsyncDB for RaDb {
 
     async fn shutdown(&mut self) {}
 
-    async fn run(
-        &mut self,
-        sql: &str,
-    ) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
         let trimmed = sql.trim();
         let upper = trimmed.to_uppercase();
 
@@ -85,9 +82,7 @@ impl AsyncDB for RaDb {
         }
 
         // Route DML through parse_statement → optimize.
-        if upper.starts_with("INSERT")
-            || upper.starts_with("UPDATE")
-            || upper.starts_with("DELETE")
+        if upper.starts_with("INSERT") || upper.starts_with("UPDATE") || upper.starts_with("DELETE")
         {
             let stmt = sql_to_relexpr::parse_statement(trimmed)
                 .map_err(|e| RaTestError::Parse(e.to_string()))?;
