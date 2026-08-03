@@ -1,6 +1,11 @@
 # Docker Deployment Infrastructure
 
-Comprehensive Docker setup for the Ra query optimizer project.
+Docker setup for the Ra query optimizer project.
+
+> Note: the `ra-web` visualizer moved to
+> [ra-lab](https://codeberg.org/gregburd/ra-lab). References to a `ra-web`
+> service below are stale and no longer part of this compose stack (the active
+> services are `docs`, `postgres-ra-extension`, and `postgres-ra-proxy`).
 
 ## Services
 
