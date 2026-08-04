@@ -127,7 +127,7 @@ impl ParseFacts {
             facts.has_having = effective.having_clause.is_some();
             // ORDER BY / LIMIT / DISTINCT belong to the top set-op node.
             facts.has_order_by = !sel.sort_clause.is_empty();
-            facts.has_limit = sel.limit_count.is_some();
+            facts.has_limit = pg_has_row_limit(sel.limit_count.as_deref());
             facts.has_distinct = !sel.distinct_clause.is_empty();
             facts.join_count = pg_count_joins(&effective.from_clause);
         }
@@ -252,6 +252,21 @@ fn fmt_set(s: &BTreeSet<String>) -> String {
     out.push_str(&s.iter().cloned().collect::<Vec<_>>().join(","));
     out.push('}');
     out
+}
+
+/// True only when a PG `LIMIT` clause imposes a real row cap.
+///
+/// PostgreSQL parses `LIMIT ALL` as a `limitCount` node that is a NULL
+/// constant (`AConst { isnull: true }`); it is documented as equivalent to
+/// omitting `LIMIT`. Treat that (and an absent clause) as no row limit so
+/// this fact matches Ra's `u64::MAX` "no limit" sentinel.
+fn pg_has_row_limit(limit_count: Option<&pg_query::protobuf::Node>) -> bool {
+    use pg_query::protobuf::node::Node as PgNode;
+    match limit_count.and_then(|n| n.node.as_ref()) {
+        None => false,
+        Some(PgNode::AConst(c)) => !c.isnull,
+        Some(_) => true,
+    }
 }
 
 // ── PG-side extraction helpers ─────────────────────────────
@@ -800,6 +815,29 @@ mod tests {
         assert!(cmp.pg.has_distinct);
         assert!(cmp.pg.has_order_by);
         assert!(cmp.pg.has_limit);
+    }
+
+    #[test]
+    fn limit_all_and_offset_before_limit_agree() {
+        // LIMIT ALL is documented as "no row limit": both sides must report
+        // has_limit == false and agree overall. OFFSET-before-LIMIT is just a
+        // clause-order variant PG accepts.
+        for sql in [
+            "SELECT x FROM t LIMIT ALL",
+            "SELECT x FROM t LIMIT ALL OFFSET 5",
+            "SELECT x FROM t OFFSET 5 LIMIT ALL",
+        ] {
+            let cmp = compare(sql).expect("compare");
+            assert!(!cmp.pg.has_limit, "LIMIT ALL is not a row cap: {sql:?}");
+            assert!(
+                cmp.is_equivalent(),
+                "{sql:?} diverged: {:?}",
+                cmp.divergences
+            );
+        }
+        let cmp = compare("SELECT x FROM t OFFSET 5 LIMIT 10").expect("compare");
+        assert!(cmp.pg.has_limit);
+        assert!(cmp.is_equivalent(), "diverged: {:?}", cmp.divergences);
     }
 
     #[test]

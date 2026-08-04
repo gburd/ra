@@ -914,6 +914,34 @@ limit_clause(A) ::= OFFSET ICONST(C).
     A.location = (C.int_val as i32);     /* offset */
     A.float_val = 1.0;               /* flag: clause present */
 }
+limit_clause(A) ::= LIMIT ALL. 
+%action_rust {
+    A.length = 0;
+    A.int_val = -1;                  /* count = u64::MAX sentinel: no limit */
+    A.location = 0;                  /* no offset */
+    A.float_val = 1.0;               /* flag: limit present */
+}
+limit_clause(A) ::= LIMIT ALL OFFSET ICONST(C). 
+%action_rust {
+    A.length = 0;
+    A.int_val = -1;                  /* count = u64::MAX sentinel: no limit */
+    A.location = (C.int_val as i32);     /* offset */
+    A.float_val = 1.0;               /* flag: limit present */
+}
+limit_clause(A) ::= OFFSET ICONST(C) LIMIT ICONST(B). 
+%action_rust {
+    A.length = 0;
+    A.int_val = B.int_val;           /* count */
+    A.location = (C.int_val as i32);     /* offset */
+    A.float_val = 1.0;               /* flag: limit present */
+}
+limit_clause(A) ::= OFFSET ICONST(C) LIMIT ALL. 
+%action_rust {
+    A.length = 0;
+    A.int_val = -1;                  /* count = u64::MAX sentinel: no limit */
+    A.location = (C.int_val as i32);     /* offset */
+    A.float_val = 1.0;               /* flag: limit present */
+}
 limit_clause(A) ::= . 
 %action_rust {
     A.length = 0; A.int_val = 0; A.location = 0;

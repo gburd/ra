@@ -144,6 +144,32 @@ fn test_limit_offset() {
 }
 
 #[test]
+fn test_limit_all_no_row_cap() {
+    // LIMIT ALL means "no row limit" -> count is the u64::MAX sentinel.
+    let sql = "SELECT * FROM users LIMIT ALL";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    if let RelExpr::Limit { count, offset, .. } = &result {
+        assert_eq!(*count, u64::MAX);
+        assert_eq!(*offset, 0);
+    } else {
+        panic!("expected Limit at top level");
+    }
+}
+
+#[test]
+fn test_offset_before_limit() {
+    // PG accepts OFFSET before LIMIT; the reversed order yields the same plan.
+    let sql = "SELECT * FROM users OFFSET 5 LIMIT 10";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    if let RelExpr::Limit { count, offset, .. } = &result {
+        assert_eq!(*count, 10);
+        assert_eq!(*offset, 5);
+    } else {
+        panic!("expected Limit at top level");
+    }
+}
+
+#[test]
 fn test_order_by_with_limit() {
     let sql = "SELECT * FROM users ORDER BY name LIMIT 5";
     let result = sql_to_relexpr(sql).expect("should parse");
