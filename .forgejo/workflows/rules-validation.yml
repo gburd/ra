@@ -23,10 +23,10 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
 
       - name: Validate all rule files
-        run: nix develop --command cargo run --bin ra -- validate rules/
+        run: nix develop --command cargo run -p ra-cli --bin ra -- validate rules/
 
       # Ratchet: 186 is the current malformed-rule backlog (tracked). The step
       # fails if the count *increases*, blocking new malformed rules while the
       # backlog is burned down.
       - name: Lint rewrite patterns (ratchet on malformed rules)
-        run: nix develop --command cargo run --bin ra -- rules lint rules/ --baseline 186
+        run: nix develop --command cargo run -p ra-cli --bin ra -- rules lint rules/ --baseline 186
