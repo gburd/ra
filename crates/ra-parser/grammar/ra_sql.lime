@@ -593,6 +593,24 @@ table_ref(A) ::= IDENT(B) IDENT(C).
     A = ra_scan_alias(ctx.user, B.text(), C.text());
 }
 
+/* Schema-qualified table: schema.table (relation name is `schema.table`,
+ * matching pg_query's tables() which reports the qualified name). */
+table_ref(A) ::= IDENT(B) DOT IDENT(C). 
+%action_rust {
+    let name = format!("{}.{}", B.text(), C.text());
+    A = ra_scan(ctx.user, &name);
+}
+table_ref(A) ::= IDENT(B) DOT IDENT(C) AS IDENT(D). 
+%action_rust {
+    let name = format!("{}.{}", B.text(), C.text());
+    A = ra_scan_alias(ctx.user, &name, D.text());
+}
+table_ref(A) ::= IDENT(B) DOT IDENT(C) IDENT(D). 
+%action_rust {
+    let name = format!("{}.{}", B.text(), C.text());
+    A = ra_scan_alias(ctx.user, &name, D.text());
+}
+
 /* Derived table (subquery in FROM) */
 table_ref(A) ::= LPAREN select_stmt(B) RPAREN AS IDENT. %action_rust {
     A = B;
@@ -725,6 +743,16 @@ table_ref(A) ::= table_ref(B) JOIN table_ref(C) USING LPAREN ident_list(D) RPARE
     let _ = &D; /* column list — kept for future optimizer use */
     let mut cond = ra_const_int(ctx.user, 1);
     A = ra_join(ctx.user, 0, B, C, cond); /* 0 = Inner */
+}
+
+/* Typed JOIN USING: INNER/LEFT/RIGHT/FULL JOIN ... USING (cols). Join type
+ * carried in join_type.int_val (0=Inner,1=Left,2=Right,3=Full,4=Cross);
+ * USING column equality is deferred to the optimizer (true condition). */
+table_ref(A) ::= table_ref(B) join_type(C) JOIN table_ref(D) USING LPAREN ident_list(E) RPAREN. 
+%action_rust {
+    let _ = &E; /* column list — kept for future optimizer use */
+    let mut cond = ra_const_int(ctx.user, 1);
+    A = ra_join(ctx.user, C.int_val, B, D, cond);
 }
 
 /* Identifier list for USING clause */

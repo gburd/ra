@@ -347,6 +347,57 @@ fn test_cross_join() {
     }
 }
 
+// ---- Typed JOIN ... USING tests (bug A) ----
+
+#[test]
+fn test_left_join_using_preserves_join_type() {
+    // LEFT JOIN ... USING(cols) must yield a LeftOuter join, not Inner.
+    let sql = "SELECT a FROM t LEFT JOIN u USING (id)";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    let join =
+        find_node(&result, |r| matches!(r, RelExpr::Join { .. })).expect("expected a Join node");
+    if let RelExpr::Join { join_type, .. } = join {
+        assert_eq!(*join_type, JoinType::LeftOuter);
+    }
+}
+
+#[test]
+fn test_inner_join_using_parses() {
+    let sql = "SELECT a FROM t INNER JOIN u USING (id)";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    let join =
+        find_node(&result, |r| matches!(r, RelExpr::Join { .. })).expect("expected a Join node");
+    if let RelExpr::Join { join_type, .. } = join {
+        assert_eq!(*join_type, JoinType::Inner);
+    }
+}
+
+// ---- Schema-qualified table tests (bug B) ----
+
+#[test]
+fn test_schema_qualified_table() {
+    // `public.t` scans the qualified relation name `public.t`.
+    let sql = "SELECT x FROM public.t";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    let scan =
+        find_node(&result, |r| matches!(r, RelExpr::Scan { .. })).expect("expected a Scan node");
+    if let RelExpr::Scan { table, .. } = scan {
+        assert_eq!(table, "public.t");
+    }
+}
+
+#[test]
+fn test_schema_qualified_table_with_alias() {
+    let sql = "SELECT x FROM public.t AS pt";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    let scan =
+        find_node(&result, |r| matches!(r, RelExpr::Scan { .. })).expect("expected a Scan node");
+    if let RelExpr::Scan { table, alias, .. } = scan {
+        assert_eq!(table, "public.t");
+        assert_eq!(alias.as_deref(), Some("pt"));
+    }
+}
+
 // ---- Window function tests ----
 // Lime grammar encodes window functions as regular function calls,
 // not as Window RelExpr nodes.
