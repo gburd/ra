@@ -11,7 +11,7 @@ use tempfile::NamedTempFile;
 // ── Helpers ─────────────────────────────────────────────────
 
 fn ra_cli() -> Command {
-    Command::cargo_bin("ra-cli").expect("ra-cli binary should be built")
+    Command::cargo_bin("ra").expect("ra binary should be built")
 }
 
 fn workspace_root() -> std::path::PathBuf {

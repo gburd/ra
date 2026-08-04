@@ -608,7 +608,7 @@ fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
 
     let short_desc = clean_annotation(error_msg);
     let _ = writeln!(output, "{}: {}", "error".red().bold(), short_desc.bold());
-    let _ = writeln!(output, "  {} query", "-->".blue().bold(),);
+    let _ = writeln!(output, "  {} query", "-->".blue().bold());
     let _ = writeln!(output, "   {}", "|".blue().bold());
 
     // Show at most 10 lines: first 5 and last 5, with ellipsis

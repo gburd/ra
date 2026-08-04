@@ -787,7 +787,7 @@ mod tests {
         let errors = validate_migration(&baseline, &migrated);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].kind, ValidationErrorKind::MetadataMismatch);
-        assert!(errors[0].field == "id");
+        assert_eq!(errors[0].field, "id");
     }
 
     #[test]
@@ -799,7 +799,7 @@ mod tests {
         let errors = validate_migration(&baseline, &migrated);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].kind, ValidationErrorKind::MetadataMismatch);
-        assert!(errors[0].field == "name");
+        assert_eq!(errors[0].field, "name");
     }
 
     #[test]
@@ -811,7 +811,7 @@ mod tests {
         let errors = validate_migration(&baseline, &migrated);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].kind, ValidationErrorKind::MetadataMismatch);
-        assert!(errors[0].field == "category");
+        assert_eq!(errors[0].field, "category");
     }
 
     #[test]

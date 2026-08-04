@@ -2,6 +2,7 @@
 
 pub mod analyze;
 pub mod compare;
+pub mod egraph;
 pub mod explain;
 pub mod format;
 pub mod gather_metadata;
@@ -9,6 +10,8 @@ pub mod list;
 pub mod monitor;
 pub mod optimize;
 pub mod proxy_cmd;
+pub mod route;
+pub mod rules_why;
 pub mod show;
 pub mod stats;
 pub mod test_cmd;

@@ -8,7 +8,7 @@ use colored::Colorize;
 
 use crate::cli::{
     CacheCommands, Cli, Commands, ConfigCommands, FederatedCommands, MigrateCommands,
-    PgSnapshotCommands, RegressionCommands, RuleDisplayMode, StatsTimelineCommands,
+    PgSnapshotCommands, RegressionCommands, RuleDisplayMode, RulesCommands, StatsTimelineCommands,
 };
 use crate::commands;
 use crate::helpers::resolve_query;
@@ -228,10 +228,26 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Commands::Route { query, format } => commands::route::cmd_route(&query, &format),
+        Commands::Rules(sub) => dispatch_rules(sub, cli.verbose),
+        Commands::Egraph {
+            query,
+            extract_top,
+            dot,
+            format,
+        } => commands::egraph::cmd_egraph(&query, extract_top, dot, &format),
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "ra", &mut std::io::stdout());
             Ok(())
+        }
+    }
+}
+
+fn dispatch_rules(sub: RulesCommands, verbose: bool) -> Result<()> {
+    match sub {
+        RulesCommands::Why { query, format } => {
+            commands::rules_why::cmd_rules_why(&query, &format, verbose)
         }
     }
 }

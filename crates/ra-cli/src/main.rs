@@ -99,6 +99,10 @@ fn run_main() -> Result<()> {
         .with_env_filter(&filter)
         .with_target(false)
         .without_time()
+        // Diagnostic logs go to stderr so stdout stays a clean machine-readable
+        // channel (e.g. `--format json`, Graphviz `--dot`). tracing's fmt layer
+        // otherwise defaults to stdout.
+        .with_writer(std::io::stderr)
         .init();
 
     router::dispatch(cli)

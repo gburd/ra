@@ -479,6 +479,48 @@ pub enum Commands {
             ra completions zsh   > ~/.zfunc/_ra\n  \
             ra completions fish  > ~/.config/fish/completions/ra.fish\n  \
             ra completions elvish")]
+    /// Inspect the speculative router: features, predicted route, budgets.
+    #[command(
+        long_about = "Extract the 16-D optimization features from a query, run the \
+            speculative router (heuristic fallback, no trained model needed), and \
+            print the chosen route, its prediction, and its budgets.\n\n\
+            Examples:\n  \
+            ra route 'SELECT * FROM a JOIN b ON a.id=b.id WHERE a.x>5'\n  \
+            ra route 'SELECT 1' --format json"
+    )]
+    Route {
+        /// SQL query to analyze.
+        query: String,
+        /// Output format: text (default) or json.
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
+    /// Rule-explanation commands (why did rules fire?).
+    #[command(subcommand)]
+    Rules(RulesCommands),
+    /// Inspect the equality-saturation e-graph for a query.
+    #[command(
+        long_about = "Build the e-graph for a query, run equality saturation with the \
+            full rewrite set, and report e-class / e-node counts and the saturation \
+            stop reason.\n\n\
+            Examples:\n  \
+            ra egraph 'SELECT * FROM a JOIN b ON a.id=b.id'\n  \
+            ra egraph 'SELECT * FROM a JOIN b ON a.id=b.id' --extract-top 3\n  \
+            ra egraph 'SELECT * FROM t' --dot | dot -Tsvg > egraph.svg"
+    )]
+    Egraph {
+        /// SQL query to analyze.
+        query: String,
+        /// List the N lowest-cost equivalent plans with their costs.
+        #[arg(long)]
+        extract_top: Option<usize>,
+        /// Emit Graphviz DOT of the e-graph (ignores --format).
+        #[arg(long)]
+        dot: bool,
+        /// Output format: text (default) or json (ignored with --dot).
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
     Completions {
         /// Target shell: bash, zsh, fish, elvish, powershell.
         shell: Shell,
@@ -486,6 +528,26 @@ pub enum Commands {
 }
 
 // ── Subcommand enums ───────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum RulesCommands {
+    /// Explain which rewrite rules fired for a query, in order.
+    #[command(
+        long_about = "Run the optimizer with rule tracking and report which rules \
+            fired, in order, with fire counts. Use --verbose for per-step \
+            before/after plans.\n\n\
+            Examples:\n  \
+            ra rules why 'SELECT * FROM a JOIN b ON a.id=b.id WHERE a.x>5'\n  \
+            ra rules why 'SELECT * FROM t WHERE x>5' --format json"
+    )]
+    Why {
+        /// SQL query to analyze.
+        query: String,
+        /// Output format: text (default) or json.
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
+}
 
 #[derive(Subcommand)]
 pub enum RegressionCommands {
