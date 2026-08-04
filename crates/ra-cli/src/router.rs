@@ -59,6 +59,15 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 plan_advice.as_deref(),
             )
         }
+        Commands::Parse {
+            sql,
+            stdin: use_stdin,
+            compare_pg,
+            format,
+        } => {
+            let resolved = resolve_query(&sql, use_stdin)?;
+            commands::parse::cmd_parse(&resolved, compare_pg, format)
+        }
         Commands::Optimize {
             query,
             hardware_profile,

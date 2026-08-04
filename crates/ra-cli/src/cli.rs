@@ -147,6 +147,26 @@ pub enum Commands {
         #[arg(long)]
         plan_advice: Option<String>,
     },
+    /// Parse SQL into Ra's relational algebra tree, optionally comparing
+    /// against PostgreSQL's own parser (the §5.2 parse oracle).
+    #[command(
+        long_about = "Parse SQL into Ra's relational algebra plan.\n\n            By default prints Ra's RelExpr tree. With --compare-pg, parses the             SQL with PostgreSQL's own parser (via libpg_query), extracts             comparable parse facts from both sides, and reports any divergence             (exiting non-zero if they disagree, so it works as a corpus             checker). --compare-pg requires building with --features pg-oracle.\n\n            Examples:\n              ra parse 'SELECT a FROM t WHERE a > 1'\n              ra parse 'SELECT * FROM users' --compare-pg\n              ra parse 'SELECT 1' --compare-pg --format json"
+    )]
+    Parse {
+        /// SQL query to parse (ignored when --stdin is set).
+        #[arg(default_value = "")]
+        sql: String,
+        /// Read SQL from stdin instead of the positional argument.
+        #[arg(long)]
+        stdin: bool,
+        /// Compare Ra's parse against PostgreSQL's parser (requires
+        /// --features pg-oracle at build time).
+        #[arg(long)]
+        compare_pg: bool,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = crate::commands::parse::ParseFormat::Text)]
+        format: crate::commands::parse::ParseFormat,
+    },
     /// Optimize a SQL query using relational algebra rewrite rules.
     #[command(
         long_about = "Parse SQL, apply optimization rules, and show the resulting plan.\n\n\

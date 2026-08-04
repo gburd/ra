@@ -39,6 +39,12 @@ regex = { workspace = true }
 toml = { workspace = true }
 chrono = { workspace = true }
 postgres = { workspace = true }
+ra-oracle = { workspace = true, optional = true }
+
+[features]
+# PostgreSQL parse oracle (§5.2). Pulls libpg_query (a C build) via pg_query.
+# Off by default so the plain ra-cli build stays lean.
+pg-oracle = ["dep:ra-oracle"]
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

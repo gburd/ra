@@ -9,6 +9,7 @@ pub mod gather_metadata;
 pub mod list;
 pub mod monitor;
 pub mod optimize;
+pub mod parse;
 pub mod proxy_cmd;
 pub mod route;
 pub mod rules_lint;

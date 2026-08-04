@@ -36,6 +36,7 @@ members = [
     "crates/ra-sqltest",
     "crates/ra-difftest",
     "crates/ra-plan-advice",
+    "crates/ra-oracle",
     # Compatibility shims (preserved for downstream consumers)
     "crates/ra-config",
 ]
@@ -71,6 +72,7 @@ experimental = [
     "dep:ra-cache-impl",
     "dep:ra-adaptive",
     "dep:ra-test-utils",
+    "dep:ra-oracle",
 ]
 # Build everything
 all = ["cli", "experimental"]
@@ -93,6 +95,7 @@ ra-ml = { workspace = true, optional = true }
 ra-cache-impl = { workspace = true, optional = true }
 ra-adaptive = { workspace = true, optional = true }
 ra-test-utils = { workspace = true, optional = true }
+ra-oracle = { workspace = true, optional = true }
 
 [dev-dependencies]
 ra-test-utils = { workspace = true, features = ["timeline"] }
@@ -171,6 +174,7 @@ ra-test-utils = { path = "crates/ra-test-utils" }
 ra-cli = { path = "crates/ra-cli" }
 ra-bitnet = { path = "crates/ra-bitnet" }
 ra-plan-advice = { path = "crates/ra-plan-advice" }
+ra-oracle = { path = "crates/ra-oracle" }
 lime-sys = { path = "crates/lime-sys" }
 postgres = { version = "0.19", features = ["with-serde_json-1"] }
 stoolap = "0.3"
