@@ -129,6 +129,12 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         // DATE and INTERVAL are NOT keywords — used as column names commonly.
         b"HAVING" => Some(token::HAVING),
         b"OFFSET" => Some(token::OFFSET),
+        // SQL-standard FETCH FIRST/NEXT n ROW[S] ONLY
+        b"FETCH" => Some(token::FETCH),
+        b"NEXT" => Some(token::NEXT),
+        b"ROW" => Some(token::ROW),
+        b"ROWS" => Some(token::ROWS),
+        b"ONLY" => Some(token::ONLY),
         b"SELECT" => Some(token::SELECT),
         b"VALUES" => Some(token::VALUES),
         b"BETWEEN" => Some(token::BETWEEN),

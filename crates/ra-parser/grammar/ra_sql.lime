@@ -214,6 +214,13 @@ typedef struct RaToken {
 %token GRAPH_TABLE.
 %token MATCH.
 %token COLUMNS.
+/* SQL-standard FETCH FIRST/NEXT n ROW[S] ONLY (appended at end so existing
+ * token codes do not shift -- mirrored by hand in lexer.rs token module). */
+%token FETCH.
+%token NEXT.
+%token ROW.
+%token ROWS.
+%token ONLY.
 
 /* ================================================================== */
 /* Precedence (low to high)                                            */
@@ -970,6 +977,48 @@ limit_clause(A) ::= OFFSET ICONST(C) LIMIT ALL.
     A.location = (C.int_val as i32);     /* offset */
     A.float_val = 1.0;               /* flag: limit present */
 }
+/* SQL-standard FETCH FIRST/NEXT n ROW[S] ONLY == LIMIT n.
+ * FIRST and NEXT are synonyms; ROW and ROWS are synonyms. */
+%type fetch_first {RaToken}
+fetch_first(A) ::= FIRST. %action_rust { A = Value::default(); }
+fetch_first(A) ::= NEXT.  %action_rust { A = Value::default(); }
+%type row_kw {RaToken}
+row_kw(A) ::= ROW.  %action_rust { A = Value::default(); }
+row_kw(A) ::= ROWS. %action_rust { A = Value::default(); }
+
+/* FETCH FIRST|NEXT n ROW|ROWS ONLY == LIMIT n */
+limit_clause(A) ::= FETCH fetch_first ICONST(B) row_kw ONLY. 
+%action_rust {
+    A.length = 0;
+    A.int_val = B.int_val;           /* count */
+    A.location = 0;                  /* no offset */
+    A.float_val = 1.0;               /* flag: limit present */
+}
+/* FETCH FIRST|NEXT ROW|ROWS ONLY (no count) == LIMIT 1 */
+limit_clause(A) ::= FETCH fetch_first row_kw ONLY. 
+%action_rust {
+    A.length = 0;
+    A.int_val = 1;                   /* count = 1 */
+    A.location = 0;                  /* no offset */
+    A.float_val = 1.0;               /* flag: limit present */
+}
+/* OFFSET n ROW|ROWS FETCH FIRST|NEXT m ROW|ROWS ONLY == LIMIT m OFFSET n */
+limit_clause(A) ::= OFFSET ICONST(C) row_kw FETCH fetch_first ICONST(B) row_kw ONLY. 
+%action_rust {
+    A.length = 0;
+    A.int_val = B.int_val;           /* count */
+    A.location = (C.int_val as i32); /* offset */
+    A.float_val = 1.0;               /* flag: limit present */
+}
+/* OFFSET n ROW|ROWS (alone) == OFFSET n */
+limit_clause(A) ::= OFFSET ICONST(C) row_kw. 
+%action_rust {
+    A.length = 0;
+    A.int_val = -1;                  /* count = u64::MAX sentinel: no limit */
+    A.location = (C.int_val as i32); /* offset */
+    A.float_val = 1.0;               /* flag: clause present */
+}
+
 limit_clause(A) ::= . 
 %action_rust {
     A.length = 0; A.int_val = 0; A.location = 0;
@@ -1991,6 +2040,11 @@ opt_window_order(A) ::= .
 }
 
 /* Window frame clause: ROWS/RANGE BETWEEN ... AND ... */
+opt_window_frame(A) ::= ROWS BETWEEN frame_bound(B) AND frame_bound(C). 
+%action_rust {
+    A.int_val = 1;  A.location = 0; A.length = 0; A.float_val = 0.0;
+    let _ = &B; let _ = &C;
+}
 opt_window_frame(A) ::= IDENT BETWEEN frame_bound(B) AND frame_bound(C). 
 %action_rust {
     /* ROWS/RANGE BETWEEN start AND end — flag presence so the optimizer can
@@ -2007,6 +2061,11 @@ opt_window_frame(A) ::= .
 frame_bound(A) ::= IDENT IDENT. 
 %action_rust {
     /* UNBOUNDED PRECEDING, UNBOUNDED FOLLOWING, CURRENT ROW */
+    A = Value::default();
+}
+frame_bound(A) ::= IDENT ROW. 
+%action_rust {
+    /* CURRENT ROW (ROW is a keyword token now) */
     A = Value::default();
 }
 frame_bound(A) ::= expr(B) IDENT. 

@@ -152,6 +152,15 @@ pub mod token {
     pub const GRAPH_TABLE: i32 = 116;
     pub const MATCH: i32 = 117;
     pub const COLUMNS: i32 = 118;
+
+    // SQL-standard FETCH FIRST/NEXT n ROW[S] ONLY.
+    // These MUST equal the generated codes in ra_sql.rs (u16); the
+    // parser reduces on those codes, so a mismatch = silent misparse.
+    pub const FETCH: i32 = 119;
+    pub const NEXT: i32 = 120;
+    pub const ROW: i32 = 121;
+    pub const ROWS: i32 = 122;
+    pub const ONLY: i32 = 123;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -271,6 +280,12 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "LAST" => Some(token::LAST),
         "LIMIT" => Some(token::LIMIT),
         "OFFSET" => Some(token::OFFSET),
+        // SQL-standard FETCH FIRST/NEXT n ROW[S] ONLY
+        "FETCH" => Some(token::FETCH),
+        "NEXT" => Some(token::NEXT),
+        "ROW" => Some(token::ROW),
+        "ROWS" => Some(token::ROWS),
+        "ONLY" => Some(token::ONLY),
         "UNION" => Some(token::UNION),
         "ALL" => Some(token::ALL),
         "ANY" => Some(token::ANY),

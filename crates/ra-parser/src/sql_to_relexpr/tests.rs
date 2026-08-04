@@ -170,6 +170,45 @@ fn test_offset_before_limit() {
 }
 
 #[test]
+fn test_fetch_first_n_rows_only() {
+    // SQL-standard FETCH FIRST n ROWS ONLY == LIMIT n.
+    let sql = "SELECT a FROM t FETCH FIRST 3 ROWS ONLY";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    if let RelExpr::Limit { count, offset, .. } = &result {
+        assert_eq!(*count, 3);
+        assert_eq!(*offset, 0);
+    } else {
+        panic!("expected Limit at top level");
+    }
+}
+
+#[test]
+fn test_offset_rows_fetch_next_rows_only() {
+    // OFFSET n ROWS FETCH NEXT m ROWS ONLY == LIMIT m OFFSET n.
+    let sql = "SELECT a FROM t OFFSET 5 ROWS FETCH NEXT 3 ROWS ONLY";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    if let RelExpr::Limit { count, offset, .. } = &result {
+        assert_eq!(*count, 3);
+        assert_eq!(*offset, 5);
+    } else {
+        panic!("expected Limit at top level");
+    }
+}
+
+#[test]
+fn test_fetch_first_row_only_no_count() {
+    // FETCH FIRST ROW ONLY (no count) == LIMIT 1.
+    let sql = "SELECT a FROM t FETCH FIRST ROW ONLY";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    if let RelExpr::Limit { count, offset, .. } = &result {
+        assert_eq!(*count, 1);
+        assert_eq!(*offset, 0);
+    } else {
+        panic!("expected Limit at top level");
+    }
+}
+
+#[test]
 fn test_order_by_with_limit() {
     let sql = "SELECT * FROM users ORDER BY name LIMIT 5";
     let result = sql_to_relexpr(sql).expect("should parse");
