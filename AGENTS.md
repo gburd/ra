@@ -294,7 +294,11 @@ Cache functionality is split into two crates:
 - The optimizer's `Idempotence` property (`optimize(optimize(x)) ==
   optimize(x)`) is now enforced: the historical `FullOuter` extraction bug
   is fixed, and `extended_idempotence` plus `full_lifecycle_all_properties`
-  / `extended_all_properties` cover it.
+  / `extended_all_properties` cover it. A related table-preservation bug
+  (Codeberg #17) — empty-relation propagation dropping a join/set-op side and
+  thus a relation reference — was fixed by removing those unsound arms;
+  `optimization_twice_preserves_tables` and
+  `empty_cross_join_preserves_tables_issue_17` guard it.
 
 ## Rust Version
 
