@@ -112,6 +112,7 @@ pub mod rewrite;
 pub mod rule_advisor;
 pub mod rule_consolidation;
 pub mod rule_knowledge;
+pub mod rule_lint;
 pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;

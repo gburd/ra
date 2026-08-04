@@ -11,6 +11,7 @@ pub mod monitor;
 pub mod optimize;
 pub mod proxy_cmd;
 pub mod route;
+pub mod rules_lint;
 pub mod rules_why;
 pub mod show;
 pub mod stats;

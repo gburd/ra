@@ -547,6 +547,28 @@ pub enum RulesCommands {
         #[arg(long, default_value = "text")]
         format: String,
     },
+    /// Lint .rra rewrite patterns; fails (non-zero) on any malformed rule.
+    #[command(
+        long_about = "Walk .rra files and check each rewrite pattern for the three \
+            pathologies that cause a rule to be silently dropped at build time: \
+            an empty LHS/RHS, an LHS equal to the RHS (no-op), or an RHS \
+            metavariable not bound on the LHS. Exits non-zero if any rule is \
+            malformed, so CI catches invisible rule loss.\n\n\
+            Examples:\n  \
+            ra rules lint\n  \
+            ra rules lint rules/logical"
+    )]
+    Lint {
+        /// Path to a .rra file or directory (default: rules).
+        #[arg(default_value = "rules")]
+        path: String,
+        /// Fail only when the malformed-rule count exceeds this baseline.
+        /// The corpus carries a tracked backlog of silently-dropped rules;
+        /// the CI default pins that count so new malformed rules are blocked
+        /// without turning CI red on the backlog. Use 0 to fail on any.
+        #[arg(long, default_value = "0")]
+        baseline: usize,
+    },
 }
 
 #[derive(Subcommand)]

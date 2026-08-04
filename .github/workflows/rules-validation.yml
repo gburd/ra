@@ -24,3 +24,9 @@ jobs:
 
       - name: Validate all rule files
         run: nix develop --command cargo run --bin ra -- validate rules/
+
+      # Ratchet: 186 is the current malformed-rule backlog (tracked). The step
+      # fails if the count *increases*, blocking new malformed rules while the
+      # backlog is burned down.
+      - name: Lint rewrite patterns (ratchet on malformed rules)
+        run: nix develop --command cargo run --bin ra -- rules lint rules/ --baseline 186

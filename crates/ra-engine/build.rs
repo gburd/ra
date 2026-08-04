@@ -19,6 +19,13 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+// Single source of truth for the malformed-rewrite-pattern checks,
+// shared with the `ra rules lint` CLI command. A build script cannot
+// depend on the crate it builds, so the module is `include!`-ed here and
+// compiled as `ra_engine::rule_lint` for the CLI. It is std-only; the
+// `#[cfg(test)]` tests inside compile away in this build-script context.
+include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/rule_lint.rs"));
+
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let rules_dir = Path::new(&manifest_dir).join("../../rules");
@@ -780,93 +787,19 @@ fn check_sexp_invalid(sexp: &str) -> bool {
 ///    which (pre-audit-Item-6) panicked the whole batch.
 ///
 /// Returns true when the rule is malformed and should be rejected.
+///
+/// Delegates to [`rewrite_pair_pathology`] (the shared logic in
+/// `src/rule_lint.rs`, also used by `ra rules lint`) and prints the
+/// historical `cargo:warning=rejecting ...` line so a dropped rule stays
+/// visible in build output.
 fn is_malformed_rule_pair(code: &str) -> bool {
-    let strings = extract_string_literals(code);
-    // The `rewrite!()` macro signature is
-    // `rewrite!("name"; "lhs" => "rhs")` — strings[0] is the rule
-    // name, strings[1] is the LHS pattern, strings[2] is the RHS.
-    // Check the LHS/RHS pair only; the name is just an identifier.
-    let Some((lhs, rhs)) = strings.get(1).zip(strings.get(2)) else {
-        // Couldn't find two patterns — leave the existing checks to
-        // do their work and treat this as not-malformed.
-        return false;
-    };
-
-    // Pathology 1: empty pattern.
-    if lhs.trim().is_empty() || rhs.trim().is_empty() {
-        println!(
-            "cargo:warning=rejecting rule with empty pattern: \
-             lhs={lhs:?} rhs={rhs:?}"
-        );
-        return true;
-    }
-
-    // Pathology 2: LHS == RHS modulo whitespace.
-    let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if norm(lhs) == norm(rhs) {
-        println!(
-            "cargo:warning=rejecting no-op rule (LHS==RHS): \"{}\"",
-            norm(lhs)
-        );
-        return true;
-    }
-
-    // Pathology 3: RHS metavar not bound on LHS.
-    let lhs_vars = collect_metavars(lhs);
-    let rhs_vars = collect_metavars(rhs);
-    let unbound: Vec<_> = rhs_vars.iter().filter(|v| !lhs_vars.contains(*v)).collect();
-    if !unbound.is_empty() {
-        println!(
-            "cargo:warning=rejecting rule with unbound RHS metavars: \
-             rhs={rhs:?} unbound={unbound:?}"
-        );
-        return true;
-    }
-    false
-}
-
-/// Extract every double-quoted string literal in `code`. Naïve about
-/// escaping, but sufficient for the rule corpus where `"` does not
-/// appear inside a pattern.
-fn extract_string_literals(code: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut iter = code.chars().peekable();
-    while let Some(c) = iter.next() {
-        if c == '"' {
-            let mut buf = String::new();
-            for ch in iter.by_ref() {
-                if ch == '"' {
-                    break;
-                }
-                buf.push(ch);
-            }
-            out.push(buf);
+    match rewrite_pair_pathology(code) {
+        Some(reason) => {
+            println!("cargo:warning=rejecting rule with {reason}");
+            true
         }
+        None => false,
     }
-    out
-}
-
-/// Collect `?metavar` tokens from a pattern string. Returns names
-/// without the leading `?`.
-fn collect_metavars(s: &str) -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
-    let chars: Vec<char> = s.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '?' {
-            i += 1;
-            let start = i;
-            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
-                i += 1;
-            }
-            if start < i {
-                out.insert(chars[start..i].iter().collect::<String>());
-            }
-        } else {
-            i += 1;
-        }
-    }
-    out
 }
 
 /// Count the number of top-level children starting from position `pos`

@@ -249,6 +249,9 @@ fn dispatch_rules(sub: RulesCommands, verbose: bool) -> Result<()> {
         RulesCommands::Why { query, format } => {
             commands::rules_why::cmd_rules_why(&query, &format, verbose)
         }
+        RulesCommands::Lint { path, baseline } => {
+            commands::rules_lint::cmd_rules_lint(&path, baseline, verbose)
+        }
     }
 }
 
