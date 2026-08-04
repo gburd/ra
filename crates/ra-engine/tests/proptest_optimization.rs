@@ -370,10 +370,6 @@ proptest! {
     /// not guaranteed because commutativity rules may cause the
     /// extractor to pick a different (but equivalent) ordering.
     #[test]
-    #[ignore = "pre-existing non-idempotent/unsound empty-join table \
-                elimination (Codeberg #17): a constant-false Cross Join drops a \
-                table on the second pass. Also fails the same seed on main. \
-                Deterministic repro: empty_cross_join_preserves_tables_issue_17."]
     fn optimization_twice_preserves_tables(expr in arb_rel_expr(1)) {
         let config = OptimizerConfig {
             node_limit: 10_000,
@@ -992,9 +988,13 @@ fn collect_tables(expr: &RelExpr) -> std::collections::HashSet<String> {
 ///   pass 2: Filter(NULL, users)   <- products dropped
 /// This is non-idempotent and its soundness is in question (locking / RLS /
 /// referenced relations for an always-empty join). Un-ignore when #17 lands.
+/// Regression for Codeberg #17: a constant-false Cross Join must not drop a
+/// table on the second optimize pass. Fixed by removing the unsound
+/// empty-relation join/union propagation rules (which dropped a relation
+/// reference, changing locking/permission/RLS semantics and breaking
+/// idempotence). See rules/logical/expression-simplification/
+/// propagate-empty-relation.rra.
 #[test]
-#[ignore = "tracks Codeberg #17: empty-join table elimination is \
-            non-idempotent and possibly unsound"]
 fn empty_cross_join_preserves_tables_issue_17() {
     let expr = RelExpr::Join {
         join_type: JoinType::Cross,

@@ -1,6 +1,6 @@
 version = "1.0.0"
-total_rules = 1463
-last_updated = "2026-08-03"
+total_rules = 1449
+last_updated = "2026-08-04"
 
 [categories.cost-models.cost-models]
 rules = ["geospatial-cost-model", "multi-column-correlation", "outlier-aware-estimation", "time-series-cost-model", "aggregate-cardinality-estimation", "aggregation-cost-formulas", "cache-conscious-cost-model", "cardinality-estimation", "cloud-elastic-cost-model", "composite-cost-model", "concurrency-contention-cost", "cost-calibration-duckdb", "cost-calibration-postgresql", "cost-calibration", "cpu-cost-model", "distributed-query-routing-cost", "gpu-cost-model", "histogram-based-estimation", "io-cost-model", "join-cardinality-estimation", "join-cost-formulas", "memory-cost-model", "network-cost-model", "numa-aware-cost-model", "sampling-based-estimation", "selectivity-estimation", "storage-tiering-cost-model", "system-r-cost-formula", "system-r-join-cardinality", "system-r-selectivity-formulas", "neural-blend-cost-estimation", "online-learning-cost-calibration", "system-fingerprint-aware-costing"]
@@ -228,7 +228,7 @@ rules = ["clickhouse-column-pruning", "tidb-column-pruning"]
 rules = ["project-idempotent", "project-through-except", "project-through-intersect", "project-through-limit", "project-values-all"]
 
 [categories.logical.consensus-core]
-rules = ["empty-anti-join-left", "empty-anti-join-right", "empty-cross-join-left", "empty-cross-join-right", "empty-except-left", "empty-except-right", "empty-filter", "empty-inner-join-left", "empty-inner-join-right", "empty-intersect-left", "empty-intersect-right", "empty-limit", "empty-project", "empty-semi-join-left", "empty-semi-join-right", "empty-sort", "empty-union-left", "empty-union-right", "extract-equijoin-from-and-left", "extract-equijoin-from-and-right", "filter-null-join-key-left", "filter-null-join-key-right"]
+rules = ["empty-filter", "empty-limit", "empty-project", "empty-sort", "extract-equijoin-from-and-left", "extract-equijoin-from-and-right", "filter-null-join-key-left", "filter-null-join-key-right"]
 
 [categories.logical.constant-folding-core]
 rules = ["fold-add-constants", "fold-mul-constants", "fold-sub-constants"]

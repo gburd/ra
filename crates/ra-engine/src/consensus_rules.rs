@@ -94,48 +94,20 @@ fn filter_null_join_keys_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 /// - `DataFusion`: `propagate_empty_relation.rs`
 /// - Calcite: `PruneEmptyRules`
 fn propagate_empty_relation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+    // CORRECTNESS (RA-STEERING §2, Codeberg #17): only propagate empty
+    // relations through operators that DO NOT drop a relation reference.
+    // Rewrites that drop the other side of a join, or a set-op branch, are
+    // UNSOUND as a general planner rewrite: PostgreSQL still locks / checks
+    // permissions on / applies RLS to every relation referenced by the query,
+    // even when a constant-false predicate makes the result provably empty.
+    // They are also non-idempotent (the table set changes between passes,
+    // caught by proptest optimization_twice_preserves_tables). The former
+    // empty-{inner,cross,semi,anti}-join-{left,right} and
+    // empty-{union,intersect,except}-{left,right} arms are intentionally
+    // omitted; the retained arms keep every input relation as a descendant of
+    // the resulting filter(false, …).
     vec![
-        // Inner join with empty left side => empty
-        rewrite!("empty-inner-join-left";
-            "(join inner ?cond (filter (const-bool false) ?left) ?right)" =>
-            "(filter (const-bool false) ?left)"
-        ),
-        // Inner join with empty right side => empty
-        rewrite!("empty-inner-join-right";
-            "(join inner ?cond ?left (filter (const-bool false) ?right))" =>
-            "(filter (const-bool false) ?right)"
-        ),
-        // Cross join with empty left side => empty
-        rewrite!("empty-cross-join-left";
-            "(join cross ?cond (filter (const-bool false) ?left) ?right)" =>
-            "(filter (const-bool false) ?left)"
-        ),
-        // Cross join with empty right side => empty
-        rewrite!("empty-cross-join-right";
-            "(join cross ?cond ?left (filter (const-bool false) ?right))" =>
-            "(filter (const-bool false) ?right)"
-        ),
-        // Semi join with empty left => empty
-        rewrite!("empty-semi-join-left";
-            "(join semi ?cond (filter (const-bool false) ?left) ?right)" =>
-            "(filter (const-bool false) ?left)"
-        ),
-        // Semi join with empty right => empty
-        rewrite!("empty-semi-join-right";
-            "(join semi ?cond ?left (filter (const-bool false) ?right))" =>
-            "(filter (const-bool false) ?right)"
-        ),
-        // Anti join with empty left => empty
-        rewrite!("empty-anti-join-left";
-            "(join anti ?cond (filter (const-bool false) ?left) ?right)" =>
-            "(filter (const-bool false) ?left)"
-        ),
-        // Anti join with empty right => left side (nothing to exclude)
-        rewrite!("empty-anti-join-right";
-            "(join anti ?cond ?left (filter (const-bool false) ?right))" =>
-            "?left"
-        ),
-        // Project over empty => empty
+        // Project over empty => empty (input subtree preserved)
         rewrite!("empty-project";
             "(project ?cols (filter (const-bool false) ?input))" =>
             "(filter (const-bool false) ?input)"
@@ -154,35 +126,6 @@ fn propagate_empty_relation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("empty-filter";
             "(filter ?pred (filter (const-bool false) ?input))" =>
             "(filter (const-bool false) ?input)"
-        ),
-        // Union with empty left => right
-        rewrite!("empty-union-left";
-            "(union ?all (filter (const-bool false) ?left) ?right)" =>
-            "?right"
-        ),
-        // Union with empty right => left
-        rewrite!("empty-union-right";
-            "(union ?all ?left (filter (const-bool false) ?right))" =>
-            "?left"
-        ),
-        // Intersect with empty side => empty
-        rewrite!("empty-intersect-left";
-            "(intersect ?all (filter (const-bool false) ?left) ?right)" =>
-            "(filter (const-bool false) ?left)"
-        ),
-        rewrite!("empty-intersect-right";
-            "(intersect ?all ?left (filter (const-bool false) ?right))" =>
-            "(filter (const-bool false) ?right)"
-        ),
-        // Except with empty left => empty
-        rewrite!("empty-except-left";
-            "(except ?all (filter (const-bool false) ?left) ?right)" =>
-            "(filter (const-bool false) ?left)"
-        ),
-        // Except with empty right => left (nothing to subtract)
-        rewrite!("empty-except-right";
-            "(except ?all ?left (filter (const-bool false) ?right))" =>
-            "?left"
         ),
     ]
 }
@@ -287,20 +230,49 @@ mod tests {
     }
 
     // -- Propagate empty relation tests --
+    //
+    // Correctness (Codeberg #17): empty propagation through a join/set-op must
+    // NOT drop a relation. These tests assert the *relation-preserving*
+    // behavior: after optimization the plan still references every base table,
+    // and optimizing twice is idempotent w.r.t. the table set.
+
+    fn collect_scans(e: &RelExpr, out: &mut std::collections::BTreeSet<String>) {
+        if let RelExpr::Scan { table, .. } = e {
+            out.insert(table.clone());
+        }
+        for c in e.children() {
+            collect_scans(c, out);
+        }
+    }
+
+    fn tables_of(e: &RelExpr) -> std::collections::BTreeSet<String> {
+        let mut out = std::collections::BTreeSet::new();
+        collect_scans(e, &mut out);
+        out
+    }
 
     #[test]
-    fn empty_inner_join_propagates() {
-        // join(inner, cond, filter(false, left), right) => empty
+    fn empty_inner_join_preserves_both_tables() {
+        // join(inner, cond, filter(false, empty_table), orders): result is
+        // empty, but BOTH relations must remain referenced (locking/RLS).
         let expr = RelExpr::Join {
             join_type: JoinType::Inner,
             condition: eq_expr("a", "b"),
             left: Box::new(RelExpr::scan("empty_table").filter(Expr::Const(Const::Bool(false)))),
             right: Box::new(RelExpr::scan("orders")),
         };
-        let runner = run_with_consensus_rules(&expr);
+        let opt = crate::Optimizer::new();
+        let first = opt.optimize(&expr).expect("optimize once");
+        let second = opt.optimize(&first).expect("optimize twice");
         assert!(
-            runner.egraph.number_of_classes() > 1,
-            "empty relation should propagate through inner join"
+            tables_of(&first).contains("empty_table") && tables_of(&first).contains("orders"),
+            "both relations must survive an always-empty inner join, got {:?}",
+            tables_of(&first)
+        );
+        assert_eq!(
+            tables_of(&first),
+            tables_of(&second),
+            "optimizing twice must preserve the table set (idempotence)"
         );
     }
 
@@ -318,17 +290,26 @@ mod tests {
     }
 
     #[test]
-    fn empty_union_left_simplifies() {
-        // union(all, filter(false, left), right) => right
+    fn empty_union_left_preserves_both_tables() {
+        // union(all, filter(false, empty_table), orders): the empty branch
+        // still references empty_table, which must NOT be dropped.
         let expr = RelExpr::Union {
             all: true,
             left: Box::new(RelExpr::scan("empty_table").filter(Expr::Const(Const::Bool(false)))),
             right: Box::new(RelExpr::scan("orders")),
         };
-        let runner = run_with_consensus_rules(&expr);
+        let opt = crate::Optimizer::new();
+        let first = opt.optimize(&expr).expect("optimize once");
+        let second = opt.optimize(&first).expect("optimize twice");
         assert!(
-            runner.egraph.number_of_classes() > 1,
-            "empty union branch should be eliminated"
+            tables_of(&first).contains("empty_table") && tables_of(&first).contains("orders"),
+            "empty union branch must keep its relation reference, got {:?}",
+            tables_of(&first)
+        );
+        assert_eq!(
+            tables_of(&first),
+            tables_of(&second),
+            "idempotent table set"
         );
     }
 
@@ -351,27 +332,38 @@ mod tests {
     }
 
     #[test]
-    fn empty_cross_join_propagates() {
+    fn empty_cross_join_preserves_both_tables() {
         let expr = RelExpr::Join {
             join_type: JoinType::Cross,
             condition: Expr::Const(Const::Bool(true)),
             left: Box::new(RelExpr::scan("empty_table").filter(Expr::Const(Const::Bool(false)))),
             right: Box::new(RelExpr::scan("data")),
         };
-        let runner = run_with_consensus_rules(&expr);
+        let opt = crate::Optimizer::new();
+        let first = opt.optimize(&expr).expect("optimize once");
+        let second = opt.optimize(&first).expect("optimize twice");
         assert!(
-            runner.egraph.number_of_classes() > 1,
-            "empty relation should propagate through cross join"
+            tables_of(&first).contains("empty_table") && tables_of(&first).contains("data"),
+            "both relations must survive an always-empty cross join, got {:?}",
+            tables_of(&first)
+        );
+        assert_eq!(
+            tables_of(&first),
+            tables_of(&second),
+            "idempotent table set"
         );
     }
 
     #[test]
     fn consensus_rules_count() {
         let rules = consensus_rules();
-        // 2 extract-equijoin + 2 filter-null + 20 propagate-empty
-        assert!(
-            rules.len() >= 20,
-            "expected at least 20 consensus rules, got {}",
+        // 2 extract-equijoin + 2 filter-null + 4 propagate-empty
+        // (the relation-dropping empty-join/set-op arms were removed for
+        // correctness, Codeberg #17).
+        assert_eq!(
+            rules.len(),
+            8,
+            "expected 8 consensus rules, got {}",
             rules.len()
         );
     }

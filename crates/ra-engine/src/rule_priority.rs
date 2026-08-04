@@ -222,8 +222,6 @@ pub fn default_rule_priorities() -> HashMap<&'static str, (ComplexityClass, Bene
     m.insert("empty-join-right", (o1, br(0.5, 0.9)));
     m.insert("empty-project", (o1, br(0.5, 0.9)));
     m.insert("empty-aggregate", (o1, br(0.5, 0.9)));
-    m.insert("empty-union-left", (o1, br(0.4, 0.7)));
-    m.insert("empty-union-right", (o1, br(0.4, 0.7)));
 
     // -- Join transformations --
     m.insert("left-outer-to-inner-with-comparison", (on, br(0.4, 0.8)));
