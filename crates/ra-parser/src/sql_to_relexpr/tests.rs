@@ -305,6 +305,128 @@ fn test_exists_subquery() {
     assert!(result.is_ok(), "EXISTS subquery should parse");
 }
 
+// ---- Quantified-comparison subquery tests (Codeberg #20) ----
+// `x <op> ANY/ALL/SOME (subquery)` must build an Expr::SubQuery that PRESERVES
+// the subquery relation, not an inert __<op>_any/__<op>_all Func that drops it.
+
+use ra_core::expr::SubQueryType;
+
+/// Find the `SubQuery` expr inside a `Filter` predicate, if any.
+fn filter_subquery(r: &RelExpr) -> Option<(&SubQueryType, &RelExpr)> {
+    let filter = find_node(r, |n| matches!(n, RelExpr::Filter { .. }))?;
+    let RelExpr::Filter { predicate, .. } = filter else {
+        return None;
+    };
+    if let Expr::SubQuery {
+        subquery_type,
+        query,
+        ..
+    } = predicate
+    {
+        Some((subquery_type, query.as_ref()))
+    } else {
+        None
+    }
+}
+
+/// A predicate that is (or contains at the top level) an `__eq_any`-style `Func`.
+fn is_quantified_func(e: &Expr) -> bool {
+    matches!(e, Expr::Function { name, .. }
+        if name.starts_with("__") && (name.ends_with("_any") || name.ends_with("_all"))
+            && !name.starts_with("__saoarr_"))
+}
+
+#[test]
+fn test_eq_any_subquery_preserves_relation() {
+    // The exact Codeberg #20 repro: id = ANY(SELECT id FROM u) dropped `u`.
+    let sql = "SELECT * FROM t WHERE id = ANY(SELECT id FROM u)";
+    let result = sql_to_relexpr(sql).expect("= ANY subquery should parse");
+
+    let (sq_type, query) = filter_subquery(&result)
+        .expect("expected a SubQuery in the Filter predicate, not a __eq_any Func");
+    assert_eq!(*sq_type, SubQueryType::Any, "= ANY -> SubQueryType::Any");
+
+    // The relation `u` must still be referenced inside the subquery.
+    assert!(
+        find_node(
+            query,
+            |n| matches!(n, RelExpr::Scan { table, .. } if table == "u")
+        )
+        .is_some(),
+        "subquery relation `u` must be preserved, got: {query:?}"
+    );
+
+    // And it must NOT be the old inert __eq_any Func.
+    if let RelExpr::Filter { predicate, .. } =
+        find_node(&result, |n| matches!(n, RelExpr::Filter { .. })).expect("Filter")
+    {
+        assert!(
+            !is_quantified_func(predicate),
+            "predicate must not be a __<op>_any/_all Func: {predicate:?}"
+        );
+    }
+}
+
+#[test]
+fn test_ne_all_subquery_preserves_relation() {
+    let sql = "SELECT * FROM t WHERE id <> ALL(SELECT id FROM u)";
+    let result = sql_to_relexpr(sql).expect("<> ALL subquery should parse");
+    let (sq_type, query) = filter_subquery(&result).expect("expected a SubQuery");
+    assert_eq!(*sq_type, SubQueryType::All, "<> ALL -> SubQueryType::All");
+    assert!(
+        find_node(
+            query,
+            |n| matches!(n, RelExpr::Scan { table, .. } if table == "u")
+        )
+        .is_some(),
+        "subquery relation `u` must be preserved"
+    );
+}
+
+#[test]
+fn test_gt_any_subquery_preserves_relation() {
+    let sql = "SELECT * FROM t WHERE x > ANY(SELECT y FROM u)";
+    let result = sql_to_relexpr(sql).expect("> ANY subquery should parse");
+    let (sq_type, query) = filter_subquery(&result).expect("expected a SubQuery");
+    assert_eq!(*sq_type, SubQueryType::Any);
+    assert!(
+        find_node(
+            query,
+            |n| matches!(n, RelExpr::Scan { table, .. } if table == "u")
+        )
+        .is_some(),
+        "subquery relation `u` must be preserved"
+    );
+}
+
+#[test]
+fn test_some_subquery_preserves_relation() {
+    // SOME is a synonym for ANY.
+    let sql = "SELECT * FROM t WHERE x = SOME(SELECT y FROM u)";
+    let result = sql_to_relexpr(sql).expect("= SOME subquery should parse");
+    let (sq_type, query) = filter_subquery(&result).expect("expected a SubQuery");
+    assert_eq!(*sq_type, SubQueryType::Any, "SOME is a synonym for ANY");
+    assert!(
+        find_node(
+            query,
+            |n| matches!(n, RelExpr::Scan { table, .. } if table == "u")
+        )
+        .is_some(),
+        "subquery relation `u` must be preserved"
+    );
+}
+
+#[test]
+fn test_any_array_form_still_scalar_array_op() {
+    // The non-subquery array form must NOT become a SubQuery.
+    let sql = "SELECT * FROM t WHERE x = ANY(ARRAY[1,2,3])";
+    let result = sql_to_relexpr(sql).expect("= ANY(ARRAY[...]) should parse");
+    assert!(
+        filter_subquery(&result).is_none(),
+        "array-expr ANY must not be lowered to a SubQuery"
+    );
+}
+
 // ---- JOIN type tests ----
 
 #[test]

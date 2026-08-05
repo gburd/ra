@@ -1431,88 +1431,52 @@ expr(A) ::= expr(B) CONCAT expr(C).
 
 expr(A) ::= expr(B) EQ ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__eq_all", args);
+    A = ra_subquery(ctx.user, 4, S, B);
 }
 expr(A) ::= expr(B) NE ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__ne_all", args);
+    A = ra_subquery(ctx.user, 4, S, B);
 }
 expr(A) ::= expr(B) LT ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__lt_all", args);
+    A = ra_subquery(ctx.user, 4, S, B);
 }
 expr(A) ::= expr(B) LE ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__le_all", args);
+    A = ra_subquery(ctx.user, 4, S, B);
 }
 expr(A) ::= expr(B) GT ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__gt_all", args);
+    A = ra_subquery(ctx.user, 4, S, B);
 }
 expr(A) ::= expr(B) GE ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__ge_all", args);
+    A = ra_subquery(ctx.user, 4, S, B);
 }
 
 expr(A) ::= expr(B) EQ ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__eq_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) NE ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__ne_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) LT ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__lt_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) LE ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__le_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) GT ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__gt_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) GE ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__ge_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 
 /* OP ANY/ALL (array expression): a = ANY(ARRAY[...]) etc. -> ScalarArrayOpExpr */
@@ -1568,45 +1532,27 @@ expr(A) ::= expr(B) GE ALL LPAREN expr(E) RPAREN.
 /* SOME is a synonym for ANY */
 expr(A) ::= expr(B) EQ SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__eq_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) NE SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__ne_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) LT SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__lt_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) LE SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__le_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) GT SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__gt_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 expr(A) ::= expr(B) GE SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    let mut args = ra_list_new(ctx.user);
-    args = ra_list_push(ctx.user, args, B);
-    args = ra_list_push(ctx.user, args, S);
-    A = ra_func(ctx.user, "__ge_any", args);
+    A = ra_subquery(ctx.user, 3, S, B);
 }
 
 /* -- Unary minus --------------------------------------------------- */
