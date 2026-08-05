@@ -433,10 +433,7 @@ fn test_three_part_qualified_column() {
     let sql = "SELECT public.t.x FROM public.t";
     let result = sql_to_relexpr(sql).expect("three-part qualified column should parse");
     // The projected column is `t.x` (table `t`, column `x`).
-    let has_col = find_node(&result, |r| {
-        matches!(r, RelExpr::Project { .. })
-    })
-    .is_some();
+    let has_col = find_node(&result, |r| matches!(r, RelExpr::Project { .. })).is_some();
     assert!(has_col, "expected a Project over the schema-qualified scan");
 }
 
