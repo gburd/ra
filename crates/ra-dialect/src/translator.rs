@@ -551,11 +551,11 @@ mod tests {
             "SELECT dept, COUNT(*) FROM employees \
              GROUP BY dept HAVING COUNT(*) > 5",
         );
-        // ra-parser represents HAVING as a Filter over Aggregate,
-        // so the emitter produces WHERE with the aggregate condition
+        // A HAVING clause (Filter over Aggregate whose predicate references
+        // an aggregate) now renders as a real HAVING, not an invalid WHERE.
         assert!(
-            result.sql.contains("WHERE") && result.sql.contains("COUNT"),
-            "Expected WHERE with COUNT in: {}",
+            result.sql.contains("HAVING") && result.sql.contains("COUNT"),
+            "Expected HAVING with COUNT in: {}",
             result.sql
         );
     }
@@ -568,10 +568,10 @@ mod tests {
              GROUP BY dept HAVING COUNT(*) > 5 \
              AND active = TRUE",
         );
-        // ra-parser represents HAVING as a Filter over Aggregate
+        // A HAVING clause now renders as a real HAVING, not an invalid WHERE.
         assert!(
-            result.sql.contains("WHERE") && result.sql.contains("COUNT"),
-            "Expected WHERE with COUNT in: {}",
+            result.sql.contains("HAVING") && result.sql.contains("COUNT"),
+            "Expected HAVING with COUNT in: {}",
             result.sql
         );
         assert!(
