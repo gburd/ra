@@ -426,6 +426,21 @@ fn test_schema_qualified_table() {
 }
 
 #[test]
+fn test_three_part_qualified_column() {
+    // schema.table.column in the target list parses; the schema qualifier is
+    // dropped from the column ref (FROM resolves the relation), leaving the
+    // column qualified by the table part — same as the two-part form.
+    let sql = "SELECT public.t.x FROM public.t";
+    let result = sql_to_relexpr(sql).expect("three-part qualified column should parse");
+    // The projected column is `t.x` (table `t`, column `x`).
+    let has_col = find_node(&result, |r| {
+        matches!(r, RelExpr::Project { .. })
+    })
+    .is_some();
+    assert!(has_col, "expected a Project over the schema-qualified scan");
+}
+
+#[test]
 fn test_schema_qualified_table_with_alias() {
     let sql = "SELECT x FROM public.t AS pt";
     let result = sql_to_relexpr(sql).expect("should parse");

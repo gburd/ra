@@ -1334,6 +1334,14 @@ expr(A) ::= IDENT(B) DOT IDENT(C).
 %action_rust {
     A = ra_qualified_column(ctx.user, B.text(), C.text());
 }
+/* Three-part qualified column: schema.table.column. The schema qualifier is
+ * dropped from the column ref (the FROM clause resolves the relation); the
+ * column is qualified by the table part, matching the two-part form. */
+expr(A) ::= IDENT(B) DOT IDENT(C) DOT IDENT(D). 
+%action_rust {
+    let _ = &B; /* schema qualifier — resolved via FROM, not carried on the column */
+    A = ra_qualified_column(ctx.user, C.text(), D.text());
+}
 expr(A) ::= ICONST(B). 
 %action_rust {
     A = ra_const_int(ctx.user, B.int_val);
