@@ -716,8 +716,32 @@ proptest! {
                     right,
                 } => is_problematic_expr(left) || is_problematic_expr(right),
                 // Comparison operators (=, !=, <, ...) yield a boolean
-                // cleanly even when both operands are bare columns or
-                // constants. They do not destabilize saturation.
+                // cleanly, EXCEPT when an operand is a constant — in
+                // particular a NULL/const operand (`NULL = id`, `x = NULL`)
+                // feeds the NULL-propagation and constant-folding rewrite
+                // cleanly, EXCEPT when an operand is a NULL constant —
+                // `NULL = id` / `x = NULL` feed the NULL-propagation and
+                // constant-folding rewrite chains, which combine with
+                // set-op/self-join reordering to blow past the iteration
+                // ceiling (Codeberg #19). Flag only NULL-constant operands;
+                // ordinary constant comparisons (`x = 5`) are fine and
+                // flagging them over-rejects the input space.
+                Expr::BinOp {
+                    op:
+                        BinOp::Eq
+                        | BinOp::Ne
+                        | BinOp::Lt
+                        | BinOp::Le
+                        | BinOp::Gt
+                        | BinOp::Ge,
+                    left,
+                    right,
+                } => {
+                    matches!(left.as_ref(), Expr::Const(Const::Null))
+                        || matches!(right.as_ref(), Expr::Const(Const::Null))
+                }
+                // Other comparison/arithmetic operators over bare columns
+                // yield a boolean cleanly and do not destabilize saturation.
                 _ => false,
             }
         }
