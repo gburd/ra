@@ -490,6 +490,12 @@ pub enum Commands {
         /// Output format: text (default) or json.
         #[arg(long, default_value = "text")]
         format: String,
+        /// libpq connection URL for the differential result oracle (tier 0):
+        /// run the original SQL and Ra's re-emitted optimized SQL on this
+        /// PostgreSQL and compare row multisets (RA-STEERING §5, Gate 1).
+        /// Requires the `pg-oracle` build feature.
+        #[arg(long)]
+        db: Option<String>,
     },
     /// Generate shell completion scripts.
     #[command(long_about = "Generate tab-completion scripts for your shell.\n\n\

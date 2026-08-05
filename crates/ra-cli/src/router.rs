@@ -229,9 +229,16 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             report,
             corpus,
             format,
+            db,
         } => {
-            let passed =
-                commands::verify::cmd_verify(tier, report, corpus.as_deref(), &format, cli.quiet)?;
+            let passed = commands::verify::cmd_verify(
+                tier,
+                report,
+                corpus.as_deref(),
+                &format,
+                cli.quiet,
+                db.as_deref(),
+            )?;
             if !passed {
                 std::process::exit(1);
             }
