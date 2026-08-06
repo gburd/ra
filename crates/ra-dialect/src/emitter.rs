@@ -954,10 +954,19 @@ impl EmitContext {
                 let inner = self.emit_expr(&args[0])?;
                 Ok(Some(format!("DISTINCT {inner}")))
             }
-            // EXTRACT(field FROM expr): ra-parser drops the field, encoding
-            // only __extract(expr). We cannot faithfully reconstruct the
-            // field, so surface a clean unsupported-feature error rather than
-            // emitting invalid SQL.
+            // EXTRACT(field FROM expr): the parser encodes it as
+            // __extract_<field>(expr) (field lower-cased; upper-cased here).
+            // Lower it back to a real EXTRACT(field FROM expr).
+            _ if name.len() > "__EXTRACT_".len()
+                && name.starts_with("__EXTRACT_")
+                && args.len() == 1 =>
+            {
+                let field = &name["__EXTRACT_".len()..];
+                let inner = self.emit_expr(&args[0])?;
+                Ok(Some(format!("EXTRACT({field} FROM {inner})")))
+            }
+            // Legacy encoding without the field (older parses) — cannot
+            // faithfully reconstruct, so surface a clean unsupported error.
             "__EXTRACT" => Err(TranslationError::UnsupportedFeature {
                 dialect: self.target,
                 feature: "EXTRACT (field lost during parsing)".to_string(),
@@ -1386,6 +1395,28 @@ mod tests {
             table: "users".to_string(),
             alias: None,
         }
+    }
+
+    #[test]
+    fn emit_extract_field_roundtrip() {
+        // EXTRACT(YEAR FROM d) parses to __extract_year(d); the emitter must
+        // lower it back to EXTRACT(YEAR FROM d), not error out (Codeberg #22).
+        let expr = RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: Expr::Function {
+                    name: "__extract_year".to_string(),
+                    args: vec![Expr::Column(ColumnRef::new("d"))],
+                },
+                alias: None,
+            }],
+            input: Box::new(simple_scan()),
+        };
+        let result = emit_sql(&expr, Dialect::PostgreSql).expect("should emit");
+        assert!(
+            result.sql.to_uppercase().contains("EXTRACT(YEAR FROM"),
+            "expected EXTRACT(YEAR FROM ...) in: {}",
+            result.sql
+        );
     }
 
     #[test]

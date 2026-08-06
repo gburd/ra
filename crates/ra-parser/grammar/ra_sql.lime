@@ -2078,14 +2078,15 @@ expr(A) ::= IDENT SCONST(B).
 }
 
 /* -- EXTRACT function ---------------------------------------------- */
-/* EXTRACT(field FROM expr) — encoded as __extract_<field>(expr). */
+/* EXTRACT(field FROM expr) — encoded as __extract_<field>(expr) so the field
+ * survives to the emitter, which lowers it back to EXTRACT(field FROM expr). */
 
 expr(A) ::= EXTRACT LPAREN IDENT(F) FROM expr(E) RPAREN. 
 %action_rust {
     let mut l = ra_list_new(ctx.user);
     l = ra_list_push(ctx.user, l, E);
-    A = ra_func(ctx.user, "__extract", l);
-    let _ = &F;
+    let fname = format!("__extract_{}", F.text().to_lowercase());
+    A = ra_func(ctx.user, &fname, l);
 }
 
 /* -- SUBSTRING function -------------------------------------------- */
