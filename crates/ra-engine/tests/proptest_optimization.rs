@@ -840,7 +840,8 @@ fn contains_joins(expr: &RelExpr) -> bool {
         | RelExpr::VectorFilter { input, .. }
         | RelExpr::RowPattern { input, .. }
         | RelExpr::ParallelAggregate { input, .. }
-        | RelExpr::Gather { input, .. } => contains_joins(input),
+        | RelExpr::Gather { input, .. }
+        | RelExpr::SubqueryAlias { input, .. } => contains_joins(input),
         RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
         | RelExpr::Except { left, right, .. } => contains_joins(left) || contains_joins(right),
@@ -1071,7 +1072,8 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         | RelExpr::DistinctOn { input, .. }
         | RelExpr::RowPattern { input, .. }
         | RelExpr::ParallelAggregate { input, .. }
-        | RelExpr::Gather { input, .. } => {
+        | RelExpr::Gather { input, .. }
+        | RelExpr::SubqueryAlias { input, .. } => {
             collect_tables_rec(input, out);
         }
         RelExpr::Join { left, right, .. }

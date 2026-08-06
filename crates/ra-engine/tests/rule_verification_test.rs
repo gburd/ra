@@ -73,7 +73,8 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::VectorFilter { input, .. }
         | RelExpr::RowPattern { input, .. }
         | RelExpr::ParallelAggregate { input, .. }
-        | RelExpr::Gather { input, .. } => collect_tables_rec(input, out),
+        | RelExpr::Gather { input, .. }
+        | RelExpr::SubqueryAlias { input, .. } => collect_tables_rec(input, out),
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
@@ -169,7 +170,8 @@ fn depth(expr: &RelExpr) -> usize {
         | RelExpr::VectorFilter { input, .. }
         | RelExpr::RowPattern { input, .. }
         | RelExpr::ParallelAggregate { input, .. }
-        | RelExpr::Gather { input, .. } => 1 + depth(input),
+        | RelExpr::Gather { input, .. }
+        | RelExpr::SubqueryAlias { input, .. } => 1 + depth(input),
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }

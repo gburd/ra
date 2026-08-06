@@ -228,6 +228,7 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::Merge { target, .. } => format!("Merge({target})"),
         RelExpr::GraphTable { graph, .. } => format!("GraphTable({graph})"),
         RelExpr::DistinctOn { .. } => "DistinctOn".to_string(),
+        RelExpr::SubqueryAlias { alias, .. } => format!("SubqueryAlias({alias})"),
     }
 }
 

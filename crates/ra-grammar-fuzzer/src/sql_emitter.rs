@@ -235,6 +235,11 @@ impl SqlEmitter {
         match expr {
             RelExpr::Scan { table, alias } => self.emit_scan(table, alias.as_deref()),
 
+            RelExpr::SubqueryAlias { alias, input } => {
+                let src = self.emit_subquery(input);
+                format!("{src} AS {alias}")
+            }
+
             RelExpr::Project { columns, input } => {
                 let cols = self.emit_projection_list(columns);
                 let src = self.emit_subquery(input);

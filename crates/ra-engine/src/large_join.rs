@@ -318,7 +318,8 @@ impl LargeJoinOptimizer {
             | RelExpr::ParallelAggregate { input, .. }
             | RelExpr::Gather { input, .. }
             | RelExpr::TopK { input, .. }
-            | RelExpr::VectorFilter { input, .. } => Self::count_tables(input),
+            | RelExpr::VectorFilter { input, .. }
+            | RelExpr::SubqueryAlias { input, .. } => Self::count_tables(input),
 
             RelExpr::BitmapHeapScan { bitmap, .. } => Self::count_tables(bitmap),
 
@@ -397,7 +398,8 @@ impl LargeJoinOptimizer {
             | RelExpr::ParallelAggregate { input, .. }
             | RelExpr::Gather { input, .. }
             | RelExpr::TopK { input, .. }
-            | RelExpr::VectorFilter { input, .. } => {
+            | RelExpr::VectorFilter { input, .. }
+            | RelExpr::SubqueryAlias { input, .. } => {
                 Self::extract_joins_recursive(input, joins);
             }
 

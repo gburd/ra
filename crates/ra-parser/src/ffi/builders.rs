@@ -747,6 +747,31 @@ pub unsafe fn ra_window(
     })
 }
 
+/// Build a `SubqueryAlias` node: a named derived table `(subquery) AS alias`.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `alias` must be null or a valid NUL-terminated C string.
+/// - `input` must be a valid tagged pointer or null.
+pub unsafe fn ra_subquery_alias(
+    state: *mut RaParseState,
+    alias: *const c_char,
+    input: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let alias_name = unsafe { c_str_to_string(alias) };
+    let Some(input_rel) = decode_rel(st, input) else {
+        st.push_error("ra_subquery_alias: invalid input node".to_owned());
+        return std::ptr::null_mut();
+    };
+    st.push_rel(RelExpr::SubqueryAlias {
+        alias: alias_name,
+        input: Box::new(input_rel),
+    })
+}
+
 /// Build a `Distinct` node.
 ///
 /// # Safety

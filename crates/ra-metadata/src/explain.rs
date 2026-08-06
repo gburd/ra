@@ -1819,7 +1819,9 @@ pub fn relexpr_to_explain_node(expr: &ra_core::algebra::RelExpr) -> ExplainNode 
             child
         }
 
-        RelExpr::Project { input, .. } => relexpr_to_explain_node(input),
+        RelExpr::Project { input, .. } | RelExpr::SubqueryAlias { input, .. } => {
+            relexpr_to_explain_node(input)
+        }
 
         RelExpr::Join {
             join_type,

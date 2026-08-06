@@ -124,6 +124,10 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             keys.len().hash(hasher);
             hash_rel_expr(input, hasher);
         }
+        RelExpr::SubqueryAlias { alias, input } => {
+            alias.hash(hasher);
+            hash_rel_expr(input, hasher);
+        }
         RelExpr::Limit {
             count,
             offset,

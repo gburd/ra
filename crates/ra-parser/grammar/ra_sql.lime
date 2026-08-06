@@ -618,21 +618,23 @@ table_ref(A) ::= IDENT(B) DOT IDENT(C) IDENT(D).
     A = ra_scan_alias(ctx.user, &name, D.text());
 }
 
-/* Derived table (subquery in FROM) */
-table_ref(A) ::= LPAREN select_stmt(B) RPAREN AS IDENT. %action_rust {
-    A = B;
+/* Derived table (subquery in FROM) — wrap in SubqueryAlias so the alias
+ * names a real scope for outer `alias.col` refs (RA-STEERING #23). */
+table_ref(A) ::= LPAREN select_stmt(B) RPAREN AS IDENT(C). %action_rust {
+    A = ra_subquery_alias(ctx.user, C.text(), B);
 }
-table_ref(A) ::= LPAREN select_stmt(B) RPAREN IDENT. %action_rust {
-    A = B;
+table_ref(A) ::= LPAREN select_stmt(B) RPAREN IDENT(C). %action_rust {
+    A = ra_subquery_alias(ctx.user, C.text(), B);
 }
 
 /* LATERAL subquery (treated as a derived table; the optimizer handles
- * the correlation via decorrelation) */
-table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN AS IDENT. %action_rust {
-    A = B;
+ * the correlation via decorrelation). Still wrap in SubqueryAlias so the
+ * alias resolves; LATERAL correlation is handled elsewhere. */
+table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN AS IDENT(C). %action_rust {
+    A = ra_subquery_alias(ctx.user, C.text(), B);
 }
-table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN IDENT. %action_rust {
-    A = B;
+table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN IDENT(C). %action_rust {
+    A = ra_subquery_alias(ctx.user, C.text(), B);
 }
 table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN. %action_rust {
     A = B;

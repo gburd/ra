@@ -190,7 +190,8 @@ impl FeatureSchema {
             | RelExpr::Distinct { input, .. }
             | RelExpr::DistinctOn { input, .. }
             | RelExpr::RowPattern { input, .. }
-            | RelExpr::TopK { input, .. } => {
+            | RelExpr::TopK { input, .. }
+            | RelExpr::SubqueryAlias { input, .. } => {
                 features[OP_TYPE_OFFSET + 2] = 1.0;
                 self.encode_expr(input, stats, features);
             }

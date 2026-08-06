@@ -73,7 +73,8 @@ fn estimate_heuristic(expr: &RelExpr, stats: &dyn StatisticsProvider) -> f64 {
         | RelExpr::Sort { input, .. }
         | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::Gather { input, .. } => estimate_heuristic(input, stats),
+        | RelExpr::Gather { input, .. }
+        | RelExpr::SubqueryAlias { input, .. } => estimate_heuristic(input, stats),
         RelExpr::Join {
             join_type,
             left,
@@ -326,7 +327,8 @@ fn collect_tables_recursive(
         | RelExpr::ParallelAggregate { input, .. }
         | RelExpr::Gather { input, .. }
         | RelExpr::TopK { input, .. }
-        | RelExpr::VectorFilter { input, .. } => {
+        | RelExpr::VectorFilter { input, .. }
+        | RelExpr::SubqueryAlias { input, .. } => {
             collect_tables_recursive(input, provider, map);
         }
         RelExpr::Join { left, right, .. }

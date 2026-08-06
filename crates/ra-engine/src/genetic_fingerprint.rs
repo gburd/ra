@@ -164,7 +164,8 @@ impl FingerprintCollector {
             | RelExpr::Window { input, .. }
             | RelExpr::Gather { input, .. }
             | RelExpr::TopK { input, .. }
-            | RelExpr::VectorFilter { input, .. } => {
+            | RelExpr::VectorFilter { input, .. }
+            | RelExpr::SubqueryAlias { input, .. } => {
                 self.visit(input);
             }
             RelExpr::Join {

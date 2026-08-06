@@ -72,6 +72,10 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             columns: convert_projection_list(nodes, id(*cols_id))?,
             input: Box::new(convert_node(nodes, id(*input_id))?),
         }),
+        RelLang::SubqueryAlias([alias_id, input_id]) => Ok(RelExpr::SubqueryAlias {
+            alias: get_symbol(nodes, id(*alias_id))?,
+            input: Box::new(convert_node(nodes, id(*input_id))?),
+        }),
         RelLang::Join(ids)
         // Physical join operators introduced during saturation extract back to
         // a logical Join; plan_builder re-selects the physical method. Mirrors

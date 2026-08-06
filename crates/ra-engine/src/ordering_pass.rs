@@ -89,6 +89,16 @@ fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, Re
             (child_props, node)
         }
 
+        // Derived-table alias: transparent to ordering; rewrite child, keep wrapper.
+        RelExpr::SubqueryAlias { alias, input } => {
+            let (child_props, rewritten_child) = propagate_inner(*input, facts);
+            let node = RelExpr::SubqueryAlias {
+                alias,
+                input: Box::new(rewritten_child),
+            };
+            (child_props, node)
+        }
+
         // Project: ordering prefix preserved for surviving columns
         RelExpr::Project { columns, input } => {
             let (child_props, rewritten_child) = propagate_inner(*input, facts);

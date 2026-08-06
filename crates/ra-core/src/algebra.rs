@@ -233,6 +233,19 @@ pub enum RelExpr {
         input: Box<RelExpr>,
     },
 
+    /// Named derived table (subquery in FROM with an alias): `FROM (subquery)
+    /// alias`. Exposes `input`'s output columns under the qualifier `alias`, so
+    /// the outer query can reference them as `alias.col`. Acts as an
+    /// optimization barrier: the optimizer optimizes `input` independently and
+    /// does NOT push the outer query's predicates/joins across it, matching
+    /// PostgreSQL derived-table scoping.
+    SubqueryAlias {
+        /// The alias naming this derived table.
+        alias: String,
+        /// The subquery relation whose columns are exposed under `alias`.
+        input: Box<RelExpr>,
+    },
+
     /// `DISTINCT ON (keys)` — keep the first row of each group of equal `on`
     /// keys, in the input's row order. The input must already be sorted so that
     /// rows sharing the `on` keys are adjacent (PostgreSQL requires the leading
@@ -795,6 +808,15 @@ impl RelExpr {
         }
     }
 
+    /// Wrap this expression as a named derived table (optimization barrier).
+    #[must_use]
+    pub fn subquery_alias(self, alias: impl Into<String>) -> Self {
+        Self::SubqueryAlias {
+            alias: alias.into(),
+            input: Box::new(self),
+        }
+    }
+
     /// Create a standalone unnest operator.
     #[must_use]
     pub fn unnest(expr: Expr, alias: Option<String>) -> Self {
@@ -853,6 +875,7 @@ impl RelExpr {
             | Self::Limit { input, .. }
             | Self::Window { input, .. }
             | Self::Distinct { input, .. }
+            | Self::SubqueryAlias { input, .. }
             | Self::DistinctOn { input, .. }
             | Self::RowPattern { input, .. }
             | Self::ParallelAggregate { input, .. }
@@ -989,6 +1012,7 @@ impl RelExpr {
             }
             Self::Limit { input, .. }
             | Self::Distinct { input, .. }
+            | Self::SubqueryAlias { input, .. }
             | Self::DistinctOn { input, .. }
             | Self::Gather { input, .. } => {
                 input.collect_columns(out);
@@ -1215,6 +1239,7 @@ impl RelExpr {
             | Self::Limit { input, .. }
             | Self::Window { input, .. }
             | Self::Distinct { input, .. }
+            | Self::SubqueryAlias { input, .. }
             | Self::DistinctOn { input, .. }
             | Self::IncrementalSort { input, .. }
             | Self::RowPattern { input, .. }

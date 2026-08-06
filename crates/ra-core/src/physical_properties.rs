@@ -41,7 +41,10 @@ pub fn derive_properties(expr: &RelExpr, input_props: &[&PropertySet]) -> Proper
         | RelExpr::GraphTable { .. }
         | RelExpr::Except { .. } => PropertySet::new(),
 
-        RelExpr::Filter { .. } | RelExpr::Limit { .. } | RelExpr::Window { .. } => {
+        RelExpr::Filter { .. }
+        | RelExpr::Limit { .. }
+        | RelExpr::Window { .. }
+        | RelExpr::SubqueryAlias { .. } => {
             // These operators preserve input properties.
             input_props
                 .first()

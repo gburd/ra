@@ -136,7 +136,8 @@ fn compare_node(
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::TopK { input, .. }
-        | RelExpr::VectorFilter { input, .. } => {
+        | RelExpr::VectorFilter { input, .. }
+        | RelExpr::SubqueryAlias { input, .. } => {
             compare_node(input, db, agreements, disagreements);
         }
         RelExpr::Union { left, right, .. }

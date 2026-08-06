@@ -109,6 +109,18 @@ impl EmitContext {
 
     fn flatten_into(&mut self, expr: &RelExpr, sel: &mut Select) -> Result<(), TranslationError> {
         match expr {
+            // A named derived table: `FROM (<input>) AS alias`. Emit the input
+            // as a subquery carrying the REAL alias so outer `alias.col`
+            // references resolve. It is an optimization/scope barrier, so it
+            // becomes its own FROM item.
+            RelExpr::SubqueryAlias { alias, input } => {
+                let sql = self.emit_rel_expr(input)?;
+                sel.from = Some(FromItem::Subquery {
+                    sql,
+                    alias: alias.clone(),
+                });
+                Ok(())
+            }
             RelExpr::Project { columns, input } => {
                 if sel.projection.is_some() {
                     // A projection is already fixed above us; this inner
@@ -395,6 +407,15 @@ impl EmitContext {
 
     /// Render any relation as a derived-table subquery `(SELECT …) AS alias`.
     fn source_from(&mut self, expr: &RelExpr) -> Result<FromItem, TranslationError> {
+        // A named derived table keeps its real alias; anything else gets a
+        // fresh `_sqN`.
+        if let RelExpr::SubqueryAlias { alias, input } = expr {
+            let sql = self.emit_rel_expr(input)?;
+            return Ok(FromItem::Subquery {
+                sql,
+                alias: alias.clone(),
+            });
+        }
         let alias = self.fresh_alias();
         let sql = self.emit_rel_expr(expr)?;
         Ok(FromItem::Subquery { sql, alias })
@@ -1395,6 +1416,27 @@ mod tests {
             table: "users".to_string(),
             alias: None,
         }
+    }
+
+    #[test]
+    fn emit_subquery_alias_uses_real_alias() {
+        // SubqueryAlias { alias, input } emits `(<input>) AS alias` so outer
+        // references resolve (Codeberg #23).
+        let expr = RelExpr::SubqueryAlias {
+            alias: "top_orders".to_string(),
+            input: Box::new(simple_scan()),
+        };
+        let result = emit_sql(&expr, Dialect::PostgreSql).expect("should emit");
+        assert!(
+            result.sql.contains("top_orders"),
+            "expected the real derived-table alias in: {}",
+            result.sql
+        );
+        assert!(
+            !result.sql.contains("_sq"),
+            "should use the real alias, not a synthetic _sqN: {}",
+            result.sql
+        );
     }
 
     #[test]

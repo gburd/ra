@@ -177,6 +177,7 @@ impl FederatedOptimizer {
             RelExpr::Filter { input, .. } => {
                 capabilities.supports_filter_pushdown && self.can_ship_query(input, capabilities)
             }
+            RelExpr::SubqueryAlias { input, .. } => self.can_ship_query(input, capabilities),
             RelExpr::Project { input, .. } => {
                 capabilities.supports_project_pushdown && self.can_ship_query(input, capabilities)
             }

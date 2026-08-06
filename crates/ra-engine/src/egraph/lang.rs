@@ -42,6 +42,10 @@ define_language! {
         "cte" = CTE([Id; 3]),
         "window" = Window([Id; 2]),
         "distinct-rel" = DistinctRel([Id; 1]),
+        // Named derived table `(subquery) AS alias`: children [alias-symbol,
+        // input]. Optimization barrier — a distinct node so no rewrite fires
+        // across it (RA-STEERING #23).
+        "subquery-alias" = SubqueryAlias([Id; 2]),
         "values" = Values(Box<[Id]>),
         "values-row" = ValuesRow(Box<[Id]>),
 

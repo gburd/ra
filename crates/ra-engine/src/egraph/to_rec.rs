@@ -138,6 +138,11 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let input_id = add_rel_expr(rec, input)?;
             Ok(rec.add(RelLang::DistinctRel([input_id])))
         }
+        RelExpr::SubqueryAlias { alias, input } => {
+            let alias_id = add_symbol(rec, alias);
+            let input_id = add_rel_expr(rec, input)?;
+            Ok(rec.add(RelLang::SubqueryAlias([alias_id, input_id])))
+        }
         // DISTINCT ON has no e-graph representation; it is built directly by the
         // plan builder and preserved by `optimize_preserving_distinct_on`, so it
         // should never reach conversion. Defer if it somehow does.

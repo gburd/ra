@@ -221,7 +221,8 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
         | ra_core::algebra::RelExpr::ParallelAggregate { input, .. }
         | ra_core::algebra::RelExpr::Gather { input, .. }
         | ra_core::algebra::RelExpr::TopK { input, .. }
-        | ra_core::algebra::RelExpr::VectorFilter { input, .. } => {
+        | ra_core::algebra::RelExpr::VectorFilter { input, .. }
+        | ra_core::algebra::RelExpr::SubqueryAlias { input, .. } => {
             collect_tables_recursive(input, out);
         }
         ra_core::algebra::RelExpr::Join { left, right, .. }

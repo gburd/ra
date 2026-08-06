@@ -351,6 +351,22 @@ fn test_subquery_in_from() {
 }
 
 #[test]
+fn test_derived_table_alias_preserved() {
+    // FROM (subquery) alias must produce a SubqueryAlias carrying the alias,
+    // so outer `alias.col` references resolve (Codeberg #23).
+    let sql = "SELECT t.id FROM (SELECT id, name FROM users) t";
+    let plan = sql_to_relexpr(sql).expect("derived table should parse");
+    let found = find_node(
+        &plan,
+        |r| matches!(r, RelExpr::SubqueryAlias { alias, .. } if alias == "t"),
+    );
+    assert!(
+        found.is_some(),
+        "expected a SubqueryAlias{{alias:\"t\"}} node, got: {plan:?}"
+    );
+}
+
+#[test]
 fn test_subquery_in_where() {
     let sql = "SELECT * FROM orders \
                WHERE customer_id IN \

@@ -206,6 +206,14 @@ fn from_node(
                 input: Box::new(input),
             })
         }
+        RelLang::SubqueryAlias([alias_id, input_id]) => {
+            let alias = extract_symbol(egraph, *alias_id)?;
+            let input = from_egraph_node(egraph, *input_id)?;
+            Ok(RelExpr::SubqueryAlias {
+                alias,
+                input: Box::new(input),
+            })
+        }
         RelLang::Values(row_ids) => {
             let mut rows = Vec::with_capacity(row_ids.len());
             for &row_id in row_ids {

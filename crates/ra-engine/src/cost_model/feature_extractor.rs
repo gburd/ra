@@ -144,7 +144,8 @@ fn collect_table_names_inner(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::ParallelAggregate { input, .. }
         | RelExpr::TopK { input, .. }
         | RelExpr::VectorFilter { input, .. }
-        | RelExpr::IncrementalSort { input, .. } => collect_table_names_inner(input, out),
+        | RelExpr::IncrementalSort { input, .. }
+        | RelExpr::SubqueryAlias { input, .. } => collect_table_names_inner(input, out),
         RelExpr::Join { left, right, .. }
         | RelExpr::ParallelHashJoin { left, right, .. }
         | RelExpr::Union { left, right, .. }
@@ -278,6 +279,9 @@ impl FeatureExtractor {
                 self.visit(input);
             }
 
+            RelExpr::SubqueryAlias { input, .. } => {
+                self.visit(input);
+            }
             RelExpr::Project { input, columns } => {
                 // Check columns for aggregate expressions (like COUNT, SUM, etc.)
                 for column in columns {
