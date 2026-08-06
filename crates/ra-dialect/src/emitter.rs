@@ -992,8 +992,50 @@ impl EmitContext {
                 dialect: self.target,
                 feature: "EXTRACT (field lost during parsing)".to_string(),
             }),
+            // GROUP BY ROLLUP(...) / CUBE(...): the parser marks these as
+            // __rollup(cols...) / __cube(cols...). Lower back to real SQL.
+            "__ROLLUP" | "__CUBE" => {
+                let kw = if name == "__ROLLUP" { "ROLLUP" } else { "CUBE" };
+                let cols: Vec<String> = args
+                    .iter()
+                    .map(|a| self.emit_expr(a))
+                    .collect::<Result<_, _>>()?;
+                Ok(Some(format!("{kw} ({})", cols.join(", "))))
+            }
+            // GROUP BY GROUPING SETS ((a,b),(a),()): the parser marks it as
+            // __grouping_sets(__gs_item(a,b), __gs_item(a), __gs_item()).
+            "__GROUPING_SETS" => {
+                let mut sets = Vec::with_capacity(args.len());
+                for a in args {
+                    let inner = self.emit_grouping_set_item(a)?;
+                    sets.push(inner);
+                }
+                Ok(Some(format!("GROUPING SETS ({})", sets.join(", "))))
+            }
+            // A bare __gs_item outside GROUPING SETS: render its columns as a
+            // parenthesized set (defensive; normally consumed by the arm above).
+            "__GS_ITEM" => Ok(Some(self.emit_grouping_set_item_cols(args)?)),
             _ => Ok(None),
         }
+    }
+
+    /// Render one grouping-set item: `__gs_item(a, b)` -> `(a, b)`, `()`.
+    fn emit_grouping_set_item(&mut self, expr: &Expr) -> Result<String, TranslationError> {
+        match expr {
+            Expr::Function { name, args } if name.eq_ignore_ascii_case("__gs_item") => {
+                self.emit_grouping_set_item_cols(args)
+            }
+            // A single bare column set (not wrapped) — parenthesize it.
+            other => Ok(format!("({})", self.emit_expr(other)?)),
+        }
+    }
+
+    fn emit_grouping_set_item_cols(&mut self, args: &[Expr]) -> Result<String, TranslationError> {
+        let cols: Vec<String> = args
+            .iter()
+            .map(|a| self.emit_expr(a))
+            .collect::<Result<_, _>>()?;
+        Ok(format!("({})", cols.join(", ")))
     }
 
     /// Lower a `__window_<FUNC>` marker (with `__window_partition` /
@@ -1349,13 +1391,30 @@ fn arm_is_flat(expr: &RelExpr) -> bool {
 
 /// Build an aggregate's SELECT list from its grouping keys followed by its
 /// aggregate expressions (falling back to `*` when both are empty).
+/// Expand a `group_by` item into the columns that appear in the `SELECT` list.
+/// Plain expressions map to themselves; `ROLLUP`/`CUBE`/`GROUPING SETS` markers
+/// expand to their underlying grouping columns (deduplication is left to PG).
+fn grouping_select_columns(g: &Expr) -> Vec<Expr> {
+    match g {
+        Expr::Function { name, args }
+            if matches!(
+                name.to_uppercase().as_str(),
+                "__ROLLUP" | "__CUBE" | "__GROUPING_SETS" | "__GS_ITEM"
+            ) =>
+        {
+            args.iter().flat_map(grouping_select_columns).collect()
+        }
+        other => vec![other.clone()],
+    }
+}
+
 fn aggregate_select_list(group_by: &[Expr], aggregates: &[AggregateExpr]) -> Vec<ProjectionColumn> {
+    // ROLLUP/CUBE/GROUPING SETS markers appear in the group_by list; the SELECT
+    // list must show their underlying grouping columns, not the marker call.
     let mut cols: Vec<ProjectionColumn> = group_by
         .iter()
-        .map(|g| ProjectionColumn {
-            expr: g.clone(),
-            alias: None,
-        })
+        .flat_map(grouping_select_columns)
+        .map(|expr| ProjectionColumn { expr, alias: None })
         .collect();
     for agg in aggregates {
         cols.push(ProjectionColumn {
@@ -1416,6 +1475,43 @@ mod tests {
             table: "users".to_string(),
             alias: None,
         }
+    }
+
+    #[test]
+    fn emit_rollup_and_grouping_sets_lower_to_sql() {
+        use ra_core::algebra::{AggregateExpr, AggregateFunction};
+        // GROUP BY ROLLUP(a, b): parser marks group_by as __rollup(a, b).
+        let rollup = Expr::Function {
+            name: "__rollup".to_string(),
+            args: vec![
+                Expr::Column(ColumnRef::new("a")),
+                Expr::Column(ColumnRef::new("b")),
+            ],
+        };
+        let agg = RelExpr::Aggregate {
+            group_by: vec![rollup],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: None,
+                distinct: false,
+                alias: Some("c".to_string()),
+            }],
+            input: Box::new(simple_scan()),
+        };
+        let sql = emit_sql(&agg, Dialect::PostgreSql).expect("should emit");
+        assert!(
+            sql.sql
+                .to_uppercase()
+                .contains("GROUP BY ROLLUP (\"A\", \"B\")")
+                || sql.sql.to_uppercase().contains("ROLLUP (\"A\", \"B\")"),
+            "expected GROUP BY ROLLUP (a, b), got: {}",
+            sql.sql
+        );
+        assert!(
+            !sql.sql.contains("__rollup"),
+            "the __rollup marker must not leak into SQL: {}",
+            sql.sql
+        );
     }
 
     #[test]
