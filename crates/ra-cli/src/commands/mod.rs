@@ -2,11 +2,13 @@
 
 pub mod analyze;
 pub mod compare;
+pub mod cost;
 pub mod egraph;
 pub mod explain;
 pub mod format;
 pub mod gather_metadata;
 pub mod list;
+pub mod model;
 pub mod monitor;
 pub mod optimize;
 pub mod parse;

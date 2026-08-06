@@ -245,6 +245,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             Ok(())
         }
         Commands::Route { query, format } => commands::route::cmd_route(&query, &format),
+        Commands::Cost { query, format } => commands::cost::cmd_cost(&query, &format),
+        Commands::Model { path, format } => commands::model::cmd_model(path.as_deref(), &format),
         Commands::Rules(sub) => dispatch_rules(sub, cli.verbose),
         Commands::Egraph {
             query,

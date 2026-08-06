@@ -524,6 +524,42 @@ pub enum Commands {
     /// Rule-explanation commands (why did rules fire?).
     #[command(subcommand)]
     Rules(RulesCommands),
+    /// Inspect the cost model's view of a query: 16-dim cost vector + plan cost.
+    #[command(
+        long_about = "Extract the 16-D optimization features from a query, run the \
+            trained BitNet cost model's predict_all to expose the full 16-dim cost \
+            vector (all dimensions labeled), and report the scalar plan cost: the \
+            model's own prediction for the parsed plan vs the bounded optimizer's \
+            cost for the plan it extracts.\n\n\
+            Examples:\n  \
+            ra cost 'SELECT * FROM a JOIN b ON a.id=b.id WHERE a.x>5'\n  \
+            ra cost 'SELECT 1' --format json"
+    )]
+    Cost {
+        /// SQL query to analyze.
+        query: String,
+        /// Output format: text (default) or json.
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
+    /// Inspect the BitNet cost model: sizes, samples, normalization, live sample.
+    #[command(long_about = "Load the committed BitNet cost model \
+            (models/cost_model.bitnet.json, override with --path) and report its \
+            weight/model sizes, training-sample count, layer dimensions, scalar \
+            head, per-feature normalization table, and a live predict_all sample. \
+            MAPE is a training-loop metric and is not persisted in the model file.\n\n\
+            Examples:\n  \
+            ra model\n  \
+            ra model --path models/cost_model.round5.json\n  \
+            ra model --format json")]
+    Model {
+        /// Path to a model JSON file (default: models/cost_model.bitnet.json).
+        #[arg(long)]
+        path: Option<String>,
+        /// Output format: text (default) or json.
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
     /// Inspect the equality-saturation e-graph for a query.
     #[command(
         long_about = "Build the e-graph for a query, run equality saturation with the \

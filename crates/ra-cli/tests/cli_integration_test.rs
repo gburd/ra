@@ -551,3 +551,59 @@ fn optimize_plan_advice_garbage_is_ignored() {
         .assert()
         .success();
 }
+
+// ── cost command (RA-STEERING §7.2, #10) ─────────────────────
+
+#[test]
+fn cost_prints_labeled_cost_vector_and_plan_cost() {
+    ra_cli()
+        .args(["cost", "SELECT * FROM a JOIN b ON a.id=b.id WHERE a.x>5"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Predicted cost vector")
+                .and(predicate::str::contains("cpu_time_ms"))
+                .and(predicate::str::contains("Optimized plan cost")),
+        );
+}
+
+#[test]
+fn cost_json_is_valid() {
+    let out = ra_cli()
+        .args(["cost", "SELECT 1", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).expect("valid JSON on stdout");
+    assert_eq!(
+        v["cost_vector"].as_array().map(Vec::len),
+        Some(16),
+        "cost vector should have 16 labeled dims"
+    );
+}
+
+// ── model command (RA-STEERING §7.2, #10) ────────────────────
+
+#[test]
+fn model_prints_sizes_and_samples() {
+    ra_cli().args(["model"]).assert().success().stdout(
+        predicate::str::contains("weights_only_bytes")
+            .and(predicate::str::contains("model_size_bytes"))
+            .and(predicate::str::contains("samples_trained"))
+            .and(predicate::str::contains("MAPE")),
+    );
+}
+
+#[test]
+fn model_json_is_valid() {
+    let out = ra_cli()
+        .args(["model", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let _: serde_json::Value = serde_json::from_slice(&out).expect("valid JSON on stdout");
+}
