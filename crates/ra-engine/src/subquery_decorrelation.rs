@@ -482,6 +482,22 @@ fn and_exprs(a: Expr, b: Expr) -> Expr {
 
 fn build_in_condition(test_expr: Option<&Expr>, subquery: &RelExpr) -> Expr {
     let subquery_col = first_output_column(subquery);
+
+    // The grammar carries an ordered comparison operator (`> ANY`, `<= ALL`, ...)
+    // as a template `BinOp { op, left, right: __subquery_operand }`. When we see
+    // that sentinel on the right, thread the real operator through and substitute
+    // the sub-query's output column for the sentinel. Anything else (plain IN /
+    // `= ANY`, whose test_expr is a bare value) keeps the historical `= col`.
+    if let Some(Expr::BinOp { op, left, right }) = test_expr {
+        if matches!(right.as_ref(), Expr::Column(c) if c.column == "__subquery_operand") {
+            return Expr::BinOp {
+                op: *op,
+                left: left.clone(),
+                right: Box::new(subquery_col),
+            };
+        }
+    }
+
     let left = test_expr.cloned().unwrap_or(Expr::Const(Const::Bool(true)));
 
     Expr::BinOp {
@@ -1585,6 +1601,137 @@ mod tests {
             }
         );
         assert!(has_anti, "expected AntiJoin, got {result:?}");
+    }
+
+    /// RA-STEERING #21: `x > ANY (subq)` must decorrelate to a `SemiJoin`
+    /// whose condition uses the CARRIED comparison operator (`>`), not `=`.
+    /// The grammar carries the op as a template
+    /// `BinOp { op: Gt, left: x, right: Column("__subquery_operand") }`;
+    /// `build_in_condition` substitutes the sub-query column for the sentinel
+    /// while preserving the op. Regression: all six ordered ops used to
+    /// collapse to `=`, producing wrong rows (oracle: `gt_any` 4 rows -> 0).
+    #[test]
+    fn gt_any_threads_operator_into_semi_join() {
+        let subquery = RelExpr::scan("customer").project(vec![ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new("c_acctbal")),
+            alias: None,
+        }]);
+        let template = Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::qualified("s", "s_acctbal"))),
+            right: Box::new(Expr::Column(ColumnRef::new("__subquery_operand"))),
+        };
+        let predicate = Expr::SubQuery {
+            subquery_type: SubQueryType::Any,
+            query: Box::new(subquery),
+            test_expr: Some(Box::new(template)),
+        };
+        let input = RelExpr::scan("supplier").filter(predicate);
+
+        let result = decorrelate(&input);
+        let RelExpr::Join {
+            join_type: JoinType::Semi,
+            condition,
+            ..
+        } = &result
+        else {
+            panic!("expected SemiJoin, got {result:?}");
+        };
+        assert!(
+            condition_uses_op(condition, BinOp::Gt),
+            "SemiJoin condition must use `>` (Gt), not `=`: {condition:?}"
+        );
+        assert!(
+            !condition_uses_op(condition, BinOp::Eq) || condition_uses_op(condition, BinOp::Gt),
+            "the comparison against the sub-query column must not be `=`: {condition:?}"
+        );
+        // The sentinel column name must be fully substituted away.
+        assert!(
+            !condition_mentions_sentinel(condition),
+            "__subquery_operand sentinel must be replaced by the sub-query column: {condition:?}"
+        );
+    }
+
+    /// RA-STEERING #21: `x > ALL (subq)` must decorrelate to an `AntiJoin`
+    /// whose condition NEGATES the carried `>` (i.e. contains `NOT(... > ...)`
+    /// or the equivalent flipped comparison). Regression: `gt_all` returned 0
+    /// rows (should be 2) because the op collapsed to `=`.
+    #[test]
+    fn gt_all_threads_negated_operator_into_anti_join() {
+        let subquery = RelExpr::scan("partsupp").project(vec![ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new("ps_supplycost")),
+            alias: None,
+        }]);
+        let template = Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::qualified("p", "p_retailprice"))),
+            right: Box::new(Expr::Column(ColumnRef::new("__subquery_operand"))),
+        };
+        let predicate = Expr::SubQuery {
+            subquery_type: SubQueryType::All,
+            query: Box::new(subquery),
+            test_expr: Some(Box::new(template)),
+        };
+        let input = RelExpr::scan("part").filter(predicate);
+
+        let result = decorrelate(&input);
+        let RelExpr::Join {
+            join_type: JoinType::Anti,
+            condition,
+            ..
+        } = &result
+        else {
+            panic!("expected AntiJoin, got {result:?}");
+        };
+        // The base comparison is the carried `>`; the ALL arm wraps it in NOT.
+        // Assert the ordered op survived (not `=`) AND the negation is present.
+        assert!(
+            condition_uses_op(condition, BinOp::Gt),
+            "AntiJoin condition must be built from `>` (Gt), not `=`: {condition:?}"
+        );
+        assert!(
+            condition_has_not(condition),
+            "AntiJoin condition must negate the ordered comparison: {condition:?}"
+        );
+        assert!(
+            !condition_mentions_sentinel(condition),
+            "__subquery_operand sentinel must be replaced by the sub-query column: {condition:?}"
+        );
+    }
+
+    /// True if any `BinOp` in `e` uses `op` against a non-sentinel right side.
+    fn condition_uses_op(e: &Expr, op: BinOp) -> bool {
+        match e {
+            Expr::BinOp { op: o, left, right } => {
+                *o == op || condition_uses_op(left, op) || condition_uses_op(right, op)
+            }
+            Expr::UnaryOp { operand, .. } => condition_uses_op(operand, op),
+            _ => false,
+        }
+    }
+
+    /// True if any subtree is `NOT(...)`.
+    fn condition_has_not(e: &Expr) -> bool {
+        match e {
+            Expr::UnaryOp {
+                op: UnaryOp::Not, ..
+            } => true,
+            Expr::UnaryOp { operand, .. } => condition_has_not(operand),
+            Expr::BinOp { left, right, .. } => condition_has_not(left) || condition_has_not(right),
+            _ => false,
+        }
+    }
+
+    /// True if the `__subquery_operand` sentinel column survives anywhere.
+    fn condition_mentions_sentinel(e: &Expr) -> bool {
+        match e {
+            Expr::Column(c) => c.column == "__subquery_operand",
+            Expr::BinOp { left, right, .. } => {
+                condition_mentions_sentinel(left) || condition_mentions_sentinel(right)
+            }
+            Expr::UnaryOp { operand, .. } => condition_mentions_sentinel(operand),
+            _ => false,
+        }
     }
 
     /// Walk a plan tree; true if any JOIN node's condition contains a subquery.

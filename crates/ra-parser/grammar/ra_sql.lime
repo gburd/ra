@@ -1431,52 +1431,64 @@ expr(A) ::= expr(B) CONCAT expr(C).
 
 expr(A) ::= expr(B) EQ ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 4, S, B);
+    let tmpl = ra_binop(ctx.user, 4, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 4, S, tmpl);
 }
 expr(A) ::= expr(B) NE ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 4, S, B);
+    let tmpl = ra_binop(ctx.user, 5, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 4, S, tmpl);
 }
 expr(A) ::= expr(B) LT ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 4, S, B);
+    let tmpl = ra_binop(ctx.user, 6, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 4, S, tmpl);
 }
 expr(A) ::= expr(B) LE ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 4, S, B);
+    let tmpl = ra_binop(ctx.user, 7, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 4, S, tmpl);
 }
 expr(A) ::= expr(B) GT ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 4, S, B);
+    let tmpl = ra_binop(ctx.user, 8, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 4, S, tmpl);
 }
 expr(A) ::= expr(B) GE ALL LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 4, S, B);
+    let tmpl = ra_binop(ctx.user, 9, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 4, S, tmpl);
 }
 
 expr(A) ::= expr(B) EQ ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 4, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) NE ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 5, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) LT ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 6, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) LE ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 7, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) GT ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 8, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) GE ANY LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 9, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 
 /* OP ANY/ALL (array expression): a = ANY(ARRAY[...]) etc. -> ScalarArrayOpExpr */
@@ -1532,27 +1544,33 @@ expr(A) ::= expr(B) GE ALL LPAREN expr(E) RPAREN.
 /* SOME is a synonym for ANY */
 expr(A) ::= expr(B) EQ SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 4, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) NE SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 5, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) LT SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 6, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) LE SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 7, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) GT SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 8, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 expr(A) ::= expr(B) GE SOME LPAREN select_stmt(S) RPAREN. 
 %action_rust {
-    A = ra_subquery(ctx.user, 3, S, B);
+    let tmpl = ra_binop(ctx.user, 9, B, ra_column(ctx.user, "__subquery_operand"));
+    A = ra_subquery(ctx.user, 3, S, tmpl);
 }
 
 /* -- Unary minus --------------------------------------------------- */

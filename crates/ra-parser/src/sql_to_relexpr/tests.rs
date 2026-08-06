@@ -18,6 +18,69 @@ fn has_node(r: &RelExpr, pred: fn(&RelExpr) -> bool) -> bool {
 
 // ---- Existing tests (preserved) ----
 
+// ---- RA-STEERING #21: quantified-comparison operator threading ----
+
+/// Find the first `Expr::SubQuery` anywhere in a Filter predicate of the tree.
+fn find_subquery(r: &RelExpr) -> Option<&ra_core::expr::Expr> {
+    fn in_expr(e: &ra_core::expr::Expr) -> Option<&ra_core::expr::Expr> {
+        use ra_core::expr::Expr;
+        match e {
+            Expr::SubQuery { .. } => Some(e),
+            Expr::BinOp { left, right, .. } => in_expr(left).or_else(|| in_expr(right)),
+            Expr::UnaryOp { operand, .. } => in_expr(operand),
+            _ => None,
+        }
+    }
+    if let RelExpr::Filter { predicate, .. } = r {
+        if let Some(sq) = in_expr(predicate) {
+            return Some(sq);
+        }
+    }
+    r.children().into_iter().find_map(find_subquery)
+}
+
+/// `x > ANY (SELECT ...)` must carry the comparison operator into the
+/// `SubQuery`'s `test_expr` as a template
+/// `BinOp { op: Gt, left: x, right: Column("__subquery_operand") }`.
+/// Before the fix the operator was dropped and `test_expr` was just `x`,
+/// so all six ordered ops decorrelated as `=` (a wrong-answer defect).
+#[test]
+fn gt_any_builds_subquery_operand_template() {
+    use ra_core::expr::{Expr, SubQueryType};
+    let sql = "SELECT s_suppkey FROM supplier s                WHERE s.s_acctbal > ANY(SELECT c.c_acctbal FROM customer c)";
+    let plan = sql_to_relexpr(sql).expect("should parse");
+    let sq = find_subquery(&plan).expect("expected a SubQuery in the filter");
+    let Expr::SubQuery {
+        subquery_type,
+        test_expr,
+        ..
+    } = sq
+    else {
+        panic!("not a SubQuery: {sq:?}");
+    };
+    assert_eq!(
+        *subquery_type,
+        SubQueryType::Any,
+        "ANY -> SubQueryType::Any"
+    );
+    let te = test_expr.as_ref().expect("test_expr must be present");
+    let Expr::BinOp { op, right, .. } = te.as_ref() else {
+        panic!("test_expr must be a comparison template, got {te:?}");
+    };
+    assert_eq!(
+        *op,
+        BinOp::Gt,
+        "the `>` operator must be carried in the template"
+    );
+    match right.as_ref() {
+        Expr::Column(c) => assert_eq!(
+            c.column, "__subquery_operand",
+            "template RHS must be the __subquery_operand sentinel"
+        ),
+        other => panic!("template RHS must be the sentinel column, got {other:?}"),
+    }
+}
+
 #[test]
 fn test_simple_select() {
     let sql = "SELECT * FROM users";
