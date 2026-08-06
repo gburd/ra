@@ -78,18 +78,6 @@ rw!("left-join-is-null-to-anti-join";
     if is_join_key_or_from("?s_col", "?right")
 ),
 
-// Anti-join with empty right side
-rw!("anti-join-empty-right";
-    "(anti-join ?cond ?left (empty-set))" =>
-    "?left"
-),
-
-// Anti-join with contradictory filter
-rw!("anti-join-contradictory-filter";
-    "(anti-join ?cond ?left (filter (literal false) ?right))" =>
-    "?left"
-),
-
 // NOT IN with nullable column -> anti-join + NULL guard
 rw!("not-in-to-anti-join-null-safe";
     "(filter (not-in ?col ?subquery) ?outer)" =>

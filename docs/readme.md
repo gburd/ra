@@ -3,14 +3,14 @@
 **RA** is an experimental parser, planner, and optimizer for PostgreSQL — a
 research prototype. It converts SQL queries into a relational algebra tree and
 explores equivalent plans via equality saturation and differential dataflow.
-The `rules/` tree contains **1,453 `.rra` rule sources**; **279 currently
+The `rules/` tree contains **1,451 `.rra` rule sources**; **277 currently
 compile to active rewrite rules** (regenerate: `cargo run --release -p
 ra-engine --example count_rules`). RA is not a working drop-in replacement; see
 the correctness status in the main [README](../README.md).
 
 ## Key Features
 
-- **Rule Library** - 1,453 `.rra` rule sources, 279 currently active, covering logical and physical optimizations (hardware/distributed/multi-model sources moved to [ra-lab](https://codeberg.org/gregburd/ra-lab))
+- **Rule Library** - 1,451 `.rra` rule sources, 277 currently active, covering logical and physical optimizations (hardware/distributed/multi-model sources moved to [ra-lab](https://codeberg.org/gregburd/ra-lab))
 - **20+ Database Dialects** - Seamless SQL translation between PostgreSQL, MySQL, Oracle, SQL Server, SQLite, DuckDB, and more
 - **Hardware-Aware Optimization** - Adaptive plans for CPU (SIMD), GPU, FPGA, and heterogeneous systems
 - **Cost-Based Optimization** - Calibratable cost models with cardinality estimation and statistics management
@@ -139,7 +139,7 @@ graph LR
     SQL["SQL Query"] --> Parser["Parser"]
     Parser --> RA["Relational<br/>Algebra"]
     RA --> EGraph["E-Graph<br/>(egg crate)"]
-    Rules["Transformation<br/>Rules (279 active)"] --> EGraph
+    Rules["Transformation<br/>Rules (277 active)"] --> EGraph
     EGraph --> Extractor["Extractor<br/>(Cost-based)"]
     Extractor --> Plan["Optimized<br/>Plan"]
 

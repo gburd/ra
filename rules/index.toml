@@ -1,6 +1,6 @@
 version = "1.0.0"
-total_rules = 1449
-last_updated = "2026-08-04"
+total_rules = 1447
+last_updated = "2026-08-06"
 
 [categories.cost-models.cost-models]
 rules = ["geospatial-cost-model", "multi-column-correlation", "outlier-aware-estimation", "time-series-cost-model", "aggregate-cardinality-estimation", "aggregation-cost-formulas", "cache-conscious-cost-model", "cardinality-estimation", "cloud-elastic-cost-model", "composite-cost-model", "concurrency-contention-cost", "cost-calibration-duckdb", "cost-calibration-postgresql", "cost-calibration", "cpu-cost-model", "distributed-query-routing-cost", "gpu-cost-model", "histogram-based-estimation", "io-cost-model", "join-cardinality-estimation", "join-cost-formulas", "memory-cost-model", "network-cost-model", "numa-aware-cost-model", "sampling-based-estimation", "selectivity-estimation", "storage-tiering-cost-model", "system-r-cost-formula", "system-r-join-cardinality", "system-r-selectivity-formulas", "neural-blend-cost-estimation", "online-learning-cost-calibration", "system-fingerprint-aware-costing"]
@@ -270,7 +270,7 @@ rules = ["graph-pattern-matching", "transitive-closure-memoization", "community-
 rules = ["clickhouse-segment-index-pruning"]
 
 [categories.logical.join-elimination]
-rules = ["calcite-aggregate-join-join-remove", "calcite-aggregate-join-remove", "anti-join-simplification", "anti-join-to-not-exists", "cross-join-elimination", "degenerate-join-to-filter", "foreign-key-join-elimination", "full-to-left-and-right-join", "inner-join-identity-elimination", "join-add-redundant-semi-join", "key-propagation-for-join-elimination", "left-join-elimination", "left-join-null-rejection", "outer-join-to-filter", "outer-join-to-inner", "calcite-project-join-join-remove", "calcite-project-join-remove", "redundant-join-elimination", "self-join-elimination", "semi-join-filter-transpose", "semi-join-project-transpose", "semi-join-remove", "semi-join-to-existence-check", "starburst-unique-key-join-elimination", "unique-key-join-elimination"]
+rules = ["calcite-aggregate-join-join-remove", "calcite-aggregate-join-remove", "anti-join-to-not-exists", "cross-join-elimination", "degenerate-join-to-filter", "foreign-key-join-elimination", "full-to-left-and-right-join", "inner-join-identity-elimination", "join-add-redundant-semi-join", "key-propagation-for-join-elimination", "left-join-elimination", "left-join-null-rejection", "outer-join-to-filter", "outer-join-to-inner", "calcite-project-join-join-remove", "calcite-project-join-remove", "redundant-join-elimination", "self-join-elimination", "semi-join-filter-transpose", "semi-join-project-transpose", "semi-join-remove", "semi-join-to-existence-check", "starburst-unique-key-join-elimination", "unique-key-join-elimination", "anti-join-simplification"]
 
 [categories.logical.join-elimination-core]
 rules = ["cross-join-single-row-right"]
@@ -336,7 +336,7 @@ rules = ["column-pruning", "calcite-join-project-transpose", "project-aggregate-
 rules = ["project-merge"]
 
 [categories.logical.redundant-join-core]
-rules = ["eliminate-anti-join-empty-right", "eliminate-cross-join-single-row-left", "eliminate-cross-join-single-row-right", "eliminate-cross-join-values-single", "eliminate-inner-join-true-single-row"]
+rules = ["eliminate-cross-join-single-row-left", "eliminate-cross-join-single-row-right", "eliminate-cross-join-values-single", "eliminate-inner-join-true-single-row"]
 
 [categories.logical.rpr]
 rules = ["rpr-constant-fold-define", "rpr-counting-pattern-to-window-aggregate", "rpr-dead-variable-elimination", "rpr-eliminate-redundant-quantifier", "rpr-empty-pattern-elimination", "rpr-factor-common-prefix", "rpr-flatten-sequence", "rpr-merge-equivalent-alternations", "rpr-next-pattern-to-lead", "rpr-normalize-quantifier-ranges", "rpr-one-row-early-termination", "rpr-push-filter-into-define", "rpr-push-order-filter-into-scan", "rpr-push-partition-filter", "rpr-simple-pattern-to-lag"]
@@ -348,7 +348,7 @@ rules = ["column-level-security", "audit-predicate-injection", "column-masking-p
 rules = ["constraint-propagation", "delta-query-optimization", "function-dependency-elimination", "incremental-view-maintenance", "calcite-calc-remove", "calcite-calc-split", "calcite-filter-calc-merge", "calcite-full-to-left-and-right-join", "hint-guided-optimization", "hottsql-proof-based", "calcite-join-to-correlate", "calcite-mark-to-semi-or-anti-join", "materialized-view-scan", "calcite-project-calc-merge", "calcite-sample-to-filter", "starburst-semantic"]
 
 [categories.logical.semi-join-core]
-rules = ["anti-join-empty-right", "filter-into-semi-join-condition", "merge-duplicate-semi-joins", "semi-join-distinct-elimination"]
+rules = ["filter-into-semi-join-condition", "merge-duplicate-semi-joins", "semi-join-distinct-elimination"]
 
 [categories.logical.set-operation-core]
 rules = ["except-self", "intersect-commutativity", "intersect-self", "union-commutativity", "union-self-all"]

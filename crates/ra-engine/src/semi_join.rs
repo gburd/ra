@@ -45,11 +45,6 @@ pub fn semi_join_reduction_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(join semi ?cond1 (join semi ?cond2 ?left ?right) ?right)" =>
             "(join semi (and ?cond1 ?cond2) ?left ?right)"
         ),
-        // Anti-join with empty right side keeps all left rows
-        rewrite!("anti-join-empty-right";
-            "(join anti ?cond ?left (filter (const-bool false) ?right))" =>
-            "?left"
-        ),
     ]
 }
 
@@ -113,7 +108,9 @@ mod tests {
     }
 
     #[test]
-    fn anti_join_with_empty_right_eliminated() {
+    fn anti_join_with_empty_right_preserves_both_tables() {
+        // Codeberg #24: an anti-join over a provably-empty right must not drop
+        // the right relation reference (same class as #17).
         let expr = RelExpr::Join {
             join_type: JoinType::Anti,
             condition: Expr::BinOp {
@@ -124,8 +121,28 @@ mod tests {
             left: Box::new(RelExpr::scan("t1")),
             right: Box::new(RelExpr::scan("t2").filter(Expr::Const(Const::Bool(false)))),
         };
-
-        let runner = run_semi_join_reduction(&expr);
-        assert!(runner.egraph.number_of_classes() > 1);
+        let opt = crate::Optimizer::new();
+        let first = opt.optimize(&expr).expect("optimize once");
+        let second = opt.optimize(&first).expect("optimize twice");
+        #[expect(clippy::items_after_statements, reason = "test-local helper")]
+        fn tabs(e: &RelExpr, o: &mut std::collections::BTreeSet<String>) {
+            if let RelExpr::Scan { table, .. } = e {
+                o.insert(table.clone());
+            }
+            for c in e.children() {
+                tabs(c, o);
+            }
+        }
+        let (mut a, mut b) = (
+            std::collections::BTreeSet::new(),
+            std::collections::BTreeSet::new(),
+        );
+        tabs(&first, &mut a);
+        tabs(&second, &mut b);
+        assert!(
+            a.contains("t1") && a.contains("t2"),
+            "both relations kept: {a:?}"
+        );
+        assert_eq!(a, b, "optimize-twice must preserve the table set");
     }
 }
