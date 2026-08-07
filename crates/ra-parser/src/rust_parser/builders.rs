@@ -285,6 +285,19 @@ pub fn ra_subquery_alias(st: *mut RaParseState, alias: &str, input: Value) -> Va
 }
 
 #[must_use]
+pub fn ra_subquery_alias_cols(
+    st: *mut RaParseState,
+    alias: &str,
+    input: Value,
+    cols: Value,
+) -> Value {
+    let alias_c = CString::new(alias).unwrap_or_default();
+    let handle =
+        unsafe { ffi::ra_subquery_alias_cols(st, alias_c.as_ptr(), input.handle(), cols.handle()) };
+    Value::from_node(handle)
+}
+
+#[must_use]
 pub fn ra_distinct_on(st: *mut RaParseState, input: Value, on: Value) -> Value {
     let handle = unsafe { ffi::ra_distinct_on(st, input.handle(), on.handle()) };
     Value::from_node(handle)

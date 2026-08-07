@@ -1601,3 +1601,88 @@ fn test_collate_inside_agg_filter() {
     assert!(has_expr_marker(&plan, "__collate"), "expected __collate");
     assert!(has_expr_marker(&plan, "__filter"), "expected __filter");
 }
+
+// ---- Codeberg #25: column-alias lists on derived tables / VALUES ----
+// `(subquery) AS v(c1,c2)` and `(VALUES ...) AS v(col)`. Represented as a
+// rename `Project` wrapped in `SubqueryAlias` (no RelExpr model change).
+
+/// Find the first `SubqueryAlias` anywhere in the tree and return its inner
+/// relation.
+fn find_subquery_alias(r: &RelExpr) -> Option<(&str, &RelExpr)> {
+    if let RelExpr::SubqueryAlias { alias, input } = r {
+        return Some((alias.as_str(), input.as_ref()));
+    }
+    r.children().into_iter().find_map(find_subquery_alias)
+}
+
+/// Collect the output-column aliases of a `Project` (None where absent).
+fn project_aliases(r: &RelExpr) -> Option<Vec<Option<String>>> {
+    if let RelExpr::Project { columns, .. } = r {
+        Some(columns.iter().map(|c| c.alias.clone()).collect())
+    } else {
+        None
+    }
+}
+
+#[test]
+fn derived_table_column_alias_renames_in_place() {
+    // `(SELECT a, b FROM t) AS v(x, y)` renames the subquery's top-level
+    // projection aliases positionally: a -> x, b -> y.
+    let sql = "SELECT x FROM (SELECT a, b FROM t) AS v(x, y)";
+    let plan = sql_to_relexpr(sql).expect("derived-table col-alias should parse");
+    let (alias, input) = find_subquery_alias(&plan).expect("expected a SubqueryAlias");
+    assert_eq!(alias, "v", "derived table keeps its alias name");
+    let aliases = project_aliases(input).expect("subquery input should be a Project");
+    assert_eq!(
+        aliases,
+        vec![Some("x".to_owned()), Some("y".to_owned())],
+        "output columns renamed positionally to x, y"
+    );
+}
+
+#[test]
+fn values_column_alias_single() {
+    // `(VALUES (1),(2)) AS v(col)` wraps the VALUES in a positional rename
+    // Project (column1 AS col), since Values has no model-level column names.
+    let sql = "SELECT col FROM (VALUES (1),(2)) AS v(col)";
+    let plan = sql_to_relexpr(sql).expect("VALUES single col-alias should parse");
+    let (alias, input) = find_subquery_alias(&plan).expect("expected a SubqueryAlias");
+    assert_eq!(alias, "v");
+    let aliases = project_aliases(input).expect("subquery input should be a rename Project");
+    assert_eq!(aliases, vec![Some("col".to_owned())]);
+    // The rename Project must sit over a Values relation.
+    if let RelExpr::Project { input: inner, .. } = input {
+        assert!(
+            has_node(inner, |r| matches!(r, RelExpr::Values { .. })),
+            "rename Project should wrap the VALUES relation, got {inner:?}"
+        );
+    } else {
+        panic!("expected a rename Project, got {input:?}");
+    }
+}
+
+#[test]
+fn values_column_alias_multi() {
+    let sql = "SELECT x, y FROM (VALUES (1,2),(3,4)) AS v(x, y)";
+    let plan = sql_to_relexpr(sql).expect("VALUES multi col-alias should parse");
+    let (alias, input) = find_subquery_alias(&plan).expect("expected a SubqueryAlias");
+    assert_eq!(alias, "v");
+    let aliases = project_aliases(input).expect("subquery input should be a rename Project");
+    assert_eq!(aliases, vec![Some("x".to_owned()), Some("y".to_owned())]);
+}
+
+#[test]
+fn plain_subquery_alias_still_parses_without_rename() {
+    // Regression: `(subquery) AS v` (no column list) must still parse and must
+    // NOT force output aliases (a, b keep their own names).
+    let sql = "SELECT a FROM (SELECT a, b FROM t) AS v";
+    let plan = sql_to_relexpr(sql).expect("plain derived-table alias should parse");
+    let (alias, input) = find_subquery_alias(&plan).expect("expected a SubqueryAlias");
+    assert_eq!(alias, "v");
+    let aliases = project_aliases(input).expect("subquery input should be a Project");
+    assert_eq!(
+        aliases,
+        vec![None, None],
+        "no column list -> no forced output aliases"
+    );
+}

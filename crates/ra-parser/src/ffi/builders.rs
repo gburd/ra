@@ -772,6 +772,106 @@ pub unsafe fn ra_subquery_alias(
     })
 }
 
+/// Build a `SubqueryAlias` whose derived table also renames its output
+/// columns positionally: `(subquery) AS alias(c1, c2, ...)` and
+/// `(VALUES ...) AS alias(c1, ...)`.
+///
+/// Representation: wrap the subquery in a rename `Project` (so no `RelExpr`
+/// model change is needed), then in `SubqueryAlias`. When the subquery's top
+/// level is already a `Project` with a matching column count, the aliases are
+/// renamed in place; otherwise (e.g. `VALUES`) a projection of positional
+/// references is built. `VALUES` output columns follow `PostgreSQL`'s default
+/// `column1..columnN` naming.
+///
+/// `cols_list` is a tagged list of `Column` exprs (built by `ident_list`).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `alias` must be a valid NUL-terminated C string.
+/// - `input` and `cols_list` must be valid tagged pointers or null.
+pub unsafe fn ra_subquery_alias_cols(
+    state: *mut RaParseState,
+    alias: *const c_char,
+    input: *mut RaNode,
+    cols_list: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let alias_name = unsafe { c_str_to_string(alias) };
+    let Some(input_rel) = decode_rel(st, input) else {
+        st.push_error("ra_subquery_alias_cols: invalid input node".to_owned());
+        return std::ptr::null_mut();
+    };
+    // `ident_list` builds `Column` exprs; pull the bare names out in order.
+    let names: Vec<String> = collect_exprs(st, cols_list)
+        .into_iter()
+        .map(|e| match e {
+            Expr::Column(c) => c.column,
+            other => format!("{other:?}"),
+        })
+        .collect();
+
+    let renamed = rename_derived_columns(input_rel, &names);
+    st.push_rel(RelExpr::SubqueryAlias {
+        alias: alias_name,
+        input: Box::new(renamed),
+    })
+}
+
+/// Positionally rename a derived table's output columns to `names`.
+///
+/// If `input` is a top-level `Project` with the same number of columns, the
+/// aliases are set in place (the cleanest, cheapest rename). Otherwise the
+/// input is wrapped in a `Project` of positional references: `VALUES` rows are
+/// referenced by `PostgreSQL`'s default `column1..columnN` names, so
+/// `(VALUES (1),(2)) AS v(col)` becomes `SELECT column1 AS col FROM (VALUES ...)`.
+fn rename_derived_columns(input: RelExpr, names: &[String]) -> RelExpr {
+    if names.is_empty() {
+        return input;
+    }
+    if let RelExpr::Project {
+        mut columns,
+        input: inner,
+    } = input
+    {
+        if columns.len() == names.len() {
+            for (col, name) in columns.iter_mut().zip(names.iter()) {
+                col.alias = Some(name.clone());
+            }
+            return RelExpr::Project {
+                columns,
+                input: inner,
+            };
+        }
+        // Column-count mismatch: rebuild as a Project so we don't silently
+        // drop the rename; fall through with the original Project restored.
+        let restored = RelExpr::Project {
+            columns,
+            input: inner,
+        };
+        return wrap_positional_rename(restored, names);
+    }
+    wrap_positional_rename(input, names)
+}
+
+/// Wrap `input` in a `Project` that references its output positionally
+/// (`column1..columnN`) and aliases each to the requested name.
+fn wrap_positional_rename(input: RelExpr, names: &[String]) -> RelExpr {
+    let columns = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new(format!("column{}", i + 1))),
+            alias: Some(name.clone()),
+        })
+        .collect();
+    RelExpr::Project {
+        columns,
+        input: Box::new(input),
+    }
+}
+
 /// Build a `Distinct` node.
 ///
 /// # Safety

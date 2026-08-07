@@ -628,6 +628,15 @@ table_ref(A) ::= LPAREN select_stmt(B) RPAREN AS IDENT(C). %action_rust {
 table_ref(A) ::= LPAREN select_stmt(B) RPAREN IDENT(C). %action_rust {
     A = ra_subquery_alias(ctx.user, C.text(), B);
 }
+/* Derived table / VALUES with an output-column-alias list:
+ * `(subquery) AS v(c1,c2)` and `(VALUES ...) AS v(c1,c2)`. The column
+ * list positionally renames the derived table's output columns. */
+table_ref(A) ::= LPAREN select_stmt(B) RPAREN AS IDENT(C) LPAREN ident_list(D) RPAREN. %action_rust {
+    A = ra_subquery_alias_cols(ctx.user, C.text(), B, D);
+}
+table_ref(A) ::= LPAREN select_stmt(B) RPAREN IDENT(C) LPAREN ident_list(D) RPAREN. %action_rust {
+    A = ra_subquery_alias_cols(ctx.user, C.text(), B, D);
+}
 
 /* LATERAL subquery (treated as a derived table; the optimizer handles
  * the correlation via decorrelation). Still wrap in SubqueryAlias so the
@@ -637,6 +646,12 @@ table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN AS IDENT(C). %action_rust 
 }
 table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN IDENT(C). %action_rust {
     A = ra_subquery_alias(ctx.user, C.text(), B);
+}
+table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN AS IDENT(C) LPAREN ident_list(D) RPAREN. %action_rust {
+    A = ra_subquery_alias_cols(ctx.user, C.text(), B, D);
+}
+table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN IDENT(C) LPAREN ident_list(D) RPAREN. %action_rust {
+    A = ra_subquery_alias_cols(ctx.user, C.text(), B, D);
 }
 table_ref(A) ::= LATERAL LPAREN select_stmt(B) RPAREN. %action_rust {
     A = B;
