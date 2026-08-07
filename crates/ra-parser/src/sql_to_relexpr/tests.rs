@@ -1564,6 +1564,52 @@ fn test_collate_in_where() {
     );
 }
 
+// ---- ROW(...) constructor (Codeberg #25) ----
+//
+// The bare tuple `(a, b)` and the explicit `ROW(...)` keyword form both parse
+// to a `__row_constructor(...)` Function marker. The single-element `ROW(a)`
+// and empty `ROW()` are only expressible via the keyword form.
+
+#[test]
+fn test_row_single_element() {
+    let sql = "SELECT ROW(a) FROM t";
+    let plan = sql_to_relexpr(sql).expect("ROW(a) should parse");
+    assert!(
+        has_expr_marker(&plan, "__row_constructor"),
+        "expected a __row_constructor marker in the projection, got {plan:?}"
+    );
+}
+
+#[test]
+fn test_row_multi_element() {
+    let sql = "SELECT ROW(a, b, c) FROM t";
+    let plan = sql_to_relexpr(sql).expect("ROW(a, b, c) should parse");
+    assert!(
+        has_expr_marker(&plan, "__row_constructor"),
+        "expected a __row_constructor marker in the projection, got {plan:?}"
+    );
+}
+
+#[test]
+fn test_row_empty() {
+    let sql = "SELECT ROW()";
+    let plan = sql_to_relexpr(sql).expect("ROW() should parse");
+    assert!(
+        has_expr_marker(&plan, "__row_constructor"),
+        "expected a __row_constructor marker for empty ROW(), got {plan:?}"
+    );
+}
+
+#[test]
+fn test_row_bare_tuple_still_parses() {
+    let sql = "SELECT (a, b) FROM t";
+    let plan = sql_to_relexpr(sql).expect("bare tuple (a, b) should parse");
+    assert!(
+        has_expr_marker(&plan, "__row_constructor"),
+        "bare tuple must also produce __row_constructor, got {plan:?}"
+    );
+}
+
 #[test]
 fn test_agg_filter() {
     let sql = "SELECT count(*) FILTER (WHERE x > 0) FROM t";

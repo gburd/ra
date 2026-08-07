@@ -986,6 +986,16 @@ impl EmitContext {
                 let r = self.emit_expr(&args[1])?;
                 Ok(Some(format!("({l} <@ {r})")))
             }
+            // Row constructor: parser emits __row_constructor(a, b, …) for
+            // both the bare tuple `(a, b)` and the explicit `ROW(...)` form
+            // (uppercased to __ROW_CONSTRUCTOR). Lower to canonical ROW(...).
+            "__ROW_CONSTRUCTOR" => {
+                let cols: Vec<String> = args
+                    .iter()
+                    .map(|a| self.emit_expr(a))
+                    .collect::<Result<_, _>>()?;
+                Ok(Some(format!("ROW({})", cols.join(", "))))
+            }
             // Bit-shift operators: parser emits __shl(a, b) / __shr(a, b),
             // uppercased to __SHL / __SHR. Lower back to `<<` / `>>`.
             "__SHL" if args.len() == 2 => {
@@ -2316,6 +2326,27 @@ mod tests {
             let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
             assert!(sql.contains(op), "expected {op} in output: {sql}");
             assert!(!sql.contains(marker), "marker must not leak: {sql}");
+        }
+    }
+
+    /// The `__row_constructor` marker (Codeberg #25) lowers back to `ROW(...)`.
+    /// Both the explicit `ROW(a, b)` keyword form and the bare tuple `(a, b)`
+    /// parse to the same marker, so both must emit canonical `ROW(...)` with no
+    /// marker leak. Round-trips through the real parser for both sources.
+    #[test]
+    fn row_constructor_marker_round_trips() {
+        for sql_in in ["SELECT ROW(a, b) FROM t", "SELECT (a, b) FROM t"] {
+            let plans = ra_parser::sql_to_relexprs(sql_in).expect("parse");
+            let plan = plans.first().expect("one statement");
+            let out = emit_sql(plan, Dialect::PostgreSql).expect("emit").sql;
+            assert!(
+                out.contains("ROW(\"a\", \"b\")"),
+                "expected ROW(...) for {sql_in:?}, got: {out}"
+            );
+            assert!(
+                !out.to_lowercase().contains("__row_constructor"),
+                "marker must not leak for {sql_in:?}: {out}"
+            );
         }
     }
 }

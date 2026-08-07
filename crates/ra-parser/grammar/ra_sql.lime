@@ -2238,6 +2238,17 @@ expr(A) ::= LPAREN expr_list(B) COMMA expr(C) RPAREN.
     A = ra_func(ctx.user, "__row_constructor", args);
 }
 
+/* Explicit ROW(...) keyword constructor. ROW(a), ROW(a,b,c), ROW(a,b);
+   reuses the same __row_constructor marker as the bare-tuple form above. */
+expr(A) ::= ROW LPAREN expr_list(B) RPAREN. 
+%action_rust {
+    A = ra_func(ctx.user, "__row_constructor", B);
+}
+expr(A) ::= ROW LPAREN RPAREN. 
+%action_rust {
+    A = ra_func(ctx.user, "__row_constructor", ra_list_new(ctx.user));
+}
+
 /* ================================================================== */
 /* Expression list                                                     */
 /* ================================================================== */
