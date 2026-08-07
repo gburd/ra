@@ -1498,3 +1498,106 @@ fn test_vector_with_projection() {
         _ => panic!("expected TopK, got {result:?}"),
     }
 }
+
+// ---- COLLATE (postfix operator) + aggregate FILTER (WHERE ...) ----
+//
+// COLLATE parses to a `__collate(expr, 'name')` Function marker; aggregate
+// FILTER parses to a `__filter(pred)` sentinel arg on the aggregate call
+// (or `__window_filter(pred)` inside a `__window_*` marker with OVER). We
+// assert the markers are present in the parsed tree so the emitter can
+// round-trip them (the emitter round-trip is covered in ra-dialect).
+
+/// True if any `Expr` in the tree (projection columns / predicates) contains a
+/// Function whose name equals `marker` (searched recursively through exprs).
+fn has_expr_marker(r: &RelExpr, marker: &str) -> bool {
+    fn in_expr(e: &Expr, marker: &str) -> bool {
+        match e {
+            Expr::Function { name, args } => {
+                name == marker || args.iter().any(|a| in_expr(a, marker))
+            }
+            Expr::BinOp { left, right, .. } => in_expr(left, marker) || in_expr(right, marker),
+            Expr::UnaryOp { operand, .. } => in_expr(operand, marker),
+            Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => in_expr(expr, marker),
+            Expr::Case {
+                operand,
+                when_clauses,
+                else_result,
+            } => {
+                operand.as_deref().is_some_and(|o| in_expr(o, marker))
+                    || when_clauses
+                        .iter()
+                        .any(|(w, t)| in_expr(w, marker) || in_expr(t, marker))
+                    || else_result.as_deref().is_some_and(|el| in_expr(el, marker))
+            }
+            Expr::Array(items) => items.iter().any(|a| in_expr(a, marker)),
+            _ => false,
+        }
+    }
+    fn in_rel(r: &RelExpr, marker: &str) -> bool {
+        let hit = match r {
+            RelExpr::Project { columns, .. } => columns.iter().any(|c| in_expr(&c.expr, marker)),
+            RelExpr::Filter { predicate, .. } => in_expr(predicate, marker),
+            _ => false,
+        };
+        hit || r.children().into_iter().any(|c| in_rel(c, marker))
+    }
+    in_rel(r, marker)
+}
+
+#[test]
+fn test_collate_in_select() {
+    let sql = "SELECT x COLLATE \"C\" FROM t";
+    let plan = sql_to_relexpr(sql).expect("COLLATE in select should parse");
+    assert!(
+        has_expr_marker(&plan, "__collate"),
+        "expected a __collate marker in the projection, got {plan:?}"
+    );
+}
+
+#[test]
+fn test_collate_in_where() {
+    let sql = "SELECT a FROM t WHERE name COLLATE \"C\" = 'x'";
+    let plan = sql_to_relexpr(sql).expect("COLLATE in WHERE should parse");
+    assert!(
+        has_expr_marker(&plan, "__collate"),
+        "expected a __collate marker in the predicate, got {plan:?}"
+    );
+}
+
+#[test]
+fn test_agg_filter() {
+    let sql = "SELECT count(*) FILTER (WHERE x > 0) FROM t";
+    let plan = sql_to_relexpr(sql).expect("aggregate FILTER should parse");
+    assert!(
+        has_expr_marker(&plan, "__filter"),
+        "expected a __filter sentinel on the aggregate, got {plan:?}"
+    );
+    // Faithful representation (not a CASE rewrite): the aggregate is preserved.
+    assert!(
+        has_node(&plan, |r| matches!(r, RelExpr::Aggregate { .. })),
+        "expected an Aggregate node"
+    );
+}
+
+#[test]
+fn test_agg_filter_over() {
+    let sql = "SELECT sum(v) FILTER (WHERE k = 1) OVER (PARTITION BY g) FROM t";
+    let plan = sql_to_relexpr(sql).expect("aggregate FILTER + OVER should parse");
+    assert!(
+        has_expr_marker(&plan, "__window_filter"),
+        "expected a __window_filter sentinel in the window marker, got {plan:?}"
+    );
+    assert!(
+        has_node(&plan, |r| matches!(r, RelExpr::Window { .. })),
+        "expected a Window node"
+    );
+}
+
+#[test]
+fn test_collate_inside_agg_filter() {
+    // Combined form from the PG regress corpus.
+    let sql = "SELECT max(a COLLATE \"C\") FILTER (WHERE i <> 0) FROM t";
+    let plan = sql_to_relexpr(sql).expect("COLLATE inside FILTERed agg should parse");
+    assert!(has_expr_marker(&plan, "__collate"), "expected __collate");
+    assert!(has_expr_marker(&plan, "__filter"), "expected __filter");
+}

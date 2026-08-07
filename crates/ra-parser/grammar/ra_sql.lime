@@ -221,6 +221,7 @@ typedef struct RaToken {
 %token ROW.
 %token ROWS.
 %token ONLY.
+%token COLLATE.        /* COLLATE postfix operator (appended at end) */
 
 /* ================================================================== */
 /* Precedence (low to high)                                            */
@@ -232,6 +233,7 @@ typedef struct RaToken {
 %left AND.
 %right NOT.
 %nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE SIMILAR BETWEEN AT_GT LT_AT AT_QUESTION AT_AT PLACEHOLDER JSONB_EXISTS JSONB_ANY_KEY JSONB_ALL_KEYS TILDE.
+%left COLLATE.
 %left ARROW ARROW_TEXT JSONB_TEXT_PATH.
 %left PLUS MINUS CONCAT.
 %left STAR SLASH PERCENT.
@@ -1843,6 +1845,18 @@ expr(A) ::= expr(B) COLONCOLON type_name(C).
     A = ra_cast(ctx.user, B, C.clone().text(), (C.clone().int_val as usize));
 }
 
+/* -- COLLATE postfix operator: expr COLLATE "name" ----------------- */
+/* Encoded as __collate(expr, 'name') marker; lowered back to
+ * `expr COLLATE "name"` by the emitter. The collation name is an IDENT
+ * (a quoted "C" lexes to IDENT, as do bare names like case_insensitive). */
+expr(A) ::= expr(B) COLLATE IDENT(C). 
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, ra_const_str(ctx.user, C.text()));
+    A = ra_func(ctx.user, "__collate", args);
+}
+
 %type type_name {RaToken}
 type_name(A) ::= IDENT(B). 
 %action_rust {
@@ -1897,44 +1911,66 @@ expr(A) ::= IDENT(B) LPAREN STAR RPAREN.
 }
 
 /* -- FILTER clause on aggregates ----------------------------------- */
-/* Rewrite at parse time: COUNT(*) FILTER (WHERE x > 10) →
- *   COUNT(CASE WHEN x > 10 THEN 1 ELSE NULL END)
- * SUM(y) FILTER (WHERE cond) →
- *   SUM(CASE WHEN cond THEN y ELSE NULL END)
- *
- * We use expr_list for the args to avoid shift/reduce conflicts with
- * the general function call rule. ra_filter_agg does the CASE rewrite. */
+/* `agg(args) FILTER (WHERE pred)` is kept faithful (not rewritten to a
+ * CASE) so the emitter round-trips it back to `... FILTER (WHERE pred)`
+ * for the result oracle. The predicate is appended to the aggregate's
+ * arg list as a `__filter(pred)` sentinel (mirrors the `__distinct` /
+ * `__window_*` sentinel-arg convention): the outer function name stays
+ * the aggregate, so scalar-aggregate detection still fires. */
 
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN FILTER LPAREN WHERE expr(D) RPAREN. 
 %action_rust {
-    A = ra_filter_agg(ctx.user, B.text(), C, D);
+    let mut filt = ra_list_new(ctx.user);
+    filt = ra_list_push(ctx.user, filt, D);
+    let mut args = C;
+    args = ra_list_push(ctx.user, args, ra_func(ctx.user, "__filter", filt));
+    A = ra_func(ctx.user, B.text(), args);
 }
 
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN FILTER LPAREN WHERE expr(C) RPAREN. 
 %action_rust {
-    /* COUNT(*) FILTER (WHERE cond) → COUNT(CASE WHEN cond THEN 1 ELSE Value::default() END) */
-    let mut when_list = ra_list_new(ctx.user);
-    when_list = ra_list_push(ctx.user, when_list, C); /* condition */
-    when_list = ra_list_push(ctx.user, when_list, ra_const_int(ctx.user, 1)); /* THEN 1 */
-    let mut case_expr = ra_case(ctx.user, Value::default(), when_list, ra_const_null(ctx.user));
-    let mut new_args = ra_list_new(ctx.user);
-    new_args = ra_list_push(ctx.user, new_args, case_expr);
-    A = ra_func(ctx.user, B.text(), new_args);
+    /* COUNT(*) FILTER (WHERE cond): keep the `*` sentinel then the filter. */
+    let mut filt = ra_list_new(ctx.user);
+    filt = ra_list_push(ctx.user, filt, C);
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, ra_column(ctx.user, "*"));
+    args = ra_list_push(ctx.user, args, ra_func(ctx.user, "__filter", filt));
+    A = ra_func(ctx.user, B.text(), args);
 }
 
 expr(A) ::= IDENT(B) LPAREN DISTINCT expr(C) RPAREN FILTER LPAREN WHERE expr(D) RPAREN. 
 %action_rust {
-    /* agg(DISTINCT x) FILTER (WHERE cond) → agg(DISTINCT CASE WHEN cond THEN x ELSE Value::default() END) */
-    let mut when_list = ra_list_new(ctx.user);
-    when_list = ra_list_push(ctx.user, when_list, D);
-    when_list = ra_list_push(ctx.user, when_list, C);
-    let mut case_expr = ra_case(ctx.user, Value::default(), when_list, ra_const_null(ctx.user));
+    /* agg(DISTINCT x) FILTER (WHERE cond): __distinct(x) then __filter(cond). */
     let mut darg = ra_list_new(ctx.user);
-    darg = ra_list_push(ctx.user, darg, case_expr);
-    let mut marker = ra_func(ctx.user, "__distinct", darg);
-    let mut new_args = ra_list_new(ctx.user);
-    new_args = ra_list_push(ctx.user, new_args, marker);
-    A = ra_func(ctx.user, B.text(), new_args);
+    darg = ra_list_push(ctx.user, darg, C);
+    let mut filt = ra_list_new(ctx.user);
+    filt = ra_list_push(ctx.user, filt, D);
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, ra_func(ctx.user, "__distinct", darg));
+    args = ra_list_push(ctx.user, args, ra_func(ctx.user, "__filter", filt));
+    A = ra_func(ctx.user, B.text(), args);
+}
+
+/* agg(args) FILTER (WHERE pred) OVER (...) : the FILTER predicate rides
+ * as a `__window_filter(pred)` sentinel inside the window marker; the
+ * emitter lowers it to `agg(args) FILTER (WHERE pred) OVER (...)`. */
+expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN FILTER LPAREN WHERE expr(D) RPAREN OVER LPAREN
+             opt_partition(E) opt_window_order(F) opt_window_frame(G) RPAREN. 
+%action_rust {
+    A = ra_window_marker_filtered(ctx.user, B.text(), C, D, E, F, G);
+}
+
+expr(A) ::= IDENT(B) LPAREN STAR RPAREN FILTER LPAREN WHERE expr(C) RPAREN OVER LPAREN
+             opt_partition(D) opt_window_order(E) opt_window_frame(F) RPAREN. 
+%action_rust {
+    let mut l = ra_list_new(ctx.user);
+    l = ra_list_push(ctx.user, l, ra_column(ctx.user, "*"));
+    A = ra_window_marker_filtered(ctx.user, B.text(), l, C, D, E, F);
+}
+
+expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN FILTER LPAREN WHERE expr(D) RPAREN OVER IDENT. 
+%action_rust {
+    A = ra_window_marker_filtered(ctx.user, B.text(), C, D, Value::default(), Value::default(), Value::default());
 }
 
 /* -- Aggregate DISTINCT: COUNT(DISTINCT col) etc. ------------------ */

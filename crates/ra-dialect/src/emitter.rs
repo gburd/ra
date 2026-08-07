@@ -786,6 +786,23 @@ impl EmitContext {
             return self.emit_window_marker(stripped, args);
         }
 
+        // Aggregate FILTER (WHERE pred): the parser appends a `__filter(pred)`
+        // sentinel to the aggregate's arg list. Peel it off, emit the plain
+        // call from the remaining args, then append `FILTER (WHERE pred)`.
+        if let Some(pred) = args.iter().find_map(|a| match a {
+            Expr::Function { name, args: inner } if name == "__filter" => inner.first(),
+            _ => None,
+        }) {
+            let real: Vec<Expr> = args
+                .iter()
+                .filter(|a| !matches!(a, Expr::Function { name, .. } if name == "__filter"))
+                .cloned()
+                .collect();
+            let call = self.emit_function(name, &real)?;
+            let cond = self.emit_expr(pred)?;
+            return Ok(format!("{call} FILTER (WHERE {cond})"));
+        }
+
         // Handle parser-produced special function names
         if let Some(result) = self.emit_special_function(&upper_name, args)? {
             return Ok(result);
@@ -975,6 +992,17 @@ impl EmitContext {
                 let inner = self.emit_expr(&args[0])?;
                 Ok(Some(format!("DISTINCT {inner}")))
             }
+            // COLLATE postfix: ra-parser emits __collate(expr, 'name').
+            // Re-emit the string collation name as a double-quoted identifier
+            // so `x COLLATE "C"` round-trips.
+            "__COLLATE" if args.len() == 2 => {
+                let inner = self.emit_expr(&args[0])?;
+                let name = match &args[1] {
+                    Expr::Const(Const::String(n)) => n.clone(),
+                    other => self.emit_expr(other)?,
+                };
+                Ok(Some(format!("{inner} COLLATE {}", self.quote_ident(&name))))
+            }
             // EXTRACT(field FROM expr): the parser encodes it as
             // __extract_<field>(expr) (field lower-cased; upper-cased here).
             // Lower it back to a real EXTRACT(field FROM expr).
@@ -1053,8 +1081,15 @@ impl EmitContext {
         // string Const arg (RA-STEERING #22). `Some("")`/no string means the
         // marker was present but its bounds were lost (legacy) -> unsupported.
         let mut frame: Option<String> = None;
+        // FILTER (WHERE pred) on a windowed aggregate, if present.
+        let mut filter: Option<String> = None;
         for a in args {
             match a {
+                Expr::Function { name, args: inner } if name == "__window_filter" => {
+                    if let Some(p) = inner.first() {
+                        filter = Some(self.emit_expr(p)?);
+                    }
+                }
                 Expr::Function { name, args: inner } if name == "__window_partition" => {
                     for p in inner {
                         partition.push(self.emit_expr(p)?);
@@ -1103,8 +1138,11 @@ impl EmitContext {
         if let Some(f) = &frame {
             over_parts.push(f.clone());
         }
+        let filter_clause = filter
+            .map(|f| format!(" FILTER (WHERE {f})"))
+            .unwrap_or_default();
         Ok(format!(
-            "{func}({arg_list}) OVER ({})",
+            "{func}({arg_list}){filter_clause} OVER ({})",
             over_parts.join(" ")
         ))
     }
@@ -2139,5 +2177,106 @@ mod tests {
             !sql.contains("WHERE (COUNT"),
             "aggregate predicate must not be a WHERE: {sql}"
         );
+    }
+
+    /// `__collate(expr, 'name')` lowers back to `expr COLLATE "name"`.
+    #[test]
+    fn collate_marker_round_trips() {
+        let expr = RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: Expr::Function {
+                    name: "__collate".to_string(),
+                    args: vec![
+                        Expr::Column(ColumnRef::new("x")),
+                        Expr::Const(Const::String("C".to_string())),
+                    ],
+                },
+                alias: None,
+            }],
+            input: Box::new(RelExpr::Scan {
+                table: "t".to_string(),
+                alias: None,
+            }),
+        };
+        let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
+        assert!(
+            sql.contains("COLLATE \"C\""),
+            "expected COLLATE clause: {sql}"
+        );
+        assert!(!sql.contains("__collate"), "marker must not leak: {sql}");
+    }
+
+    /// A `__filter(pred)` sentinel arg on an aggregate lowers to
+    /// `AGG(args) FILTER (WHERE pred)`.
+    #[test]
+    fn agg_filter_marker_round_trips() {
+        let expr = RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: Expr::Function {
+                    name: "count".to_string(),
+                    args: vec![
+                        Expr::Column(ColumnRef::new("*")),
+                        Expr::Function {
+                            name: "__filter".to_string(),
+                            args: vec![Expr::BinOp {
+                                op: BinOp::Gt,
+                                left: Box::new(Expr::Column(ColumnRef::new("x"))),
+                                right: Box::new(Expr::Const(Const::Int(0))),
+                            }],
+                        },
+                    ],
+                },
+                alias: None,
+            }],
+            input: Box::new(RelExpr::Scan {
+                table: "t".to_string(),
+                alias: None,
+            }),
+        };
+        let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
+        assert!(
+            sql.contains("FILTER (WHERE"),
+            "expected FILTER clause: {sql}"
+        );
+        assert!(!sql.contains("__filter"), "marker must not leak: {sql}");
+    }
+
+    /// `__window_filter(pred)` inside a `__window_*` marker lowers to
+    /// `AGG(args) FILTER (WHERE pred) OVER (...)`.
+    #[test]
+    fn agg_filter_over_marker_round_trips() {
+        let expr = RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: Expr::Function {
+                    name: "__window_SUM".to_string(),
+                    args: vec![
+                        Expr::Column(ColumnRef::new("v")),
+                        Expr::Function {
+                            name: "__window_filter".to_string(),
+                            args: vec![Expr::BinOp {
+                                op: BinOp::Eq,
+                                left: Box::new(Expr::Column(ColumnRef::new("k"))),
+                                right: Box::new(Expr::Const(Const::Int(1))),
+                            }],
+                        },
+                        Expr::Function {
+                            name: "__window_partition".to_string(),
+                            args: vec![Expr::Column(ColumnRef::new("g"))],
+                        },
+                    ],
+                },
+                alias: None,
+            }],
+            input: Box::new(RelExpr::Scan {
+                table: "t".to_string(),
+                alias: None,
+            }),
+        };
+        let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
+        assert!(
+            sql.contains("FILTER (WHERE") && sql.contains("OVER (PARTITION BY"),
+            "expected FILTER ... OVER: {sql}"
+        );
+        assert!(!sql.contains("__window"), "marker must not leak: {sql}");
     }
 }

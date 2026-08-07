@@ -161,6 +161,10 @@ pub mod token {
     pub const ROW: i32 = 121;
     pub const ROWS: i32 = 122;
     pub const ONLY: i32 = 123;
+
+    // COLLATE postfix operator: `expr COLLATE "name"` (appended at end so
+    // existing token codes do not shift -- mirrored by hand in ra_sql.rs).
+    pub const COLLATE: i32 = 124;
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -286,6 +290,7 @@ fn keyword_lookup(word: &str) -> Option<i32> {
         "ROW" => Some(token::ROW),
         "ROWS" => Some(token::ROWS),
         "ONLY" => Some(token::ONLY),
+        "COLLATE" => Some(token::COLLATE),
         "UNION" => Some(token::UNION),
         "ALL" => Some(token::ALL),
         "ANY" => Some(token::ANY),

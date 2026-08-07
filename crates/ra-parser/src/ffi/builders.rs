@@ -2120,6 +2120,75 @@ pub unsafe fn ra_window_marker_full(
     })
 }
 
+/// Build a window-function marker carrying an aggregate `FILTER (WHERE pred)`.
+///
+/// Identical to [`ra_window_marker_full`] but appends a `__window_filter(pred)`
+/// sentinel arg so the emitter can lower it back to
+/// `agg(args) FILTER (WHERE pred) OVER (...)`. Kept faithful (no CASE rewrite)
+/// for the result-oracle round-trip.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - all node pointers must be valid tagged pointers or null.
+pub unsafe fn ra_window_marker_filtered(
+    state: *mut RaParseState,
+    name: *const c_char,
+    args_list: *mut RaNode,
+    filter_cond: *mut RaNode,
+    partition_list: *mut RaNode,
+    order_list: *mut RaNode,
+    frame: *mut RaNode,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let raw_name = unsafe { c_str_to_string(name) };
+    let marker_name = format!("__window_{raw_name}");
+    let mut args = collect_exprs(st, args_list);
+
+    // FILTER predicate rides as a __window_filter(pred) sentinel arg.
+    if let Some(pred) = decode_expr(st, filter_cond) {
+        args.push(Expr::Function {
+            name: "__window_filter".to_string(),
+            args: vec![pred],
+        });
+    }
+
+    let partition_exprs = collect_exprs(st, partition_list);
+    if !partition_exprs.is_empty() {
+        args.push(Expr::Function {
+            name: "__window_partition".to_string(),
+            args: partition_exprs,
+        });
+    }
+
+    let order_keys = collect_sort_keys(st, order_list);
+    for key in order_keys {
+        let sentinel_name = match key.direction {
+            SortDirection::Asc => "__window_order_asc",
+            SortDirection::Desc => "__window_order_desc",
+        };
+        args.push(Expr::Function {
+            name: sentinel_name.to_string(),
+            args: vec![key.expr],
+        });
+    }
+
+    if !frame.is_null() {
+        if let Some(frame_expr) = decode_expr(st, frame) {
+            args.push(Expr::Function {
+                name: "__window_frame".to_string(),
+                args: vec![frame_expr],
+            });
+        }
+    }
+
+    st.push_expr(Expr::Function {
+        name: marker_name,
+        args,
+    })
+}
+
 /// Build a `FieldAccess` expression (e.g., `(row).field_name`).
 ///
 /// # Safety

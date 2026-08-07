@@ -363,6 +363,10 @@ fn decode_window_sentinels(
                     frame = Some(f.clone());
                 }
             }
+            // FILTER (WHERE ...) on a windowed aggregate: kept only on the raw
+            // marker for the emitter; the internal WindowExpr has no filter
+            // slot, so drop this sentinel from the real args.
+            Expr::Function { name, .. } if name == "__window_filter" => {}
             _ => real_args.push(arg),
         }
     }
@@ -465,15 +469,21 @@ fn make_agg_expr(expr: &Expr) -> Option<AggregateExpr> {
         return None;
     };
     let func = aggregate_function_for(name)?;
+    // Skip the `__filter(pred)` sentinel (FILTER (WHERE pred)) when locating
+    // the real aggregate argument; it is emitted from the raw Function marker.
+    let real: Vec<&Expr> = args
+        .iter()
+        .filter(|a| !matches!(a, Expr::Function { name, .. } if name == "__filter"))
+        .collect();
     // COUNT(*) — the argument is the column "*" sentinel.
     let is_star = matches!(
-        args.first(),
+        real.first(),
         Some(Expr::Column(ColumnRef { column, .. })) if column == "*"
     );
-    let arg = if is_star || args.is_empty() {
+    let arg = if is_star || real.is_empty() {
         None
     } else {
-        args.first().cloned()
+        real.first().map(|e| (*e).clone())
     };
     Some(AggregateExpr {
         function: func,

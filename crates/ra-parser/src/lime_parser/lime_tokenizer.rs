@@ -169,6 +169,7 @@ fn keyword_lookup(bytes: &[u8]) -> Option<i32> {
         b"MATERIALIZED" => Some(token::MATERIALIZED),
         // SIMILAR TO operator
         b"SIMILAR" => Some(token::SIMILAR),
+        b"COLLATE" => Some(token::COLLATE),
         _ => None,
     }
 }

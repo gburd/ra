@@ -234,6 +234,31 @@ pub fn ra_window_marker_full(
 }
 
 #[must_use]
+pub fn ra_window_marker_filtered(
+    st: *mut RaParseState,
+    name: &str,
+    args: Value,
+    filter_cond: Value,
+    partition_list: Value,
+    order_list: Value,
+    frame: Value,
+) -> Value {
+    let name_c = CString::new(name).unwrap_or_default();
+    let handle = unsafe {
+        ffi::ra_window_marker_filtered(
+            st,
+            name_c.as_ptr(),
+            args.handle(),
+            filter_cond.handle(),
+            partition_list.handle(),
+            order_list.handle(),
+            frame.handle(),
+        )
+    };
+    Value::from_node(handle)
+}
+
+#[must_use]
 pub fn ra_cte(st: *mut RaParseState, name: &str, definition: Value, body: Value) -> Value {
     let name_c = CString::new(name).unwrap_or_default();
     let handle = unsafe { ffi::ra_cte(st, name_c.as_ptr(), definition.handle(), body.handle()) };
