@@ -84,6 +84,100 @@ fn convert_parse_errors(errs: ParseErrors) -> SqlConversionError {
     }
 }
 
+/// Split SQL into statements on top-level `;`, ignoring `;` inside
+/// single-quoted strings and `PostgreSQL` dollar-quoted bodies
+/// (`$$...$$` / `$tag$...$tag$`). A plain `sql.split(';')` corrupts
+/// dollar-quoted bodies that contain `;` (Codeberg #25).
+fn split_statements(sql: &str) -> Vec<&str> {
+    let bytes = sql.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let mut in_single = false;
+    let mut dollar_tag: Option<&str> = None;
+
+    while i < bytes.len() {
+        if let Some(tag) = dollar_tag {
+            if sql[i..].starts_with(tag) {
+                i += tag.len();
+                dollar_tag = None;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        let c = bytes[i];
+        if in_single {
+            if c == b'\'' {
+                in_single = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'\'' => {
+                in_single = true;
+                i += 1;
+            }
+            b'$' => {
+                if let Some(tag) = scan_dollar_tag(&sql[i..]) {
+                    dollar_tag = Some(tag);
+                    i += tag.len();
+                } else {
+                    i += 1;
+                }
+            }
+            b';' => {
+                let stmt = sql[start..i].trim();
+                if !stmt.is_empty() {
+                    out.push(stmt);
+                }
+                i += 1;
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    let tail = sql[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
+}
+
+/// If `s` starts with a dollar-quote open delimiter (`$$` or `$ident$`),
+/// return the delimiter text as a subslice of `s`; otherwise `None`. The tag
+/// is `[A-Za-z_][A-Za-z0-9_]*` (a digit after `$` is a positional parameter).
+fn scan_dollar_tag(s: &str) -> Option<&str> {
+    let b = s.as_bytes();
+    if b.first() != Some(&b'$') {
+        return None;
+    }
+    let mut j = 1;
+    // `$$` empty tag: second byte is `$`.
+    if b.get(1) == Some(&b'$') {
+        return s.get(..2);
+    }
+    // Otherwise a named tag must start with a letter or `_`.
+    if !b
+        .get(1)
+        .is_some_and(|&c| c.is_ascii_alphabetic() || c == b'_')
+    {
+        return None;
+    }
+    while j < b.len() {
+        let c = b[j];
+        if c == b'$' {
+            return s.get(..=j);
+        }
+        if !(c.is_ascii_alphanumeric() || c == b'_') {
+            return None;
+        }
+        j += 1;
+    }
+    None
+}
+
 /// Parse multiple SQL statements and convert each to a `RelExpr`.
 ///
 /// Splits on semicolons. Non-SELECT statements produce errors for that entry.
@@ -92,11 +186,7 @@ fn convert_parse_errors(errs: ParseErrors) -> SqlConversionError {
 ///
 /// Returns error if SQL parsing fails entirely or no statements are found.
 pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
-    let statements: Vec<&str> = sql
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
+    let statements: Vec<&str> = split_statements(sql);
 
     if statements.is_empty() {
         return Err(SqlConversionError::InvalidSql(
@@ -125,11 +215,7 @@ pub fn sql_to_relexprs(sql: &str) -> Result<Vec<RelExpr>, SqlConversionError> {
 ///
 /// Returns error if SQL is invalid or contains unsupported features.
 pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
-    let statements: Vec<&str> = sql
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
+    let statements: Vec<&str> = split_statements(sql);
 
     if statements.is_empty() {
         return Err(SqlConversionError::InvalidSql(
@@ -163,11 +249,7 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
 ///
 /// Returns error if SQL is invalid or contains unsupported features.
 pub fn sql_to_parsed_query(sql: &str) -> Result<ParsedQuery, SqlConversionError> {
-    let statements: Vec<&str> = sql
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
+    let statements: Vec<&str> = split_statements(sql);
 
     if statements.is_empty() {
         return Err(SqlConversionError::InvalidSql(
@@ -344,5 +426,42 @@ fn classify_ddl(sql: &str) -> Statement {
         _ => Statement::Ddl(DdlStmt::Other {
             sql: sql.to_owned(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod dollar_split_tests {
+    use super::{scan_dollar_tag, split_statements};
+
+    #[test]
+    fn split_ignores_semicolon_in_dollar_body() {
+        // `;` inside a dollar-quoted body must NOT split the statement
+        // (Codeberg #25). A naive `split(';')` would produce two fragments.
+        let stmts = split_statements("SELECT $$a ; b$$; SELECT 2");
+        assert_eq!(stmts, vec!["SELECT $$a ; b$$", "SELECT 2"]);
+    }
+
+    #[test]
+    fn split_ignores_semicolon_in_named_tag_body() {
+        let stmts = split_statements("SELECT $t$x ; y$t$");
+        assert_eq!(stmts, vec!["SELECT $t$x ; y$t$"]);
+    }
+
+    #[test]
+    fn split_ignores_semicolon_in_single_quotes() {
+        let stmts = split_statements("SELECT 'a ; b'; SELECT 2");
+        assert_eq!(stmts, vec!["SELECT 'a ; b'", "SELECT 2"]);
+    }
+
+    #[test]
+    fn scan_dollar_tag_variants() {
+        assert_eq!(scan_dollar_tag("$$body$$"), Some("$$"));
+        assert_eq!(scan_dollar_tag("$tag$body$tag$"), Some("$tag$"));
+        assert_eq!(scan_dollar_tag("$_x$b$_x$"), Some("$_x$"));
+        // `$1` is a positional parameter, not a dollar-quote.
+        assert_eq!(scan_dollar_tag("$1"), None);
+        // Bare `$` with no closing delimiter.
+        assert_eq!(scan_dollar_tag("$abc"), None);
+        assert_eq!(scan_dollar_tag("xyz"), None);
     }
 }

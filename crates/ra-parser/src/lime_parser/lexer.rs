@@ -542,6 +542,85 @@ fn lex_string(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
     })
 }
 
+/// Whether `b` can start a dollar-quote tag (letter or underscore). A digit
+/// after `$` is a positional parameter, not a dollar-quote.
+fn is_tag_start(b: u8) -> bool {
+    b.is_ascii_alphabetic() || b == b'_'
+}
+
+/// Lex a `PostgreSQL` dollar-quoted string literal (`$$body$$` or
+/// `$tag$body$tag$`).
+///
+/// The caller guarantees `cur.peek() == b'$'` AND that the next byte is `$`,
+/// a letter, or `_` (a digit means a positional parameter `$N`, handled by
+/// the caller's error path). The tag is `[A-Za-z_][A-Za-z0-9_]*` (or empty).
+/// The body is taken verbatim up to the matching `$tag$` closing delimiter:
+/// no escape processing, no doubling. The value is emitted as an SCONST.
+///
+/// # Errors
+///
+/// Returns an error if the opening tag is malformed (no closing `$`) or the
+/// body is unterminated (no matching close delimiter before EOF).
+fn lex_dollar_string(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
+    let start = cur.pos;
+    cur.advance(); // skip opening '$'
+                   // Read the tag: [A-Za-z_][A-Za-z0-9_]* (possibly empty) up to the
+                   // closing '$' of the opening delimiter.
+    while !cur.at_end() && (cur.peek().is_ascii_alphanumeric() || cur.peek() == b'_') {
+        cur.advance();
+    }
+    if cur.at_end() || cur.peek() != b'$' {
+        return Err(format!(
+            "unterminated dollar-quote delimiter starting at \
+             position {start}"
+        ));
+    }
+    // The full closing delimiter is `$tag$` including both dollar signs.
+    let delim = cur.slice(start, cur.pos + 1).as_bytes();
+    cur.advance(); // skip the '$' that closes the opening delimiter
+    let body_start = cur.pos;
+    // Scan the body verbatim until the exact matching closing delimiter.
+    loop {
+        if cur.at_end() {
+            return Err(format!(
+                "unterminated dollar-quoted string starting at \
+                 position {start}"
+            ));
+        }
+        if cur.peek() == b'$'
+            && cur
+                .bytes
+                .get(cur.pos..cur.pos + delim.len())
+                .is_some_and(|w| w == delim)
+        {
+            break;
+        }
+        cur.advance();
+    }
+    let body_bytes = cur
+        .bytes
+        .get(body_start..cur.pos)
+        .ok_or_else(|| format!("invalid dollar-quote body at position {start}"))?;
+    let value = String::from_utf8(body_bytes.to_vec())
+        .map_err(|e| format!("invalid UTF-8 in dollar-quoted string at position {start}: {e}"))?;
+    cur.advance_by(delim.len()); // skip closing delimiter
+    let length = i32::try_from(cur.pos - start).unwrap_or(0);
+    let cstr = CString::new(value)
+        .map_err(|e| format!("invalid dollar-quoted string at position {start}: {e}"))?;
+    let ptr = cstr.as_ptr();
+    Ok(LexToken {
+        code: token::SCONST,
+        value: RaToken {
+            text: ptr,
+            location: i32::try_from(start).unwrap_or(0),
+            length,
+            int_val: 0,
+            float_val: 0.0,
+        },
+        text_backing: Some(cstr),
+    })
+}
+
 /// Lex a numeric literal (integer or float).
 fn lex_number(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
     let start = cur.pos;
@@ -664,6 +743,15 @@ pub fn tokenize(sql: &str) -> Result<Vec<LexToken>, String> {
 
         if b == b'\'' {
             tokens.push(lex_string(&mut cur)?);
+        } else if b == b'$'
+            && cur
+                .peek_next()
+                .is_some_and(|n| n == b'$' || is_tag_start(n))
+        {
+            // PostgreSQL dollar-quoting: `$$...$$` or `$tag$...$tag$`. A `$`
+            // followed by a digit is a positional parameter (`$N`) and falls
+            // through to the error path below (unchanged behavior).
+            tokens.push(lex_dollar_string(&mut cur)?);
         } else if b.is_ascii_digit() {
             tokens.push(lex_number(&mut cur)?);
         } else if b.is_ascii_alphabetic() || b == b'_' {
@@ -727,6 +815,96 @@ mod tests {
         );
         // A bare multibyte char in operator position errors cleanly, no panic.
         assert!(tokenize("SELECT a \u{2192} b").is_err());
+    }
+
+    #[test]
+    fn tokenize_dollar_quote_empty_tag() {
+        let toks = tokenize("SELECT $$hi$$").expect("empty-tag dollar-quote should tokenize");
+        let s = toks
+            .iter()
+            .find(|t| t.code == token::SCONST)
+            .expect("a string constant");
+        // SAFETY: text is a valid CString pointer kept alive by text_backing.
+        let text = unsafe { std::ffi::CStr::from_ptr(s.value.text) }
+            .to_str()
+            .expect("valid utf-8");
+        assert_eq!(text, "hi");
+    }
+
+    #[test]
+    fn tokenize_dollar_quote_named_tag() {
+        let toks = tokenize("SELECT $t$x$t$").expect("named-tag dollar-quote should tokenize");
+        let s = toks
+            .iter()
+            .find(|t| t.code == token::SCONST)
+            .expect("a string constant");
+        // SAFETY: text is a valid CString pointer kept alive by text_backing.
+        let text = unsafe { std::ffi::CStr::from_ptr(s.value.text) }
+            .to_str()
+            .expect("valid utf-8");
+        assert_eq!(text, "x");
+    }
+
+    #[test]
+    fn tokenize_dollar_quote_body_with_semicolon() {
+        let toks =
+            tokenize("SELECT $$a ; b$$").expect("body with semicolon should tokenize verbatim");
+        let s = toks
+            .iter()
+            .find(|t| t.code == token::SCONST)
+            .expect("a string constant");
+        // SAFETY: text is a valid CString pointer kept alive by text_backing.
+        let text = unsafe { std::ffi::CStr::from_ptr(s.value.text) }
+            .to_str()
+            .expect("valid utf-8");
+        assert_eq!(text, "a ; b");
+    }
+
+    #[test]
+    fn tokenize_dollar_quote_body_with_newline() {
+        let toks =
+            tokenize("SELECT $$line1\nline2$$").expect("multi-line body should tokenize verbatim");
+        let s = toks
+            .iter()
+            .find(|t| t.code == token::SCONST)
+            .expect("a string constant");
+        // SAFETY: text is a valid CString pointer kept alive by text_backing.
+        let text = unsafe { std::ffi::CStr::from_ptr(s.value.text) }
+            .to_str()
+            .expect("valid utf-8");
+        assert_eq!(text, "line1\nline2");
+    }
+
+    #[test]
+    fn tokenize_dollar_quote_nested_different_tag_is_body() {
+        // An inner $tag$ with a DIFFERENT tag is just body text; the outer
+        // quote ends only at its own matching $func$ close.
+        let toks =
+            tokenize("$func$ begin $inner$ end $func$").expect("nested-tag body should tokenize");
+        let s = toks
+            .iter()
+            .find(|t| t.code == token::SCONST)
+            .expect("a string constant");
+        // SAFETY: text is a valid CString pointer kept alive by text_backing.
+        let text = unsafe { std::ffi::CStr::from_ptr(s.value.text) }
+            .to_str()
+            .expect("valid utf-8");
+        assert_eq!(text, " begin $inner$ end ");
+    }
+
+    #[test]
+    fn tokenize_dollar_quote_unterminated_errors() {
+        assert!(tokenize("SELECT $$no close").is_err());
+        assert!(tokenize("SELECT $tag$no close$other$").is_err());
+    }
+
+    #[test]
+    fn tokenize_dollar_param_still_errors_as_before() {
+        // `$` followed by a digit is a positional parameter, NOT a
+        // dollar-quote; Ra does not support `$N`, so it must keep erroring
+        // exactly as on origin/main (unchanged behavior, out of scope).
+        let err = tokenize("SELECT $1").expect_err("$N is still unsupported");
+        assert!(err.contains("unexpected character"), "got: {err}");
     }
 
     #[test]
