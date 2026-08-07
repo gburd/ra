@@ -1968,7 +1968,7 @@ expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN WITHIN GROUP LPAREN ORDER BY sor
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER LPAREN
              opt_partition(D) opt_window_order(E) opt_window_frame(F) RPAREN. 
 %action_rust {
-    A = ra_window_marker_full(ctx.user, B.text(), C, D, E, F.int_val);
+    A = ra_window_marker_full(ctx.user, B.text(), C, D, E, F);
 }
 
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
@@ -1976,29 +1976,29 @@ expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER LPAREN
 %action_rust {
     let mut l = ra_list_new(ctx.user);
     l = ra_list_push(ctx.user, l, ra_column(ctx.user, "*"));
-    A = ra_window_marker_full(ctx.user, B.text(), l, C, D, E.int_val);
+    A = ra_window_marker_full(ctx.user, B.text(), l, C, D, E);
 }
 
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER LPAREN
              opt_partition(C) opt_window_order(D) opt_window_frame(E) RPAREN. 
 %action_rust {
-    A = ra_window_marker_full(ctx.user, B.text(), ra_list_new(ctx.user), C, D, E.int_val);
+    A = ra_window_marker_full(ctx.user, B.text(), ra_list_new(ctx.user), C, D, E);
 }
 
 /* Named window reference: func() OVER w — treated as empty window spec */
 expr(A) ::= IDENT(B) LPAREN expr_list(C) RPAREN OVER IDENT. 
 %action_rust {
-    A = ra_window_marker_full(ctx.user, B.text(), C, Value::default(), Value::default(), 0);
+    A = ra_window_marker_full(ctx.user, B.text(), C, Value::default(), Value::default(), Value::default());
 }
 expr(A) ::= IDENT(B) LPAREN STAR RPAREN OVER IDENT. 
 %action_rust {
     let mut l = ra_list_new(ctx.user);
     l = ra_list_push(ctx.user, l, ra_column(ctx.user, "*"));
-    A = ra_window_marker_full(ctx.user, B.text(), l, Value::default(), Value::default(), 0);
+    A = ra_window_marker_full(ctx.user, B.text(), l, Value::default(), Value::default(), Value::default());
 }
 expr(A) ::= IDENT(B) LPAREN RPAREN OVER IDENT. 
 %action_rust {
-    A = ra_window_marker_full(ctx.user, B.text(), ra_list_new(ctx.user), Value::default(), Value::default(), 0);
+    A = ra_window_marker_full(ctx.user, B.text(), ra_list_new(ctx.user), Value::default(), Value::default(), Value::default());
 }
 
 opt_partition(A) ::= PARTITION BY expr_list(B). %action_rust { A = B; }
@@ -2013,39 +2013,47 @@ opt_window_order(A) ::= .
     A = Value::default();
 }
 
-/* Window frame clause: ROWS/RANGE BETWEEN ... AND ... */
+/* Window frame clause: ROWS/RANGE/GROUPS BETWEEN ... AND ...
+ * Captured as a canonical SQL string carried in a single string Const node so
+ * the emitter can reproduce the frame verbatim (RA-STEERING #22). frame_bound
+ * carries its canonical bound text in the Value's text field; opt_window_frame
+ * joins mode + BETWEEN + start + AND + end into one ra_const_str node. An
+ * absent frame is Value::default() (no node). */
 opt_window_frame(A) ::= ROWS BETWEEN frame_bound(B) AND frame_bound(C). 
 %action_rust {
-    A.int_val = 1;  A.location = 0; A.length = 0; A.float_val = 0.0;
-    let _ = &B; let _ = &C;
+    let s = format!("ROWS BETWEEN {} AND {}", B.text(), C.text());
+    A = ra_const_str(ctx.user, &s);
 }
-opt_window_frame(A) ::= IDENT BETWEEN frame_bound(B) AND frame_bound(C). 
+opt_window_frame(A) ::= IDENT(M) BETWEEN frame_bound(B) AND frame_bound(C). 
 %action_rust {
-    /* ROWS/RANGE BETWEEN start AND end — flag presence so the optimizer can
-     * defer (frame semantics are not built directly). */
-    A.int_val = 1;  A.location = 0; A.length = 0; A.float_val = 0.0;
-    let _ = &B; let _ = &C;
+    /* IDENT is RANGE/GROUPS (ROWS is a keyword handled above). */
+    let s = format!("{} BETWEEN {} AND {}", M.text().to_uppercase(), B.text(), C.text());
+    A = ra_const_str(ctx.user, &s);
 }
 opt_window_frame(A) ::= . 
 %action_rust {
-    A.int_val = 0;  A.location = 0; A.length = 0; A.float_val = 0.0;
+    A = Value::default();
 }
 
-/* Frame bounds: UNBOUNDED PRECEDING, CURRENT ROW, expr PRECEDING/FOLLOWING */
-frame_bound(A) ::= IDENT IDENT. 
+/* Frame bounds: UNBOUNDED PRECEDING/FOLLOWING, CURRENT ROW, N PRECEDING/FOLLOWING.
+ * Each produces a text-only Value carrying the canonical bound string. */
+frame_bound(A) ::= IDENT(a) IDENT(b). 
 %action_rust {
-    /* UNBOUNDED PRECEDING, UNBOUNDED FOLLOWING, CURRENT ROW */
-    A = Value::default();
+    /* UNBOUNDED PRECEDING, UNBOUNDED FOLLOWING, CURRENT FOLLOWING(unused) */
+    let s = format!("{} {}", a.text().to_uppercase(), b.text().to_uppercase());
+    A = Value::from_token(&s, 0, 0.0, 0);
 }
-frame_bound(A) ::= IDENT ROW. 
+frame_bound(A) ::= IDENT(a) ROW. 
 %action_rust {
-    /* CURRENT ROW (ROW is a keyword token now) */
-    A = Value::default();
+    /* CURRENT ROW (ROW is a keyword token now); a is CURRENT */
+    let s = format!("{} ROW", a.text().to_uppercase());
+    A = Value::from_token(&s, 0, 0.0, 0);
 }
-frame_bound(A) ::= expr(B) IDENT. 
+frame_bound(A) ::= ICONST(B) IDENT(dir). 
 %action_rust {
-    /* N.clone() PRECEDING, N.clone() FOLLOWING */
-    A = B;
+    /* N PRECEDING, N FOLLOWING (integer offset) */
+    let s = format!("{} {}", B.int_val, dir.text().to_uppercase());
+    A = Value::from_token(&s, 0, 0.0, 0);
 }
 
 /* -- TRIM special syntax: TRIM(BOTH/LEADING/TRAILING 'chars' FROM expr) --- */

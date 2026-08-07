@@ -217,7 +217,7 @@ pub fn ra_window_marker_full(
     args: Value,
     partition_list: Value,
     order_list: Value,
-    has_frame: i64,
+    frame: Value,
 ) -> Value {
     let name_c = CString::new(name).unwrap_or_default();
     let handle = unsafe {
@@ -227,7 +227,7 @@ pub fn ra_window_marker_full(
             args.handle(),
             partition_list.handle(),
             order_list.handle(),
-            has_frame as i32,
+            frame.handle(),
         )
     };
     Value::from_node(handle)

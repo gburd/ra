@@ -689,6 +689,63 @@ fn test_window_sum() {
     );
 }
 
+// RA-STEERING #22: window frame bounds must survive the parse so the emitter
+// can reproduce `ROWS/RANGE BETWEEN ...`. We assert the WindowExpr carries a
+// parsed WindowFrame (mode + start/end bounds), not just a presence flag.
+#[test]
+fn test_window_frame_rows_between_preserved() {
+    use ra_core::algebra::{WindowFrameBound, WindowFrameMode};
+    let sql = "SELECT SUM(amount) OVER (                PARTITION BY custkey ORDER BY id                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)                FROM orders";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    let win =
+        find_node(&result, |r| matches!(r, RelExpr::Window { .. })).expect("expected Window node");
+    let RelExpr::Window { functions, .. } = win else {
+        unreachable!("matched Window above")
+    };
+    let frame = functions[0]
+        .frame
+        .as_ref()
+        .expect("frame bounds should be preserved");
+    assert_eq!(frame.mode, WindowFrameMode::Rows);
+    assert_eq!(frame.start, WindowFrameBound::UnboundedPreceding);
+    assert_eq!(frame.end, WindowFrameBound::CurrentRow);
+}
+
+#[test]
+fn test_window_frame_n_preceding_following_preserved() {
+    use ra_core::algebra::{WindowFrameBound, WindowFrameMode};
+    let sql = "SELECT SUM(amount) OVER (                PARTITION BY custkey ORDER BY id                ROWS BETWEEN 3 PRECEDING AND 1 FOLLOWING)                FROM orders";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    let win =
+        find_node(&result, |r| matches!(r, RelExpr::Window { .. })).expect("expected Window node");
+    let RelExpr::Window { functions, .. } = win else {
+        unreachable!("matched Window above")
+    };
+    let frame = functions[0]
+        .frame
+        .as_ref()
+        .expect("frame bounds should be preserved");
+    assert_eq!(frame.mode, WindowFrameMode::Rows);
+    assert_eq!(frame.start, WindowFrameBound::Preceding(3));
+    assert_eq!(frame.end, WindowFrameBound::Following(1));
+}
+
+// A window without a frame clause must not fabricate one.
+#[test]
+fn test_window_without_frame_has_none() {
+    let sql = "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY id) FROM t";
+    let result = sql_to_relexpr(sql).expect("should parse");
+    let win =
+        find_node(&result, |r| matches!(r, RelExpr::Window { .. })).expect("expected Window node");
+    let RelExpr::Window { functions, .. } = win else {
+        unreachable!("matched Window above")
+    };
+    assert!(
+        functions[0].frame.is_none(),
+        "frameless window should have no frame"
+    );
+}
+
 // ---- Set operation tests ----
 
 #[test]

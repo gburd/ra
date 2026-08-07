@@ -1049,7 +1049,10 @@ impl EmitContext {
         let mut real_args: Vec<String> = Vec::new();
         let mut partition: Vec<String> = Vec::new();
         let mut order: Vec<String> = Vec::new();
-        let mut has_frame = false;
+        // Canonical frame clause carried verbatim in the __window_frame marker's
+        // string Const arg (RA-STEERING #22). `Some("")`/no string means the
+        // marker was present but its bounds were lost (legacy) -> unsupported.
+        let mut frame: Option<String> = None;
         for a in args {
             match a {
                 Expr::Function { name, args: inner } if name == "__window_partition" => {
@@ -1067,16 +1070,22 @@ impl EmitContext {
                         order.push(format!("{} DESC", self.emit_expr(e)?));
                     }
                 }
-                Expr::Function { name, .. } if name == "__window_frame" => {
-                    has_frame = true;
+                Expr::Function { name, args: inner } if name == "__window_frame" => {
+                    match inner.first() {
+                        Some(Expr::Const(Const::String(f))) if !f.is_empty() => {
+                            frame = Some(f.clone());
+                        }
+                        // Present but bounds-less (legacy marker): flag as unsupported below.
+                        _ => frame = Some(String::new()),
+                    }
                 }
                 other => real_args.push(self.emit_expr(other)?),
             }
         }
-        // A frame was specified but its bounds were dropped during parsing;
-        // we cannot faithfully reproduce it, so refuse rather than emit
+        // A frame marker with no canonical bounds string is a legacy/empty
+        // marker whose bounds were lost during parsing; refuse rather than emit
         // silently-wrong SQL.
-        if has_frame {
+        if matches!(&frame, Some(f) if f.is_empty()) {
             return Err(TranslationError::UnsupportedFeature {
                 dialect: self.target,
                 feature: "window frame (bounds lost during parsing)".to_string(),
@@ -1089,6 +1098,10 @@ impl EmitContext {
         }
         if !order.is_empty() {
             over_parts.push(format!("ORDER BY {}", order.join(", ")));
+        }
+        // The frame clause follows PARTITION BY / ORDER BY, emitted verbatim.
+        if let Some(f) = &frame {
+            over_parts.push(f.clone());
         }
         Ok(format!(
             "{func}({arg_list}) OVER ({})",
@@ -2016,6 +2029,79 @@ mod tests {
         assert!(
             !sql.contains("__window"),
             "window marker must not leak: {sql}"
+        );
+    }
+
+    /// RA-STEERING #22: a `__window_frame(Const::String)` marker emits the
+    /// canonical frame clause verbatim in the OVER clause and does not leak.
+    #[test]
+    fn flatten_window_frame_to_over() {
+        let expr = RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: Expr::Function {
+                    name: "__window_SUM".to_string(),
+                    args: vec![
+                        Expr::Column(ColumnRef::new("amount")),
+                        Expr::Function {
+                            name: "__window_partition".to_string(),
+                            args: vec![Expr::Column(ColumnRef::new("custkey"))],
+                        },
+                        Expr::Function {
+                            name: "__window_order_asc".to_string(),
+                            args: vec![Expr::Column(ColumnRef::new("id"))],
+                        },
+                        Expr::Function {
+                            name: "__window_frame".to_string(),
+                            args: vec![Expr::Const(Const::String(
+                                "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW".to_string(),
+                            ))],
+                        },
+                    ],
+                },
+                alias: Some("running".to_string()),
+            }],
+            input: Box::new(RelExpr::Scan {
+                table: "orders".to_string(),
+                alias: None,
+            }),
+        };
+        let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
+        assert!(
+            sql.contains("ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"),
+            "expected frame clause verbatim in OVER: {sql}"
+        );
+        assert!(
+            !sql.contains("__window"),
+            "window/frame marker must not leak: {sql}"
+        );
+    }
+
+    /// A legacy bounds-less `__window_frame()` marker (empty args) is still
+    /// rejected: we cannot reproduce it faithfully.
+    #[test]
+    fn window_frame_without_bounds_is_unsupported() {
+        let expr = RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: Expr::Function {
+                    name: "__window_SUM".to_string(),
+                    args: vec![
+                        Expr::Column(ColumnRef::new("amount")),
+                        Expr::Function {
+                            name: "__window_frame".to_string(),
+                            args: vec![],
+                        },
+                    ],
+                },
+                alias: None,
+            }],
+            input: Box::new(RelExpr::Scan {
+                table: "orders".to_string(),
+                alias: None,
+            }),
+        };
+        assert!(
+            emit_sql(&expr, Dialect::PostgreSql).is_err(),
+            "bounds-less frame marker must be unsupported"
         );
     }
 

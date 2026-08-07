@@ -2061,13 +2061,16 @@ pub unsafe fn ra_window_marker(
 /// - `name` must be a valid NUL-terminated C string.
 /// - `args_list`, `partition_list`, `order_list` must be valid tagged list
 ///   pointers or null.
+/// - `frame` must be a valid tagged Expr pointer or null (a canonical
+///   frame-clause string `Const`, e.g. `"ROWS BETWEEN UNBOUNDED PRECEDING AND
+///   CURRENT ROW"`).
 pub unsafe fn ra_window_marker_full(
     state: *mut RaParseState,
     name: *const c_char,
     args_list: *mut RaNode,
     partition_list: *mut RaNode,
     order_list: *mut RaNode,
-    has_frame: c_int,
+    frame: *mut RaNode,
 ) -> *mut RaNode {
     let Some(st) = (unsafe { state_ref(state) }) else {
         return std::ptr::null_mut();
@@ -2098,14 +2101,17 @@ pub unsafe fn ra_window_marker_full(
         });
     }
 
-    // An explicit window frame is encoded as a sentinel arg so the
-    // optimizer/plan-builder can detect it and defer (the frame semantics
-    // are otherwise dropped). Frame-insensitive ranking functions ignore it.
-    if has_frame != 0 {
-        args.push(Expr::Function {
-            name: "__window_frame".to_string(),
-            args: Vec::new(),
-        });
+    // An explicit window frame is carried verbatim as a canonical SQL string
+    // in a single `__window_frame(Const::String)` sentinel arg so the emitter
+    // can reproduce `ROWS/RANGE BETWEEN ...` exactly (RA-STEERING #22).
+    // Frame-insensitive ranking functions ignore it.
+    if !frame.is_null() {
+        if let Some(frame_expr) = decode_expr(st, frame) {
+            args.push(Expr::Function {
+                name: "__window_frame".to_string(),
+                args: vec![frame_expr],
+            });
+        }
     }
 
     st.push_expr(Expr::Function {

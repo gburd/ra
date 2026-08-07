@@ -7,7 +7,7 @@
 
 use ra_core::algebra::{
     AggregateExpr, AggregateFunction, NullOrdering, ProjectionColumn, RelExpr, SortDirection,
-    SortKey, WindowExpr, WindowFunction,
+    SortKey, WindowExpr, WindowFrame, WindowFrameBound, WindowFrameMode, WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_core::search_types::DistanceMetric;
@@ -288,7 +288,7 @@ fn extract_window_exprs(
         if let Expr::Function { ref name, ref args } = col.expr {
             if name.starts_with("__window_") {
                 if let Some(func) = window_function_for(name) {
-                    let (real_args, partition_by, order_by, has_frame) =
+                    let (real_args, partition_by, order_by, frame_str) =
                         decode_window_sentinels(args.clone());
                     // Most window functions take a single argument. lag/lead/
                     // nth_value also take an offset (and optional default); the
@@ -308,14 +308,9 @@ fn extract_window_exprs(
                         arg,
                         partition_by,
                         order_by,
-                        // An explicit (non-default) frame was specified. We do
-                        // not build frame semantics directly; recording it as
-                        // Some makes the plan-builder defer to native PG.
-                        frame: has_frame.then_some(ra_core::algebra::WindowFrame {
-                            mode: ra_core::algebra::WindowFrameMode::Range,
-                            start: ra_core::algebra::WindowFrameBound::UnboundedPreceding,
-                            end: ra_core::algebra::WindowFrameBound::CurrentRow,
-                        }),
+                        // An explicit frame was specified: parse its canonical
+                        // string (RA-STEERING #22) into a real WindowFrame.
+                        frame: frame_str.as_deref().and_then(parse_window_frame),
                         alias: col.alias.clone(),
                     });
                     clean_cols.push(col);
@@ -332,11 +327,13 @@ fn extract_window_exprs(
 /// Separate real function args from sentinel args encoding window OVER clause.
 ///
 /// Returns `(real_args, partition_by_exprs, order_by_sort_keys)`.
-fn decode_window_sentinels(args: Vec<Expr>) -> (Vec<Expr>, Vec<Expr>, Vec<SortKey>, bool) {
+fn decode_window_sentinels(
+    args: Vec<Expr>,
+) -> (Vec<Expr>, Vec<Expr>, Vec<SortKey>, Option<String>) {
     let mut real_args = Vec::new();
     let mut partition_by = Vec::new();
     let mut order_by = Vec::new();
-    let mut has_frame = false;
+    let mut frame: Option<String> = None;
 
     for arg in args {
         match &arg {
@@ -361,14 +358,57 @@ fn decode_window_sentinels(args: Vec<Expr>) -> (Vec<Expr>, Vec<Expr>, Vec<SortKe
                     });
                 }
             }
-            Expr::Function { name, .. } if name == "__window_frame" => {
-                has_frame = true;
+            Expr::Function { name, args: inner } if name == "__window_frame" => {
+                if let Some(Expr::Const(Const::String(f))) = inner.first() {
+                    frame = Some(f.clone());
+                }
             }
             _ => real_args.push(arg),
         }
     }
 
-    (real_args, partition_by, order_by, has_frame)
+    (real_args, partition_by, order_by, frame)
+}
+
+/// Parse a canonical frame string (`"<MODE> BETWEEN <start> AND <end>"`, as
+/// produced by the grammar for RA-STEERING #22) into a [`WindowFrame`].
+///
+/// Recognizes ROWS/RANGE/GROUPS modes and the bounds UNBOUNDED PRECEDING,
+/// UNBOUNDED FOLLOWING, CURRENT ROW, and `N PRECEDING`/`N FOLLOWING`. Returns
+/// `None` on anything it does not understand (the emitter still round-trips
+/// the raw string, so an un-parsed frame is not a correctness hazard).
+fn parse_window_frame(s: &str) -> Option<WindowFrame> {
+    let up = s.trim().to_uppercase();
+    let (mode_str, rest) = up.split_once(" BETWEEN ")?;
+    let mode = match mode_str.trim() {
+        "ROWS" => WindowFrameMode::Rows,
+        "RANGE" => WindowFrameMode::Range,
+        "GROUPS" => WindowFrameMode::Groups,
+        _ => return None,
+    };
+    let (start_str, end_str) = rest.split_once(" AND ")?;
+    Some(WindowFrame {
+        mode,
+        start: parse_frame_bound(start_str.trim())?,
+        end: parse_frame_bound(end_str.trim())?,
+    })
+}
+
+fn parse_frame_bound(s: &str) -> Option<WindowFrameBound> {
+    match s {
+        "UNBOUNDED PRECEDING" => Some(WindowFrameBound::UnboundedPreceding),
+        "UNBOUNDED FOLLOWING" => Some(WindowFrameBound::UnboundedFollowing),
+        "CURRENT ROW" => Some(WindowFrameBound::CurrentRow),
+        _ => {
+            let (n, dir) = s.split_once(' ')?;
+            let n: u64 = n.parse().ok()?;
+            match dir {
+                "PRECEDING" => Some(WindowFrameBound::Preceding(n)),
+                "FOLLOWING" => Some(WindowFrameBound::Following(n)),
+                _ => None,
+            }
+        }
+    }
 }
 
 fn promote_window_in_project(rel: RelExpr) -> RelExpr {
