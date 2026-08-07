@@ -163,6 +163,16 @@ pub enum Commands {
         /// --features pg-oracle at build time).
         #[arg(long)]
         compare_pg: bool,
+        /// Batch mode: run the parse oracle over every `*.sql` file in this
+        /// directory. Implies --compare-pg. Prints a ranked divergence
+        /// inventory and exits non-zero if any statement diverges.
+        #[arg(long, value_name = "DIR")]
+        corpus: Option<PathBuf>,
+        /// Batch mode: run the parse oracle over the statements in this single
+        /// `.sql` file. Implies --compare-pg. Combine with --corpus to add one
+        /// extra file.
+        #[arg(long, value_name = "FILE")]
+        sql_file: Option<PathBuf>,
         /// Output format.
         #[arg(long, value_enum, default_value_t = crate::commands::parse::ParseFormat::Text)]
         format: crate::commands::parse::ParseFormat,

@@ -63,10 +63,23 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             sql,
             stdin: use_stdin,
             compare_pg,
+            corpus,
+            sql_file,
             format,
         } => {
-            let resolved = resolve_query(&sql, use_stdin)?;
-            commands::parse::cmd_parse(&resolved, compare_pg, format)
+            // Corpus/batch mode never reads the positional query or stdin.
+            if corpus.is_some() || sql_file.is_some() {
+                commands::parse::cmd_parse(
+                    "",
+                    compare_pg,
+                    corpus.as_deref(),
+                    sql_file.as_deref(),
+                    format,
+                )
+            } else {
+                let resolved = resolve_query(&sql, use_stdin)?;
+                commands::parse::cmd_parse(&resolved, compare_pg, None, None, format)
+            }
         }
         Commands::Optimize {
             query,

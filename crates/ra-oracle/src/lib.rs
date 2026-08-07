@@ -160,6 +160,29 @@ impl ParseFacts {
     }
 }
 
+/// Split a multi-statement SQL string into individual statements using
+/// PostgreSQL's own scanner (via `pg_query`), which correctly ignores `;`
+/// inside single-quoted, dollar-quoted, and comment text.
+///
+/// Returns owned, trimmed, non-empty statements. Note: this does *not* strip
+/// psql `\` meta-commands — the caller should do that first, since they are
+/// not SQL and the scanner will fold them into the following statement.
+///
+/// # Errors
+///
+/// Returns an error if PG's scanner rejects the input (e.g. an unterminated
+/// quote). Callers running over messy corpora should fall back to a tolerant
+/// splitter on error rather than aborting.
+pub fn split_statements(sql: &str) -> anyhow::Result<Vec<String>> {
+    let parts = pg_query::split_with_scanner(sql)?;
+    Ok(parts
+        .into_iter()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
 /// Compare PG and Ra parse facts for one SQL string.
 ///
 /// A divergence is a human string like `tables: PG {t1,t2} vs Ra {t1}` for
@@ -392,6 +415,7 @@ fn collect_tables(expr: &RelExpr, out: &mut BTreeSet<String>, ctes: &mut BTreeSe
         | RelExpr::ParallelAggregate { input, .. }
         | RelExpr::Gather { input, .. }
         | RelExpr::TopK { input, .. }
+        | RelExpr::SubqueryAlias { input, .. }
         | RelExpr::VectorFilter { input, .. } => collect_tables(input, out, ctes),
         RelExpr::Join {
             condition,

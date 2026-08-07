@@ -12,12 +12,18 @@
 //! stable token-name accessor exists on the tokenizer.
 #![expect(clippy::print_stdout, reason = "CLI output")]
 
+use std::path::Path;
+
 use anyhow::{bail, Result};
 
 use ra_parser::sql_to_relexpr;
 
 use crate::display::format_plan_tree;
 use crate::output::errors::format_sql_error;
+
+#[cfg(feature = "pg-oracle")]
+#[path = "parse/corpus.rs"]
+mod corpus;
 
 /// Output format for `ra parse`.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -28,7 +34,22 @@ pub enum ParseFormat {
     Json,
 }
 
-pub fn cmd_parse(query: &str, compare_pg: bool, format: ParseFormat) -> Result<()> {
+pub fn cmd_parse(
+    query: &str,
+    compare_pg: bool,
+    corpus: Option<&Path>,
+    sql_file: Option<&Path>,
+    format: ParseFormat,
+) -> Result<()> {
+    // Batch/corpus mode: `--corpus <dir>` and/or `--sql-file <f>`. Requires
+    // --compare-pg (the oracle is the whole point of the corpus run).
+    if corpus.is_some() || sql_file.is_some() {
+        if !compare_pg {
+            bail!("--corpus/--sql-file require --compare-pg");
+        }
+        return run_corpus(corpus, sql_file, format);
+    }
+
     if compare_pg {
         return cmd_parse_compare(query, format);
     }
@@ -109,5 +130,23 @@ fn cmd_parse_compare(_query: &str, _format: ParseFormat) -> Result<()> {
         "--compare-pg requires the PostgreSQL parse oracle, which is not \
          compiled in.\nrebuild with --features pg-oracle, e.g.\n  \
          cargo run -p ra-cli --features pg-oracle --bin ra -- parse <sql> --compare-pg"
+    );
+}
+
+#[cfg(feature = "pg-oracle")]
+fn run_corpus(corpus: Option<&Path>, sql_file: Option<&Path>, format: ParseFormat) -> Result<()> {
+    corpus::run(corpus, sql_file, format)
+}
+
+#[cfg(not(feature = "pg-oracle"))]
+fn run_corpus(
+    _corpus: Option<&Path>,
+    _sql_file: Option<&Path>,
+    _format: ParseFormat,
+) -> Result<()> {
+    bail!(
+        "--corpus/--sql-file with --compare-pg requires the PostgreSQL parse \
+         oracle, which is not compiled in.\nrebuild with --features pg-oracle, e.g.\n  \
+         cargo run -p ra-cli --features pg-oracle --bin ra -- parse --compare-pg --corpus <dir>"
     );
 }
