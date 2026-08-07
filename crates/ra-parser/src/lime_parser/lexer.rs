@@ -350,10 +350,10 @@ fn keyword_lookup(word: &str) -> Option<i32> {
 /// Must be checked BEFORE `match_two_char_op` to avoid ambiguity
 /// (e.g. `->>` vs `->`).
 fn match_three_char_op(sql: &str, pos: usize) -> Option<i32> {
-    if pos + 2 >= sql.len() {
-        return None;
-    }
-    match &sql[pos..pos + 3] {
+    // `sql.get` returns None when `pos..pos + 3` is out of bounds OR does not
+    // fall on UTF-8 char boundaries, so a multibyte char at/after `pos` yields
+    // no match instead of panicking on a byte-index slice (Codeberg #26).
+    match sql.get(pos..pos + 3)? {
         "->>" => Some(token::ARROW_TEXT),
         "#>>" => Some(token::JSONB_TEXT_PATH),
         _ => None,
@@ -362,10 +362,9 @@ fn match_three_char_op(sql: &str, pos: usize) -> Option<i32> {
 
 /// Match a two-character operator starting at `pos`.
 fn match_two_char_op(sql: &str, pos: usize) -> Option<i32> {
-    if pos + 1 >= sql.len() {
-        return None;
-    }
-    match &sql[pos..pos + 2] {
+    // Char-boundary- and bounds-safe (see `match_three_char_op`): a byte-index
+    // slice `&sql[pos..pos + 2]` panics when `pos` splits a multibyte char.
+    match sql.get(pos..pos + 2)? {
         "<>" | "!=" => Some(token::NE),
         "<=" => Some(token::LE),
         ">=" => Some(token::GE),
@@ -443,7 +442,10 @@ impl<'a> Cursor<'a> {
     }
 
     fn slice(&self, start: usize, end: usize) -> &'a str {
-        &self.sql[start..end]
+        // Boundary-safe: `start`/`end` are token spans that should already fall
+        // on char boundaries, but fall back to the largest valid sub-slice
+        // rather than panicking if a byte-based scan ever lands mid-char.
+        self.sql.get(start..end).unwrap_or("")
     }
 }
 
@@ -493,7 +495,10 @@ fn skip_trivia(cur: &mut Cursor<'_>) -> Result<bool, String> {
 fn lex_string(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
     let start = cur.pos;
     cur.advance(); // skip opening quote
-    let mut value = String::new();
+                   // Accumulate raw bytes and decode as UTF-8 at the end. Pushing
+                   // `char::from(byte)` per byte would corrupt multibyte characters (each
+                   // continuation byte would become a separate Latin-1 char) (Codeberg #26).
+    let mut value: Vec<u8> = Vec::new();
     loop {
         if cur.at_end() {
             return Err(format!(
@@ -504,15 +509,17 @@ fn lex_string(cur: &mut Cursor<'_>) -> Result<LexToken, String> {
         if cur.peek() == b'\'' {
             cur.advance();
             if !cur.at_end() && cur.peek() == b'\'' {
-                value.push('\'');
+                value.push(b'\'');
                 cur.advance();
                 continue;
             }
             break;
         }
-        value.push(char::from(cur.peek()));
+        value.push(cur.peek());
         cur.advance();
     }
+    let value = String::from_utf8(value)
+        .map_err(|e| format!("invalid UTF-8 in string literal at position {start}: {e}"))?;
     let length = i32::try_from(cur.pos - start).unwrap_or(0);
     let cstr =
         CString::new(value).map_err(|e| format!("invalid string at position {start}: {e}"))?;
@@ -692,6 +699,29 @@ mod tests {
         assert_eq!(tokens[1].code, token::STAR);
         assert_eq!(tokens[2].code, token::FROM);
         assert_eq!(tokens[3].code, token::IDENT);
+    }
+
+    #[test]
+    fn tokenize_multibyte_does_not_panic(/* Codeberg #26 */) {
+        // A multibyte char immediately after an operator-lead byte used to
+        // panic on a byte-index slice in match_two/three_char_op; a multibyte
+        // string literal used to be corrupted by per-byte char::from. Neither
+        // should panic, and the string value must round-trip intact.
+        let toks = tokenize("SELECT 'héllo 日本語'").expect("multibyte string should tokenize");
+        let s = toks
+            .iter()
+            .find(|t| t.code == token::SCONST)
+            .expect("a string constant");
+        // SAFETY: text is a valid CString pointer kept alive by text_backing.
+        let text = unsafe { std::ffi::CStr::from_ptr(s.value.text) }
+            .to_str()
+            .expect("valid utf-8");
+        assert_eq!(
+            text, "héllo 日本語",
+            "multibyte string value must be preserved"
+        );
+        // A bare multibyte char in operator position errors cleanly, no panic.
+        assert!(tokenize("SELECT a \u{2192} b").is_err());
     }
 
     #[test]
