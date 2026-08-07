@@ -223,6 +223,12 @@ typedef struct RaToken {
 %token ONLY.
 %token COLLATE.        /* COLLATE postfix operator (appended at end) */
 
+/* PostgreSQL bit-shift operators << and >> (appended at end so existing
+ * token codes do not shift -- mirrored by hand in lexer.rs token module).
+ * Modeled as function-call markers __shl / __shr (see the -> / @> productions). */
+%token SHL.            /* << left shift */
+%token SHR.            /* >> right shift */
+
 /* ================================================================== */
 /* Precedence (low to high)                                            */
 /* ================================================================== */
@@ -235,6 +241,7 @@ typedef struct RaToken {
 %nonassoc EQ NE LT LE GT GE IS IN LIKE ILIKE SIMILAR BETWEEN AT_GT LT_AT AT_QUESTION AT_AT PLACEHOLDER JSONB_EXISTS JSONB_ANY_KEY JSONB_ALL_KEYS TILDE.
 %left COLLATE.
 %left ARROW ARROW_TEXT JSONB_TEXT_PATH.
+%left SHL SHR.
 %left PLUS MINUS CONCAT.
 %left STAR SLASH PERCENT.
 %right UMINUS.
@@ -1623,6 +1630,23 @@ expr(A) ::= expr(B) ARROW_TEXT expr(C).
     args = ra_list_push(ctx.user, args, B);
     args = ra_list_push(ctx.user, args, C);
     A = ra_func(ctx.user, "__json_field_text", args);
+}
+
+/* -- Bit-shift operators (<<, >>) -----------------------------------
+ * Represented as function calls to avoid BinOp enum changes. */
+expr(A) ::= expr(B) SHL expr(C). 
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__shl", args);
+}
+expr(A) ::= expr(B) SHR expr(C). 
+%action_rust {
+    let mut args = ra_list_new(ctx.user);
+    args = ra_list_push(ctx.user, args, B);
+    args = ra_list_push(ctx.user, args, C);
+    A = ra_func(ctx.user, "__shr", args);
 }
 
 /* -- JSONB operators ----------------------------------------------- */

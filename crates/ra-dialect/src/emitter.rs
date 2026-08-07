@@ -986,6 +986,18 @@ impl EmitContext {
                 let r = self.emit_expr(&args[1])?;
                 Ok(Some(format!("({l} <@ {r})")))
             }
+            // Bit-shift operators: parser emits __shl(a, b) / __shr(a, b),
+            // uppercased to __SHL / __SHR. Lower back to `<<` / `>>`.
+            "__SHL" if args.len() == 2 => {
+                let l = self.emit_expr(&args[0])?;
+                let r = self.emit_expr(&args[1])?;
+                Ok(Some(format!("({l} << {r})")))
+            }
+            "__SHR" if args.len() == 2 => {
+                let l = self.emit_expr(&args[0])?;
+                let r = self.emit_expr(&args[1])?;
+                Ok(Some(format!("({l} >> {r})")))
+            }
             // COUNT(DISTINCT x) etc. — parser encodes the DISTINCT argument as
             // __distinct(x) inside the aggregate call.
             "__DISTINCT" if args.len() == 1 => {
@@ -2278,5 +2290,32 @@ mod tests {
             "expected FILTER ... OVER: {sql}"
         );
         assert!(!sql.contains("__window"), "marker must not leak: {sql}");
+    }
+
+    /// Bit-shift markers `__shl` / `__shr` (Codeberg #25) lower back to the
+    /// `<<` / `>>` operators (the marker must not leak into emitted SQL).
+    #[test]
+    fn shift_markers_round_trip() {
+        for (marker, op) in [("__shl", "<<"), ("__shr", ">>")] {
+            let expr = RelExpr::Project {
+                columns: vec![ProjectionColumn {
+                    expr: Expr::Function {
+                        name: marker.to_string(),
+                        args: vec![
+                            Expr::Column(ColumnRef::new("a")),
+                            Expr::Const(Const::Int(2)),
+                        ],
+                    },
+                    alias: None,
+                }],
+                input: Box::new(RelExpr::Scan {
+                    table: "t".to_string(),
+                    alias: None,
+                }),
+            };
+            let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
+            assert!(sql.contains(op), "expected {op} in output: {sql}");
+            assert!(!sql.contains(marker), "marker must not leak: {sql}");
+        }
     }
 }

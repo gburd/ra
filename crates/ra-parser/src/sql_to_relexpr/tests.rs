@@ -1686,3 +1686,39 @@ fn plain_subquery_alias_still_parses_without_rename() {
         "no column list -> no forced output aliases"
     );
 }
+
+// ---- Codeberg #25: PostgreSQL bit-shift operators (<<, >>) ----
+// Represented as function-call markers __shl / __shr (like the -> / @>
+// JSON operators) to avoid BinOp enum churn through the e-graph.
+
+#[test]
+fn shl_operator_parses_as_marker() {
+    let sql = "SELECT a << 2 FROM t";
+    let plan = sql_to_relexpr(sql).expect("<< should parse");
+    assert!(
+        has_expr_marker(&plan, "__shl"),
+        "expected a __shl marker in the projection, got {plan:?}"
+    );
+}
+
+#[test]
+fn shr_operator_parses_as_marker() {
+    let sql = "SELECT b >> 1 FROM t";
+    let plan = sql_to_relexpr(sql).expect(">> should parse");
+    assert!(
+        has_expr_marker(&plan, "__shr"),
+        "expected a __shr marker in the projection, got {plan:?}"
+    );
+}
+
+#[test]
+fn shift_in_where_parses() {
+    // `<<` / `>>` bind tighter than comparison, so `(flags >> 3) = 1`
+    // parses with the shift under the equality.
+    let sql = "SELECT a FROM t WHERE flags >> 3 = 1";
+    let plan = sql_to_relexpr(sql).expect("shift in WHERE should parse");
+    assert!(
+        has_expr_marker(&plan, "__shr"),
+        "expected a __shr marker in the filter, got {plan:?}"
+    );
+}

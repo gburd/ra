@@ -165,6 +165,12 @@ pub mod token {
     // COLLATE postfix operator: `expr COLLATE "name"` (appended at end so
     // existing token codes do not shift -- mirrored by hand in ra_sql.rs).
     pub const COLLATE: i32 = 124;
+
+    /* PostgreSQL bit-shift operators << and >> (appended last in the
+     * grammar %token list, so their generated codes are the next two;
+     * UMINUS is a precedence-only pseudo-token that shifts after them). */
+    pub const SHL: i32 = 125; /* << left shift */
+    pub const SHR: i32 = 126; /* >> right shift */
 }
 
 /// C-compatible token value passed to the Lime parser.
@@ -380,6 +386,8 @@ fn match_two_char_op(sql: &str, pos: usize) -> Option<i32> {
         "@@" => Some(token::AT_AT),
         "::" => Some(token::COLONCOLON),
         "->" => Some(token::ARROW),
+        "<<" => Some(token::SHL),
+        ">>" => Some(token::SHR),
         "?|" => Some(token::JSONB_ANY_KEY),
         "?&" => Some(token::JSONB_ALL_KEYS),
         _ => None,
