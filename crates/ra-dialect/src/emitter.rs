@@ -89,11 +89,185 @@ impl EmitContext {
                 ..
             } => self.emit_recursive_cte(name, base_case, recursive_case, body),
             RelExpr::Values { rows } => self.emit_values(rows),
+            RelExpr::Insert {
+                table,
+                columns,
+                source,
+                on_conflict,
+                returning,
+            } => self.emit_insert(
+                table,
+                columns,
+                source,
+                on_conflict.as_ref(),
+                returning.as_deref(),
+            ),
+            RelExpr::Update {
+                table,
+                assignments,
+                filter,
+                from,
+                returning,
+                only,
+            } => self.emit_update(
+                table,
+                *only,
+                assignments,
+                filter.as_ref(),
+                from.as_deref(),
+                returning.as_deref(),
+            ),
+            RelExpr::Delete {
+                table,
+                filter,
+                using,
+                returning,
+                only,
+            } => self.emit_delete(
+                table,
+                *only,
+                filter.as_ref(),
+                using.as_deref(),
+                returning.as_deref(),
+            ),
             _ => {
                 let sel = self.flatten(expr)?;
                 self.render_select(&sel)
             }
         }
+    }
+
+    /// Emit a `RETURNING` clause (leading space included), or empty.
+    fn emit_returning(
+        &mut self,
+        returning: Option<&[ProjectionColumn]>,
+    ) -> Result<String, TranslationError> {
+        let Some(cols) = returning else {
+            return Ok(String::new());
+        };
+        if cols.is_empty() {
+            return Ok(String::new());
+        }
+        let mut parts = Vec::with_capacity(cols.len());
+        for c in cols {
+            let e = self.emit_expr(&c.expr)?;
+            match &c.alias {
+                Some(a) => parts.push(format!("{e} AS {}", self.quote_ident(a))),
+                None => parts.push(e),
+            }
+        }
+        Ok(format!(" RETURNING {}", parts.join(", ")))
+    }
+
+    /// Emit `SET col = expr, ...` from assignments.
+    fn emit_assignments(
+        &mut self,
+        assignments: &[(String, Expr)],
+    ) -> Result<String, TranslationError> {
+        let mut parts = Vec::with_capacity(assignments.len());
+        for (col, val) in assignments {
+            let v = self.emit_expr(val)?;
+            parts.push(format!("{} = {v}", self.quote_ident(col)));
+        }
+        Ok(parts.join(", "))
+    }
+
+    fn emit_insert(
+        &mut self,
+        table: &str,
+        columns: &[String],
+        source: &RelExpr,
+        on_conflict: Option<&ra_core::OnConflict>,
+        returning: Option<&[ProjectionColumn]>,
+    ) -> Result<String, TranslationError> {
+        let cols = if columns.is_empty() {
+            String::new()
+        } else {
+            let quoted: Vec<String> = columns.iter().map(|c| self.quote_ident(c)).collect();
+            format!(" ({})", quoted.join(", "))
+        };
+        let src = self.emit_rel_expr(source)?;
+        let conflict = match on_conflict {
+            None => String::new(),
+            Some(ra_core::OnConflict::DoNothing) => " ON CONFLICT DO NOTHING".to_string(),
+            Some(ra_core::OnConflict::DoUpdate {
+                target,
+                assignments,
+            }) => {
+                let tgt: Vec<String> = target.iter().map(|c| self.quote_ident(c)).collect();
+                let set = self.emit_assignments(assignments)?;
+                format!(" ON CONFLICT ({}) DO UPDATE SET {set}", tgt.join(", "))
+            }
+            Some(ra_core::OnConflict::DoSelect { target, .. }) => {
+                if target.is_empty() {
+                    " ON CONFLICT DO SELECT".to_string()
+                } else {
+                    let tgt: Vec<String> = target.iter().map(|c| self.quote_ident(c)).collect();
+                    format!(" ON CONFLICT ({}) DO SELECT", tgt.join(", "))
+                }
+            }
+        };
+        let ret = self.emit_returning(returning)?;
+        Ok(format!(
+            "INSERT INTO {}{cols} {src}{conflict}{ret}",
+            self.quote_ident(table)
+        ))
+    }
+
+    fn emit_update(
+        &mut self,
+        table: &str,
+        only: bool,
+        assignments: &[(String, Expr)],
+        filter: Option<&Expr>,
+        from: Option<&RelExpr>,
+        returning: Option<&[ProjectionColumn]>,
+    ) -> Result<String, TranslationError> {
+        let only_kw = if only { "ONLY " } else { "" };
+        let set = self.emit_assignments(assignments)?;
+        let from_clause = match from {
+            Some(f) => {
+                let item = self.source_from(f)?;
+                format!(" FROM {}", self.render_from(&item)?)
+            }
+            None => String::new(),
+        };
+        let where_clause = match filter {
+            Some(p) => format!(" WHERE {}", self.emit_expr(p)?),
+            None => String::new(),
+        };
+        let ret = self.emit_returning(returning)?;
+        Ok(format!(
+            "UPDATE {only_kw}{} SET {set}{from_clause}{where_clause}{ret}",
+            self.quote_ident(table)
+        ))
+    }
+
+    fn emit_delete(
+        &mut self,
+        table: &str,
+        only: bool,
+        filter: Option<&Expr>,
+        using: Option<&RelExpr>,
+        returning: Option<&[ProjectionColumn]>,
+    ) -> Result<String, TranslationError> {
+        let only_kw = if only { "ONLY " } else { "" };
+        let using_clause = match using {
+            Some(u) => {
+                let item = self.source_from(u)?;
+                format!(" USING {}", self.render_from(&item)?)
+            }
+            None => String::new(),
+        };
+        let where_clause = match filter {
+            Some(p) => format!(" WHERE {}", self.emit_expr(p)?),
+            None => String::new(),
+        };
+        let ret = self.emit_returning(returning)?;
+        Ok(format!(
+            "DELETE FROM {only_kw}{}{using_clause}{where_clause}{ret}",
+            self.quote_ident(table)
+        ))
     }
 
     /// Flatten a Scan/Filter/Project/Join/Aggregate/Sort/Limit/Distinct/Window
@@ -1549,6 +1723,62 @@ fn aggregate_to_expr(agg: &AggregateExpr) -> Expr {
 mod tests {
     use super::*;
     use ra_core::algebra::{NullOrdering, ProjectionColumn, SortDirection, SortKey};
+
+    #[test]
+    fn emits_insert_update_delete_dml() {
+        use ra_core::algebra::RelExpr;
+        use ra_core::expr::{Const, Expr};
+        // INSERT INTO t (a) VALUES (1)
+        let ins = RelExpr::Insert {
+            table: "t".into(),
+            columns: vec!["a".into()],
+            source: Box::new(RelExpr::Values {
+                rows: vec![vec![Expr::Const(Const::Int(1))]],
+            }),
+            on_conflict: None,
+            returning: None,
+        };
+        let sql = emit_sql(&ins, Dialect::PostgreSql)
+            .expect("insert emits")
+            .sql;
+        assert!(sql.starts_with("INSERT INTO"), "got {sql}");
+        assert!(sql.contains("VALUES (1)"), "got {sql}");
+
+        // DELETE FROM ONLY t emits ONLY (Codeberg #28).
+        let del = RelExpr::Delete {
+            table: "t".into(),
+            filter: None,
+            using: None,
+            returning: None,
+            only: true,
+        };
+        let sql = emit_sql(&del, Dialect::PostgreSql)
+            .expect("delete emits")
+            .sql;
+        assert!(sql.contains("DELETE FROM ONLY"), "ONLY must survive: {sql}");
+
+        // UPDATE t SET a = 1 (no more stack overflow — Codeberg #27).
+        let upd = RelExpr::Update {
+            table: "t".into(),
+            assignments: vec![("a".into(), Expr::Const(Const::Int(1)))],
+            filter: None,
+            from: None,
+            returning: None,
+            only: false,
+        };
+        let sql = emit_sql(&upd, Dialect::PostgreSql)
+            .expect("update emits")
+            .sql;
+        assert!(
+            sql.starts_with("UPDATE") && sql.contains("SET"),
+            "got {sql}"
+        );
+        assert!(
+            !sql.contains("ONLY"),
+            "plain update must not emit ONLY: {sql}"
+        );
+    }
+
     use ra_core::expr::{ColumnRef, Const};
 
     fn simple_scan() -> RelExpr {
