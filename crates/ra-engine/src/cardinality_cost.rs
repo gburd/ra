@@ -128,14 +128,15 @@ impl CostFunction<RelLang> for CardinalityAwareCostFn {
     {
         let base_cost = match enode {
             // --- Scan: cost scales linearly with row count ---
-            RelLang::Scan([table_id]) => {
+            RelLang::Scan([table_id]) | RelLang::ScanOnly([table_id]) => {
                 let child_cost = costs(*table_id);
                 let rows = self
                     .resolve_table(*table_id)
                     .map_or(DEFAULT_ROW_COUNT, |t| self.row_count_for(t));
                 return child_cost + rows * SCAN_COST_PER_ROW;
             }
-            RelLang::ScanAlias([table_id, alias_id]) => {
+            RelLang::ScanAlias([table_id, alias_id])
+            | RelLang::ScanOnlyAlias([table_id, alias_id]) => {
                 let child_cost = costs(*table_id) + costs(*alias_id);
                 let rows = self
                     .resolve_table(*table_id)

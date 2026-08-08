@@ -372,6 +372,7 @@ fn test_count_tables() {
     let expr = RelExpr::Scan {
         table: "users".to_string(),
         alias: None,
+        only: false,
     };
     assert_eq!(LargeJoinOptimizer::count_tables(&expr), 1);
 
@@ -382,10 +383,12 @@ fn test_count_tables() {
         left: Box::new(RelExpr::Scan {
             table: "users".to_string(),
             alias: None,
+            only: false,
         }),
         right: Box::new(RelExpr::Scan {
             table: "orders".to_string(),
             alias: None,
+            only: false,
         }),
     };
     assert_eq!(LargeJoinOptimizer::count_tables(&expr), 2);
@@ -400,15 +403,18 @@ fn test_count_tables() {
             left: Box::new(RelExpr::Scan {
                 table: "users".to_string(),
                 alias: None,
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "orders".to_string(),
                 alias: None,
+                only: false,
             }),
         }),
         right: Box::new(RelExpr::Scan {
             table: "products".to_string(),
             alias: None,
+            only: false,
         }),
     };
     assert_eq!(LargeJoinOptimizer::count_tables(&expr), 3);
@@ -421,6 +427,7 @@ fn test_count_tables() {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_string(),
                 alias: None,
+                only: false,
             }),
         }),
     };
@@ -435,6 +442,7 @@ fn test_extract_joins() {
         left: Box::new(RelExpr::Scan {
             table: "users".to_string(),
             alias: Some("u".to_string()),
+            only: false,
         }),
         right: Box::new(RelExpr::Join {
             join_type: JoinType::Inner,
@@ -442,10 +450,12 @@ fn test_extract_joins() {
             left: Box::new(RelExpr::Scan {
                 table: "orders".to_string(),
                 alias: Some("o".to_string()),
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "products".to_string(),
                 alias: Some("p".to_string()),
+                only: false,
             }),
         }),
     };

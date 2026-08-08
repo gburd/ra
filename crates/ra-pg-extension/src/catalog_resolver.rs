@@ -51,7 +51,7 @@ fn collect_table_refs_rec(
     out: &mut Vec<(String, Option<String>)>,
 ) {
     match expr {
-        ra_core::algebra::RelExpr::Scan { table, alias } => {
+        ra_core::algebra::RelExpr::Scan { table, alias, .. } => {
             out.push((table.clone(), alias.clone()));
         }
         other => {

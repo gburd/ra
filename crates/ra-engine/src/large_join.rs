@@ -62,6 +62,10 @@ impl JoinNode {
         RelExpr::Scan {
             table: self.table.clone(),
             alias: self.alias.clone(),
+            // ponytail: join reordering drops ONLY (JoinNode has no slot);
+            // add a JoinNode.only field if ONLY-scan joins ever need to
+            // preserve inheritance exclusion through reorder.
+            only: false,
         }
     }
 }
@@ -372,7 +376,7 @@ impl LargeJoinOptimizer {
 
     fn extract_joins_recursive(expr: &RelExpr, joins: &mut Vec<JoinNode>) {
         match expr {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 joins.push(JoinNode {
                     table: table.clone(),
                     alias: alias.clone(),
@@ -539,6 +543,7 @@ mod tests {
         RelExpr::Scan {
             table: table.to_string(),
             alias: None,
+            only: false,
         }
     }
 
@@ -707,6 +712,7 @@ mod tests {
         let expr = RelExpr::Scan {
             table: "users".to_string(),
             alias: Some("u".to_string()),
+            only: false,
         };
         let joins = LargeJoinOptimizer::extract_joins(&expr);
         assert_eq!(joins.len(), 1);
@@ -774,7 +780,7 @@ mod tests {
         let node = make_join_node("users");
         let expr = node.to_scan();
         match &expr {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 assert_eq!(table, "users");
                 assert!(alias.is_none());
             }
@@ -791,7 +797,7 @@ mod tests {
         };
         let expr = node.to_scan();
         match &expr {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 assert_eq!(table, "users");
                 assert_eq!(alias.as_deref(), Some("u"));
             }

@@ -20,6 +20,7 @@ fn scan(name: &str) -> RelExpr {
     RelExpr::Scan {
         table: name.into(),
         alias: None,
+        only: false,
     }
 }
 

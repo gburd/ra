@@ -611,20 +611,20 @@ table_ref(A) ::= graph_table_ref(B). %action_rust { A = B; }
  * a result mismatch. (Codeberg #25) */
 table_ref(A) ::= ONLY IDENT(B). 
 %action_rust {
-    A = ra_scan(ctx.user, B.text());
+    A = ra_scan_only(ctx.user, B.text());
 }
 table_ref(A) ::= ONLY IDENT(B) AS IDENT(C). 
 %action_rust {
-    A = ra_scan_alias(ctx.user, B.text(), C.text());
+    A = ra_scan_only_alias(ctx.user, B.text(), C.text());
 }
 table_ref(A) ::= ONLY IDENT(B) IDENT(C). 
 %action_rust {
-    A = ra_scan_alias(ctx.user, B.text(), C.text());
+    A = ra_scan_only_alias(ctx.user, B.text(), C.text());
 }
 table_ref(A) ::= ONLY IDENT(B) DOT IDENT(C). 
 %action_rust {
     let name = format!("{}.{}", B.text(), C.text());
-    A = ra_scan(ctx.user, &name);
+    A = ra_scan_only(ctx.user, &name);
 }
 table_ref(A) ::= IDENT(B) AS IDENT(C). 
 %action_rust {
@@ -1158,11 +1158,12 @@ update_stmt(A) ::= UPDATE IDENT(T) SET assignment_list(S)
     A = ra_update(ctx.user, T.text(), S, W, F, R);
 }
 
-/* UPDATE ONLY t SET ... — see table_ref ONLY note; bare relation name. */
+/* UPDATE ONLY t SET ... — ONLY excludes inheritance children; the flag is
+ * carried on RelExpr::Update.only so the emitter re-prints ONLY. */
 update_stmt(A) ::= UPDATE ONLY IDENT(T) SET assignment_list(S)
                     opt_update_from(F) opt_where(W) opt_returning(R). 
 %action_rust {
-    A = ra_update(ctx.user, T.text(), S, W, F, R);
+    A = ra_update_only(ctx.user, T.text(), S, W, F, R);
 }
 update_stmt(A) ::= UPDATE IDENT(T) AS IDENT SET assignment_list(S)
                     opt_update_from(F) opt_where(W) opt_returning(R). 
@@ -1212,11 +1213,12 @@ delete_stmt(A) ::= DELETE FROM IDENT(T)
     A = ra_delete(ctx.user, T.text(), W, U, R);
 }
 
-/* DELETE FROM ONLY t — see table_ref ONLY note; bare relation name. */
+/* DELETE FROM ONLY t — ONLY excludes inheritance children; the flag is
+ * carried on RelExpr::Delete.only so the emitter re-prints ONLY. */
 delete_stmt(A) ::= DELETE FROM ONLY IDENT(T)
                     opt_using(U) opt_where(W) opt_returning(R). 
 %action_rust {
-    A = ra_delete(ctx.user, T.text(), W, U, R);
+    A = ra_delete_only(ctx.user, T.text(), W, U, R);
 }
 delete_stmt(A) ::= DELETE FROM IDENT(T) AS IDENT
                     opt_using(U) opt_where(W) opt_returning(R). 

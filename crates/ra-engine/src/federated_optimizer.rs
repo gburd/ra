@@ -424,11 +424,12 @@ impl FederatedOptimizer {
     )]
     fn extract_scan(&self, plan: &RelExpr, table_name: &str) -> Option<RelExpr> {
         match plan {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, only } => {
                 if table == table_name {
                     Some(RelExpr::Scan {
                         table: table.clone(),
                         alias: alias.clone(),
+                        only: *only,
                     })
                 } else {
                     None

@@ -607,7 +607,7 @@ impl PlanBuilder {
     /// matching PostgreSQL's standard plan representation.
     unsafe fn build_plan(&mut self, expr: &RelExpr) -> Result<*mut pg_sys::Plan, PlanBuilderError> {
         match expr {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 if let Some(rt) = &self.cte_runtime {
                     if table.to_lowercase() == rt.name {
                         return self.build_cte_scan();
@@ -661,7 +661,7 @@ impl PlanBuilder {
                 // IndexScan (the equality moves into indexqual; any residual
                 // conjuncts stay as the heap recheck qual). Strictly
                 // conservative — falls through to the SeqScan path otherwise.
-                if let RelExpr::Scan { table, alias } = &**input {
+                if let RelExpr::Scan { table, alias, .. } = &**input {
                     // RFC 0091 B2b: honor the cost extractor's seq-vs-index
                     // decision. It records ScanStrategy::Seq for an
                     // index-eligible scan only when it judged a sequential scan
@@ -827,7 +827,7 @@ impl PlanBuilder {
                 // coverage and build a canonical INDEX_VAR indexqual, so any
                 // other shape falls through to the generic build below.
                 if let RelExpr::Filter { predicate, input: fi } = &**input {
-                    if let RelExpr::Scan { table, alias } = &**fi {
+                    if let RelExpr::Scan { table, alias, .. } = &**fi {
                         // The in-scope recursive-CTE worktable is not a catalog
                         // relation; skip the catalog-dependent index peephole
                         // (Scan(cte) builds as a WorkTableScan/CteScan below).
@@ -2023,7 +2023,7 @@ impl PlanBuilder {
             columns: columns.to_vec(),
             input: Box::new(RelExpr::Filter {
                 predicate: predicate.clone(),
-                input: Box::new(RelExpr::Scan { table: table.to_owned(), alias: None }),
+                input: Box::new(RelExpr::Scan { table: table.to_owned(), alias: None, only: false }),
             }),
         };
         self.build_plan(&lowered)
@@ -2227,7 +2227,7 @@ impl PlanBuilder {
     /// rtindexes; the bare table name does not).
     fn base_scan_ident(expr: &RelExpr) -> Option<&str> {
         match expr {
-            RelExpr::Scan { table, alias } => Some(alias.as_deref().unwrap_or(table)),
+            RelExpr::Scan { table, alias, .. } => Some(alias.as_deref().unwrap_or(table)),
             RelExpr::Filter { input, .. } | RelExpr::Project { input, .. } => {
                 Self::base_scan_ident(input)
             }
@@ -2629,7 +2629,7 @@ impl PlanBuilder {
         Ok(node.cast())
     }
     fn collect_scan_tables(expr: &RelExpr, out: &mut Vec<String>) {
-        if let RelExpr::Scan { table, alias } = expr {
+        if let RelExpr::Scan { table, alias, .. } = expr {
             out.push(alias.clone().unwrap_or_else(|| table.clone()));
         }
         for c in expr.children() {
@@ -3428,7 +3428,7 @@ impl PlanBuilder {
     fn expr_only_qualifies(e: &Expr, alias: &str, tbl: &str) -> bool {
         let probe = RelExpr::Filter {
             predicate: e.clone(),
-            input: Box::new(RelExpr::Scan { table: "__probe".to_owned(), alias: None }),
+            input: Box::new(RelExpr::Scan { table: "__probe".to_owned(), alias: None, only: false }),
         };
         let cols = probe.referenced_columns();
         !cols.is_empty()
@@ -3542,6 +3542,7 @@ impl PlanBuilder {
                     input: Box::new(RelExpr::Scan {
                         table: "__probe".to_owned(),
                         alias: None,
+                        only: false,
                     }),
                 };
                 !probe.referenced_columns().iter().any(|c| {
@@ -7372,6 +7373,7 @@ impl PlanBuilder {
                 filter,
                 from,
                 returning,
+                ..
             } => self.build_modify_table_update(
                 table,
                 assignments,
@@ -7384,6 +7386,7 @@ impl PlanBuilder {
                 filter,
                 using,
                 returning,
+                ..
             } => self.build_modify_table_delete(
                 table,
                 filter.as_ref(),
@@ -7432,6 +7435,7 @@ impl PlanBuilder {
         let scan_fallback = RelExpr::Scan {
             table: table.to_owned(),
             alias: None,
+            only: false,
         };
         let sub_expr = from.unwrap_or(&scan_fallback);
         let subplan = self.build_plan(sub_expr)?;
@@ -7472,6 +7476,7 @@ impl PlanBuilder {
         let scan_fallback = RelExpr::Scan {
             table: table.to_owned(),
             alias: None,
+            only: false,
         };
         let sub_expr = using.unwrap_or(&scan_fallback);
         let subplan = self.build_plan(sub_expr)?;
@@ -7977,7 +7982,7 @@ fn leaf_eq_column(clause: &Expr) -> Option<&str> {
 /// fall back to default join-method selection in that case.
 fn leaf_alias(expr: &RelExpr) -> Option<String> {
     match expr {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, .. } => {
             Some(alias.clone().unwrap_or_else(|| table.clone()))
         }
         // Pass-through wrappers: descend.
@@ -8065,7 +8070,7 @@ fn collect_aliases(expr: &RelExpr) -> Vec<String> {
 }
 
 fn walk_aliases(expr: &RelExpr, out: &mut Vec<String>) {
-    if let RelExpr::Scan { table, alias } = expr {
+    if let RelExpr::Scan { table, alias, .. } = expr {
         out.push(alias.clone().unwrap_or_else(|| table.clone()));
     }
     for child in expr.children() {
@@ -8197,7 +8202,7 @@ pub unsafe fn build_table_map(
 fn inline_cte_scan(body: &RelExpr, name: &str, def: &RelExpr) -> RelExpr {
     let rec = |e: &RelExpr| Box::new(inline_cte_scan(e, name, def));
     match body {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, .. } => {
             let refs = table.eq_ignore_ascii_case(name)
                 || alias.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(name));
             if refs {
@@ -8717,6 +8722,7 @@ mod leaf_alias_tests {
         RelExpr::Scan {
             table: table.into(),
             alias: alias.map(String::from),
+            only: false,
         }
     }
 
@@ -8770,6 +8776,7 @@ mod helpers_tests {
         RelExpr::Scan {
             table: table.into(),
             alias: None,
+            only: false,
         }
     }
 
@@ -8777,6 +8784,7 @@ mod helpers_tests {
         RelExpr::Scan {
             table: table.into(),
             alias: Some(alias.into()),
+            only: false,
         }
     }
 

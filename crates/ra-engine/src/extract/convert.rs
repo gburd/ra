@@ -54,7 +54,11 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
     match &nodes[idx] {
         RelLang::Scan([table_id]) => {
             let table = get_symbol(nodes, id(*table_id))?;
-            Ok(RelExpr::Scan { table, alias: None })
+            Ok(RelExpr::Scan {
+                table,
+                alias: None,
+                only: false,
+            })
         }
         RelLang::ScanAlias([table_id, alias_id]) => {
             let table = get_symbol(nodes, id(*table_id))?;
@@ -62,6 +66,24 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             Ok(RelExpr::Scan {
                 table,
                 alias: Some(alias),
+                only: false,
+            })
+        }
+        RelLang::ScanOnly([table_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: None,
+                only: true,
+            })
+        }
+        RelLang::ScanOnlyAlias([table_id, alias_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            let alias = get_symbol(nodes, id(*alias_id))?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some(alias),
+                only: true,
             })
         }
         RelLang::Filter([pred_id, input_id]) => Ok(RelExpr::Filter {
@@ -170,12 +192,20 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
                     distinct: false,
                     alias: Some("count".to_string()),
                 }],
-                input: Box::new(RelExpr::Scan { table, alias: None }),
+                input: Box::new(RelExpr::Scan {
+                table,
+                alias: None,
+                only: false,
+            }),
             })
         }
         RelLang::IndexScan([table_id, _column_id]) => {
             let table = get_symbol(nodes, id(*table_id))?;
-            Ok(RelExpr::Scan { table, alias: None })
+            Ok(RelExpr::Scan {
+                table,
+                alias: None,
+                only: false,
+            })
         }
         RelLang::IndexOnlyScan([table_id, index_id, cols_id, pred_id]) => {
             // Preserve the physical IndexOnlyScan so plan_builder can build a
@@ -202,7 +232,11 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             let predicate = convert_scalar(nodes, id(*pred_id))?;
             Ok(RelExpr::Filter {
                 predicate,
-                input: Box::new(RelExpr::Scan { table, alias: None }),
+                input: Box::new(RelExpr::Scan {
+                table,
+                alias: None,
+                only: false,
+            }),
             })
         }
         RelLang::BitmapAnd(input_ids) => {
@@ -231,7 +265,11 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             match predicate {
                 Some(predicate) => Ok(RelExpr::Filter {
                     predicate,
-                    input: Box::new(RelExpr::Scan { table, alias: None }),
+                    input: Box::new(RelExpr::Scan {
+                table,
+                alias: None,
+                only: false,
+            }),
                 }),
                 None => Err(EGraphError::ConversionError(
                     "bitmap-heap-scan without a recoverable predicate".to_string(),
@@ -245,6 +283,7 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("vector_knn_scan".to_string()),
+                only: false,
             })
         }
         RelLang::VectorRangeScan([table_id, _col_id, _target_id, _threshold_id, _metric_id]) => {
@@ -252,6 +291,7 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("vector_range_scan".to_string()),
+                only: false,
             })
         }
         RelLang::FtsIndexScan([table_id, _idx_id, _match_id]) => {
@@ -259,6 +299,7 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("fts_index_scan".to_string()),
+                only: false,
             })
         }
         RelLang::FtsRankedScan([table_id, _idx_id, _query_id, _k_id, _algo_id]) => {
@@ -266,6 +307,7 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("fts_ranked_scan".to_string()),
+                only: false,
             })
         }
         RelLang::FtsSkipListAnd([table_id, _match1_id, _match2_id]) => {
@@ -273,11 +315,13 @@ pub(crate) fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGr
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("fts_skip_list_and".to_string()),
+                only: false,
             })
         }
         RelLang::HybridScan(_ids) => Ok(RelExpr::Scan {
             table: "hybrid_scan".to_string(),
             alias: Some("hybrid_scan".to_string()),
+            only: false,
         }),
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"

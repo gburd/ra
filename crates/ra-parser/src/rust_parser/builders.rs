@@ -42,6 +42,21 @@ pub fn ra_scan_alias(st: *mut RaParseState, table: &str, alias: &str) -> Value {
 }
 
 #[must_use]
+pub fn ra_scan_only(st: *mut RaParseState, table: &str) -> Value {
+    let table_c = CString::new(table).unwrap_or_default();
+    let handle = unsafe { ffi::ra_scan_only(st, table_c.as_ptr()) };
+    Value::from_node(handle)
+}
+
+#[must_use]
+pub fn ra_scan_only_alias(st: *mut RaParseState, table: &str, alias: &str) -> Value {
+    let table_c = CString::new(table).unwrap_or_default();
+    let alias_c = CString::new(alias).unwrap_or_default();
+    let handle = unsafe { ffi::ra_scan_only_alias(st, table_c.as_ptr(), alias_c.as_ptr()) };
+    Value::from_node(handle)
+}
+
+#[must_use]
 pub fn ra_filter_agg(
     st: *mut RaParseState,
     func_name: &str,
@@ -350,6 +365,29 @@ pub fn ra_update(
 }
 
 #[must_use]
+pub fn ra_update_only(
+    st: *mut RaParseState,
+    table: &str,
+    assignments: Value,
+    filter: Value,
+    from: Value,
+    returning: Value,
+) -> Value {
+    let table_c = CString::new(table).unwrap_or_default();
+    let handle = unsafe {
+        ffi::ra_update_only(
+            st,
+            table_c.as_ptr(),
+            assignments.handle(),
+            filter.handle(),
+            from.handle(),
+            returning.handle(),
+        )
+    };
+    Value::from_node(handle)
+}
+
+#[must_use]
 pub fn ra_delete(
     st: *mut RaParseState,
     table: &str,
@@ -360,6 +398,27 @@ pub fn ra_delete(
     let table_c = CString::new(table).unwrap_or_default();
     let handle = unsafe {
         ffi::ra_delete(
+            st,
+            table_c.as_ptr(),
+            filter.handle(),
+            using_clause.handle(),
+            returning.handle(),
+        )
+    };
+    Value::from_node(handle)
+}
+
+#[must_use]
+pub fn ra_delete_only(
+    st: *mut RaParseState,
+    table: &str,
+    filter: Value,
+    using_clause: Value,
+    returning: Value,
+) -> Value {
+    let table_c = CString::new(table).unwrap_or_default();
+    let handle = unsafe {
+        ffi::ra_delete_only(
             st,
             table_c.as_ptr(),
             filter.handle(),

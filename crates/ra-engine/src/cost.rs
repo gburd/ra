@@ -1588,7 +1588,7 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
         };
 
         match enode {
-            RelLang::Scan([table_id]) => {
+            RelLang::Scan([table_id]) | RelLang::ScanOnly([table_id]) => {
                 // Cardinality = the table's row count; cost from the
                 // rule-provided `scan` model (already row-count aware).
                 let rows = self.row_count_for_id(*table_id);
@@ -1601,7 +1601,8 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                     shape_hash,
                 }
             }
-            RelLang::ScanAlias([table_id, alias_id]) => {
+            RelLang::ScanAlias([table_id, alias_id])
+            | RelLang::ScanOnlyAlias([table_id, alias_id]) => {
                 let rows = self.row_count_for_id(*table_id);
                 let total = costs(*table_id).total_cost
                     + costs(*alias_id).total_cost

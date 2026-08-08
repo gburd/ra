@@ -259,7 +259,10 @@ impl egg::CostFunction<RelLang> for HybridCostFn {
 #[inline]
 fn classify_operator(enode: &RelLang) -> OperatorType {
     match enode {
-        RelLang::Scan(_) | RelLang::ScanAlias(_) => OperatorType::Scan,
+        RelLang::Scan(_)
+        | RelLang::ScanOnly(_)
+        | RelLang::ScanAlias(_)
+        | RelLang::ScanOnlyAlias(_) => OperatorType::Scan,
         RelLang::Filter(_) => OperatorType::Filter,
         RelLang::Project(_) => OperatorType::Project,
         RelLang::Join(_) => OperatorType::Join,
@@ -279,11 +282,14 @@ fn classify_operator(enode: &RelLang) -> OperatorType {
 #[inline]
 fn estimate_rows_for_op(enode: &RelLang) -> f32 {
     let log_rows = match enode {
-        RelLang::Scan(_) | RelLang::ScanAlias(_) => 4.0, // ~10K rows typical
-        RelLang::Join(_) => 4.5,                         // ~30K join result
-        RelLang::Aggregate(_) => 2.0,                    // ~100 groups
-        RelLang::Limit(_) => 1.5,                        // ~30 rows
-        _ => 3.0,                                        // default ~1K (including Filter)
+        RelLang::Scan(_)
+        | RelLang::ScanOnly(_)
+        | RelLang::ScanAlias(_)
+        | RelLang::ScanOnlyAlias(_) => 4.0, // ~10K rows typical
+        RelLang::Join(_) => 4.5,      // ~30K join result
+        RelLang::Aggregate(_) => 2.0, // ~100 groups
+        RelLang::Limit(_) => 1.5,     // ~30 rows
+        _ => 3.0,                     // default ~1K (including Filter)
     };
     log_rows / 7.0 // Normalize: log10(10M) ≈ 7
 }

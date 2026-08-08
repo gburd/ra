@@ -9,6 +9,11 @@ define_language! {
         // -- Relational operators --
         "scan" = Scan([Id; 1]),
         "scan-alias" = ScanAlias([Id; 2]),
+        // `FROM ONLY t` (PostgreSQL: exclude inheritance children). Same
+        // children as scan/scan-alias; a distinct atom so the ONLY flag
+        // survives the e-graph round-trip. Opaque to all rewrite rules.
+        "scan-only" = ScanOnly([Id; 1]),
+        "scan-only-alias" = ScanOnlyAlias([Id; 2]),
         "filter" = Filter([Id; 2]),
         "project" = Project([Id; 2]),
         "join" = Join([Id; 4]),

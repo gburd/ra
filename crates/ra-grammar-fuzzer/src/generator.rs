@@ -302,6 +302,7 @@ fn arb_scan() -> impl Strategy<Value = RelExpr> {
     arb_table_name().prop_map(|t| RelExpr::Scan {
         table: t,
         alias: None,
+        only: false,
     })
 }
 
@@ -309,6 +310,7 @@ fn arb_scan_with_alias() -> impl Strategy<Value = RelExpr> {
     (arb_table_name(), "[a-z]{1,3}").prop_map(|(t, alias)| RelExpr::Scan {
         table: t,
         alias: Some(alias),
+        only: false,
     })
 }
 

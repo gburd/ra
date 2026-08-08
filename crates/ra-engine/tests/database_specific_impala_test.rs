@@ -21,6 +21,7 @@ fn scan(table: &str) -> RelExpr {
     RelExpr::Scan {
         table: table.to_string(),
         alias: None,
+        only: false,
     }
 }
 

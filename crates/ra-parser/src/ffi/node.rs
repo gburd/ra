@@ -387,6 +387,11 @@ impl RaParseState {
         self.rel_nodes.get(index)
     }
 
+    /// Mutably retrieve a relational expression by arena index.
+    pub fn get_rel_mut(&mut self, index: usize) -> Option<&mut RelExpr> {
+        self.rel_nodes.get_mut(index)
+    }
+
     /// Take (clone) a relational expression by arena index.
     #[must_use]
     pub fn take_rel(&self, index: usize) -> Option<RelExpr> {

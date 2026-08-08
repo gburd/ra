@@ -121,6 +121,9 @@ pub enum RelExpr {
         table: String,
         /// Optional alias for the scan.
         alias: Option<String>,
+        /// `ONLY` modifier: scan only this table, excluding inheritance children.
+        #[serde(default)]
+        only: bool,
     },
 
     /// Filter rows by a predicate.
@@ -523,6 +526,10 @@ pub enum RelExpr {
         from: Option<Box<RelExpr>>,
         /// Optional RETURNING clause.
         returning: Option<Vec<ProjectionColumn>>,
+        /// `ONLY` modifier: target only this table, excluding inheritance
+        /// children (`UPDATE ONLY t`).
+        #[serde(default)]
+        only: bool,
     },
 
     /// DELETE FROM table WHERE filter.
@@ -535,6 +542,10 @@ pub enum RelExpr {
         using: Option<Box<RelExpr>>,
         /// Optional RETURNING clause.
         returning: Option<Vec<ProjectionColumn>>,
+        /// `ONLY` modifier: target only this table, excluding inheritance
+        /// children (`DELETE FROM ONLY t`).
+        #[serde(default)]
+        only: bool,
     },
 
     /// MERGE INTO target USING source ON cond WHEN ... THEN ...
@@ -769,6 +780,7 @@ impl RelExpr {
         Self::Scan {
             table: table.into(),
             alias: None,
+            only: false,
         }
     }
 
@@ -1588,7 +1600,7 @@ mod tests {
     #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn scan_builder() {
         let scan = RelExpr::scan("users");
-        if let RelExpr::Scan { table, alias } = &scan {
+        if let RelExpr::Scan { table, alias, .. } = &scan {
             assert_eq!(table, "users");
             assert_eq!(*alias, None);
         } else {
@@ -1963,7 +1975,7 @@ mod tests {
     #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn scan_creates_scan_node() {
         let plan = RelExpr::scan("users");
-        if let RelExpr::Scan { table, alias } = &plan {
+        if let RelExpr::Scan { table, alias, .. } = &plan {
             assert_eq!(table, "users");
             assert!(alias.is_none());
         } else {

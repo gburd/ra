@@ -312,6 +312,7 @@ mod tests {
         RelExpr::Scan {
             table: "t".to_string(),
             alias: None,
+            only: false,
         }
     }
 

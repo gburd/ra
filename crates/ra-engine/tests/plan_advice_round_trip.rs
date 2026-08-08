@@ -33,6 +33,7 @@ fn scan(name: &str) -> RelExpr {
     RelExpr::Scan {
         table: name.into(),
         alias: None,
+        only: false,
     }
 }
 
@@ -53,7 +54,7 @@ fn eq_join(left: RelExpr, right: RelExpr, l: &str, r: &str) -> RelExpr {
 /// scan order.
 fn collect_tables(expr: &RelExpr) -> Vec<String> {
     fn walk(e: &RelExpr, out: &mut Vec<String>) {
-        if let RelExpr::Scan { table, alias } = e {
+        if let RelExpr::Scan { table, alias, .. } = e {
             out.push(alias.clone().unwrap_or_else(|| table.clone()));
         } else {
             for child in e.children() {
@@ -81,7 +82,7 @@ fn join_shape(expr: &RelExpr) -> String {
                 walk(right, buf);
                 buf.push(')');
             }
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 let n = alias.as_deref().unwrap_or(table);
                 buf.push_str(n);
             }

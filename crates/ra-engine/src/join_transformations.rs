@@ -1084,10 +1084,12 @@ mod tests {
             RelExpr::Scan {
                 table: "a".to_string(),
                 alias: None,
+                only: false,
             },
             RelExpr::Scan {
                 table: "b".to_string(),
                 alias: None,
+                only: false,
             },
         );
         let expr = RelExpr::Filter {
@@ -1155,10 +1157,12 @@ mod tests {
             RelExpr::Scan {
                 table: "a".to_string(),
                 alias: None,
+                only: false,
             },
             RelExpr::Scan {
                 table: "b".to_string(),
                 alias: None,
+                only: false,
             },
         );
         let expr = RelExpr::Filter {
@@ -1197,6 +1201,7 @@ mod tests {
             RelExpr::Scan {
                 table: "s".to_string(),
                 alias: None,
+                only: false,
             },
         );
         let expr = RelExpr::Filter {
@@ -1259,6 +1264,7 @@ mod tests {
         let expr = RelExpr::Scan {
             table: "users".to_string(),
             alias: Some("u".to_string()),
+            only: false,
         };
         let tables = collect_scan_tables(&expr);
         assert!(tables.contains("users"));

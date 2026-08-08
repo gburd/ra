@@ -274,6 +274,7 @@ mod tests {
         RelExpr::Scan {
             table: name.to_owned(),
             alias: None,
+            only: false,
         }
     }
 

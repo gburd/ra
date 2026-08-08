@@ -233,7 +233,7 @@ impl SqlEmitter {
     #[expect(clippy::too_many_lines)]
     fn emit_rel(&self, expr: &RelExpr) -> String {
         match expr {
-            RelExpr::Scan { table, alias } => self.emit_scan(table, alias.as_deref()),
+            RelExpr::Scan { table, alias, .. } => self.emit_scan(table, alias.as_deref()),
 
             RelExpr::SubqueryAlias { alias, input } => {
                 let src = self.emit_subquery(input);
@@ -469,7 +469,7 @@ impl SqlEmitter {
 
     fn emit_subquery(&self, expr: &RelExpr) -> String {
         match expr {
-            RelExpr::Scan { table, alias } => self.emit_scan(table, alias.as_deref()),
+            RelExpr::Scan { table, alias, .. } => self.emit_scan(table, alias.as_deref()),
             other => {
                 let alias = fresh_alias();
                 format!("({}) AS {alias}", self.emit_rel(other))
@@ -856,6 +856,7 @@ mod tests {
         RelExpr::Scan {
             table: table.to_owned(),
             alias: None,
+            only: false,
         }
     }
 

@@ -726,6 +726,7 @@ mod tests {
         let expr = RelExpr::Scan {
             table: "users".to_owned(),
             alias: None,
+            only: false,
         };
         let features = extract_features(&expr);
         assert_eq!(features.table_count, 1.0);
@@ -744,6 +745,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_owned(),
                 alias: None,
+                only: false,
             }),
         };
         let features = extract_features(&expr);
@@ -763,10 +765,12 @@ mod tests {
             left: Box::new(RelExpr::Scan {
                 table: "orders".to_owned(),
                 alias: Some("a".to_owned()),
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "customers".to_owned(),
                 alias: Some("b".to_owned()),
+                only: false,
             }),
         };
         let features = extract_features(&expr);
@@ -797,6 +801,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "orders".to_owned(),
                 alias: None,
+                only: false,
             }),
         };
         let features = extract_features(&expr);
@@ -811,6 +816,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_owned(),
                 alias: None,
+                only: false,
             }),
         };
         let features = extract_features(&expr);
@@ -825,6 +831,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_owned(),
                 alias: None,
+                only: false,
             }),
         };
         let features = extract_features(&expr);
@@ -838,10 +845,12 @@ mod tests {
             definition: Box::new(RelExpr::Scan {
                 table: "orders".to_owned(),
                 alias: None,
+                only: false,
             }),
             body: Box::new(RelExpr::Scan {
                 table: "temp".to_owned(),
                 alias: None,
+                only: false,
             }),
         };
         let features = extract_features(&expr);
@@ -868,6 +877,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_owned(),
                 alias: None,
+                only: false,
             }),
         };
         let features = extract_features(&expr);
@@ -934,10 +944,12 @@ mod tests {
                             left: Box::new(RelExpr::Scan {
                                 table: "orders".to_owned(),
                                 alias: Some("o".to_owned()),
+                                only: false,
                             }),
                             right: Box::new(RelExpr::Scan {
                                 table: "customers".to_owned(),
                                 alias: Some("c".to_owned()),
+                                only: false,
                             }),
                         }),
                     }),

@@ -466,6 +466,7 @@ fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, Re
             filter,
             from,
             returning,
+            only,
         } => {
             let rewritten_from = from.map(|f| {
                 let (_fp, rf) = propagate_inner(*f, facts);
@@ -477,6 +478,7 @@ fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, Re
                 filter,
                 from: rewritten_from,
                 returning,
+                only,
             };
             (PropertySet::new(), node)
         }
@@ -486,6 +488,7 @@ fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, Re
             filter,
             using,
             returning,
+            only,
         } => {
             let rewritten_using = using.map(|u| {
                 let (_up, ru) = propagate_inner(*u, facts);
@@ -496,6 +499,7 @@ fn propagate_inner(expr: RelExpr, facts: &dyn FactsProvider) -> (PropertySet, Re
                 filter,
                 using: rewritten_using,
                 returning,
+                only,
             };
             (PropertySet::new(), node)
         }
@@ -962,6 +966,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_string(),
                 alias: None,
+                only: false,
             }),
         };
 
@@ -1053,6 +1058,7 @@ mod tests {
         let scan = RelExpr::Scan {
             table: "t".to_string(),
             alias: None,
+            only: false,
         };
         let result = propagate_ordering(scan.clone(), &facts);
         assert_eq!(result, scan);

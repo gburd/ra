@@ -1522,7 +1522,7 @@ mod tests {
         // each Filter's predicate references only qualifiers present in its input.
         fn tables(e: &RelExpr, out: &mut std::collections::HashSet<String>) {
             match e {
-                RelExpr::Scan { table, alias } => {
+                RelExpr::Scan { table, alias, .. } => {
                     out.insert(table.to_lowercase());
                     if let Some(a) = alias {
                         out.insert(a.to_lowercase());
@@ -1590,10 +1590,12 @@ mod tests {
             left: Box::new(RelExpr::Scan {
                 table: "orders".into(),
                 alias: Some("o".into()),
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "customer".into(),
                 alias: Some("c".into()),
+                only: false,
             }),
         };
         let expr = RelExpr::Filter {

@@ -187,6 +187,7 @@ mod tests {
         QueryFingerprint::from_rel_expr(&RelExpr::Scan {
             table: "t".into(),
             alias: None,
+            only: false,
         })
     }
 

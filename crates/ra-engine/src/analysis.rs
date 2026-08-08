@@ -55,7 +55,9 @@ impl Analysis<RelLang> for RelAnalysis {
 
         match enode {
             RelLang::Scan([table_id])
+            | RelLang::ScanOnly([table_id])
             | RelLang::ScanAlias([table_id, _])
+            | RelLang::ScanOnlyAlias([table_id, _])
             | RelLang::IndexScan([table_id, _])
             | RelLang::IndexOnlyScan([table_id, _, _, _]) => {
                 data.is_relational = true;
@@ -106,7 +108,8 @@ impl Analysis<RelLang> for RelAnalysis {
         // the qualifier on a `QCol` leaf (for scalar predicates). Both use the
         // query's alias namespace, so they match without alias↔table resolution.
         match enode {
-            RelLang::ScanAlias([table_id, alias_id]) => {
+            RelLang::ScanAlias([table_id, alias_id])
+            | RelLang::ScanOnlyAlias([table_id, alias_id]) => {
                 if let Some(sym) = get_symbol(egraph, *table_id) {
                     data.qualifiers.insert(sym);
                 }
@@ -115,6 +118,7 @@ impl Analysis<RelLang> for RelAnalysis {
                 }
             }
             RelLang::Scan([table_id])
+            | RelLang::ScanOnly([table_id])
             | RelLang::IndexScan([table_id, _])
             | RelLang::IndexOnlyScan([table_id, _, _, _])
             | RelLang::IndexScanChoice([_, table_id])

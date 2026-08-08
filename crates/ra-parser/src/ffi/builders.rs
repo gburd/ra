@@ -112,6 +112,25 @@ pub unsafe fn ra_scan(state: *mut RaParseState, table: *const c_char) -> *mut Ra
     st.push_rel(RelExpr::Scan {
         table: table_name,
         alias: None,
+        only: false,
+    })
+}
+
+/// Build an only-scan node (`PostgreSQL` `FROM ONLY t`: exclude inheritance
+/// children).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `table` must be null or a valid NUL-terminated C string.
+pub unsafe fn ra_scan_only(state: *mut RaParseState, table: *const c_char) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let table_name = unsafe { c_str_to_string(table) };
+    st.push_rel(RelExpr::Scan {
+        table: table_name,
+        alias: None,
+        only: true,
     })
 }
 
@@ -133,6 +152,29 @@ pub unsafe fn ra_scan_alias(
     st.push_rel(RelExpr::Scan {
         table: table_name,
         alias: Some(alias_name),
+        only: false,
+    })
+}
+
+/// Build an `ONLY` `Scan` node with an alias (`FROM ONLY t AS x`).
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `table` and `alias` must be null or valid NUL-terminated C strings.
+pub unsafe fn ra_scan_only_alias(
+    state: *mut RaParseState,
+    table: *const c_char,
+    alias: *const c_char,
+) -> *mut RaNode {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    let table_name = unsafe { c_str_to_string(table) };
+    let alias_name = unsafe { c_str_to_string(alias) };
+    st.push_rel(RelExpr::Scan {
+        table: table_name,
+        alias: Some(alias_name),
+        only: true,
     })
 }
 
@@ -1020,7 +1062,25 @@ pub unsafe fn ra_update(
         filter: filter_val,
         from: from_val,
         returning: returning_val,
+        only: false,
     })
+}
+
+/// Build an `UPDATE ONLY t` node (exclude inheritance children).
+///
+/// # Safety
+/// Same contract as [`ra_update`].
+pub unsafe fn ra_update_only(
+    state: *mut RaParseState,
+    table: *const c_char,
+    assignments: *mut RaNode,
+    filter: *mut RaNode,
+    from: *mut RaNode,
+    returning: *mut RaNode,
+) -> *mut RaNode {
+    let node = unsafe { ra_update(state, table, assignments, filter, from, returning) };
+    set_only_flag(state, node);
+    node
 }
 
 /// Build a `Delete` node.
@@ -1066,7 +1126,41 @@ pub unsafe fn ra_delete(
         filter: filter_val,
         using: using_val,
         returning: returning_val,
+        only: false,
     })
+}
+
+/// Build a `DELETE FROM ONLY t` node (exclude inheritance children).
+///
+/// # Safety
+/// Same contract as [`ra_delete`].
+pub unsafe fn ra_delete_only(
+    state: *mut RaParseState,
+    table: *const c_char,
+    filter: *mut RaNode,
+    using_clause: *mut RaNode,
+    returning: *mut RaNode,
+) -> *mut RaNode {
+    let node = unsafe { ra_delete(state, table, filter, using_clause, returning) };
+    set_only_flag(state, node);
+    node
+}
+
+/// Set the `ONLY` flag on a just-built `Update`/`Delete` DML rel node.
+///
+/// # Safety
+/// - `state` must be null or a valid `*mut RaParseState`.
+/// - `node` must be a tagged rel pointer or null.
+unsafe fn set_only_flag(state: *mut RaParseState, node: *mut RaNode) {
+    let Some(st) = (unsafe { state_ref(state) }) else {
+        return;
+    };
+    let Some((NodeTag::Rel, idx)) = decode(node) else {
+        return;
+    };
+    if let Some(RelExpr::Update { only, .. } | RelExpr::Delete { only, .. }) = st.get_rel_mut(idx) {
+        *only = true;
+    }
 }
 
 /// Determine the MERGE match kind from a `BY <ident>` clause: returns

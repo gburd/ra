@@ -191,7 +191,7 @@ impl EmitContext {
                 // here would double every window column. Recurse.
                 self.flatten_into(input, sel)
             }
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, only } => {
                 if table == "__dual" {
                     // Synthetic single-row source for `SELECT <const>` with no
                     // FROM: emit no FROM clause at all.
@@ -201,6 +201,7 @@ impl EmitContext {
                 sel.from = Some(FromItem::Table {
                     name: table.clone(),
                     alias: alias.clone(),
+                    only: *only,
                 });
                 Ok(())
             }
@@ -327,10 +328,11 @@ impl EmitContext {
         lifted: &mut Vec<Expr>,
     ) -> Result<(), TranslationError> {
         match expr {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, only } => {
                 tables.push(FromItem::Table {
                     name: table.clone(),
                     alias: alias.clone(),
+                    only: *only,
                 });
                 Ok(())
             }
@@ -391,9 +393,10 @@ impl EmitContext {
         _allow_lift: bool,
     ) -> Result<FromItem, TranslationError> {
         match expr {
-            RelExpr::Scan { table, alias } => Ok(FromItem::Table {
+            RelExpr::Scan { table, alias, only } => Ok(FromItem::Table {
                 name: table.clone(),
                 alias: alias.clone(),
+                only: *only,
             }),
             RelExpr::Join {
                 join_type: jt @ (JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter),
@@ -508,12 +511,13 @@ impl EmitContext {
 
     fn render_from(&mut self, item: &FromItem) -> Result<String, TranslationError> {
         match item {
-            FromItem::Table { name, alias } => {
+            FromItem::Table { name, alias, only } => {
                 let quoted = self.quote_ident(name);
+                let prefix = if *only { "ONLY " } else { "" };
                 if let Some(a) = alias {
-                    Ok(format!("{quoted} AS {}", self.quote_ident(a)))
+                    Ok(format!("{prefix}{quoted} AS {}", self.quote_ident(a)))
                 } else {
-                    Ok(quoted)
+                    Ok(format!("{prefix}{quoted}"))
                 }
             }
             FromItem::Subquery { sql, alias } => {
@@ -1376,6 +1380,7 @@ enum FromItem {
     Table {
         name: String,
         alias: Option<String>,
+        only: bool,
     },
     Subquery {
         sql: String,
@@ -1550,7 +1555,47 @@ mod tests {
         RelExpr::Scan {
             table: "users".to_string(),
             alias: None,
+            only: false,
         }
+    }
+
+    #[test]
+    fn only_scan_emits_only_prefix() {
+        // Codeberg #28: FROM ONLY t must re-emit `ONLY` (dropping it reads
+        // inheritance children PG's ONLY excludes — a wrong answer).
+        let only = RelExpr::Scan {
+            table: "t".to_string(),
+            alias: None,
+            only: true,
+        };
+        let sql = emit_sql(&only, Dialect::PostgreSql).expect("emit").sql;
+        assert!(sql.contains("FROM ONLY \"t\""), "expected FROM ONLY: {sql}");
+
+        // ONLY with an alias.
+        let only_alias = RelExpr::Scan {
+            table: "t".to_string(),
+            alias: Some("x".to_string()),
+            only: true,
+        };
+        let sql2 = emit_sql(&only_alias, Dialect::PostgreSql)
+            .expect("emit")
+            .sql;
+        assert!(
+            sql2.contains("FROM ONLY \"t\" AS \"x\""),
+            "expected FROM ONLY t AS x: {sql2}"
+        );
+
+        // Plain scan must NOT emit ONLY.
+        let plain = RelExpr::Scan {
+            table: "t".to_string(),
+            alias: None,
+            only: false,
+        };
+        let sql3 = emit_sql(&plain, Dialect::PostgreSql).expect("emit").sql;
+        assert!(
+            !sql3.contains("ONLY"),
+            "plain scan must not emit ONLY: {sql3}"
+        );
     }
 
     #[test]
@@ -1719,6 +1764,7 @@ mod tests {
             right: Box::new(RelExpr::Scan {
                 table: "admins".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let result = emit_sql(&expr, Dialect::PostgreSql).expect("should emit");
@@ -1836,6 +1882,7 @@ mod tests {
             body: Box::new(RelExpr::Scan {
                 table: "active".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let result = emit_sql(&expr, Dialect::PostgreSql).expect("should emit");
@@ -1854,6 +1901,7 @@ mod tests {
             right: Box::new(RelExpr::Scan {
                 table: "banned".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let result = emit_sql(&expr, Dialect::Oracle).expect("should emit");
@@ -1892,10 +1940,12 @@ mod tests {
                 left: Box::new(RelExpr::Scan {
                     table: "orders".to_string(),
                     alias: Some("o".to_string()),
+                    only: false,
                 }),
                 right: Box::new(RelExpr::Scan {
                     table: "customer".to_string(),
                     alias: Some("c".to_string()),
+                    only: false,
                 }),
             }),
         };
@@ -1936,6 +1986,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "orders".to_string(),
                 alias: Some("o".to_string()),
+                only: false,
             }),
         };
         let sql = emit_sql(&expr, Dialect::PostgreSql)
@@ -1974,10 +2025,12 @@ mod tests {
             left: Box::new(RelExpr::Scan {
                 table: "orders".to_string(),
                 alias: Some("o".to_string()),
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "customer".to_string(),
                 alias: Some("c".to_string()),
+                only: false,
             }),
         };
         let expr = RelExpr::Filter {
@@ -2013,6 +2066,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "__dual".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let sql = emit_sql(&expr, Dialect::PostgreSql)
@@ -2037,10 +2091,12 @@ mod tests {
             left: Box::new(RelExpr::Scan {
                 table: "customer".to_string(),
                 alias: Some("c".to_string()),
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "orders".to_string(),
                 alias: Some("o".to_string()),
+                only: false,
             }),
         };
         let semi = emit_sql(&make(JoinType::Semi), Dialect::PostgreSql)
@@ -2082,6 +2138,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "emp".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
@@ -2126,6 +2183,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "orders".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
@@ -2160,6 +2218,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "orders".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         assert!(
@@ -2183,6 +2242,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "emp".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let expr = RelExpr::Filter {
@@ -2221,6 +2281,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "t".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
@@ -2256,6 +2317,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "t".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
@@ -2295,6 +2357,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "t".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;
@@ -2324,6 +2387,7 @@ mod tests {
                 input: Box::new(RelExpr::Scan {
                     table: "t".to_string(),
                     alias: None,
+                    only: false,
                 }),
             };
             let sql = emit_sql(&expr, Dialect::PostgreSql).expect("emit").sql;

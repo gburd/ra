@@ -28,7 +28,7 @@ impl egg::CostFunction<RelLang> for RelCostFn {
         C: FnMut(Id) -> Self::Cost,
     {
         let base_cost = match enode {
-            RelLang::Scan([table_id]) => {
+            RelLang::Scan([table_id]) | RelLang::ScanOnly([table_id]) => {
                 // Sequential scan: cost scales with table size but uses
                 // sequential I/O which is efficient. For small tables
                 // (which fit in a few pages), this is very cheap.
@@ -40,7 +40,8 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
                 return costs(*table_id) + (50.0 * storage_factor);
             }
-            RelLang::ScanAlias([table_id, alias_id]) => {
+            RelLang::ScanAlias([table_id, alias_id])
+            | RelLang::ScanOnlyAlias([table_id, alias_id]) => {
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
                 return costs(*table_id) + costs(*alias_id) + (50.0 * storage_factor);
             }

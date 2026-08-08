@@ -341,6 +341,7 @@ mod tests {
         let input = RelExpr::Scan {
             table: "t".to_string(),
             alias: None,
+            only: false,
         };
 
         let result = try_incremental_sort(&sort_keys, &input_keys, input, 100_000.0, 10_000.0);
@@ -367,6 +368,7 @@ mod tests {
         let input = RelExpr::Scan {
             table: "t".to_string(),
             alias: None,
+            only: false,
         };
 
         assert!(
@@ -381,6 +383,7 @@ mod tests {
         let input = RelExpr::Scan {
             table: "t".to_string(),
             alias: None,
+            only: false,
         };
 
         // 1 group: incremental sort won't be cheaper
@@ -412,6 +415,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "t".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         assert_eq!(expr.children().len(), 1);
@@ -425,6 +429,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "t".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let cols = expr.referenced_columns();

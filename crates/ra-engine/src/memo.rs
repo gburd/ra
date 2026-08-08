@@ -73,7 +73,7 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
     use std::hash::Hash;
     std::mem::discriminant(expr).hash(hasher);
     match expr {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, .. } => {
             table.hash(hasher);
             alias.hash(hasher);
         }

@@ -397,6 +397,7 @@ mod tests {
         RelExpr::Scan {
             table: "users".to_owned(),
             alias: None,
+            only: false,
         }
     }
 
@@ -448,10 +449,12 @@ mod tests {
             left: Box::new(RelExpr::Scan {
                 table: "a".to_owned(),
                 alias: None,
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "b".to_owned(),
                 alias: None,
+                only: false,
             }),
         };
         let tables = collect_tables(&expr);

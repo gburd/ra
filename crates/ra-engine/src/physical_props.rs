@@ -264,6 +264,7 @@ mod tests {
         RelExpr::Scan {
             table: name.into(),
             alias: None,
+            only: false,
         }
     }
 

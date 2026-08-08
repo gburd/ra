@@ -185,6 +185,7 @@ fn scope_analysis_unit_integration() {
     let inner_rel = RelExpr::Scan {
         table: "employees".to_owned(),
         alias: Some("e2".to_owned()),
+        only: false,
     };
 
     let scope = build_scope(&inner_rel);

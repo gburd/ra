@@ -135,7 +135,7 @@ pub fn apply_color_mode(mode: ColorMode) {
 /// Extract the operator label for a `RelExpr` node.
 fn operator_label(expr: &RelExpr) -> String {
     match expr {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, .. } => {
             let mut s = format!("Scan({table})");
             if let Some(a) = alias {
                 let _ = write!(s, " AS {a}");
@@ -694,6 +694,7 @@ mod tests {
         let plan = RelExpr::Scan {
             table: "users".to_owned(),
             alias: Some("u".to_owned()),
+            only: false,
         };
         assert_eq!(operator_label(&plan), "Scan(users) AS u");
     }

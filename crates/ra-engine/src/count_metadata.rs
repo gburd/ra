@@ -159,6 +159,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: table_name.to_string(),
                 alias: None,
+                only: false,
             }),
         }
     }
@@ -243,6 +244,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let runner = run_with_count_rules(&expr);
@@ -271,6 +273,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_string(),
                 alias: None,
+                only: false,
             }),
         };
         let runner = run_with_count_rules(&expr);

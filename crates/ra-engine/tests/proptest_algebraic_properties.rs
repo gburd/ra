@@ -128,8 +128,8 @@ proptest! {
         t2 in arb_table(),
         pred in arb_eq_pred(),
     ) {
-        let left = RelExpr::Scan { table: t1.clone(), alias: None };
-        let right = RelExpr::Scan { table: t2.clone(), alias: None };
+        let left = RelExpr::Scan { table: t1.clone(), alias: None, only: false };
+        let right = RelExpr::Scan { table: t2.clone(), alias: None, only: false };
 
         let join_ab = RelExpr::Join {
             join_type: JoinType::Inner,
@@ -157,8 +157,8 @@ proptest! {
         t1 in arb_table(),
         t2 in arb_table(),
     ) {
-        let left = RelExpr::Scan { table: t1.clone(), alias: None };
-        let right = RelExpr::Scan { table: t2.clone(), alias: None };
+        let left = RelExpr::Scan { table: t1.clone(), alias: None, only: false };
+        let right = RelExpr::Scan { table: t2.clone(), alias: None, only: false };
         let cond = Expr::Const(Const::Bool(true));
 
         let cross_ab = RelExpr::Join {
@@ -190,9 +190,9 @@ proptest! {
         c1 in arb_eq_pred(),
         c2 in arb_eq_pred(),
     ) {
-        let a = RelExpr::Scan { table: t1, alias: None };
-        let b = RelExpr::Scan { table: t2, alias: None };
-        let c = RelExpr::Scan { table: t3, alias: None };
+        let a = RelExpr::Scan { table: t1, alias: None, only: false };
+        let b = RelExpr::Scan { table: t2, alias: None, only: false };
+        let c = RelExpr::Scan { table: t3, alias: None, only: false };
 
         // (A JOIN B) JOIN C
         let left_deep = RelExpr::Join {
@@ -241,8 +241,8 @@ proptest! {
         join_pred in arb_eq_pred(),
         filter_pred in arb_simple_pred(),
     ) {
-        let left = RelExpr::Scan { table: t1, alias: None };
-        let right = RelExpr::Scan { table: t2, alias: None };
+        let left = RelExpr::Scan { table: t1, alias: None, only: false };
+        let right = RelExpr::Scan { table: t2, alias: None, only: false };
 
         let join = RelExpr::Join {
             join_type: JoinType::Inner,
@@ -282,7 +282,7 @@ proptest! {
         p1 in arb_simple_pred(),
         p2 in arb_simple_pred(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
 
         let stacked = RelExpr::Filter {
             predicate: p1.clone(),
@@ -315,7 +315,7 @@ proptest! {
         p1 in arb_simple_pred(),
         p2 in arb_simple_pred(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
 
         let conj = RelExpr::Filter {
             predicate: Expr::BinOp {
@@ -348,8 +348,8 @@ proptest! {
         t2 in arb_table(),
         pred in arb_simple_pred(),
     ) {
-        let a = RelExpr::Scan { table: t1, alias: None };
-        let b = RelExpr::Scan { table: t2, alias: None };
+        let a = RelExpr::Scan { table: t1, alias: None, only: false };
+        let b = RelExpr::Scan { table: t2, alias: None, only: false };
 
         let filter_over_union = RelExpr::Filter {
             predicate: pred.clone(),
@@ -381,7 +381,7 @@ proptest! {
     /// Filter TRUE is identity: filter(TRUE, x) ~ x
     #[test]
     fn filter_true_is_identity(t in arb_table()) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
 
         let filtered = RelExpr::Filter {
             predicate: Expr::Const(Const::Bool(true)),
@@ -408,7 +408,7 @@ proptest! {
         col1 in arb_col(),
         col2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
 
         let inner_cols = vec![ProjectionColumn {
             expr: Expr::Column(ColumnRef::new(col2)),
@@ -455,7 +455,7 @@ proptest! {
             left: Box::new(Expr::Column(ColumnRef::new(col.clone()))),
             right: Box::new(Expr::Const(ra_core::expr::Const::Int(0))),
         };
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let cols = vec![ProjectionColumn {
             expr: Expr::Column(ColumnRef::new(col)),
             alias: None,
@@ -498,7 +498,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let col_expr = Expr::Column(ColumnRef::new(col));
 
         let double_not = RelExpr::Filter {
@@ -530,7 +530,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -574,7 +574,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -617,7 +617,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let x = Expr::Column(ColumnRef::new(col));
 
         let and_true = RelExpr::Filter {
@@ -646,7 +646,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let x = Expr::Column(ColumnRef::new(col));
 
         let or_false = RelExpr::Filter {
@@ -675,7 +675,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let x = Expr::Column(ColumnRef::new(col));
 
         let and_self = RelExpr::Filter {
@@ -704,7 +704,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let x = Expr::Column(ColumnRef::new(col));
 
         let or_self = RelExpr::Filter {
@@ -733,7 +733,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let x = Expr::Column(ColumnRef::new(col));
 
         let add_zero = RelExpr::Filter {
@@ -762,7 +762,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let x = Expr::Column(ColumnRef::new(col));
 
         let mul_one = RelExpr::Filter {
@@ -791,7 +791,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let x = Expr::Column(ColumnRef::new(col));
 
         let sub_self = RelExpr::Filter {
@@ -820,7 +820,7 @@ proptest! {
         t in arb_table(),
         col in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let x = Expr::Column(ColumnRef::new(col));
 
         let double_neg = RelExpr::Filter {
@@ -858,7 +858,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -896,7 +896,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -940,8 +940,8 @@ proptest! {
         t2 in arb_table(),
         all in any::<bool>(),
     ) {
-        let a = RelExpr::Scan { table: t1, alias: None };
-        let b = RelExpr::Scan { table: t2, alias: None };
+        let a = RelExpr::Scan { table: t1, alias: None, only: false };
+        let b = RelExpr::Scan { table: t2, alias: None, only: false };
 
         let union_ab = RelExpr::Union {
             all,
@@ -967,8 +967,8 @@ proptest! {
         t2 in arb_table(),
         all in any::<bool>(),
     ) {
-        let a = RelExpr::Scan { table: t1, alias: None };
-        let b = RelExpr::Scan { table: t2, alias: None };
+        let a = RelExpr::Scan { table: t1, alias: None, only: false };
+        let b = RelExpr::Scan { table: t2, alias: None, only: false };
 
         let int_ab = RelExpr::Intersect {
             all,
@@ -993,7 +993,7 @@ proptest! {
         t in arb_table(),
         all in any::<bool>(),
     ) {
-        let a = RelExpr::Scan { table: t, alias: None };
+        let a = RelExpr::Scan { table: t, alias: None, only: false };
 
         let int_self = RelExpr::Intersect {
             all,
@@ -1013,7 +1013,7 @@ proptest! {
         t in arb_table(),
         all in any::<bool>(),
     ) {
-        let a = RelExpr::Scan { table: t, alias: None };
+        let a = RelExpr::Scan { table: t, alias: None, only: false };
 
         let except_self = RelExpr::Except {
             all,
@@ -1047,7 +1047,7 @@ proptest! {
         n in 1u64..50,
         off in 0u64..10,
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let cols = vec![ProjectionColumn {
             expr: Expr::Column(ColumnRef::new(col)),
             alias: None,
@@ -1088,7 +1088,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
 
         let k1 = vec![SortKey {
             expr: Expr::Column(ColumnRef::new(c1)),
@@ -1130,7 +1130,7 @@ proptest! {
         sort_col in arb_col(),
         func in arb_agg_func(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let groups = vec![Expr::Column(ColumnRef::new(group_col))];
         let aggs = vec![AggregateExpr {
             function: func,
@@ -1179,7 +1179,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -1214,7 +1214,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -1249,7 +1249,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -1284,7 +1284,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -1328,7 +1328,7 @@ proptest! {
         pred in arb_simple_pred(),
         func in arb_agg_func(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let groups = vec![Expr::Column(ColumnRef::new(group_col))];
         let aggs = vec![AggregateExpr {
             function: func,
@@ -1374,7 +1374,7 @@ proptest! {
         c1 in arb_col(),
         c2 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
 
@@ -1418,7 +1418,7 @@ proptest! {
         c2 in arb_col(),
         c3 in arb_col(),
     ) {
-        let scan = RelExpr::Scan { table: t, alias: None };
+        let scan = RelExpr::Scan { table: t, alias: None, only: false };
         let a = Expr::Column(ColumnRef::new(c1));
         let b = Expr::Column(ColumnRef::new(c2));
         let c = Expr::Column(ColumnRef::new(c3));
@@ -1473,8 +1473,8 @@ proptest! {
         t2 in arb_table(),
         pred in arb_eq_pred(),
     ) {
-        let a = RelExpr::Scan { table: t1, alias: None };
-        let b = RelExpr::Scan { table: t2, alias: None };
+        let a = RelExpr::Scan { table: t1, alias: None, only: false };
+        let b = RelExpr::Scan { table: t2, alias: None, only: false };
 
         let cartesian_with_filter = RelExpr::Filter {
             predicate: pred.clone(),
@@ -1521,10 +1521,12 @@ proptest! {
             left: Box::new(RelExpr::Scan {
                 table: t1,
                 alias: None,
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: t2,
                 alias: None,
+                only: false,
             }),
         };
         prop_assert!(rules_dont_crash(&expr));
@@ -1547,6 +1549,7 @@ proptest! {
                     input: Box::new(RelExpr::Scan {
                         table: t,
                         alias: None,
+                        only: false,
                     }),
                 }),
             }),
@@ -1573,6 +1576,7 @@ proptest! {
             input: Box::new(RelExpr::Scan {
                 table: t,
                 alias: None,
+                only: false,
             }),
         };
         prop_assert!(rules_dont_crash(&expr));

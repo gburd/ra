@@ -177,6 +177,7 @@ fn arb_rel_expr(depth: u32) -> impl Strategy<Value = RelExpr> {
     let leaf = arb_table_name().prop_map(|t| RelExpr::Scan {
         table: t,
         alias: None,
+        only: false,
     });
 
     leaf.prop_recursive(depth, 128, 4, |inner| {
@@ -1031,10 +1032,12 @@ fn empty_cross_join_preserves_tables_issue_17() {
         left: Box::new(RelExpr::Scan {
             table: "products".into(),
             alias: None,
+            only: false,
         }),
         right: Box::new(RelExpr::Scan {
             table: "users".into(),
             alias: None,
+            only: false,
         }),
     };
     let optimizer = Optimizer::new();

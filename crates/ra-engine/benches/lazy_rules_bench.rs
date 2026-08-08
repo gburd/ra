@@ -23,6 +23,7 @@ fn simple_query() -> RelExpr {
         input: Box::new(RelExpr::Scan {
             table: "t".to_string(),
             alias: None,
+            only: false,
         }),
     }
 }
@@ -45,10 +46,12 @@ fn join_query() -> RelExpr {
         left: Box::new(RelExpr::Scan {
             table: "t1".to_string(),
             alias: None,
+            only: false,
         }),
         right: Box::new(RelExpr::Scan {
             table: "t2".to_string(),
             alias: None,
+            only: false,
         }),
     }
 }
@@ -58,18 +61,22 @@ fn complex_query() -> RelExpr {
     let t1 = RelExpr::Scan {
         table: "t1".to_string(),
         alias: None,
+        only: false,
     };
     let t2 = RelExpr::Scan {
         table: "t2".to_string(),
         alias: None,
+        only: false,
     };
     let t3 = RelExpr::Scan {
         table: "t3".to_string(),
         alias: None,
+        only: false,
     };
     let t4 = RelExpr::Scan {
         table: "t4".to_string(),
         alias: None,
+        only: false,
     };
 
     let join12 = RelExpr::Join {

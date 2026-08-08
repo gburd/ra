@@ -342,7 +342,7 @@ impl LeftDeepBuilder {
 
     fn collect_tables(expr: &RelExpr, out: &mut Vec<String>) {
         match expr {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 out.push(alias.clone().unwrap_or_else(|| table.clone()));
             }
             RelExpr::IndexScan { table, .. }
@@ -648,6 +648,7 @@ mod tests {
         RelExpr::Scan {
             table: name.to_string(),
             alias: None,
+            only: false,
         }
     }
 

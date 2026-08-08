@@ -25,7 +25,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
     let child_prefix_ext = if is_last { "   " } else { "│  " };
 
     match expr {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, .. } => {
             buf.push_str(prefix);
             buf.push_str(connector);
             buf.push_str("Scan(");

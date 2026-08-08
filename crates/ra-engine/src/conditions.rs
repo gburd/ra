@@ -431,10 +431,15 @@ impl Condition<RelLang, RelAnalysis> for IsCanonicalScan {
     fn check(&self, egraph: &mut EGraph<RelLang, RelAnalysis>, _eclass: Id, subst: &Subst) -> bool {
         let id = subst[self.expr_var];
         let class = &egraph[id];
-        class
-            .nodes
-            .iter()
-            .any(|n| matches!(n, RelLang::Scan(_) | RelLang::ScanAlias(_)))
+        class.nodes.iter().any(|n| {
+            matches!(
+                n,
+                RelLang::Scan(_)
+                    | RelLang::ScanOnly(_)
+                    | RelLang::ScanAlias(_)
+                    | RelLang::ScanOnlyAlias(_)
+            )
+        })
     }
 }
 

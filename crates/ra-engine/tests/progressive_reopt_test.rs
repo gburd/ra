@@ -27,6 +27,7 @@ fn scan(name: &str) -> RelExpr {
     RelExpr::Scan {
         table: name.to_string(),
         alias: None,
+        only: false,
     }
 }
 
@@ -1188,6 +1189,7 @@ fn test_background_respects_max_reoptimizations() {
             Ok(RelExpr::Scan {
                 table: format!("table_{n}"),
                 alias: None,
+                only: false,
             })
         }
     }

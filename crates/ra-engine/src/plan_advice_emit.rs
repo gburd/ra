@@ -202,7 +202,7 @@ fn inline_outer_into(expr: &RelExpr, out: &mut Vec<AdviceTarget>) {
 /// inner join becomes a parenthesised sublist.
 fn render_join_member(expr: &RelExpr) -> Option<AdviceTarget> {
     match expr {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, .. } => {
             let alias_name = alias.clone().unwrap_or_else(|| table.clone());
             Some(AdviceTarget::identifier(RelationIdentifier::simple(
                 alias_name,
@@ -234,7 +234,7 @@ fn collect_scans(expr: &RelExpr) -> Vec<RelationIdentifier> {
         counts: &mut std::collections::HashMap<String, u32>,
     ) {
         match expr {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 let name = alias.clone().unwrap_or_else(|| table.clone());
                 let count = counts.entry(name.clone()).or_insert(0);
                 *count += 1;
@@ -274,6 +274,7 @@ mod tests {
         RelExpr::Scan {
             table: name.into(),
             alias: None,
+            only: false,
         }
     }
 

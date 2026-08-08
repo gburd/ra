@@ -737,6 +737,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "t".to_string(),
                 alias: None,
+                only: false,
             }),
         };
 
@@ -769,10 +770,12 @@ mod tests {
             left: Box::new(RelExpr::Scan {
                 table: "t1".to_string(),
                 alias: None,
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "t2".to_string(),
                 alias: None,
+                only: false,
             }),
         };
 
@@ -804,6 +807,7 @@ mod tests {
             input: Box::new(RelExpr::Scan {
                 table: "t".to_string(),
                 alias: None,
+                only: false,
             }),
         };
 
@@ -821,14 +825,17 @@ mod tests {
         let t1 = RelExpr::Scan {
             table: "t1".to_string(),
             alias: None,
+            only: false,
         };
         let t2 = RelExpr::Scan {
             table: "t2".to_string(),
             alias: None,
+            only: false,
         };
         let t3 = RelExpr::Scan {
             table: "t3".to_string(),
             alias: None,
+            only: false,
         };
 
         let join12 = RelExpr::Join {
@@ -861,10 +868,12 @@ mod tests {
             left: Box::new(RelExpr::Scan {
                 table: "t1".to_string(),
                 alias: None,
+                only: false,
             }),
             right: Box::new(RelExpr::Scan {
                 table: "t2".to_string(),
                 alias: None,
+                only: false,
             }),
         };
 

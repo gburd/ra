@@ -160,6 +160,7 @@ fn extract_scan_alias() {
     let expr = RelExpr::Scan {
         table: "users".into(),
         alias: Some("u".into()),
+        only: false,
     };
     let rec = to_rec_expr(&expr).expect("to_rec_expr");
     let result = rec_expr_to_rel_expr(&rec).expect("extraction");
@@ -864,6 +865,7 @@ fn extract_bitmap_index_scan() {
         input: Box::new(RelExpr::Scan {
             table: "orders".into(),
             alias: None,
+            only: false,
         }),
     };
     assert_eq!(result, expected);
@@ -903,6 +905,7 @@ fn extract_bitmap_and() {
         input: Box::new(RelExpr::Scan {
             table: "t".into(),
             alias: None,
+            only: false,
         }),
     };
     let expected = RelExpr::BitmapAnd {
@@ -945,6 +948,7 @@ fn extract_bitmap_or() {
         input: Box::new(RelExpr::Scan {
             table: "t".into(),
             alias: None,
+            only: false,
         }),
     };
     let expected = RelExpr::BitmapOr {
@@ -985,6 +989,7 @@ fn extract_bitmap_heap_scan() {
         input: Box::new(RelExpr::Scan {
             table: "orders".into(),
             alias: None,
+            only: false,
         }),
     };
     assert_eq!(result, expected);
@@ -1043,6 +1048,7 @@ fn extract_nested_filter_project_join() {
             RelExpr::Scan {
                 table: "users".into(),
                 alias: Some("u".into()),
+                only: false,
             }
             .filter(Expr::BinOp {
                 op: BinOp::Gt,
@@ -1054,6 +1060,7 @@ fn extract_nested_filter_project_join() {
             RelExpr::Scan {
                 table: "orders".into(),
                 alias: Some("o".into()),
+                only: false,
             }
             .project(vec![
                 ProjectionColumn {
@@ -1377,10 +1384,12 @@ fn extract_complex_plan() {
         left: Box::new(RelExpr::Scan {
             table: "users".into(),
             alias: Some("u".into()),
+            only: false,
         }),
         right: Box::new(RelExpr::Scan {
             table: "orders".into(),
             alias: Some("o".into()),
+            only: false,
         }),
     };
     let agg = RelExpr::Aggregate {

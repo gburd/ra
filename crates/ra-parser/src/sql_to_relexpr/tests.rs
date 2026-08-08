@@ -1895,17 +1895,18 @@ fn default_value_in_values_mixed() {
 
 #[test]
 fn from_only_scans_bare_table() {
-    // ONLY t restricts to a table excluding inheritance children; Ra does not
-    // model inheritance, so it scans the bare relation name (matching PG's
-    // tables() fact).
+    // ONLY t restricts to a table excluding inheritance children. The bare
+    // relation name matches PG's tables() fact (so the parse oracle stays
+    // equal), and the `only` flag is carried on RelExpr::Scan so the emitter
+    // re-prints ONLY (Codeberg #28: dropping it is a wrong answer).
     let plan =
         sql_to_relexpr("SELECT avg(x) FROM ONLY student").expect("FROM ONLY student should parse");
     assert!(
         has_node(
             &plan,
-            |n| matches!(n, RelExpr::Scan { table, .. } if table == "student")
+            |n| matches!(n, RelExpr::Scan { table, only, .. } if table == "student" && *only)
         ),
-        "expected Scan(student), got {plan:?}"
+        "expected Scan(student, only=true), got {plan:?}"
     );
     assert!(
         !has_node(
@@ -1915,24 +1916,55 @@ fn from_only_scans_bare_table() {
         "ONLY must not leak into the relation name: {plan:?}"
     );
 
-    // ONLY with an alias keeps the alias but the bare table name.
+    // Plain FROM (no ONLY) must NOT set the flag.
+    let plain = sql_to_relexpr("SELECT avg(x) FROM student").expect("FROM student should parse");
+    assert!(
+        has_node(
+            &plain,
+            |n| matches!(n, RelExpr::Scan { table, only, .. } if table == "student" && !*only)
+        ),
+        "expected Scan(student, only=false) for plain FROM, got {plain:?}"
+    );
+
+    // ONLY with an alias keeps the alias, the bare table name, and only=true.
     let aliased =
         sql_to_relexpr("SELECT * FROM ONLY road r").expect("FROM ONLY road r should parse");
     assert!(
         has_node(
             &aliased,
-            |n| matches!(n, RelExpr::Scan { table, alias, .. } if table == "road" && alias.as_deref() == Some("r"))
+            |n| matches!(n, RelExpr::Scan { table, alias, only } if table == "road" && alias.as_deref() == Some("r") && *only)
         ),
-        "expected Scan(road AS r), got {aliased:?}"
+        "expected Scan(road AS r, only=true), got {aliased:?}"
     );
 }
 
 #[test]
 fn delete_and_update_only_parse() {
-    // DELETE FROM ONLY t and UPDATE ONLY t both parse to DML envelopes.
-    sql_to_relexpr("DELETE FROM ONLY parent WHERE a = 1")
+    // DELETE FROM ONLY t and UPDATE ONLY t parse to DML envelopes carrying the
+    // ONLY flag (Codeberg #28).
+    let del = sql_to_relexpr("DELETE FROM ONLY parent WHERE a = 1")
         .expect("DELETE FROM ONLY parent should parse");
-    sql_to_relexpr("UPDATE ONLY t SET a = 1").expect("UPDATE ONLY t should parse");
+    assert!(
+        matches!(&del, RelExpr::Delete { table, only, .. } if table == "parent" && *only),
+        "expected Delete(parent, only=true), got {del:?}"
+    );
+    let upd = sql_to_relexpr("UPDATE ONLY t SET a = 1").expect("UPDATE ONLY t should parse");
+    assert!(
+        matches!(&upd, RelExpr::Update { table, only, .. } if table == "t" && *only),
+        "expected Update(t, only=true), got {upd:?}"
+    );
+
+    // Plain DELETE/UPDATE (no ONLY) must NOT set the flag.
+    let del0 = sql_to_relexpr("DELETE FROM parent WHERE a = 1").expect("plain DELETE should parse");
+    assert!(
+        matches!(&del0, RelExpr::Delete { only, .. } if !*only),
+        "expected Delete(only=false) for plain DELETE, got {del0:?}"
+    );
+    let upd0 = sql_to_relexpr("UPDATE t SET a = 1").expect("plain UPDATE should parse");
+    assert!(
+        matches!(&upd0, RelExpr::Update { only, .. } if !*only),
+        "expected Update(only=false) for plain UPDATE, got {upd0:?}"
+    );
 }
 
 #[test]

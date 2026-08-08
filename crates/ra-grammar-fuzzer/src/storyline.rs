@@ -231,6 +231,7 @@ fn scan_for(table: &str) -> RelExpr {
     RelExpr::Scan {
         table: table.to_owned(),
         alias: None,
+        only: false,
     }
 }
 

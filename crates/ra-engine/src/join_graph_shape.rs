@@ -221,6 +221,7 @@ mod tests {
         RelExpr::Scan {
             table: name.to_string(),
             alias: None,
+            only: false,
         }
     }
 

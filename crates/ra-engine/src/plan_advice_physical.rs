@@ -361,8 +361,8 @@ fn first_relation_alias(nodes: &[crate::egraph::RelLang], id: egg::Id) -> Option
                   need a wildcard that also swallows unrelated variants."
     )]
     match nodes.get(usize::from(id))? {
-        RelLang::Scan([t]) | RelLang::IndexScan([t, _]) => symbol_at(*t),
-        RelLang::ScanAlias([_, a]) => symbol_at(*a),
+        RelLang::Scan([t]) | RelLang::ScanOnly([t]) | RelLang::IndexScan([t, _]) => symbol_at(*t),
+        RelLang::ScanAlias([_, a]) | RelLang::ScanOnlyAlias([_, a]) => symbol_at(*a),
         RelLang::Filter([_, c]) | RelLang::Project([_, c]) | RelLang::Sort([_, c]) => {
             first_relation_alias(nodes, *c)
         }
@@ -649,7 +649,7 @@ mod cost_driven {
         out: &mut Vec<(String, String, Option<&'a Expr>)>,
     ) {
         match expr {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 let alias_name = alias.clone().unwrap_or_else(|| table.clone());
                 out.push((alias_name, table.clone(), parent_pred));
             }
@@ -787,7 +787,7 @@ mod cost_driven {
 pub fn inner_join_alias(expr: &ra_core::algebra::RelExpr) -> Option<String> {
     use ra_core::algebra::RelExpr;
     match expr {
-        RelExpr::Scan { table, alias } => Some(alias.clone().unwrap_or_else(|| table.clone())),
+        RelExpr::Scan { table, alias, .. } => Some(alias.clone().unwrap_or_else(|| table.clone())),
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }

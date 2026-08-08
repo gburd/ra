@@ -1029,6 +1029,7 @@ impl Optimizer {
                 filter,
                 from,
                 returning,
+                only,
             } => {
                 let optimized_from = from
                     .as_deref()
@@ -1041,6 +1042,7 @@ impl Optimizer {
                     filter: filter.clone(),
                     from: optimized_from,
                     returning: returning.clone(),
+                    only: *only,
                 }))
             }
             RelExpr::Delete {
@@ -1048,6 +1050,7 @@ impl Optimizer {
                 filter,
                 using,
                 returning,
+                only,
             } => {
                 let optimized_using = using
                     .as_deref()
@@ -1059,6 +1062,7 @@ impl Optimizer {
                     filter: filter.clone(),
                     using: optimized_using,
                     returning: returning.clone(),
+                    only: *only,
                 }))
             }
             RelExpr::Merge {

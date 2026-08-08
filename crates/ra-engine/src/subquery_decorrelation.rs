@@ -163,6 +163,7 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
             filter,
             from,
             returning,
+            only,
         } => {
             let new_from = from.as_deref().map(|f| Box::new(decorrelate(f)));
             let new_filter = filter.as_ref().map(decorrelate_scalar_subqueries);
@@ -176,6 +177,7 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
                 filter: new_filter,
                 from: new_from,
                 returning: returning.clone(),
+                only: *only,
             }
         }
         RelExpr::Delete {
@@ -183,6 +185,7 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
             filter,
             using,
             returning,
+            only,
         } => {
             let new_using = using.as_deref().map(|u| Box::new(decorrelate(u)));
             let new_filter = filter.as_ref().map(decorrelate_scalar_subqueries);
@@ -191,6 +194,7 @@ pub fn decorrelate(expr: &RelExpr) -> RelExpr {
                 filter: new_filter,
                 using: new_using,
                 returning: returning.clone(),
+                only: *only,
             }
         }
         // Leaf nodes and nodes without subexpression inputs
@@ -548,7 +552,7 @@ fn first_output_column(query: &RelExpr) -> Expr {
 /// output column. Returns `None` for multi-relation bodies (ambiguous).
 fn leaf_scan_rel(query: &RelExpr) -> Option<String> {
     match query {
-        RelExpr::Scan { table, alias } => Some(alias.clone().unwrap_or_else(|| table.clone())),
+        RelExpr::Scan { table, alias, .. } => Some(alias.clone().unwrap_or_else(|| table.clone())),
         RelExpr::Filter { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Sort { input, .. }

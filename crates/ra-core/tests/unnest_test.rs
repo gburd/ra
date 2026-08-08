@@ -36,6 +36,7 @@ fn unnest_lateral_has_input_child() {
     let scan = RelExpr::Scan {
         table: "t".to_owned(),
         alias: None,
+        only: false,
     };
     let expr = RelExpr::unnest_lateral(
         Expr::Column(ColumnRef::qualified("t", "arr")),
@@ -105,6 +106,7 @@ fn table_function_with_lateral_input() {
     let scan = RelExpr::Scan {
         table: "ranges".to_owned(),
         alias: None,
+        only: false,
     };
     let expr = RelExpr::TableFunction {
         name: "generate_series".to_owned(),
@@ -200,6 +202,7 @@ fn unnest_lateral_delegates_cte_reference_to_input() {
     let cte_scan = RelExpr::Scan {
         table: "my_cte".to_owned(),
         alias: None,
+        only: false,
     };
     let expr = RelExpr::unnest_lateral(Expr::Const(Const::Int(1)), cte_scan, None);
 

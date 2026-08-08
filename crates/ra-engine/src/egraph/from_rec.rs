@@ -37,7 +37,11 @@ fn from_node(
     match node {
         RelLang::Scan([table_id]) => {
             let table = extract_symbol(egraph, *table_id)?;
-            Ok(RelExpr::Scan { table, alias: None })
+            Ok(RelExpr::Scan {
+                table,
+                alias: None,
+                only: false,
+            })
         }
         RelLang::ScanAlias([table_id, alias_id]) => {
             let table = extract_symbol(egraph, *table_id)?;
@@ -45,6 +49,24 @@ fn from_node(
             Ok(RelExpr::Scan {
                 table,
                 alias: Some(alias),
+                only: false,
+            })
+        }
+        RelLang::ScanOnly([table_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: None,
+                only: true,
+            })
+        }
+        RelLang::ScanOnlyAlias([table_id, alias_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            let alias = extract_symbol(egraph, *alias_id)?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some(alias),
+                only: true,
             })
         }
         RelLang::Filter([pred_id, input_id]) => {
@@ -270,7 +292,11 @@ fn from_node(
                     distinct: false,
                     alias: Some("count".to_string()),
                 }],
-                input: Box::new(RelExpr::Scan { table, alias: None }),
+                input: Box::new(RelExpr::Scan {
+                    table,
+                    alias: None,
+                    only: false,
+                }),
             })
         }
         RelLang::VectorKNN([table_id, col_id, target_id, k_id]) => {
@@ -283,6 +309,7 @@ fn from_node(
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("vector_knn_scan".to_string()),
+                only: false,
             })
         }
         RelLang::VectorRangeScan([table_id, _col_id, _target_id, _threshold_id, _metric_id]) => {
@@ -290,6 +317,7 @@ fn from_node(
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("vector_range_scan".to_string()),
+                only: false,
             })
         }
         RelLang::FtsIndexScan([table_id, _idx_id, _match_id]) => {
@@ -297,6 +325,7 @@ fn from_node(
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("fts_index_scan".to_string()),
+                only: false,
             })
         }
         RelLang::FtsRankedScan([table_id, _idx_id, _query_id, _k_id, _algo_id]) => {
@@ -304,6 +333,7 @@ fn from_node(
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("fts_ranked_scan".to_string()),
+                only: false,
             })
         }
         RelLang::FtsSkipListAnd([table_id, _match1_id, _match2_id]) => {
@@ -311,6 +341,7 @@ fn from_node(
             Ok(RelExpr::Scan {
                 table,
                 alias: Some("fts_skip_list_and".to_string()),
+                only: false,
             })
         }
         RelLang::HybridScan(_ids) => {
@@ -318,6 +349,7 @@ fn from_node(
             Ok(RelExpr::Scan {
                 table: "hybrid_scan".to_string(),
                 alias: Some("hybrid_scan".to_string()),
+                only: false,
             })
         }
         RelLang::HybridScore(_ids) => {

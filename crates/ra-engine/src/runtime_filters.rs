@@ -736,7 +736,7 @@ fn equi_columns(condition: &ra_core::expr::Expr) -> Option<(String, String)> {
 fn scan_alias(expr: &ra_core::algebra::RelExpr) -> Option<String> {
     use ra_core::algebra::RelExpr;
     match expr {
-        RelExpr::Scan { table, alias } => Some(alias.clone().unwrap_or_else(|| table.clone())),
+        RelExpr::Scan { table, alias, .. } => Some(alias.clone().unwrap_or_else(|| table.clone())),
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }

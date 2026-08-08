@@ -786,6 +786,7 @@ fn test_cost_model_self_join() {
         right: Box::new(RelExpr::Scan {
             table: "employees".to_string(),
             alias: Some("managers".to_string()),
+            only: false,
         }),
     };
     assert_cost_calculated(plan);

@@ -211,7 +211,7 @@ fn classify_foreign_join(
 /// Collect every base-scan alias reachable from `expr`.
 fn collect_aliases(expr: &RelExpr) -> HashSet<String> {
     fn walk(e: &RelExpr, out: &mut HashSet<String>) {
-        if let RelExpr::Scan { table, alias } = e {
+        if let RelExpr::Scan { table, alias, .. } = e {
             out.insert(alias.clone().unwrap_or_else(|| table.clone()));
         } else {
             for child in e.children() {
@@ -259,7 +259,7 @@ fn walk_target(target: &AdviceTarget, out: &mut Vec<String>, seen: &mut HashSet<
 fn collect_outer_deep_order(expr: &RelExpr) -> Vec<String> {
     fn walk(e: &RelExpr, out: &mut Vec<String>) {
         match e {
-            RelExpr::Scan { table, alias } => {
+            RelExpr::Scan { table, alias, .. } => {
                 out.push(alias.clone().unwrap_or_else(|| table.clone()));
             }
             RelExpr::Join { left, right, .. } => {
@@ -301,6 +301,7 @@ mod tests {
         RelExpr::Scan {
             table: name.into(),
             alias: None,
+            only: false,
         }
     }
 

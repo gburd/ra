@@ -88,6 +88,7 @@ fn scan(name: &str) -> RelExpr {
     RelExpr::Scan {
         table: name.to_string(),
         alias: None,
+        only: false,
     }
 }
 

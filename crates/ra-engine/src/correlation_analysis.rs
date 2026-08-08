@@ -43,7 +43,7 @@ pub fn collect_visible_tables(rel: &RelExpr) -> Vec<String> {
 
 fn collect_tables_recursive(rel: &RelExpr, tables: &mut Vec<String>) {
     match rel {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, .. } => {
             tables.push(table.clone());
             if let Some(a) = alias {
                 tables.push(a.clone());
@@ -77,7 +77,7 @@ pub fn collect_output_columns(rel: &RelExpr) -> Vec<ColumnRef> {
 
 fn collect_output_recursive(rel: &RelExpr, cols: &mut Vec<ColumnRef>) {
     match rel {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, .. } => {
             // Use the alias (or table name) as the qualifier for all
             // columns that reference this table. Since we don't have a
             // catalog schema, we record the table/alias itself so that
@@ -426,6 +426,7 @@ mod tests {
         let rel = RelExpr::Scan {
             table: "orders".to_owned(),
             alias: Some("o".to_owned()),
+            only: false,
         };
         let scope = build_scope(&rel);
         assert!(scope.tables.contains(&"orders".to_owned()));
@@ -437,10 +438,12 @@ mod tests {
         let left = RelExpr::Scan {
             table: "lineitem".to_owned(),
             alias: Some("l".to_owned()),
+            only: false,
         };
         let right = RelExpr::Scan {
             table: "orders".to_owned(),
             alias: Some("o".to_owned()),
+            only: false,
         };
         let join = RelExpr::Join {
             join_type: ra_core::algebra::JoinType::Inner,

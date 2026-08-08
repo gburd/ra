@@ -22,11 +22,17 @@ pub fn to_rec_expr(expr: &RelExpr) -> Result<RecExpr<RelLang>, EGraphError> {
 #[expect(clippy::too_many_lines, reason = "match over all RelExpr variants")]
 fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraphError> {
     match expr {
-        RelExpr::Scan { table, alias } => {
+        RelExpr::Scan { table, alias, only } => {
             let table_id = add_symbol(rec, table);
             if let Some(alias_name) = alias {
                 let alias_id = add_symbol(rec, alias_name);
-                Ok(rec.add(RelLang::ScanAlias([table_id, alias_id])))
+                if *only {
+                    Ok(rec.add(RelLang::ScanOnlyAlias([table_id, alias_id])))
+                } else {
+                    Ok(rec.add(RelLang::ScanAlias([table_id, alias_id])))
+                }
+            } else if *only {
+                Ok(rec.add(RelLang::ScanOnly([table_id])))
             } else {
                 Ok(rec.add(RelLang::Scan([table_id])))
             }
@@ -392,6 +398,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             filter,
             from,
             returning,
+            only: _,
         } => {
             let tag_id = add_symbol(rec, "update");
             let table_id = add_symbol(rec, table);
@@ -414,6 +421,7 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             filter,
             using,
             returning,
+            only: _,
         } => {
             let tag_id = add_symbol(rec, "delete");
             let table_id = add_symbol(rec, table);

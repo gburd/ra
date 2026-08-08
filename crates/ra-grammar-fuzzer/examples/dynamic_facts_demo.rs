@@ -37,6 +37,7 @@ fn main() {
             input: Box::new(RelExpr::Scan {
                 table: "users".to_string(),
                 alias: None,
+                only: false,
             }),
         }),
     };
