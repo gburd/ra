@@ -10,6 +10,14 @@ authors: ["RA Contributors"]
 tags: [subquery, unnesting, scalar, join]
 complexity: "O(1)"
 benefit_range: [0.4, 0.7]
+proof_obligations:
+  - type: volatility
+    max_class: stable
+    description: >-
+      Rewriting a scalar subquery into a join reorders and may change how many
+      times the subquery expression is evaluated; this is sound only when the
+      subquery is at most STABLE (no VOLATILE calls such as random()/nextval),
+      so the reordering cannot change results.
 ---
 
 # Scalar Subquery to Join

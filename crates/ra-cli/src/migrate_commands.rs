@@ -738,6 +738,7 @@ mod tests {
             authors: vec![],
             tags: vec![],
             preconditions: vec![],
+            proof_obligations: vec![],
         }
     }
 

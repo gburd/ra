@@ -4,7 +4,7 @@
 //! [`RuleFile`] values containing metadata, prose, and code blocks.
 
 use pulldown_cmark::{Event, Options, Parser as MdParser, Tag};
-use ra_core::PreCondition;
+use ra_core::{PreCondition, ProofObligation};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -88,6 +88,12 @@ pub struct RuleMetadata {
     /// Formal pre-conditions (optional, for rule filtering).
     #[serde(default)]
     pub preconditions: Vec<PreCondition>,
+    /// Machine-checkable proof obligations (RA-STEERING §5.4). Declares *why*
+    /// the rewrite is sound (distinct from preconditions, which gate *when* it
+    /// fires). Optional today; `ra rules lint --check-obligations` ratchets the
+    /// gap toward eventual hard "does not load" enforcement.
+    #[serde(default)]
+    pub proof_obligations: Vec<ProofObligation>,
 }
 
 fn default_version() -> String {

@@ -33,6 +33,7 @@ pub mod isolation;
 pub mod pattern;
 pub mod physical_properties;
 pub mod precondition;
+pub mod proof_obligation;
 pub mod properties;
 pub mod row_pattern;
 pub mod rule;
@@ -55,6 +56,7 @@ pub use isolation::{BackendKind, IsolationLevel, MultiXactPressure, TransactionC
 pub use pattern::*;
 pub use physical_properties::*;
 pub use precondition::*;
+pub use proof_obligation::*;
 pub use properties::*;
 pub use row_pattern::*;
 pub use rule::*;

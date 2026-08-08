@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [distinct, primary-key, elimination]
 complexity: "O(1)"
 benefit_range: [0.1, 0.5]
+proof_obligations:
+  - type: uniqueness_fd
+    keys: "primary key (or a unique key) of the underlying relation is fully projected"
+    description: >-
+      DISTINCT is redundant only when the projected columns include a unique
+      key, whose functional dependency guarantees every output row is already
+      distinct.
 ---
 
 # Distinct Over Primary Key Elimination

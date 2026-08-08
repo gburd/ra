@@ -357,6 +357,7 @@ mod tests {
             authors: vec![],
             tags: vec![],
             preconditions: vec![],
+            proof_obligations: vec![],
         };
         let core = RuleRegistry::convert_metadata(&parser_meta);
         assert_eq!(core.id, "test-rule");
@@ -379,6 +380,7 @@ mod tests {
             authors: vec![],
             tags: vec![],
             preconditions: vec![],
+            proof_obligations: vec![],
         };
         let core = RuleRegistry::convert_metadata(&parser_meta);
         assert_eq!(core.category, RuleCategory::Physical);
@@ -397,6 +399,7 @@ mod tests {
             authors: vec![],
             tags: vec![],
             preconditions: vec![],
+            proof_obligations: vec![],
         };
         let core = RuleRegistry::convert_metadata(&parser_meta);
         assert_eq!(core.category, RuleCategory::Implementation);

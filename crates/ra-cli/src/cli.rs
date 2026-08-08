@@ -672,6 +672,18 @@ pub enum RulesCommands {
         /// without turning CI red on the backlog. Use 0 to fail on any.
         #[arg(long, default_value = "0")]
         baseline: usize,
+        /// Instead of the malformed-pattern check, verify each rule declares the
+        /// machine-checkable proof obligations its category requires
+        /// (RA-STEERING §5.4). Ratchet via --obligations-baseline.
+        #[arg(long)]
+        check_obligations: bool,
+        /// Fail only when the count of rules missing a required proof obligation
+        /// exceeds this baseline (only meaningful with --check-obligations). The
+        /// default pins the current §5.4 backlog so CI stays green while new
+        /// rules that skip a required obligation are blocked. Use 0 to require
+        /// every applicable rule to declare its obligation.
+        #[arg(long, default_value = "64")]
+        obligations_baseline: usize,
     },
 }
 

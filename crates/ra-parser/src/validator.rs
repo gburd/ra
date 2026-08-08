@@ -304,6 +304,7 @@ mod tests {
             authors: vec![],
             tags: vec![],
             preconditions: vec![],
+            proof_obligations: vec![],
         }
     }
 
@@ -430,6 +431,7 @@ mod tests {
             authors: vec![],
             tags: vec![],
             preconditions: vec![],
+            proof_obligations: vec![],
         };
         let errs = validate_metadata_all(&m);
         assert!(errs.len() >= 4, "expected >= 4 errors, got: {errs:?}");

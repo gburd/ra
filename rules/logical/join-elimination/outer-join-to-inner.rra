@@ -8,6 +8,14 @@ authors: ["Galindo-Legaria, Cesar", "Rosenthal, Arnon"]
 tags: [logical, join, outer-join, inner-join, simplification, null-rejection]
 complexity: O(1)
 benefit_range: [0.05, 0.3]
+proof_obligations:
+  - type: null_rejection
+    predicate: "downstream filter rejects NULLs on the preserved side"
+    description: >-
+      Converting an outer join to an inner join is sound only when a
+      downstream predicate rejects the NULL-extended rows the outer join
+      would otherwise produce; that predicate negates the NULL-extension so
+      the two joins are equivalent.
 ---
 
 # Outer Join to Inner Join Simplification

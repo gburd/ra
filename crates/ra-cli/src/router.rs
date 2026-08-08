@@ -287,8 +287,17 @@ fn dispatch_rules(sub: RulesCommands, verbose: bool) -> Result<()> {
         RulesCommands::Why { query, format } => {
             commands::rules_why::cmd_rules_why(&query, &format, verbose)
         }
-        RulesCommands::Lint { path, baseline } => {
-            commands::rules_lint::cmd_rules_lint(&path, baseline, verbose)
+        RulesCommands::Lint {
+            path,
+            baseline,
+            check_obligations,
+            obligations_baseline,
+        } => {
+            if check_obligations {
+                commands::rules_lint::cmd_rules_obligations(&path, obligations_baseline, verbose)
+            } else {
+                commands::rules_lint::cmd_rules_lint(&path, baseline, verbose)
+            }
         }
     }
 }

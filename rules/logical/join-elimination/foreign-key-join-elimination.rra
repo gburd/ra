@@ -10,6 +10,14 @@ authors: ["RA Contributors"]
 tags: [join, elimination, foreign-key]
 complexity: "O(1)"
 benefit_range: [0.4, 0.7]
+proof_obligations:
+  - type: uniqueness_fd
+    keys: "foreign key on the join column referencing the eliminated table's primary key"
+    description: >-
+      Dropping the joined table is sound only when a foreign-key constraint
+      guarantees exactly one matching row on the referenced side (so the join
+      neither adds nor removes rows) and none of that table's columns are
+      referenced.
 ---
 
 # Foreign Key Join Elimination

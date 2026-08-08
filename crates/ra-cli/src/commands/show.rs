@@ -42,6 +42,14 @@ pub fn cmd_show(rule_id: &str, dir: &str) -> Result<()> {
         eprintln!("  {}: {std}", "Standard".bold());
     }
 
+    if !rule.metadata.proof_obligations.is_empty() {
+        eprintln!();
+        eprintln!("{}", "Proof Obligations:".bold());
+        for ob in &rule.metadata.proof_obligations {
+            eprintln!("  - {}", ob.kind().as_str().green());
+        }
+    }
+
     if !rule.description.is_empty() {
         eprintln!();
         eprintln!("{}", "Description:".bold());
