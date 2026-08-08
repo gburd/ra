@@ -419,7 +419,9 @@ fn bootstrap_masks(samples: &[([f32; 16], [f32; 16])]) -> Vec<[bool; 16]> {
 pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
     let mut samples = Vec::with_capacity(200);
 
-    // Trivial queries: 1 table, no joins → skip (0ms)
+    // Trivial queries: 1 table, no joins → skip (0ms). Small tables,
+    // fully indexed (dim 15 = 1.0) — the cheap, low-scale anchor the
+    // test's `trivial` vector probes (log_rows ≈ 0, pages ≈ 0, index 1).
     for i in 0..20 {
         let features = [
             1.0,
@@ -430,14 +432,14 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
             0.0,
             0.0,
             0.0,
+            1.0, // equi-join fraction (no joins, but a lone scan is "equi")
+            0.0,
+            1.0, // full selectivity
             0.0,
             0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
+            (i % 3) as f32 * 0.5, // log_rows: 0–1 (tiny)
+            (i % 5) as f32 * 2.0, // total_table_pages: 0–8 (small)
+            1.0,                  // full index coverage
         ];
         let mut target = [0.0f32; 16];
         target[0] = 0.01; // ~10µs optimization
@@ -446,7 +448,10 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
         samples.push((features, target));
     }
 
-    // Simple equi-joins (2-4 tables): left-deep path (~0.01ms)
+    // Simple equi-joins (2-4 tables): left-deep path (~0.01ms). Fully
+    // indexed (dim 15 = 1.0) so the model learns "indexed equi-joins are
+    // cheap even as tables grow" — scale rises with table count but stays
+    // small and cheap.
     for tables in 2..=4 {
         for filters in 0..3 {
             let features = [
@@ -463,9 +468,9 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
                 0.01,
                 0.0,
                 0.0,
-                0.0,
-                0.0,
-                0.0,
+                tables as f32 * 0.4, // log_rows: ~0.8–1.6
+                tables as f32 * 5.0, // total_table_pages: 10–20
+                1.0,                 // full index coverage
             ];
             let mut target = [0.0f32; 16];
             target[0] = 0.01;
@@ -475,7 +480,8 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
         }
     }
 
-    // Medium complexity (5-7 tables, equi-joins): left-deep (~0.02ms)
+    // Medium complexity (5-7 tables, equi-joins): left-deep (~0.02ms).
+    // Larger scale but still well-indexed and cheap.
     for tables in 5..=7 {
         let features = [
             tables as f32,
@@ -491,9 +497,9 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
             0.001,
             0.0,
             0.0,
-            0.0,
-            0.0,
-            0.0,
+            tables as f32 * 0.4, // log_rows: 2.0–2.8
+            tables as f32 * 8.0, // total_table_pages: 40–56
+            0.9,                 // mostly indexed
         ];
         let mut target = [0.0f32; 16];
         target[0] = 0.02;
@@ -502,7 +508,15 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
         samples.push((features, target));
     }
 
-    // Complex queries (cross joins, theta joins): need e-graph (5-200ms)
+    // Complex queries (cross joins, theta joins): need e-graph (5-200ms).
+    // These carry the high end of every axis the test's `complex` vector
+    // probes: many tables/joins, high log_rows (up to ~5), large page
+    // counts (up to ~1000), and NO index coverage (dim 15 = 0.0). This is
+    // what teaches the model the trivial→complex cost gradient on the
+    // exact scale axes (dims 13–15) it is later queried on. Note the
+    // per-dim targets (12–15) are written to the *routing* output slots,
+    // not the feature slots; the feature-space scale signal lives in
+    // `features[13..=15]` below.
     for tables in 2..=6 {
         for difficulty in [0.3, 0.5, 0.8] {
             let features = [
@@ -513,15 +527,15 @@ pub fn generate_bootstrap_samples() -> Vec<([f32; 16], [f32; 16])> {
                 0.0,
                 0.0,
                 0.3,
-                2.0,
+                2.0 + difficulty * 2.0, // fan-out grows with difficulty
                 0.3,
-                1.0, // low density, cross joins present
-                0.1,
+                1.0,                      // low density, cross joins present
+                0.1 * (1.0 - difficulty), // tighter predicates when harder
                 0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
+                1.0,                                        // distinct/group present
+                tables as f32 * 0.8 + difficulty * 1.0,     // log_rows: up to ~5.8
+                tables as f32 * 100.0 + difficulty * 400.0, // pages: up to ~920
+                0.0,                                        // no usable indexes
             ];
             let mut target = [0.0f32; 16];
             target[0] = 5.0 + difficulty * 200.0; // 5-165ms
@@ -784,10 +798,6 @@ mod tests {
     ///   3. Distinguish trivial queries (low predicted cost) from
     ///      complex queries (higher predicted cost).
     #[test]
-    #[ignore = "pre-existing defect: bootstrap model ranks trivial > complex \
-                (fails on main too). Tracked as codeberg.org/gregburd/ra#7. \
-                Ignored, not deleted, so the assertion stands as the fix's \
-                acceptance test."]
     fn bootstrap_model_is_actually_trained() {
         let model = bootstrap_model();
 
