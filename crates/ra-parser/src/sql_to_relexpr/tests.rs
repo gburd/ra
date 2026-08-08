@@ -1801,3 +1801,31 @@ fn schema_qualified_delete_target() {
     sql_to_relexpr("DELETE FROM s.t AS x WHERE a = 1").expect("aliased schema delete should parse");
     sql_to_relexpr("DELETE FROM t WHERE a = 1").expect("bare delete should parse");
 }
+
+#[test]
+fn array_type_cast_colon() {
+    // #25: expr::type[] array-type cast (precedence: COLONCOLON < LBRACKET so
+    // the type_name array suffix shifts instead of an empty subscript).
+    let plan = sql_to_relexpr("SELECT x::int[] FROM t").expect("x::int[] should parse");
+    assert!(format!("{plan:?}").contains("int[]"), "got: {plan:?}");
+    sql_to_relexpr("SELECT '{4,140}'::float8[]").expect("string::float8[] should parse");
+    sql_to_relexpr("SELECT x::text[] FROM t").expect("x::text[] should parse");
+}
+
+#[test]
+fn array_type_cast_function() {
+    // #25: CAST(expr AS type[]).
+    sql_to_relexpr("SELECT CAST(x AS int[]) FROM t").expect("CAST AS int[] should parse");
+}
+
+#[test]
+fn cast_precedence_unchanged() {
+    // The COLONCOLON precedence addition must not change existing cast parsing.
+    sql_to_relexpr("SELECT x::int + 1 FROM t").expect("x::int + 1");
+    sql_to_relexpr("SELECT (x + 1)::int FROM t").expect("(x+1)::int");
+    sql_to_relexpr("SELECT x::numeric(10,2) FROM t").expect("x::numeric(10,2)");
+    // subscript of an array cast still composes when parenthesized.
+    sql_to_relexpr("SELECT (x::int[])[1] FROM t").expect("(x::int[])[1]");
+    // plain subscript still parses.
+    sql_to_relexpr("SELECT a[1] FROM t").expect("a[1]");
+}

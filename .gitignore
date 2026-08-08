@@ -4,6 +4,9 @@ crates/*/target/
 Cargo.lock
 **/*.rs.bk
 *.pdb
+# Lime-generated parser (emitted to OUT_DIR at build time; a stray copy in the
+# grammar dir is a build artifact and must never be committed)
+crates/ra-parser/grammar/ra_sql.rs
 
 # IDE
 .vscode/

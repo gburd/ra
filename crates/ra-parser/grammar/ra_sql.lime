@@ -245,6 +245,7 @@ typedef struct RaToken {
 %left PLUS MINUS CONCAT.
 %left STAR SLASH PERCENT.
 %right UMINUS.
+%left COLONCOLON.
 %left LBRACKET.
 
 /* ================================================================== */
@@ -1916,7 +1917,7 @@ expr(A) ::= CAST LPAREN expr(B) AS type_name(C) RPAREN.
 }
 
 /* PostgreSQL :: type cast operator: expr::type */
-expr(A) ::= expr(B) COLONCOLON type_name(C). 
+expr(A) ::= expr(B) COLONCOLON type_name(C). [COLONCOLON] 
 %action_rust {
     A = ra_cast(ctx.user, B, C.clone().text(), (C.clone().int_val as usize));
 }
@@ -1959,6 +1960,12 @@ type_name(A) ::= IDENT(B) LPAREN ICONST COMMA ICONST RPAREN.
     A.location = B.clone().location;
     A.length = 0;
     A.float_val = 0.0;
+}
+
+/* Array type suffix: type[] (e.g. int[], float8[]). (#25) */
+type_name(A) ::= type_name(B) LBRACKET RBRACKET. 
+%action_rust {
+    A = ra_typename_array(ctx.user, B);
 }
 
 /* -- Scalar subquery ----------------------------------------------- */

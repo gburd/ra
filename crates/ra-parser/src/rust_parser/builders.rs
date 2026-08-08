@@ -598,6 +598,14 @@ pub fn ra_case(st: *mut RaParseState, operand: Value, when_list: Value, else_exp
     Value::from_node(handle)
 }
 
+/// Array type name: `float8` -> `float8[]`. Pure terminal synthesis. (#25)
+#[must_use]
+pub fn ra_typename_array(_st: *mut RaParseState, base: Value) -> Value {
+    let text = format!("{}[]", base.text());
+    let len = text.len() as i64;
+    Value::from_token(&text, len, 1.0, 0)
+}
+
 #[must_use]
 pub fn ra_cast(st: *mut RaParseState, expr: Value, type_str: &str, type_len: usize) -> Value {
     let handle = unsafe {
