@@ -38,6 +38,11 @@ pub struct OptimizationResult {
     /// `RelExpr` itself is logical and doesn't carry physical
     /// choices, so this sidecar is the canonical place for them.
     pub physical_choices: crate::plan_advice_physical::PhysicalChoices,
+    /// Per-iteration optimization trace (cost history, node count,
+    /// termination reason). Only populated by the tracking path
+    /// (`optimize_with_tracking*`); `None` on the fast/unbounded paths.
+    /// Feeds `ra optimize --step` and the `ra replay` capture loop.
+    pub trace: Option<crate::cost_model::feedback::OptimizationTrace>,
 }
 
 /// Whether optimization completed within its budget.

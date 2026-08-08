@@ -40,6 +40,10 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "clap subcommand enum: the Optimize variant carries many CLI flags; boxing clap arg fields is not ergonomic and the enum is never held in bulk"
+)]
 pub enum Commands {
     /// Validate .rra rule files for correct syntax and metadata.
     #[command(long_about = "Validate one or more .rra rule files.\n\n\
@@ -281,6 +285,28 @@ pub enum Commands {
         /// See docs/integrations/plan-advice.md for the full grammar.
         #[arg(long)]
         plan_advice: Option<String>,
+        /// Step through the optimization: print a per-iteration table
+        /// (cost, delta, node count) from the optimization trace, and
+        /// mark the optimal stop point. Adds to (does not replace) the
+        /// final plan output.
+        #[arg(long)]
+        step: bool,
+        /// Write the optimization trace (source SQL + per-iteration cost
+        /// history) to this JSON file for later `ra replay`.
+        #[arg(long, value_name = "FILE")]
+        emit_trace: Option<PathBuf>,
+    },
+    /// Re-run a captured optimization trace to reproduce a plan offline.
+    #[command(
+        long_about = "Load an OptimizationTrace previously written by             `ra optimize --emit-trace`, re-parse and re-optimize the captured             SQL deterministically, print the per-iteration step view, and             report whether the replay reproduces the stored trace.
+
+            Example:
+              ra-cli optimize 'SELECT ...' --emit-trace /tmp/tr.json
+              ra-cli replay /tmp/tr.json"
+    )]
+    Replay {
+        /// Path to a trace JSON file written by `ra optimize --emit-trace`.
+        trace: PathBuf,
     },
     /// Gather database metadata and write to a JSON file.
     GatherMetadata {

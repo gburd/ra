@@ -1980,6 +1980,7 @@ impl Optimizer {
         };
 
         let trace = OptimizationTrace {
+            sql: String::new(),
             features: crate::cost_model::extract_features(expr),
             iterations_run: actual_iterations,
             cost_per_iteration: cost_history.clone(),
@@ -2015,6 +2016,7 @@ impl Optimizer {
     fn record_fast_path_trace(&self, expr: &RelExpr, reason: &str, time_ms: f64) {
         if let Some(ref coordinator) = self.training_coordinator {
             let trace = OptimizationTrace {
+                sql: String::new(),
                 features: crate::cost_model::extract_features(expr),
                 iterations_run: 0,
                 cost_per_iteration: Vec::new(),
@@ -2136,6 +2138,7 @@ impl Optimizer {
                 rule_tracking: None,
                 provenance: None,
                 physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+                trace: None,
             });
         }
 
@@ -2153,6 +2156,7 @@ impl Optimizer {
                 rule_tracking: None,
                 provenance: None,
                 physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+                trace: None,
             });
         }
 
@@ -2168,6 +2172,7 @@ impl Optimizer {
                 rule_tracking: None,
                 provenance: None,
                 physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+                trace: None,
             });
         }
 
@@ -2395,6 +2400,7 @@ impl Optimizer {
                     rule_tracking: None,
                     provenance: Some(provenance),
                     physical_choices: choices,
+                    trace: None,
                 })
             }
             None => Err(EGraphError::ExtractionError(
@@ -2489,6 +2495,8 @@ impl Optimizer {
         let mut step_number = 0;
         let mut iteration_number = 0;
         let mut saturated = false;
+        let mut cost_per_iteration: Vec<f64> = Vec::new();
+        let tracking_start = std::time::Instant::now();
 
         for _iteration in 0..iter_limit {
             // Check budget before running an iteration
@@ -2593,6 +2601,11 @@ impl Optimizer {
             let mem_estimate = (egraph.total_number_of_nodes() as u64).saturating_mul(64);
             tracker.record_memory_estimate(mem_estimate);
 
+            // Snapshot the cost at the end of this iteration so the
+            // OptimizationTrace carries a per-iteration cost history
+            // (feeds `ra optimize --step` / `ra replay`).
+            cost_per_iteration.push(estimate_plan_cost(&egraph, root, &hardware));
+
             // If no rules applied anything this iteration, we're saturated
             if !any_rule_applied_this_iteration {
                 saturated = true;
@@ -2621,6 +2634,26 @@ impl Optimizer {
             },
         );
 
+        let final_improvement_pct = match cost_per_iteration.as_slice() {
+            [first, .., last] if *first > 0.0 => ((first - last) / first) * 100.0,
+            _ => 0.0,
+        };
+        let trace = OptimizationTrace {
+            sql: String::new(),
+            features: crate::cost_model::extract_features(expr),
+            iterations_run: iteration_number,
+            cost_per_iteration: cost_per_iteration.clone(),
+            termination_reason: if saturated {
+                "saturated".to_owned()
+            } else {
+                "iteration-limit".to_owned()
+            },
+            final_improvement_pct,
+            optimal_stop_point: OptimizationTrace::compute_optimal_stop(&cost_per_iteration),
+            egraph_nodes_final: egraph.total_number_of_nodes(),
+            optimization_time_ms: tracking_start.elapsed().as_secs_f64() * 1000.0,
+        };
+
         match best_plan {
             Some(plan) => Ok(OptimizationResult {
                 plan,
@@ -2631,6 +2664,7 @@ impl Optimizer {
                 rule_tracking: Some(tracking),
                 provenance: None,
                 physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+                trace: Some(trace),
             }),
             None => Err(EGraphError::ExtractionError(
                 "no plan could be extracted".to_owned(),
@@ -2810,6 +2844,7 @@ fn handle_overflow_with_tracking(
                 rule_tracking,
                 provenance: None,
                 physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+                trace: None,
             }),
             None => Ok(OptimizationResult {
                 plan: original.clone(),
@@ -2820,6 +2855,7 @@ fn handle_overflow_with_tracking(
                 rule_tracking,
                 provenance: None,
                 physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+                trace: None,
             }),
         },
         OverflowStrategy::ReturnOriginal => Ok(OptimizationResult {
@@ -2831,6 +2867,7 @@ fn handle_overflow_with_tracking(
             rule_tracking,
             provenance: None,
             physical_choices: crate::plan_advice_physical::PhysicalChoices::new(),
+            trace: None,
         }),
         OverflowStrategy::Fail => {
             let exceeded = report

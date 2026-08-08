@@ -166,7 +166,7 @@ pub use convergence::{
     ConvergenceDetector, ConvergenceStats, IterationMetrics, TerminationDecision,
 };
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel, LiveConditions};
-pub use cost_model::BitNetCostModel;
+pub use cost_model::{BitNetCostModel, OptimizationTrace};
 pub use cost_pruning::{CostPruner, PruningStats};
 pub use covering_index::{covering_index_rules, index_only_scan_cost_factor};
 #[cfg(feature = "streaming")]

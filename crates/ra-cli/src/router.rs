@@ -109,6 +109,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             schema_sql,
             db,
             plan_advice,
+            step,
+            emit_trace,
         } => {
             let resolved = resolve_query(&query, use_stdin)?;
 
@@ -144,8 +146,11 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 rule_advisor_learn,
                 rule_advisor_db.as_deref(),
                 plan_advice.as_deref(),
+                step,
+                emit_trace.as_deref(),
             )
         }
+        Commands::Replay { trace } => commands::replay::cmd_replay(&trace, cli.quiet),
         Commands::GatherMetadata { db, schema, output } => {
             commands::gather_metadata::cmd_gather_metadata(
                 db.as_deref(),

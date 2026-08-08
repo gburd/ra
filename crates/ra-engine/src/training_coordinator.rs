@@ -572,6 +572,7 @@ mod tests {
             .map(|i| 100.0 - (improvement * i as f64 / iterations as f64))
             .collect();
         OptimizationTrace {
+            sql: String::new(),
             features: QueryFeatures {
                 table_count: 3.0,
                 join_count: 2.0,

@@ -121,6 +121,8 @@ pub fn cmd_optimize(
     use_rule_advisor_learn: bool,
     rule_advisor_db: Option<&str>,
     plan_advice: Option<&str>,
+    step: bool,
+    emit_trace: Option<&Path>,
 ) -> Result<()> {
     use ra_engine::{SnapshotFactsProvider, TimelineConfig};
 
@@ -301,6 +303,52 @@ pub fn cmd_optimize(
             );
             eprintln!();
         }
+    }
+
+    // --step / --emit-trace: run the tracking optimizer once to obtain the
+    // per-iteration OptimizationTrace, render the step view (shared with
+    // `ra replay`) and/or write a capture file, then print the final plan.
+    if step || emit_trace.is_some() {
+        let mut result = optimizer
+            .optimize_with_tracking(&plan)
+            .with_context(|| format!("failed to optimize query: {query}"))?;
+        let mut trace = result
+            .trace
+            .take()
+            .context("tracking optimizer produced no trace (unexpected)")?;
+        trace.sql = query.to_string();
+
+        if let Some(path) = emit_trace {
+            let capture = crate::commands::replay::TraceCapture {
+                sql: query.to_string(),
+                trace: trace.clone(),
+            };
+            let json =
+                serde_json::to_string_pretty(&capture).context("serializing optimization trace")?;
+            std::fs::write(path, json)
+                .with_context(|| format!("writing trace file: {}", path.display()))?;
+            if !quiet {
+                eprintln!(
+                    "{} {}",
+                    "Wrote trace:".bold(),
+                    path.display().to_string().cyan()
+                );
+            }
+        }
+
+        if !quiet {
+            if step {
+                crate::commands::replay::render_step_view(&trace, Some(query));
+                eprintln!();
+            }
+            if let Some(fmt) = explain_format {
+                print_explain_output(&result.plan, fmt)?;
+            } else {
+                print_optimization_header("Query Optimization", query, &hardware, verbose);
+                print_plan_output(&plan, &result.plan, diff_format)?;
+            }
+        }
+        return Ok(());
     }
 
     let result = if budget.is_some() {

@@ -125,6 +125,11 @@ impl<'de> Deserialize<'de> for SystemFingerprint {
 /// post-hoc computation of the optimal stopping point and route label.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationTrace {
+    /// The SQL (or rendered plan) that produced this trace. Empty when
+    /// the trace was recorded without a source query (e.g. internal
+    /// training traces). Persisted so `ra replay` can re-run it offline.
+    #[serde(default)]
+    pub sql: String,
     /// 12-dimensional structural features at optimization time.
     pub features: QueryFeatures,
     /// Total iterations actually run.

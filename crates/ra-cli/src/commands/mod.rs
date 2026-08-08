@@ -13,6 +13,7 @@ pub mod monitor;
 pub mod optimize;
 pub mod parse;
 pub mod proxy_cmd;
+pub mod replay;
 pub mod route;
 pub mod rules_lint;
 pub mod rules_why;
