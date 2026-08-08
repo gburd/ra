@@ -471,6 +471,7 @@ pub enum Commands {
     Ml(crate::ml_commands::MlCommands),
     /// Run comparison benchmarks against native RDBMS implementations.
     #[command(
+        visible_alias = "bench",
         long_about = "Run performance comparison benchmarks between Ra and native database implementations.\n\n\
             Compare Ra's optimized query execution against PostgreSQL, MySQL, SQLite, and DuckDB \
             across different workload types including hybrid search, vector search, joins, and analytics.\n\n\
@@ -478,9 +479,28 @@ pub enum Commands {
             ra-cli benchmark --all\n  \
             ra-cli benchmark --database postgresql --workload hybrid-search\n  \
             ra-cli benchmark --database mysql --workload joins --output results.json\n  \
-            ra-cli benchmark --all --format html --output comparison.html"
+            ra-cli benchmark --all --format html --output comparison.html\n  \
+            ra bench --mape --db postgresql://ra:ra@127.0.0.1:5432/ratest"
     )]
     Benchmark {
+        /// Gate-4 MAPE mode (RA-STEERING §6, Codeberg #14): measure the BitNet
+        /// cost model's MAPE against real execution and compare it to a
+        /// global-scalar-calibrated PostgreSQL-cost baseline. Requires --db.
+        #[arg(long)]
+        mape: bool,
+        /// libpq connection URL for the MAPE oracle (--mape mode). Runs
+        /// EXPLAIN / EXPLAIN ANALYZE on this PostgreSQL to get pg_cost and
+        /// actual execution time per query.
+        #[arg(long)]
+        db: Option<String>,
+        /// Corpus directory of *.sql files for --mape mode (defaults to the
+        /// built-in tier-0 planner-comparison suite).
+        #[arg(long)]
+        corpus: Option<PathBuf>,
+        /// Timed EXPLAIN ANALYZE passes per query in --mape mode (a warmup
+        /// pass is always discarded first); the median is used.
+        #[arg(long, default_value = "3")]
+        runs: usize,
         /// Run benchmarks for all databases and workloads.
         #[arg(long)]
         all: bool,

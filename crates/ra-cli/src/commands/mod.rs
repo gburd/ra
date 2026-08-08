@@ -1,6 +1,7 @@
 //! Command implementations for Ra CLI.
 
 pub mod analyze;
+pub mod bench_mape;
 pub mod compare;
 pub mod cost;
 pub mod egraph;

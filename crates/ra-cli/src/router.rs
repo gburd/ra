@@ -232,15 +232,31 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             .context("failed to create tokio runtime")?
             .block_on(crate::ml_commands::handle_ml_command(cmd)),
         Commands::Benchmark {
+            mape,
+            db,
+            corpus,
+            runs,
             all: _,
             database: _,
             workload: _,
             output: _,
-            format: _,
+            format,
         } => {
-            anyhow::bail!(
-                "Benchmark command is temporarily disabled due to incomplete implementation"
-            )
+            if mape {
+                let url = db.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "benchmark --mape requires --db <libpq-url> \
+                         (e.g. postgresql://ra:ra@127.0.0.1:5432/ratest)"
+                    )
+                })?;
+                commands::bench_mape::cmd_bench_mape(&url, corpus.as_deref(), runs, &format)
+            } else {
+                anyhow::bail!(
+                    "Benchmark speedup-comparison mode is temporarily disabled due to \
+                     incomplete implementation. Use `ra bench --mape --db <url>` for the \
+                     Gate-4 cost-model MAPE measurement."
+                )
+            }
         }
         Commands::Verify {
             tier,
