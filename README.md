@@ -10,24 +10,33 @@ parsing, planning, and optimization with results logically identical to the
 native planner, but that parity is unproven and a fallback to the native
 planner is still present. Progress is tracked mechanically:
 
-| Tier | Corpus | Structural (parse+optimize) | Answer-correctness vs PG | Harness |
-|------|--------|------|------|---------|
-| 0 | 120-query smoke suite | 117/120 parse+optimize | 3 known wrong-answer defects (tracked) | `ra verify --tier 0 --report` |
-| 1 | PostgreSQL `src/test/regress` | not yet run | not yet run | — |
-| 2 | sqllogictest | not yet run | not yet run | — |
-| 3 | TPC-H / TPC-DS / JOB (results) | not yet run | not yet run | — |
-| 4 | Differential fuzzing | not yet run | not yet run | — |
+| Tier | Corpus | Answer-correctness vs PG (matched / checked) | Wrong answers | Fallback | Harness |
+|------|--------|------|------|------|---------|
+| 0 | 120-query smoke suite | 109 / 112 checked | **0 mismatches** (3 re-emission gaps) | 3 emit-fail / 112 | `ra verify --tier 0 --db <url>` |
+| 1 | PostgreSQL `src/test/regress` | 2217 / 2243 checked | **26 wrong-answer defects** (tracked #28) | 1039 / 3282 = 31.7% | `ra verify --tier 1 --db <url> --corpus <regress-sql>` |
+| 2 | sqllogictest | not yet run | — | — | — |
+| 3 | TPC-H / TPC-DS / JOB (results) | not yet run | — | — | — |
+| 4 | Differential fuzzing | not yet run | — | — | — |
 
-`ra verify` checks *structural* success (Ra parses and optimizes each query
-without error). It does **not** check answer-correctness — that Ra's plan
-produces the same rows as PostgreSQL's — which requires the PG oracle (a live
-connection, tracked as an open issue). The 3 wrong-answer defects parse and
-optimize fine but produce incorrect results, so structural success is not a
-correctness score.
+`ra verify --db <url>` runs the **differential result oracle**: it executes
+both the original SQL and Ra's optimized-then-re-emitted SQL against a live
+PostgreSQL and compares row multisets. This checks *answer-correctness*, not
+just structural success. Tier 0 has **0 wrong answers** (3 queries fail only to
+re-emit, tracked). Tier 1 points the same oracle at PostgreSQL's own
+regression suite: of 2,243 read-only statements checked, 2,217 match and **26
+produce wrong answers** (tracked as #28 — e.g. re-emission defects the harness
+surfaced). 83 of 227 regress files also crash the recursive optimizer/emitter
+(tracked #29), isolated per-file.
 
-The native-planner fallback is **not yet instrumented** (tracked): once it is,
-the fallback count becomes the project's headline number until it reaches
-zero. No performance claim is published until correctness parity is reached
+**Fallback counter (RA-STEERING §5.1).** A *fallback* is any statement Ra
+cannot plan end-to-end (parse/optimize/re-emit failure) — exactly what the
+PostgreSQL extension hands back to the native planner. It is now instrumented
+and published per tier: Tier 1's fallback rate is **31.7%** (1,039 of 3,282
+attempted statements). This count is the project's headline number and the bar
+is zero (Gate 2). The in-process counter inside the PG extension itself is
+separate and still pending (needs a pgrx build).
+
+No performance claim is published until correctness parity (Gate 1) is reached
 and measured end-to-end (plan + execute) against native PostgreSQL.
 
 ## Overview
