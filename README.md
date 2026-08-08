@@ -13,7 +13,7 @@ planner is still present. Progress is tracked mechanically:
 | Tier | Corpus | Answer-correctness vs PG (matched / checked) | Wrong answers | Fallback | Harness |
 |------|--------|------|------|------|---------|
 | 0 | 120-query smoke suite | 109 / 112 checked | **0 mismatches** (3 re-emission gaps) | 3 emit-fail / 112 | `ra verify --tier 0 --db <url>` |
-| 1 | PostgreSQL `src/test/regress` | 2217 / 2243 checked | **26 wrong-answer defects** (tracked #28) | 1039 / 3282 = 31.7% | `ra verify --tier 1 --db <url> --corpus <regress-sql>` |
+| 1 | PostgreSQL `src/test/regress` | 2271 / 2295 checked | **24 wrong-answer defects** (tracked #28) | 1163 / 3458 = 33.6% | `ra verify --tier 1 --db <url> --corpus <regress-sql>` |
 | 2 | sqllogictest | not yet run | — | — | — |
 | 3 | TPC-H / TPC-DS / JOB (results) | not yet run | — | — | — |
 | 4 | Differential fuzzing | not yet run | — | — | — |
@@ -23,15 +23,15 @@ both the original SQL and Ra's optimized-then-re-emitted SQL against a live
 PostgreSQL and compares row multisets. This checks *answer-correctness*, not
 just structural success. Tier 0 has **0 wrong answers** (3 queries fail only to
 re-emit, tracked). Tier 1 points the same oracle at PostgreSQL's own
-regression suite: of 2,243 read-only statements checked, 2,217 match and **26
+regression suite: of 2,295 read-only statements checked, 2,271 match and **24
 produce wrong answers** (tracked as #28 — e.g. re-emission defects the harness
-surfaced). 83 of 227 regress files also crash the recursive optimizer/emitter
+surfaced). 82 of 227 regress files also crash the recursive optimizer/emitter
 (tracked #29), isolated per-file.
 
 **Fallback counter (RA-STEERING §5.1).** A *fallback* is any statement Ra
 cannot plan end-to-end (parse/optimize/re-emit failure) — exactly what the
 PostgreSQL extension hands back to the native planner. It is now instrumented
-and published per tier: Tier 1's fallback rate is **31.7%** (1,039 of 3,282
+and published per tier: Tier 1's fallback rate is **33.6%** (1,163 of 3,458
 attempted statements). This count is the project's headline number and the bar
 is zero (Gate 2). The in-process counter inside the PG extension itself is
 separate and still pending (needs a pgrx build).
