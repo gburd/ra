@@ -601,6 +601,31 @@ table_ref(A) ::= IDENT(B).
     A = ra_scan(ctx.user, B.text());
 }
 table_ref(A) ::= graph_table_ref(B). %action_rust { A = B; }
+
+/* FROM ONLY t — PostgreSQL's ONLY restricts a scan to a table excluding its
+ * inheritance children. Ra is a planner/rewriter that does not model table
+ * inheritance, so ONLY is a plain scan of the bare relation name. PG's own
+ * parser reports the bare name in tables() (ONLY is a RangeVar.inh flag, not
+ * part of the relname), so the bare name is what the §5.2 parse oracle needs
+ * to match. The tier-0 result oracle has no ONLY queries, so this cannot cause
+ * a result mismatch. (Codeberg #25) */
+table_ref(A) ::= ONLY IDENT(B). 
+%action_rust {
+    A = ra_scan(ctx.user, B.text());
+}
+table_ref(A) ::= ONLY IDENT(B) AS IDENT(C). 
+%action_rust {
+    A = ra_scan_alias(ctx.user, B.text(), C.text());
+}
+table_ref(A) ::= ONLY IDENT(B) IDENT(C). 
+%action_rust {
+    A = ra_scan_alias(ctx.user, B.text(), C.text());
+}
+table_ref(A) ::= ONLY IDENT(B) DOT IDENT(C). 
+%action_rust {
+    let name = format!("{}.{}", B.text(), C.text());
+    A = ra_scan(ctx.user, &name);
+}
 table_ref(A) ::= IDENT(B) AS IDENT(C). 
 %action_rust {
     A = ra_scan_alias(ctx.user, B.text(), C.text());
@@ -1132,6 +1157,13 @@ update_stmt(A) ::= UPDATE IDENT(T) SET assignment_list(S)
 %action_rust {
     A = ra_update(ctx.user, T.text(), S, W, F, R);
 }
+
+/* UPDATE ONLY t SET ... — see table_ref ONLY note; bare relation name. */
+update_stmt(A) ::= UPDATE ONLY IDENT(T) SET assignment_list(S)
+                    opt_update_from(F) opt_where(W) opt_returning(R). 
+%action_rust {
+    A = ra_update(ctx.user, T.text(), S, W, F, R);
+}
 update_stmt(A) ::= UPDATE IDENT(T) AS IDENT SET assignment_list(S)
                     opt_update_from(F) opt_where(W) opt_returning(R). 
 %action_rust {
@@ -1175,6 +1207,13 @@ opt_update_from(A) ::= FROM from_list(B).         %action_rust { A = B; }
 /* -- DELETE -------------------------------------------------------- */
 
 delete_stmt(A) ::= DELETE FROM IDENT(T)
+                    opt_using(U) opt_where(W) opt_returning(R). 
+%action_rust {
+    A = ra_delete(ctx.user, T.text(), W, U, R);
+}
+
+/* DELETE FROM ONLY t — see table_ref ONLY note; bare relation name. */
+delete_stmt(A) ::= DELETE FROM ONLY IDENT(T)
                     opt_using(U) opt_where(W) opt_returning(R). 
 %action_rust {
     A = ra_delete(ctx.user, T.text(), W, U, R);
@@ -1429,6 +1468,13 @@ expr(A) ::= TRUE_KW.
 expr(A) ::= FALSE_KW. 
 %action_rust {
     A = ra_const_int(ctx.user, 0);
+}
+
+/* DEFAULT as a value (INSERT ... VALUES (default, ...)). Encoded as an argless
+   __default marker so the emitter can re-emit the bare DEFAULT keyword. */
+expr(A) ::= DEFAULT. 
+%action_rust {
+    A = ra_func(ctx.user, "__default", ra_list_new(ctx.user));
 }
 
 /* -- Binary operations --------------------------------------------- */

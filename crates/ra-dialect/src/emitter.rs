@@ -1064,6 +1064,9 @@ impl EmitContext {
             }
             // A bare __gs_item outside GROUPING SETS: render its columns as a
             // parenthesized set (defensive; normally consumed by the arm above).
+            // DEFAULT as a value in INSERT ... VALUES: parser emits an argless
+            // __default marker (uppercased to __DEFAULT). Lower to bare DEFAULT.
+            "__DEFAULT" if args.is_empty() => Ok(Some("DEFAULT".to_string())),
             "__GS_ITEM" => Ok(Some(self.emit_grouping_set_item_cols(args)?)),
             _ => Ok(None),
         }
@@ -2345,6 +2348,26 @@ mod tests {
             );
             assert!(
                 !out.to_lowercase().contains("__row_constructor"),
+                "marker must not leak for {sql_in:?}: {out}"
+            );
+        }
+    }
+
+    /// The `__default` marker (Codeberg #25) lowers back to the bare `DEFAULT`
+    /// keyword in `VALUES` rows — no parens, no marker leak. Round-trips
+    /// through the real parser, single and mixed with real values.
+    #[test]
+    fn default_value_marker_round_trips() {
+        for sql_in in ["VALUES (DEFAULT)", "VALUES (DEFAULT, 11, 12)"] {
+            let plans = ra_parser::sql_to_relexprs(sql_in).expect("parse");
+            let plan = plans.first().expect("one statement");
+            let out = emit_sql(plan, Dialect::PostgreSql).expect("emit").sql;
+            assert!(
+                out.to_uppercase().contains("DEFAULT"),
+                "expected DEFAULT for {sql_in:?}, got: {out}"
+            );
+            assert!(
+                !out.to_lowercase().contains("__default"),
                 "marker must not leak for {sql_in:?}: {out}"
             );
         }

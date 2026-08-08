@@ -1845,3 +1845,92 @@ fn multiword_typed_literal_with_time_zone() {
         "got: {plan:?}"
     );
 }
+
+// ---- Codeberg #25: DEFAULT-as-value in VALUES, FROM/DELETE/UPDATE ONLY ----
+
+/// The first row of the topmost Values relation in the tree.
+fn first_values_row(r: &RelExpr) -> Option<&Vec<Expr>> {
+    match find_node(r, |n| matches!(n, RelExpr::Values { .. })) {
+        Some(RelExpr::Values { rows }) => rows.first(),
+        _ => None,
+    }
+}
+
+fn is_default_marker(e: &Expr) -> bool {
+    matches!(e, Expr::Function { name, args } if name.eq_ignore_ascii_case("__default") && args.is_empty())
+}
+
+#[test]
+fn default_value_in_values_single() {
+    // Bare VALUES with a single DEFAULT column.
+    let plan = sql_to_relexpr("VALUES (default)").expect("VALUES (default) should parse");
+    let row = first_values_row(&plan).expect("expected a Values row");
+    assert_eq!(row.len(), 1, "one column, got {row:?}");
+    assert!(
+        is_default_marker(&row[0]),
+        "expected __default marker, got {row:?}"
+    );
+}
+
+#[test]
+fn default_value_in_values_mixed() {
+    // DEFAULT mixed with real values — marker in slot 0, constants after.
+    let plan =
+        sql_to_relexpr("VALUES (default, 11, 12)").expect("VALUES (default, 11, 12) should parse");
+    let row = first_values_row(&plan).expect("expected a Values row");
+    assert_eq!(row.len(), 3, "three columns, got {row:?}");
+    assert!(
+        is_default_marker(&row[0]),
+        "slot 0 should be __default, got {row:?}"
+    );
+    assert!(
+        !is_default_marker(&row[1]),
+        "slot 1 should be a constant, got {row:?}"
+    );
+
+    // Also reachable through a full INSERT ... VALUES (default, ...).
+    sql_to_relexpr("INSERT INTO t (a, b) VALUES (default, 5)")
+        .expect("INSERT ... VALUES (default, 5) should parse");
+}
+
+#[test]
+fn from_only_scans_bare_table() {
+    // ONLY t restricts to a table excluding inheritance children; Ra does not
+    // model inheritance, so it scans the bare relation name (matching PG's
+    // tables() fact).
+    let plan =
+        sql_to_relexpr("SELECT avg(x) FROM ONLY student").expect("FROM ONLY student should parse");
+    assert!(
+        has_node(
+            &plan,
+            |n| matches!(n, RelExpr::Scan { table, .. } if table == "student")
+        ),
+        "expected Scan(student), got {plan:?}"
+    );
+    assert!(
+        !has_node(
+            &plan,
+            |n| matches!(n, RelExpr::Scan { table, .. } if table.contains("only") || table.contains("ONLY"))
+        ),
+        "ONLY must not leak into the relation name: {plan:?}"
+    );
+
+    // ONLY with an alias keeps the alias but the bare table name.
+    let aliased =
+        sql_to_relexpr("SELECT * FROM ONLY road r").expect("FROM ONLY road r should parse");
+    assert!(
+        has_node(
+            &aliased,
+            |n| matches!(n, RelExpr::Scan { table, alias, .. } if table == "road" && alias.as_deref() == Some("r"))
+        ),
+        "expected Scan(road AS r), got {aliased:?}"
+    );
+}
+
+#[test]
+fn delete_and_update_only_parse() {
+    // DELETE FROM ONLY t and UPDATE ONLY t both parse to DML envelopes.
+    sql_to_relexpr("DELETE FROM ONLY parent WHERE a = 1")
+        .expect("DELETE FROM ONLY parent should parse");
+    sql_to_relexpr("UPDATE ONLY t SET a = 1").expect("UPDATE ONLY t should parse");
+}
