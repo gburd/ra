@@ -241,6 +241,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             tier,
             report,
             corpus,
+            file,
             format,
             db,
         } => {
@@ -248,6 +249,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 tier,
                 report,
                 corpus.as_deref(),
+                file.as_deref(),
                 &format,
                 cli.quiet,
                 db.as_deref(),

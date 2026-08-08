@@ -497,6 +497,12 @@ pub enum Commands {
         /// Path to the corpus directory (defaults to the built-in 120-query suite).
         #[arg(long)]
         corpus: Option<PathBuf>,
+        /// Internal: process a single tier-1 regress file and print its
+        /// per-file JSON result. Used by the tier-1 runner to isolate each
+        /// file in a subprocess so an uncatchable optimizer/emitter stack
+        /// overflow on one file cannot abort the whole corpus run.
+        #[arg(long, hide = true)]
+        file: Option<PathBuf>,
         /// Output format: text (default) or json.
         #[arg(long, default_value = "text")]
         format: String,
