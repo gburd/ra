@@ -205,11 +205,11 @@ The optimizer uses [egg](https://arxiv.org/abs/2004.03082) (e-graphs good) for e
 
 ### Rule Categories
 
-The optimizer loads **277 active rewrite rules** (hand-coded rules in
+The optimizer loads **275 active rewrite rules** (hand-coded rules in
 `ra-engine` plus rules compiled from `.rra` sources). Regenerate the count with
 `cargo run --release -p ra-engine --example count_rules`. The table below groups
 representative categories; the counts are approximate minimums, not a partition
-of the 277 total.
+of the 275 total.
 
 | Category | Rules | Examples |
 |----------|-------|----------|
@@ -405,9 +405,9 @@ ra/
 └── docs/                         # Documentation
 ```
 
-> Note: The `rules/` tree contains 1,451 `.rra` rule sources. Of those,
+> Note: The `rules/` tree contains 1,449 `.rra` rule sources. Of those,
 > a subset currently compile to active rewrite rules; combined with the
-> hand-coded rules in `ra-engine`, `Optimizer::all_rules()` returns **277
+> hand-coded rules in `ra-engine`, `Optimizer::all_rules()` returns **275
 > active rewrite rules** (regenerate via `cargo run --release -p ra-engine
 > --example count_rules`). The remaining `.rra` files are spec-only and
 > require additional condition functions or operator-mapping work to

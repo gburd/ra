@@ -3,7 +3,7 @@
 This guide demonstrates RA's major features through practical examples. RA is
 an experimental parser, planner, and optimizer for PostgreSQL (a research
 prototype) that transforms SQL queries into a relational algebra tree using its
-rule library (1,451 `.rra` rule sources; 277 currently active), equality
+rule library (1,449 `.rra` rule sources; 275 currently active), equality
 saturation, and cost-based optimization.
 
 ## Installation

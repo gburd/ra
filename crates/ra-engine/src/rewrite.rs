@@ -772,10 +772,6 @@ fn boolean_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(not (and ?x ?y))" => "(or (not ?x) (not ?y))"),
         rewrite!("demorgan-or-to-and";
             "(not (or ?x ?y))" => "(and (not ?x) (not ?y))"),
-        rewrite!("eq-reflexive";
-            "(eq ?x ?x)" => "(const-bool true)"),
-        rewrite!("ne-reflexive";
-            "(ne ?x ?x)" => "(const-bool false)"),
         rewrite!("eq-null";
             "(eq ?x const-null)" => "const-null"),
         rewrite!("ne-null";

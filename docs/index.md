@@ -16,7 +16,7 @@ hero:
 features:
   - icon: ⚡
     title: Rule Library
-    details: 1,451 .rra rule sources, 277 currently active, covering logical and physical optimizations
+    details: 1,449 .rra rule sources, 275 currently active, covering logical and physical optimizations
 
   - icon: 🔄
     title: 20+ Database Dialects

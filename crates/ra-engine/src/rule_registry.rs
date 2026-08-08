@@ -184,9 +184,7 @@ impl RuleRegistry {
         id += 1;
         self.register(id, "double-negation", "boolean");
         id += 1;
-        self.register(id, "eq-reflexive", "boolean");
         id += 1;
-        self.register(id, "ne-reflexive", "boolean");
         id += 1;
         self.register(id, "eq-null", "boolean");
         id += 1;

@@ -103,8 +103,6 @@ pub fn default_rule_priorities() -> HashMap<&'static str, (ComplexityClass, Bene
     m.insert("or-true-left", (o1, br(0.5, 0.9)));
     m.insert("or-true-right", (o1, br(0.5, 0.9)));
     m.insert("double-negation", (o1, br(0.2, 0.5)));
-    m.insert("eq-reflexive", (o1, br(0.4, 0.8)));
-    m.insert("ne-reflexive", (o1, br(0.4, 0.8)));
     m.insert("eq-null", (o1, br(0.3, 0.6)));
     m.insert("ne-null", (o1, br(0.3, 0.6)));
     m.insert("not-is-null", (o1, br(0.1, 0.3)));

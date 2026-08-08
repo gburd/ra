@@ -8,7 +8,7 @@ RA is a relational algebra query optimization system. It codifies database
 transformation rules (from PostgreSQL, MySQL, DuckDB, SQLite, etc.) into literate
 `.rra` files, then uses equality saturation (egg e-graphs) and differential
 dataflow to explore and extract optimal query plans. The `rules/` tree holds
-1,451 `.rra` sources; 277 currently compile to active rewrite rules (regenerate:
+1,449 `.rra` sources; 275 currently compile to active rewrite rules (regenerate:
 `cargo run --release -p ra-engine --example count_rules`).
 
 Non-core work (hardware/distributed/multi-model rule sources, the
@@ -180,7 +180,7 @@ Use `anyhow`/`thiserror` for error handling; avoid `.unwrap()` and `.expect()` (
 ## Project Layout
 
 ```
-rules/           — 1,451 .rra rule files (logical/, physical/); hardware/, distributed/, multi-model/ moved to ra-lab
+rules/           — 1,449 .rra rule files (logical/, physical/); hardware/, distributed/, multi-model/ moved to ra-lab
 crates/          — Rust crates organized into core/cli/experimental layers (see above)
 tests/           — workspace-level integration tests
 benchmarks/      — JOB and TPC-H benchmark suites

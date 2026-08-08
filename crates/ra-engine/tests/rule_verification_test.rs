@@ -405,14 +405,18 @@ fn or_with_true_short_circuits() {
 }
 
 #[test]
-fn eq_reflexive_simplifies() {
-    // filter(a = a) should simplify to filter(TRUE) -> scan
+fn eq_reflexive_is_not_simplified_nullable() {
+    // `a = a` must NOT simplify to TRUE: in SQL three-valued logic, when `a`
+    // is NULL, `a = a` is NULL (not TRUE), so `WHERE a = a` filters NULL rows
+    // out — rewriting it to TRUE keeps them, a wrong answer (Codeberg #28).
+    // The eq-reflexive/ne-reflexive rules were removed for this reason; the
+    // filter must survive rather than collapse to a bare scan.
     let pred = eq(col("a"), col("a"));
     let input = RelExpr::scan("t").filter(pred);
     let result = optimize(&input);
     assert!(
-        is_scan(&result),
-        "filter(a = a) should be eliminated (eq-reflexive + filter-true). Got: {result:?}"
+        !is_scan(&result),
+        "filter(a = a) must NOT be eliminated (NULL-unsafe). Got: {result:?}"
     );
 }
 
