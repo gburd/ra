@@ -598,6 +598,23 @@ pub fn ra_case(st: *mut RaParseState, operand: Value, when_list: Value, else_exp
     Value::from_node(handle)
 }
 
+/// Type name with a single typmod arg: `char` + 9 -> `char(9)`. Pure terminal
+/// synthesis so the cast emitter round-trips the typmod. (#28)
+#[must_use]
+pub fn ra_typename_typmod(_st: *mut RaParseState, base: Value, n: i64) -> Value {
+    let text = format!("{}({n})", base.text());
+    let len = text.len() as i64;
+    Value::from_token(&text, len, 0.0, 0)
+}
+
+/// Type name with two typmod args: `numeric` + (10, 2) -> `numeric(10,2)`. (#28)
+#[must_use]
+pub fn ra_typename_typmod2(_st: *mut RaParseState, base: Value, n: i64, m: i64) -> Value {
+    let text = format!("{}({n},{m})", base.text());
+    let len = text.len() as i64;
+    Value::from_token(&text, len, 0.0, 0)
+}
+
 /// Array type name: `float8` -> `float8[]`. Pure terminal synthesis. (#25)
 #[must_use]
 pub fn ra_typename_array(_st: *mut RaParseState, base: Value) -> Value {

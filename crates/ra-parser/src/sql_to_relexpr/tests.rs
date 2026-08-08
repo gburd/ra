@@ -1934,3 +1934,23 @@ fn delete_and_update_only_parse() {
         .expect("DELETE FROM ONLY parent should parse");
     sql_to_relexpr("UPDATE ONLY t SET a = 1").expect("UPDATE ONLY t should parse");
 }
+
+#[test]
+fn cast_preserves_typmod() {
+    // #28: typmod on casts must survive parse->emit (dropping it truncates
+    // strings / flips bit() comparisons). Verified via the Debug tree carrying
+    // the typmod in the cast type string.
+    for (sql, ty) in [
+        ("SELECT x::char(9) FROM t", "char(9)"),
+        ("SELECT x::bit(32) FROM t", "bit(32)"),
+        ("SELECT x::numeric(10,2) FROM t", "numeric(10,2)"),
+    ] {
+        let plan = sql_to_relexpr(sql).expect("typmod cast should parse");
+        assert!(
+            format!("{plan:?}").contains(ty),
+            "expected {ty} in {plan:?}"
+        );
+    }
+    // plain cast unaffected.
+    sql_to_relexpr("SELECT x::int FROM t").expect("plain cast");
+}

@@ -1989,23 +1989,16 @@ type_name(A) ::= IDENT(B).
     A.length = 0;
     A.float_val = 0.0;
 }
-type_name(A) ::= IDENT(B) LPAREN ICONST RPAREN. 
+type_name(A) ::= IDENT(B) LPAREN ICONST(N) RPAREN. 
 %action_rust {
-    /* e.g. VARCHAR(255) -- use just the base type name */
-    A = B.clone().clone();
-    A.int_val = (B.clone().text().len() as i64);
-    A.location = B.clone().location;
-    A.length = 0;
-    A.float_val = 0.0;
+    /* VARCHAR(255), char(9), bit(32): preserve the typmod so the cast
+     * emitter round-trips it (dropping it truncates/changes results). (#28) */
+    A = ra_typename_typmod(ctx.user, B, N.clone().int_val);
 }
-type_name(A) ::= IDENT(B) LPAREN ICONST COMMA ICONST RPAREN. 
+type_name(A) ::= IDENT(B) LPAREN ICONST(N) COMMA ICONST(M) RPAREN. 
 %action_rust {
-    /* e.g. DECIMAL(15,4), NUMERIC(10,2) -- use just the base type name */
-    A = B.clone().clone();
-    A.int_val = (B.clone().text().len() as i64);
-    A.location = B.clone().location;
-    A.length = 0;
-    A.float_val = 0.0;
+    /* DECIMAL(15,4), NUMERIC(10,2): preserve both typmod args. (#28) */
+    A = ra_typename_typmod2(ctx.user, B, N.clone().int_val, M.clone().int_val);
 }
 
 /* Array type suffix: type[] (e.g. int[], float8[]). (#25) */
