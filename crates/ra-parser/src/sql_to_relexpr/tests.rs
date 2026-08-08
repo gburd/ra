@@ -1829,3 +1829,19 @@ fn cast_precedence_unchanged() {
     // plain subscript still parses.
     sql_to_relexpr("SELECT a[1] FROM t").expect("a[1]");
 }
+
+#[test]
+fn multiword_typed_literal_with_time_zone() {
+    // #25: `timestamp with time zone 'lit'` / `time with time zone 'lit'` —
+    // the type is discarded, the string value is a Const::String.
+    sql_to_relexpr("SELECT timestamp with time zone '2024-01-01 00:00:00+00'")
+        .expect("timestamp with time zone should parse");
+    sql_to_relexpr("SELECT time with time zone '12:00:00+00'")
+        .expect("time with time zone should parse");
+    // The WITH-anchored form must not break implicit column aliasing.
+    let plan = sql_to_relexpr("SELECT a b FROM t").expect("SELECT a b (implicit alias)");
+    assert!(
+        format!("{plan:?}").contains("\"b\"") || format!("{plan:?}").contains("alias"),
+        "got: {plan:?}"
+    );
+}

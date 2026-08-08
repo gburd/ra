@@ -2206,6 +2206,15 @@ expr(A) ::= IDENT SCONST(B).
     A = ra_const_str(ctx.user, B.text());
 }
 
+/* Multi-word typed literals: `timestamp with time zone '...'`,
+ * `time with time zone '...'`.
+ * WITH is a keyword token; WITHOUT/TIME/ZONE lex as IDENT. Type discarded;
+ * the string value is a Const::String. (#25) */
+expr(A) ::= IDENT WITH IDENT IDENT SCONST(B). 
+%action_rust {
+    A = ra_const_str(ctx.user, B.text());
+}
+
 /* -- EXTRACT function ---------------------------------------------- */
 /* EXTRACT(field FROM expr) — encoded as __extract_<field>(expr) so the field
  * survives to the emitter, which lowers it back to EXTRACT(field FROM expr). */
