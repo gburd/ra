@@ -1075,6 +1075,15 @@ insert_stmt(A) ::= INSERT INTO IDENT(T) opt_col_list(C)
     A = ra_insert(ctx.user, T.text(), C, S, O, R);
 }
 
+/* Schema-qualified INSERT target: INSERT INTO schema.table (relation name is
+ * `schema.table`, matching pg_query's qualified-name reporting). */
+insert_stmt(A) ::= INSERT INTO IDENT(SC) DOT IDENT(T) opt_col_list(C)
+                    insert_source(S) opt_on_conflict(O) opt_returning(R). 
+%action_rust {
+    let name = format!("{}.{}", SC.text(), T.text());
+    A = ra_insert(ctx.user, &name, C, S, O, R);
+}
+
 insert_source(A) ::= select_stmt(B).              %action_rust { A = B; }
 insert_source(A) ::= DEFAULT VALUES.              
 %action_rust {
@@ -1128,6 +1137,20 @@ update_stmt(A) ::= UPDATE IDENT(T) AS IDENT SET assignment_list(S)
     A = ra_update(ctx.user, T.text(), S, W, F, R);
 }
 
+/* Schema-qualified UPDATE target: UPDATE schema.table [AS alias] SET ... */
+update_stmt(A) ::= UPDATE IDENT(SC) DOT IDENT(T) SET assignment_list(S)
+                    opt_update_from(F) opt_where(W) opt_returning(R). 
+%action_rust {
+    let name = format!("{}.{}", SC.text(), T.text());
+    A = ra_update(ctx.user, &name, S, W, F, R);
+}
+update_stmt(A) ::= UPDATE IDENT(SC) DOT IDENT(T) AS IDENT SET assignment_list(S)
+                    opt_update_from(F) opt_where(W) opt_returning(R). 
+%action_rust {
+    let name = format!("{}.{}", SC.text(), T.text());
+    A = ra_update(ctx.user, &name, S, W, F, R);
+}
+
 assignment_list(A) ::= assignment(B). 
 %action_rust {
     A = ra_list_push(ctx.user, ra_list_new(ctx.user), B);
@@ -1159,6 +1182,20 @@ delete_stmt(A) ::= DELETE FROM IDENT(T) AS IDENT
                     opt_using(U) opt_where(W) opt_returning(R). 
 %action_rust {
     A = ra_delete(ctx.user, T.text(), W, U, R);
+}
+
+/* Schema-qualified DELETE target: DELETE FROM schema.table [AS alias] ... */
+delete_stmt(A) ::= DELETE FROM IDENT(SC) DOT IDENT(T)
+                    opt_using(U) opt_where(W) opt_returning(R). 
+%action_rust {
+    let name = format!("{}.{}", SC.text(), T.text());
+    A = ra_delete(ctx.user, &name, W, U, R);
+}
+delete_stmt(A) ::= DELETE FROM IDENT(SC) DOT IDENT(T) AS IDENT
+                    opt_using(U) opt_where(W) opt_returning(R). 
+%action_rust {
+    let name = format!("{}.{}", SC.text(), T.text());
+    A = ra_delete(ctx.user, &name, W, U, R);
 }
 
 opt_using(A) ::= .                                

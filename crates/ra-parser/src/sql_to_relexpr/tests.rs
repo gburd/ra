@@ -1768,3 +1768,36 @@ fn shift_in_where_parses() {
         "expected a __shr marker in the filter, got {plan:?}"
     );
 }
+
+#[test]
+fn schema_qualified_insert_target() {
+    // #25: INSERT INTO schema.table — target relation name is "schema.table".
+    let plan = sql_to_relexpr("INSERT INTO myschema.t (a, b) VALUES (1, 2)")
+        .expect("schema-qualified insert should parse");
+    assert!(
+        format!("{plan:?}").contains("myschema.t"),
+        "target should be schema.table, got: {plan:?}"
+    );
+    // bare-IDENT insert still parses.
+    sql_to_relexpr("INSERT INTO t (a) VALUES (1)").expect("bare insert should parse");
+}
+
+#[test]
+fn schema_qualified_update_target() {
+    // #25: UPDATE schema.table [AS alias].
+    let plan = sql_to_relexpr("UPDATE s.t SET a = 1 WHERE b = 2")
+        .expect("schema-qualified update should parse");
+    assert!(format!("{plan:?}").contains("s.t"), "got: {plan:?}");
+    sql_to_relexpr("UPDATE s.t AS x SET a = 1").expect("aliased schema update should parse");
+    sql_to_relexpr("UPDATE t SET a = 1").expect("bare update should parse");
+}
+
+#[test]
+fn schema_qualified_delete_target() {
+    // #25: DELETE FROM schema.table [AS alias].
+    let plan = sql_to_relexpr("DELETE FROM s.t WHERE a = 1")
+        .expect("schema-qualified delete should parse");
+    assert!(format!("{plan:?}").contains("s.t"), "got: {plan:?}");
+    sql_to_relexpr("DELETE FROM s.t AS x WHERE a = 1").expect("aliased schema delete should parse");
+    sql_to_relexpr("DELETE FROM t WHERE a = 1").expect("bare delete should parse");
+}
